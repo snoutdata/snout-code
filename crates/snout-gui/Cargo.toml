@@ -1,0 +1,26 @@
+[package]
+name = "snout-gui"
+description = "A small, fast desktop Git client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "snout"
+path = "src/main.rs"
+
+[dependencies]
+snout-core.workspace = true
+serde.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+rfd.workspace = true
+portable-pty.workspace = true
+vt100.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot", "eframe"] }

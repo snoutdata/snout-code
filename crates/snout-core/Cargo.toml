@@ -1,0 +1,16 @@
+[package]
+name = "snout-core"
+description = "Git operations used by the snout GUI (and later the MCP server)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+similar.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
