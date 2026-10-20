@@ -59,7 +59,8 @@ pub struct DiffRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileDiff {
     pub path: String,
-    pub base: DiffBase,
+    /// What was compared; `None` for a commit against its parent.
+    pub base: Option<DiffBase>,
     /// Set when either side is binary; `rows` is then empty.
     pub binary: bool,
     /// Set when either side exceeds the size limit; `rows` is then empty.
@@ -85,7 +86,7 @@ fn split_lines(text: &str) -> Vec<&str> {
     text.split_inclusive('\n').map(|l| l.trim_end_matches('\n').trim_end_matches('\r')).collect()
 }
 
-pub(crate) fn compute(path: String, base: DiffBase, old: &[u8], new: &[u8]) -> FileDiff {
+pub(crate) fn compute(path: String, base: Option<DiffBase>, old: &[u8], new: &[u8]) -> FileDiff {
     let mut diff =
         FileDiff { path, base, binary: false, too_large: false, rows: Vec::new(), additions: 0, deletions: 0 };
     if old.len() > MAX_BYTES || new.len() > MAX_BYTES {
@@ -149,7 +150,7 @@ mod tests {
 
     #[test]
     fn aligns_replacements() {
-        let d = compute("f".into(), DiffBase::default(), b"a\nb\nc\n", b"a\nB\nB2\nc\nd\n");
+        let d = compute("f".into(), None, b"a\nb\nc\n", b"a\nB\nB2\nc\nd\n");
         assert_eq!((d.additions, d.deletions), (3, 1));
         let kinds: Vec<RowKind> = d.rows.iter().map(|r| r.kind).collect();
         assert_eq!(kinds, [RowKind::Equal, RowKind::Replace, RowKind::Replace, RowKind::Equal, RowKind::Insert]);
@@ -159,7 +160,7 @@ mod tests {
 
     #[test]
     fn detects_binary() {
-        let d = compute("f".into(), DiffBase::default(), b"\0\x01", b"\0\x02");
+        let d = compute("f".into(), None, b"\0\x01", b"\0\x02");
         assert!(d.binary && d.rows.is_empty());
     }
 }

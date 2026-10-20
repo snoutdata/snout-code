@@ -6,13 +6,16 @@ use eframe::egui::{self, Color32, Key, RichText, Sense};
 use egui_extras::{Column, TableBuilder};
 use serde::{Deserialize, Serialize};
 use snout_core::{
-    Branch, BranchKind, CheckoutTarget, Commit, DiffBase, FileEntry, LocalChanges, PullMode, PullProblem, Repo, Status,
-    Tag,
+    Branch, BranchKind, CheckoutTarget, Commit, CommitDetails, CommitFile, DiffBase, FileEntry, LocalChanges, PullMode,
+    PullProblem, Repo, Status, Tag,
 };
 
+use crate::art::{self, Glyph, glyph_button};
 use crate::diff_view::DiffView;
+use crate::graph::{self, GraphRow};
+use crate::theme::{self, Palette, ThemeChoice};
 use console::{Console, ConsoleEvent};
-use dialogs::{CheckoutPicker, Dialog, StartPoint};
+use dialogs::{CheckoutPicker, Dialog, Mood, RemoteRef, StartPoint};
 
 mod console;
 mod dialogs;
@@ -33,6 +36,7 @@ struct Settings {
     compact: bool,
     /// The Claude Code console is showing.
     console_open: bool,
+    theme: ThemeChoice,
 }
 
 impl Default for Settings {
@@ -44,6 +48,7 @@ impl Default for Settings {
             side_by_side: true,
             compact: true,
             console_open: false,
+            theme: ThemeChoice::default(),
         }
     }
 }
@@ -82,6 +87,9 @@ enum Action {
     Unstage(Vec<String>),
     AskDiscard(Vec<FileEntry>),
     Discard(Vec<FileEntry>),
+    /// Ask, then move files to the Trash.
+    AskDeleteFiles(Vec<FileEntry>),
+    DeleteFiles(Vec<FileEntry>),
     Commit,
     ShowCheckout,
     /// Check out, asking first what to do with local changes if there are any.
@@ -93,11 +101,15 @@ enum Action {
         start: Option<String>,
         checkout: bool,
     },
-    AskDeleteBranch(String),
+    /// Ask, then delete a local branch (and maybe its upstream) or a remote one.
+    AskDeleteBranch(Branch),
     DeleteBranch {
         name: String,
         force: bool,
+        /// Also delete this branch on its remote.
+        upstream: Option<RemoteRef>,
     },
+    DeleteRemoteBranch(RemoteRef),
     Fetch,
     Pull(PullMode),
     /// Make the current branch match its upstream, keeping a backup branch.
@@ -105,6 +117,10 @@ enum Action {
     Push,
     OpenGithub,
     ToggleConsole,
+    /// Show one commit in place of the working tree.
+    ShowCommit(String),
+    CloseCommit,
+    SetTheme(ThemeChoice),
     Reveal(PathBuf),
     Copy(String),
 }
@@ -120,6 +136,32 @@ struct Job {
     rx: mpsc::Receiver<Result<JobOutcome, String>>,
 }
 
+/// A commit shown in place of the working tree, after a click in the Journal.
+struct CommitView {
+    details: Result<CommitDetails, String>,
+    /// Path of the file whose diff is showing.
+    selected: Option<String>,
+    diff_key: Option<(String, bool)>,
+    diff: Option<Result<DiffView, String>>,
+}
+
+impl CommitView {
+    fn load(repo: &Repo, rev: &str) -> Self {
+        let details = repo.commit_details(rev).map_err(|e| e.to_string());
+        let selected = details.as_ref().ok().and_then(|d| d.files.first()).map(|f| f.path.clone());
+        Self { details, selected, diff_key: None, diff: None }
+    }
+
+    fn id(&self) -> Option<&str> {
+        self.details.as_ref().ok().map(|d| d.id.as_str())
+    }
+
+    fn selected_file(&self) -> Option<&CommitFile> {
+        let details = self.details.as_ref().ok()?;
+        details.files.iter().find(|f| Some(&f.path) == self.selected.as_ref())
+    }
+}
+
 struct OutputLine {
     text: String,
     error: bool,
@@ -132,6 +174,9 @@ pub struct SnoutApp {
     branches: Vec<Branch>,
     tags: Vec<Tag>,
     log: Vec<Commit>,
+    graph: Vec<GraphRow>,
+    journal_filter: String,
+    commit_view: Option<CommitView>,
     github_url: Option<String>,
     /// Working-tree directories, for the tree under the repository.
     dirs: Vec<String>,
@@ -166,6 +211,7 @@ impl SnoutApp {
     pub fn new(cc: &eframe::CreationContext<'_>, open_arg: Option<PathBuf>) -> Self {
         install_fonts(&cc.egui_ctx);
         let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, eframe::APP_KEY)).unwrap_or_default();
+        theme::apply(&cc.egui_ctx, settings.theme);
         let mut app = Self {
             settings,
             repo: None,
@@ -173,6 +219,9 @@ impl SnoutApp {
             branches: Vec::new(),
             tags: Vec::new(),
             log: Vec::new(),
+            graph: Vec::new(),
+            journal_filter: String::new(),
+            commit_view: None,
             github_url: None,
             dirs: Vec::new(),
             dir_filter: None,
@@ -217,6 +266,8 @@ impl SnoutApp {
                 self.selected.clear();
                 self.anchor = None;
                 self.dir_filter = None;
+                self.commit_view = None;
+                self.journal_filter.clear();
                 self.commit_msg.clear();
                 self.amend = false;
                 self.refresh();
@@ -252,7 +303,9 @@ impl SnoutApp {
             self.branches.clear();
             self.tags.clear();
             self.log.clear();
+            self.graph.clear();
             self.dirs.clear();
+            self.commit_view = None;
             return;
         };
         match repo.status() {
@@ -275,6 +328,7 @@ impl SnoutApp {
             self.log_output(e.to_string(), true);
             Vec::new()
         });
+        self.graph = graph::layout(&self.log);
         self.dirs = repo.directories().unwrap_or_else(|e| {
             self.log_output(e.to_string(), true);
             Vec::new()
@@ -374,6 +428,7 @@ impl SnoutApp {
             self.dialog = Some(Dialog::Info {
                 title: "No repositories found".into(),
                 text: format!("No Git repositories within {SCAN_DEPTH} levels of\n{}", root.display()),
+                mood: Mood::Empty,
             });
             return;
         }
@@ -450,6 +505,10 @@ impl SnoutApp {
             Action::Clone { url, dest } => self.spawn(ctx, "Clone", move || {
                 Repo::clone_from(&url, &dest).map(|(repo, text)| JobOutcome::Cloned(repo, text))
             }),
+            Action::SetTheme(choice) => {
+                self.settings.theme = choice;
+                theme::apply(ctx, choice);
+            }
             _ if repo.is_none() => {}
             Action::Stage(paths) => {
                 let n = paths.len();
@@ -462,6 +521,21 @@ impl SnoutApp {
             Action::Discard(entries) => {
                 let n = entries.len();
                 local(self, &format!("Discarded {n} file(s)"), repo.unwrap().discard(&entries));
+            }
+            Action::AskDeleteFiles(entries) => {
+                let entries: Vec<FileEntry> = entries.into_iter().filter(on_disk).collect();
+                if !entries.is_empty() {
+                    self.dialog = Some(Dialog::ConfirmDeleteFiles(entries));
+                }
+            }
+            Action::DeleteFiles(entries) => {
+                let n = entries.len();
+                let label = if snout_core::can_trash() {
+                    format!("Moved {n} file(s) to the Trash")
+                } else {
+                    format!("Deleted {n} file(s)")
+                };
+                local(self, &label, repo.unwrap().delete_files(&entries, true));
             }
             Action::Commit => match repo.unwrap().commit(&self.commit_msg, self.amend) {
                 Ok(summary) => {
@@ -487,8 +561,11 @@ impl SnoutApp {
                         self.done(format!("Checked out {}", target.label()));
                         if let Some(warning) = outcome.warning {
                             self.log_output(warning.clone(), true);
-                            self.dialog =
-                                Some(Dialog::Info { title: "Local changes conflicted".into(), text: warning });
+                            self.dialog = Some(Dialog::Info {
+                                title: "Local changes conflicted".into(),
+                                text: warning,
+                                mood: Mood::Warning,
+                            });
                         }
                     }
                     Err(e) => self.fail(e.to_string()),
@@ -502,9 +579,37 @@ impl SnoutApp {
                 let r = repo.unwrap().create_branch(&name, start.as_deref(), checkout);
                 local(self, &format!("Created branch {name}"), r);
             }
-            Action::AskDeleteBranch(name) => self.dialog = Some(Dialog::DeleteBranch { name, force: false }),
-            Action::DeleteBranch { name, force } => {
-                local(self, &format!("Deleted branch {name}"), repo.unwrap().delete_branch(&name, force));
+            Action::AskDeleteBranch(b) => {
+                self.dialog = Some(match b.kind {
+                    BranchKind::Local => {
+                        // Offer the upstream too, when it still exists.
+                        let upstream = b
+                            .upstream
+                            .as_ref()
+                            .filter(|_| !b.upstream_gone)
+                            .and_then(|u| self.branches.iter().find(|r| r.kind == BranchKind::Remote && &r.name == u))
+                            .and_then(RemoteRef::of);
+                        Dialog::DeleteBranch { name: b.name, force: false, upstream, with_upstream: false }
+                    }
+                    BranchKind::Remote => match RemoteRef::of(&b) {
+                        Some(r) => Dialog::DeleteRemoteBranch(r),
+                        None => return,
+                    },
+                });
+            }
+            Action::DeleteBranch { name, force, upstream } => {
+                let deleted = repo.unwrap().delete_branch(&name, force);
+                let ok = deleted.is_ok();
+                local(self, &format!("Deleted branch {name}"), deleted);
+                if let Some(upstream) = upstream.filter(|_| ok) {
+                    self.handle(Action::DeleteRemoteBranch(upstream), ctx);
+                }
+            }
+            Action::DeleteRemoteBranch(r) => {
+                let repo = repo.unwrap();
+                self.spawn(ctx, &format!("Delete {}", r.label()), move || {
+                    repo.delete_remote_branch(&r.remote, &r.branch).map(JobOutcome::Done)
+                });
             }
             Action::Fetch => {
                 let repo = repo.unwrap();
@@ -530,6 +635,7 @@ impl SnoutApp {
                             text: format!(
                                 "Your previous commits are kept on the branch {backup}. Delete it once you no longer need them."
                             ),
+                            mood: Mood::Done,
                         });
                     }
                     Err(e) => self.fail(e.to_string()),
@@ -549,6 +655,17 @@ impl SnoutApp {
                 let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
             }
             Action::Copy(text) => ctx.copy_text(text),
+            Action::ShowCommit(rev) => {
+                let view = CommitView::load(repo.as_ref().unwrap(), &rev);
+                if let Ok(d) = &view.details {
+                    self.message = format!("Commit {} {}", d.short_id, d.summary());
+                }
+                self.commit_view = Some(view);
+            }
+            Action::CloseCommit => {
+                self.commit_view = None;
+                self.message = "Working tree".into();
+            }
             Action::ToggleConsole => {
                 self.settings.console_open = !self.settings.console_open;
                 if self.settings.console_open {
@@ -574,15 +691,24 @@ impl SnoutApp {
         if self.dialog.is_some() {
             return;
         }
-        let (refresh, open, checkout, console) = ctx.input(|i| {
+        let (refresh, open, checkout, console, delete) = ctx.input(|i| {
             let cmd = i.modifiers.command;
             (
                 i.key_pressed(Key::F5) || (cmd && i.key_pressed(Key::R)),
                 cmd && !i.modifiers.shift && i.key_pressed(Key::O),
                 cmd && i.modifiers.shift && i.key_pressed(Key::O),
                 cmd && i.key_pressed(Key::J),
+                cmd && i.key_pressed(Key::Backspace),
             )
         });
+        // ⌘⌫ moves the selected files to the Trash, as in Finder, unless a text field or
+        // the console has the keyboard.
+        if delete && self.commit_view.is_none() && ctx.memory(|m| m.focused().is_none()) {
+            let entries = self.selected_entries();
+            if entries.iter().any(on_disk) {
+                actions.push(Action::AskDeleteFiles(entries));
+            }
+        }
         if console {
             actions.push(Action::ToggleConsole);
         }
@@ -595,6 +721,48 @@ impl SnoutApp {
         if checkout && self.repo.is_some() {
             actions.push(Action::ShowCheckout);
         }
+        self.commit_view_keys(ctx, actions);
+    }
+
+    /// In the commit view, Esc goes back to the working tree and ↑ ↓ step through the
+    /// Journal, unless a text field or the console has the keyboard.
+    fn commit_view_keys(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        let Some(view) = &self.commit_view else { return };
+        if ctx.memory(|m| m.focused().is_some()) {
+            return;
+        }
+        let (esc, up, down) =
+            ctx.input(|i| (i.key_pressed(Key::Escape), i.key_pressed(Key::ArrowUp), i.key_pressed(Key::ArrowDown)));
+        if esc {
+            actions.push(Action::CloseCommit);
+            return;
+        }
+        let visible = self.journal_rows();
+        let at = visible.iter().position(|&i| Some(self.log[i].id.as_str()) == view.id());
+        let next = match (at, up, down) {
+            (Some(at), true, _) => at.checked_sub(1),
+            (Some(at), _, true) => Some(at + 1),
+            (None, true, _) | (None, _, true) => Some(0),
+            _ => None,
+        };
+        if let Some(&i) = next.and_then(|n| visible.get(n)) {
+            actions.push(Action::ShowCommit(self.log[i].id.clone()));
+        }
+    }
+
+    /// Indices into `log` of the commits the Journal shows, after its filter.
+    fn journal_rows(&self) -> Vec<usize> {
+        let needle = self.journal_filter.trim().to_lowercase();
+        (0..self.log.len())
+            .filter(|&i| {
+                let c = &self.log[i];
+                needle.is_empty()
+                    || c.summary.to_lowercase().contains(&needle)
+                    || c.author.to_lowercase().contains(&needle)
+                    || c.id.starts_with(&needle)
+                    || c.refs.iter().any(|r| r.to_lowercase().contains(&needle))
+            })
+            .collect()
     }
 
     /// Folders dropped onto the window are opened; show a hint while hovering.
@@ -677,71 +845,83 @@ impl SnoutApp {
         let has_repo = self.repo.is_some();
         let idle = self.job.is_none();
         let entries = self.selected_entries();
-        let can_stage = entries.iter().any(FileEntry::has_unstaged);
-        let can_unstage = entries.iter().any(FileEntry::has_staged);
+        let in_tree = self.commit_view.is_none();
+        let can_stage = in_tree && entries.iter().any(FileEntry::has_unstaged);
+        let can_unstage = in_tree && entries.iter().any(FileEntry::has_staged);
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
-            if ui.button("📂 Open").on_hover_text("Open local repository (⌘O)").clicked() {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if glyph_button(ui, Glyph::Open, "Open", true).on_hover_text("Open local repository (⌘O)").clicked() {
                 actions.push(Action::PickFolder);
             }
             ui.separator();
             let net = has_repo && idle;
-            if ui.add_enabled(net, egui::Button::new("⬇ Pull")).on_hover_text("git pull").clicked() {
+            if glyph_button(ui, Glyph::Pull, "Pull", net).on_hover_text("git pull").clicked() {
                 actions.push(Action::Pull(PullMode::Default));
             }
-            if ui.add_enabled(net, egui::Button::new("⟲ Fetch")).on_hover_text("git fetch --all --prune").clicked() {
+            if glyph_button(ui, Glyph::Fetch, "Fetch", net).on_hover_text("git fetch --all --prune").clicked() {
                 actions.push(Action::Fetch);
             }
             let push_label = match self.status.branch.ahead {
-                0 => "⬆ Push".to_owned(),
-                n => format!("⬆ Push ({n})"),
+                0 => "Push".to_owned(),
+                n => format!("Push ({n})"),
             };
-            if ui
-                .add_enabled(net, egui::Button::new(push_label))
+            if glyph_button(ui, Glyph::Push, &push_label, net)
                 .on_hover_text("git push (sets upstream on first push)")
                 .clicked()
             {
                 actions.push(Action::Push);
             }
             ui.separator();
-            if ui.add_enabled(can_stage, egui::Button::new("➕ Stage")).clicked() {
+            if glyph_button(ui, Glyph::Stage, "Stage", can_stage).clicked() {
                 actions.push(Action::Stage(stage_paths(&entries)));
             }
-            if ui.add_enabled(can_unstage, egui::Button::new("➖ Unstage")).clicked() {
+            if glyph_button(ui, Glyph::Unstage, "Unstage", can_unstage).clicked() {
                 actions.push(Action::Unstage(unstage_paths(&entries)));
             }
-            if ui.add_enabled(!entries.is_empty(), egui::Button::new("↺ Discard")).clicked() {
+            if glyph_button(ui, Glyph::Discard, "Discard", in_tree && !entries.is_empty()).clicked() {
                 actions.push(Action::AskDiscard(entries.clone()));
             }
+            if glyph_button(ui, Glyph::Trash, "Delete", in_tree && entries.iter().any(on_disk))
+                .on_hover_text("Move to the Trash (⌘⌫)")
+                .clicked()
+            {
+                actions.push(Action::AskDeleteFiles(entries.clone()));
+            }
             ui.separator();
-            if ui.add_enabled(has_repo, egui::Button::new("⟳ Refresh")).on_hover_text("F5 / ⌘R").clicked() {
+            if glyph_button(ui, Glyph::Refresh, "Refresh", has_repo).on_hover_text("F5 / ⌘R").clicked() {
                 actions.push(Action::Refresh);
             }
-            if ui
-                .add_enabled(has_repo, egui::Button::new("🔀 Check Out…"))
+            if glyph_button(ui, Glyph::Switch, "Check Out…", has_repo)
                 .on_hover_text("Branch, tag or commit (⇧⌘O)")
                 .clicked()
             {
                 actions.push(Action::ShowCheckout);
             }
-            if ui.add_enabled(has_repo, egui::Button::new("🌿 New Branch")).clicked() {
+            if glyph_button(ui, Glyph::Branch, "New Branch", has_repo).clicked() {
                 actions.push(Action::ShowNewBranch(None));
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let claude = ui
-                    .add(egui::Button::selectable(self.settings.console_open, "✳ Claude"))
+                let open = self.settings.console_open;
+                let claude = glyph_button(ui, Glyph::Spark, if open { "Hide Claude" } else { "Claude" }, true)
                     .on_hover_text("Claude Code console in this repository (⌘J)");
                 if claude.clicked() {
                     actions.push(Action::ToggleConsole);
                 }
-                let gh = ui
-                    .add_enabled(self.github_url.is_some(), egui::Button::new("🌐 GitHub"))
+                let gh = glyph_button(ui, Glyph::Web, "GitHub", self.github_url.is_some())
                     .on_hover_text(self.github_url.as_deref().unwrap_or("No GitHub remote"));
                 if gh.clicked() {
                     actions.push(Action::OpenGithub);
                 }
+                let theme = glyph_button(ui, Glyph::Theme, "", true).on_hover_text("Appearance");
+                egui::Popup::menu(&theme).show(|ui| {
+                    for choice in ThemeChoice::ALL {
+                        if ui.radio(self.settings.theme == choice, choice.label()).clicked() {
+                            actions.push(Action::SetTheme(choice));
+                        }
+                    }
+                });
             });
         });
     }
@@ -768,6 +948,7 @@ impl SnoutApp {
                         s += "  (no upstream)";
                     }
                     ui.weak(s);
+                    Glyph::Branch.drawing().show(ui, egui::vec2(14.0, 14.0));
                 }
             });
         });
@@ -878,22 +1059,14 @@ impl SnoutApp {
             pane_title(ui, "Branches");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let has_repo = self.repo.is_some();
-                if ui
-                    .add_enabled(has_repo && self.job.is_none(), egui::Button::new("⟲").frame(false))
-                    .on_hover_text("Fetch")
-                    .clicked()
-                {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                if art::icon_button(ui, Glyph::Fetch, has_repo && self.job.is_none()).on_hover_text("Fetch").clicked() {
                     actions.push(Action::Fetch);
                 }
-                if ui.add_enabled(has_repo, egui::Button::new("➕").frame(false)).on_hover_text("New branch").clicked()
-                {
+                if art::icon_button(ui, Glyph::Branch, has_repo).on_hover_text("New branch").clicked() {
                     actions.push(Action::ShowNewBranch(None));
                 }
-                if ui
-                    .add_enabled(has_repo, egui::Button::new("🔀").frame(false))
-                    .on_hover_text("Check out… (⇧⌘O)")
-                    .clicked()
-                {
+                if art::icon_button(ui, Glyph::Switch, has_repo).on_hover_text("Check out… (⇧⌘O)").clicked() {
                     actions.push(Action::ShowCheckout);
                 }
             });
@@ -939,34 +1112,41 @@ impl SnoutApp {
 
     /// Shown in place of the working-tree panes when no repository is open.
     fn welcome_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        ui.vertical_centered(|ui| {
-            ui.add_space((ui.available_height() * 0.18).max(20.0));
-            ui.heading(RichText::new("snout").size(32.0));
-            ui.weak("Open a repository to get started");
-            ui.add_space(20.0);
-            let size = egui::vec2(300.0, 34.0);
-            if ui.add_sized(size, egui::Button::new("📂 Open local repository…   ⌘O")).clicked() {
-                actions.push(Action::PickFolder);
-            }
-            if ui.add_sized(size, egui::Button::new("🔍 Find repositories in folder…")).clicked() {
-                actions.push(Action::PickScanFolder);
-            }
-            if ui.add_sized(size, egui::Button::new("⬇ Clone from GitHub…")).clicked() {
-                actions.push(Action::ShowClone);
-            }
-            ui.add_space(8.0);
-            ui.weak("or drop a folder onto this window");
-
-            if !self.settings.repos.is_empty() {
-                ui.add_space(24.0);
-                ui.strong("Recent");
-                for path in self.settings.repos.iter().rev().take(8) {
-                    let resp = ui.link(dir_name(path)).on_hover_text(path.display().to_string());
-                    if resp.clicked() {
-                        actions.push(Action::OpenRepo(path.clone()));
+        let p = Palette::of(ui.visuals());
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space((ui.available_height() * 0.06).max(12.0));
+                art::welcome().show(ui, egui::vec2(360.0, 228.0));
+                ui.add_space(6.0);
+                wordmark(ui, p);
+                ui.add_space(2.0);
+                ui.label(RichText::new("See what changed, read the diff, commit, ship.").color(p.fg_dim).size(15.0));
+                ui.add_space(22.0);
+                let size = egui::vec2(300.0, 36.0);
+                for (glyph, text, action) in [
+                    (Glyph::Open, "Open local repository…   ⌘O", Action::PickFolder),
+                    (Glyph::Fetch, "Find repositories in folder…", Action::PickScanFolder),
+                    (Glyph::Pull, "Clone from GitHub…", Action::ShowClone),
+                ] {
+                    if art::glyph_button_sized(ui, glyph, text, true, size).clicked() {
+                        actions.push(action);
                     }
                 }
-            }
+                ui.add_space(8.0);
+                ui.weak("or drop a folder onto this window");
+
+                if !self.settings.repos.is_empty() {
+                    ui.add_space(26.0);
+                    ui.label(RichText::new("RECENT").small().color(p.fg_dim));
+                    ui.add_space(2.0);
+                    for path in self.settings.repos.iter().rev().take(8) {
+                        let resp = ui.link(dir_name(path)).on_hover_text(path.display().to_string());
+                        if resp.clicked() {
+                            actions.push(Action::OpenRepo(path.clone()));
+                        }
+                    }
+                }
+            });
         });
     }
 
@@ -985,6 +1165,14 @@ impl SnoutApp {
             });
         });
         ui.separator();
+        if self.status.files.is_empty() {
+            let text = match &self.status.branch.head {
+                Some(head) => format!("Nothing to commit on {head}"),
+                None => "Nothing to commit".to_owned(),
+            };
+            art_note(ui, art::clean(), "The working tree is clean", &text);
+            return;
+        }
 
         // Visible rows: filtered, then sorted.
         let needle = self.filter.to_lowercase();
@@ -1089,6 +1277,9 @@ impl SnoutApp {
                         if ui.button("Discard…").clicked() {
                             actions.push(Action::AskDiscard(entries.clone()));
                         }
+                        if ui.add_enabled(entries.iter().any(on_disk), egui::Button::new("Delete…")).clicked() {
+                            actions.push(Action::AskDeleteFiles(entries.clone()));
+                        }
                         ui.separator();
                         if let Some(repo) = &self.repo
                             && ui.button("Reveal in Finder").clicked()
@@ -1130,58 +1321,29 @@ impl SnoutApp {
         self.update_diff();
         ui.horizontal(|ui| {
             pane_title(ui, "Changes");
-            if let Some(Ok(view)) = &self.diff {
-                let d = &view.diff;
-                ui.label(RichText::new(&d.path).monospace());
-                if !d.binary && !d.too_large {
-                    ui.label(RichText::new(format!("+{}", d.additions)).color(Color32::from_rgb(60, 160, 80)));
-                    ui.label(RichText::new(format!("−{}", d.deletions)).color(Color32::from_rgb(200, 70, 70)));
-                }
-            }
+            diff_title(ui, self.diff.as_ref());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.toggle_value(&mut self.settings.compact, "Compact")
-                    .on_hover_text("Hide unchanged lines away from changes");
+                diff_controls(ui, &mut self.settings);
                 ui.separator();
-                ui.selectable_value(&mut self.settings.side_by_side, true, "Side by Side");
-                ui.selectable_value(&mut self.settings.side_by_side, false, "Unified");
-                ui.separator();
-                egui::ComboBox::from_label("Compare").selected_text(self.settings.diff_base.label()).show_ui(
-                    ui,
-                    |ui| {
+                egui::ComboBox::from_id_salt("compare")
+                    .selected_text(self.settings.diff_base.label())
+                    .show_ui(ui, |ui| {
                         for base in DiffBase::ALL {
                             ui.selectable_value(&mut self.settings.diff_base, base, base.label());
                         }
-                    },
-                );
+                    })
+                    .response
+                    .on_hover_text("What to compare");
             });
         });
         ui.separator();
 
-        match &self.diff {
-            None if self.selected.len() > 1 => centered_note(ui, &format!("{} files selected", self.selected.len())),
-            None => centered_note(ui, "Select a file to see its changes"),
-            Some(Err(e)) => centered_note(ui, e),
-            Some(Ok(view)) => {
-                let d = &view.diff;
-                if d.binary {
-                    centered_note(ui, "Binary file differs");
-                } else if d.too_large {
-                    centered_note(ui, "File too large to display");
-                } else if d.is_identical() {
-                    let (l, r) = d.base.sides();
-                    centered_note(ui, &format!("No differences between {l} and {r}"));
-                } else {
-                    if self.settings.side_by_side {
-                        let (l, r) = d.base.sides();
-                        ui.columns(2, |cols| {
-                            cols[0].weak(l);
-                            cols[1].weak(r);
-                        });
-                    }
-                    view.show(ui, self.settings.side_by_side);
-                }
-            }
-        }
+        let empty = if self.selected.len() > 1 {
+            format!("{} files selected", self.selected.len())
+        } else {
+            "Select a file to see its changes".to_owned()
+        };
+        diff_body(ui, self.diff.as_ref(), self.settings.diff_base.sides(), self.settings.side_by_side, &empty);
     }
 
     fn commit_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
@@ -1191,26 +1353,38 @@ impl SnoutApp {
         let can_commit = self.repo.is_some() && !self.commit_msg.trim().is_empty() && (staged > 0 || self.amend);
 
         egui::Panel::bottom("commit_actions").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let had_amend = self.amend;
-                ui.add_enabled(!self.log.is_empty(), egui::Checkbox::new(&mut self.amend, "Amend last commit"));
-                if self.amend
-                    && !had_amend
-                    && self.commit_msg.trim().is_empty()
-                    && let Some(repo) = &self.repo
-                {
-                    self.commit_msg = repo.last_commit_message().unwrap_or_default();
-                }
+            // Side by side when there is room, the button under the checkbox when not.
+            let narrow = ui.available_width() < 320.0;
+            let had_amend = self.amend;
+            let has_log = !self.log.is_empty();
+            let commit = |ui: &mut egui::Ui, amend: bool, actions: &mut Vec<Action>| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let hint = if staged == 0 && !self.amend { "Nothing staged" } else { "⌘↩" };
-                    if ui.add_enabled(can_commit, egui::Button::new("Commit")).on_hover_text(hint).clicked() {
+                    let hint = if staged == 0 && !amend { "Nothing staged" } else { "⌘↩" };
+                    if theme::primary_button(ui, can_commit, "Commit").on_hover_text(hint).clicked() {
                         actions.push(Action::Commit);
                     }
-                    if staged == 0 && !self.amend {
+                    if staged == 0 && !amend {
                         ui.weak("nothing staged");
                     }
                 });
-            });
+            };
+            let amend = &mut self.amend;
+            if narrow {
+                ui.add_enabled(has_log, egui::Checkbox::new(amend, "Amend last commit"));
+                ui.horizontal(|ui| commit(ui, *amend, actions));
+            } else {
+                ui.horizontal(|ui| {
+                    ui.add_enabled(has_log, egui::Checkbox::new(amend, "Amend last commit"));
+                    commit(ui, *amend, actions);
+                });
+            }
+            if self.amend
+                && !had_amend
+                && self.commit_msg.trim().is_empty()
+                && let Some(repo) = &self.repo
+            {
+                self.commit_msg = repo.last_commit_message().unwrap_or_default();
+            }
         });
         egui::CentralPanel::default().show(ui, |ui| {
             let edit = ui.add_sized(
@@ -1227,16 +1401,30 @@ impl SnoutApp {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.bottom_tab, BottomTab::Journal, RichText::new("Journal").strong());
             ui.selectable_value(&mut self.bottom_tab, BottomTab::Output, RichText::new("Output").strong());
-            if self.bottom_tab == BottomTab::Output {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match self.bottom_tab {
+                BottomTab::Output => {
                     if ui.small_button("Clear").clicked() {
                         self.output.clear();
                     }
-                });
-            }
+                }
+                BottomTab::Journal => {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.journal_filter)
+                            .hint_text("🔍 Message, author, SHA or ref")
+                            .desired_width(240.0),
+                    );
+                    // Only where it fits beside the tabs.
+                    if self.commit_view.is_none() && !self.log.is_empty() && ui.available_width() > 420.0 {
+                        ui.weak("Click a commit to see what it changed");
+                    }
+                }
+            });
         });
         ui.separator();
         match self.bottom_tab {
+            BottomTab::Journal if self.log.is_empty() => {
+                art_note(ui, art::seed(), "No commits yet", "Stage some files and make the first one");
+            }
             BottomTab::Journal => self.journal_table(ui, actions),
             BottomTab::Output => {
                 egui::ScrollArea::vertical().auto_shrink(false).stick_to_bottom(true).show(ui, |ui| {
@@ -1250,8 +1438,16 @@ impl SnoutApp {
     }
 
     fn journal_table(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+        // No gap between rows, so the graph's lanes run unbroken from row to row.
+        let row_h = ui.text_style_height(&egui::TextStyle::Body) + 10.0;
         ui.style_mut().interaction.selectable_labels = false;
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let rows = self.journal_rows();
+        // Lanes only mean something over the whole history, so a filter hides them.
+        let show_graph = rows.len() == self.log.len();
+        let graph_w = if show_graph { graph::width(&self.graph) } else { 14.0 };
+        let shown = self.commit_view.as_ref().and_then(CommitView::id);
+        let p = Palette::of(ui.visuals());
         TableBuilder::new(ui)
             .id_salt("journal")
             .striped(true)
@@ -1260,7 +1456,7 @@ impl SnoutApp {
             .auto_shrink(false)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
-            .column(Column::exact(18.0))
+            .column(Column::exact(graph_w))
             .column(Column::remainder().at_least(200.0).clip(true))
             .column(Column::initial(160.0).clip(true))
             .column(Column::initial(130.0))
@@ -1274,12 +1470,21 @@ impl SnoutApp {
                 }
             })
             .body(|body| {
-                body.rows(row_h, self.log.len(), |mut row| {
-                    let c = &self.log[row.index()];
+                body.rows(row_h, rows.len(), |mut row| {
+                    let i = rows[row.index()];
+                    let c = &self.log[i];
+                    row.set_selected(shown == Some(c.id.as_str()));
+                    let is_head = c.refs.iter().any(|r| r == "HEAD" || r.starts_with("HEAD -> "));
                     row.col(|ui| {
+                        let rect = ui.max_rect();
+                        if show_graph {
+                            graph::paint(ui, rect, &self.graph[i], c.unpushed, is_head);
+                        } else if c.unpushed {
+                            ui.painter().circle_filled(rect.center(), 3.5, p.ill_accent);
+                        }
+                        let hover = ui.allocate_rect(rect, Sense::hover());
                         if c.unpushed {
-                            ui.label(RichText::new("↑").color(Color32::from_rgb(70, 140, 220)))
-                                .on_hover_text("Not pushed yet");
+                            hover.on_hover_text("Not pushed yet");
                         }
                     });
                     row.col(|ui| {
@@ -1300,7 +1505,15 @@ impl SnoutApp {
                     row.col(|ui| {
                         ui.label(RichText::new(&c.short_id).monospace()).on_hover_text(&c.id);
                     });
-                    row.response().context_menu(|ui| {
+                    let resp = row.response();
+                    if resp.clicked() && shown != Some(c.id.as_str()) {
+                        actions.push(Action::ShowCommit(c.id.clone()));
+                    }
+                    resp.context_menu(|ui| {
+                        if ui.button("Show changes").clicked() {
+                            actions.push(Action::ShowCommit(c.id.clone()));
+                        }
+                        ui.separator();
                         if ui.button("Check out this commit (detached)").clicked() {
                             actions.push(Action::RequestCheckout(CheckoutTarget::Commit(c.id.clone())));
                         }
@@ -1320,6 +1533,227 @@ impl SnoutApp {
                 });
             });
     }
+
+    // ----- Commit view ---------------------------------------------------------------
+
+    fn update_commit_diff(&mut self) {
+        let Some(view) = &mut self.commit_view else { return };
+        let compact = self.settings.compact;
+        let Some(file) = view.selected_file().cloned() else {
+            view.diff = None;
+            view.diff_key = None;
+            return;
+        };
+        let key = (file.path.clone(), compact);
+        if view.diff_key.as_ref() == Some(&key) {
+            return;
+        }
+        let (Some(repo), Ok(details)) = (&self.repo, &view.details) else { return };
+        let parent = details.parents.first().map(String::as_str);
+        view.diff = Some(
+            repo.commit_file_diff(&details.id, parent, &file)
+                .map(|d| DiffView::new(d, compact))
+                .map_err(|e| e.to_string()),
+        );
+        view.diff_key = Some(key);
+    }
+
+    /// The commit view: its files, its details and the diff of the picked file, laid out
+    /// like the working tree it replaces.
+    fn commit_view_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        self.update_commit_diff();
+        let Some(view) = &mut self.commit_view else { return };
+        let p = Palette::of(ui.visuals());
+        let details = match &view.details {
+            Ok(d) => d,
+            Err(e) => {
+                if glyph_button(ui, Glyph::Back, "Working tree", true).clicked() {
+                    actions.push(Action::CloseCommit);
+                }
+                centered_note(ui, e);
+                return;
+            }
+        };
+        let frame = theme::pane(p);
+
+        egui::Panel::bottom("commit_changes").resizable(true).default_size(380.0).frame(frame).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                pane_title(ui, "Changes");
+                diff_title(ui, view.diff.as_ref());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    diff_controls(ui, &mut self.settings);
+                });
+            });
+            ui.separator();
+            let empty = if details.files.is_empty() { "This commit changes no files" } else { "Select a file" };
+            let parent = if details.parents.is_empty() { "(nothing)" } else { "Parent" };
+            diff_body(ui, view.diff.as_ref(), (parent, "This commit"), self.settings.side_by_side, empty);
+        });
+
+        let details_max = (ui.available_width() * 0.5).max(260.0);
+        egui::Panel::right("commit_details")
+            .resizable(true)
+            .default_size(420.0)
+            .max_size(details_max)
+            .frame(frame)
+            .show(ui, |ui| commit_details_ui(ui, details, &self.log, actions));
+
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if glyph_button(ui, Glyph::Back, "Working tree", true).on_hover_text("Back (Esc)").clicked() {
+                    actions.push(Action::CloseCommit);
+                }
+                ui.add_space(4.0);
+                Glyph::Commit.drawing().show(ui, egui::vec2(18.0, 18.0));
+                ui.label(RichText::new(&details.short_id).monospace().strong());
+                ui.label(RichText::new(details.summary()).strong());
+            });
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                pane_title(ui, "Files");
+                let n = details.files.len();
+                ui.weak(format!("{n} changed"));
+            });
+            ui.separator();
+            if details.files.is_empty() {
+                art_note(ui, art::clean(), "", "This commit changes no files");
+                return;
+            }
+            let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+            ui.style_mut().interaction.selectable_labels = false;
+            let mut clicked = None;
+            TableBuilder::new(ui)
+                .id_salt("commit_files")
+                .striped(true)
+                .resizable(true)
+                .sense(Sense::click())
+                .auto_shrink(false)
+                .min_scrolled_height(0.0)
+                .max_scroll_height(f32::INFINITY)
+                .column(Column::initial(260.0).at_least(80.0).clip(true))
+                .column(Column::initial(110.0).at_least(60.0).clip(true))
+                .column(Column::remainder().clip(true))
+                .header(row_h, |mut h| {
+                    for t in ["Name", "State", "Relative Directory"] {
+                        h.col(|ui| {
+                            ui.strong(t);
+                        });
+                    }
+                })
+                .body(|body| {
+                    body.rows(row_h, details.files.len(), |mut row| {
+                        let f = &details.files[row.index()];
+                        row.set_selected(view.selected.as_ref() == Some(&f.path));
+                        row.col(|ui| {
+                            ui.label(f.file_name());
+                        });
+                        row.col(|ui| {
+                            ui.label(RichText::new(f.change.label()).color(change_color(f.change, p)));
+                        });
+                        row.col(|ui| {
+                            let dir = match &f.orig_path {
+                                Some(orig) => format!("{}  (from {orig})", f.directory()),
+                                None => f.directory().to_owned(),
+                            };
+                            ui.weak(dir);
+                        });
+                        let resp = row.response();
+                        if resp.clicked() {
+                            clicked = Some(f.path.clone());
+                        }
+                        resp.context_menu(|ui| {
+                            if let Some(repo) = &self.repo
+                                && ui.button("Reveal in Finder").clicked()
+                            {
+                                actions.push(Action::Reveal(repo.root().join(&f.path)));
+                            }
+                            if ui.button("Copy path").clicked() {
+                                actions.push(Action::Copy(f.path.clone()));
+                            }
+                        });
+                    });
+                });
+            if clicked.is_some() {
+                view.selected = clicked;
+            }
+        });
+    }
+}
+
+/// Author, committer, parents, refs and the whole message of a commit.
+fn commit_details_ui(ui: &mut egui::Ui, d: &CommitDetails, log: &[Commit], actions: &mut Vec<Action>) {
+    let p = Palette::of(ui.visuals());
+    pane_title(ui, "Commit");
+    ui.separator();
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        if !d.refs.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                for r in &d.refs {
+                    ref_badge(ui, r);
+                }
+            });
+            ui.add_space(4.0);
+        }
+        ui.label(RichText::new(d.summary()).size(16.0).strong());
+        let body = d.body();
+        if !body.is_empty() {
+            ui.add_space(4.0);
+            ui.add(egui::Label::new(RichText::new(body).color(p.fg)).selectable(true));
+        }
+        ui.add_space(12.0);
+        egui::Grid::new("commit_facts").num_columns(2).spacing([14.0, 6.0]).show(ui, |ui| {
+            let key = |ui: &mut egui::Ui, k: &str| {
+                ui.label(RichText::new(k).color(p.fg_dim));
+            };
+            key(ui, "Author");
+            ui.label(format!("{} <{}>", d.author, d.email));
+            ui.end_row();
+            key(ui, "Date");
+            ui.label(&d.date);
+            ui.end_row();
+            if (&d.committer, &d.committer_email) != (&d.author, &d.email) || d.committer_date != d.date {
+                key(ui, "Committer");
+                ui.label(format!("{} <{}>", d.committer, d.committer_email));
+                ui.end_row();
+                key(ui, "Committed");
+                ui.label(&d.committer_date);
+                ui.end_row();
+            }
+            key(ui, "SHA");
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&d.id).monospace().small());
+                if ui.small_button("Copy").clicked() {
+                    actions.push(Action::Copy(d.id.clone()));
+                }
+            });
+            ui.end_row();
+            key(ui, if d.parents.len() > 1 { "Parents" } else { "Parent" });
+            ui.vertical(|ui| {
+                if d.parents.is_empty() {
+                    ui.weak("none, this is the first commit");
+                }
+                for parent in &d.parents {
+                    let summary = log.iter().find(|c| &c.id == parent).map(|c| c.summary.as_str()).unwrap_or("");
+                    let short = &parent[..parent.len().min(7)];
+                    let link = ui.link(RichText::new(short).monospace()).on_hover_text(summary);
+                    if link.clicked() {
+                        actions.push(Action::ShowCommit(parent.clone()));
+                    }
+                }
+            });
+            ui.end_row();
+        });
+    });
+}
+
+fn change_color(change: snout_core::Change, p: &Palette) -> Color32 {
+    use snout_core::Change;
+    match change {
+        Change::Added | Change::Copied => p.ok,
+        Change::Deleted => p.error,
+        Change::Renamed => p.warn,
+        _ => p.fg,
+    }
 }
 
 impl eframe::App for SnoutApp {
@@ -1330,19 +1764,36 @@ impl eframe::App for SnoutApp {
         let mut actions = Vec::new();
         self.shortcuts(&ctx, &mut actions);
 
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            ui.add_space(4.0);
+        let p = Palette::of(&ctx.global_style().visuals);
+        let pane = theme::pane(p);
+        let bar = egui::Frame::new().fill(p.ground).inner_margin(egui::Margin::symmetric(8, 6));
+        egui::Panel::top("toolbar").frame(bar).show_separator_line(false).show(ui, |ui| {
             self.toolbar(ui, &mut actions);
-            ui.add_space(2.0);
         });
-        egui::Panel::bottom("statusbar").show(ui, |ui| self.status_bar(ui));
+        egui::Panel::bottom("statusbar")
+            .frame(bar.inner_margin(egui::Margin::symmetric(10, 4)))
+            .show_separator_line(false)
+            .show(ui, |ui| self.status_bar(ui));
         if self.settings.console_open {
             let root = self.repo.as_ref().map(|r| r.root().to_owned());
+            // On the ground like the other panes; the card alone would leave its margin
+            // unpainted, which shows as a black edge.
+            // Never so wide that the panes in the middle overlap: they need about 600 points
+            // beside the left column.
+            let max = (ui.available_width() - 860.0).max(360.0);
             let event = egui::Panel::right("console")
                 .resizable(true)
                 .default_size(680.0)
                 .min_size(360.0)
-                .show(ui, |ui| self.console.ui(ui, root.as_deref()))
+                .max_size(max)
+                .frame(egui::Frame::new().fill(p.ground).inner_margin(egui::Margin {
+                    left: 0,
+                    right: 5,
+                    top: 0,
+                    bottom: 0,
+                }))
+                .show_separator_line(false)
+                .show(ui, |ui| pane.show(ui, |ui| self.console.ui(ui, root.as_deref())).inner)
                 .inner;
             match event {
                 Some(ConsoleEvent::Activity) if self.job.is_none() => self.refresh(),
@@ -1350,31 +1801,50 @@ impl eframe::App for SnoutApp {
                 _ => {}
             }
         }
-        egui::Panel::left("left").resizable(true).default_size(260.0).show(ui, |ui| {
-            egui::Panel::bottom("branches")
-                .resizable(true)
-                .default_size(360.0)
-                .show(ui, |ui| self.branches_ui(ui, &mut actions));
-            egui::CentralPanel::default().show(ui, |ui| self.repos_ui(ui, &mut actions));
-        });
-        egui::CentralPanel::default().show(ui, |ui| {
+        let ground = egui::Frame::new().fill(p.ground).inner_margin(egui::Margin::symmetric(5, 0));
+        egui::Panel::left("left").resizable(true).default_size(260.0).frame(ground).show_separator_line(false).show(
+            ui,
+            |ui| {
+                egui::Panel::bottom("branches")
+                    .resizable(true)
+                    .default_size(360.0)
+                    .frame(pane)
+                    .show_separator_line(false)
+                    .show(ui, |ui| self.branches_ui(ui, &mut actions));
+                egui::CentralPanel::default().frame(pane).show(ui, |ui| self.repos_ui(ui, &mut actions));
+            },
+        );
+        egui::CentralPanel::default().frame(ground).show(ui, |ui| {
             if self.repo.is_none() {
-                self.welcome_ui(ui, &mut actions);
+                egui::CentralPanel::default().frame(pane).show(ui, |ui| self.welcome_ui(ui, &mut actions));
                 return;
             }
             egui::Panel::bottom("journal")
                 .resizable(true)
-                .default_size(170.0)
+                .default_size(190.0)
+                .frame(pane)
+                .show_separator_line(false)
                 .show(ui, |ui| self.journal_ui(ui, &mut actions));
-            egui::Panel::bottom("changes").resizable(true).default_size(340.0).show(ui, |ui| self.changes_ui(ui));
+            if self.commit_view.is_some() {
+                self.commit_view_ui(ui, &mut actions);
+                return;
+            }
+            egui::Panel::bottom("changes")
+                .resizable(true)
+                .default_size(340.0)
+                .frame(pane)
+                .show_separator_line(false)
+                .show(ui, |ui| self.changes_ui(ui));
             // Capped so the file list keeps room when the console narrows the window.
             let commit_max = (ui.available_width() * 0.45).max(220.0);
             egui::Panel::right("commit")
                 .resizable(true)
                 .default_size(380.0)
                 .max_size(commit_max)
+                .frame(pane)
+                .show_separator_line(false)
                 .show(ui, |ui| self.commit_ui(ui, &mut actions));
-            egui::CentralPanel::default().show(ui, |ui| self.files_ui(ui, &mut actions));
+            egui::CentralPanel::default().frame(pane).show(ui, |ui| self.files_ui(ui, &mut actions));
         });
 
         self.dialogs(&ctx, &mut actions);
@@ -1474,6 +1944,33 @@ fn reveal_items(ui: &mut egui::Ui, path: &Path, actions: &mut Vec<Action>) {
     }
 }
 
+/// "snout" with the butterfly beside it and a green stroke under it, the website's lockup.
+fn wordmark(ui: &mut egui::Ui, p: &Palette) {
+    let galley = ui.painter().layout_no_wrap("snout".into(), egui::FontId::proportional(40.0), p.fg);
+    let fly = egui::vec2(52.0, 44.0);
+    let size = egui::vec2(fly.x + 10.0 + galley.size().x, galley.size().y.max(fly.y) + 8.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let fly_rect = egui::Rect::from_min_size(egui::pos2(rect.min.x, rect.center().y - fly.y / 2.0 - 4.0), fly);
+    art::butterfly().paint(ui.painter(), fly_rect, None);
+    let text_pos = egui::pos2(fly_rect.max.x + 10.0, rect.center().y - galley.size().y / 2.0 - 4.0);
+    let text_rect = egui::Rect::from_min_size(text_pos, galley.size());
+    ui.painter().galley(text_pos, galley, p.fg);
+    let y = text_rect.bottom() + 1.0;
+    let (x0, x1) = (text_rect.left() + 2.0, text_rect.right() - 2.0);
+    let swash = egui::epaint::CubicBezierShape::from_points_stroke(
+        [
+            egui::pos2(x0, y + 2.0),
+            egui::pos2(x0 + 20.0, y - 2.0),
+            egui::pos2(x1 - 30.0, y - 3.0),
+            egui::pos2(x1, y - 1.0),
+        ],
+        false,
+        Color32::TRANSPARENT,
+        egui::Stroke::new(4.0, p.ill_accent),
+    );
+    ui.painter().add(swash);
+}
+
 fn pane_title(ui: &mut egui::Ui, title: &str) {
     ui.label(RichText::new(title).strong());
 }
@@ -1482,6 +1979,76 @@ fn centered_note(ui: &mut egui::Ui, text: &str) {
     ui.centered_and_justified(|ui| {
         ui.weak(text);
     });
+}
+
+/// A drawing above a short message, centred: how an empty pane says what goes there.
+fn art_note(ui: &mut egui::Ui, drawing: &art::Drawing, title: &str, text: &str) {
+    let h = ui.available_height();
+    // Fill the pane: a panel takes its content's size, and would shrink to the note.
+    ui.set_min_size(ui.available_size());
+    let art_h = (h * 0.55).clamp(0.0, 150.0);
+    ui.vertical_centered(|ui| {
+        ui.add_space(((h - art_h - 48.0) * 0.4).max(0.0));
+        if art_h >= 40.0 {
+            drawing.show(ui, egui::vec2(art_h * 1.5, art_h));
+        }
+        if !title.is_empty() {
+            ui.label(RichText::new(title).strong());
+        }
+        ui.weak(text);
+    });
+}
+
+/// Path and +/− counts of the diff showing, for a pane header.
+fn diff_title(ui: &mut egui::Ui, diff: Option<&Result<DiffView, String>>) {
+    let Some(Ok(view)) = diff else { return };
+    let d = &view.diff;
+    let p = Palette::of(ui.visuals());
+    ui.label(RichText::new(&d.path).monospace());
+    if !d.binary && !d.too_large {
+        ui.label(RichText::new(format!("+{}", d.additions)).color(p.ok));
+        ui.label(RichText::new(format!("−{}", d.deletions)).color(p.error));
+    }
+}
+
+/// Layout toggles shared by every diff pane (right to left).
+fn diff_controls(ui: &mut egui::Ui, settings: &mut Settings) {
+    ui.toggle_value(&mut settings.compact, "Compact").on_hover_text("Hide unchanged lines away from changes");
+    ui.separator();
+    ui.selectable_value(&mut settings.side_by_side, true, "Side by Side");
+    ui.selectable_value(&mut settings.side_by_side, false, "Unified");
+}
+
+/// The diff itself, or a note saying why there is none.
+fn diff_body(
+    ui: &mut egui::Ui,
+    diff: Option<&Result<DiffView, String>>,
+    (left, right): (&str, &str),
+    side_by_side: bool,
+    empty: &str,
+) {
+    match diff {
+        None => art_note(ui, art::pick(), "", empty),
+        Some(Err(e)) => centered_note(ui, e),
+        Some(Ok(view)) => {
+            let d = &view.diff;
+            if d.binary {
+                centered_note(ui, "Binary file differs");
+            } else if d.too_large {
+                centered_note(ui, "File too large to display");
+            } else if d.is_identical() {
+                centered_note(ui, &format!("No differences between {left} and {right}"));
+            } else {
+                if side_by_side {
+                    ui.columns(2, |cols| {
+                        cols[0].weak(left);
+                        cols[1].weak(right);
+                    });
+                }
+                view.show(ui, side_by_side);
+            }
+        }
+    }
 }
 
 fn dir_name(path: &Path) -> String {
@@ -1513,17 +2080,24 @@ fn unstage_paths(entries: &[FileEntry]) -> Vec<String> {
         .collect()
 }
 
+/// Whether there is a file on disk to delete.
+fn on_disk(e: &FileEntry) -> bool {
+    use snout_core::Change::Deleted;
+    e.worktree != Some(Deleted) && e.index != Some(Deleted)
+}
+
 fn state_color(f: &FileEntry, v: &egui::Visuals) -> Color32 {
+    let p = Palette::of(v);
     if f.conflicted {
-        v.error_fg_color
+        p.error
     } else if f.is_untracked() {
-        v.weak_text_color()
+        p.fg_dim
     } else if f.has_staged() && !f.has_unstaged() {
-        Color32::from_rgb(60, 160, 80)
+        p.ok
     } else if f.has_staged() {
-        Color32::from_rgb(200, 150, 40)
+        p.warn
     } else {
-        Color32::from_rgb(70, 130, 210)
+        p.accent
     }
 }
 
@@ -1558,7 +2132,31 @@ fn branch_row(ui: &mut egui::Ui, b: &Branch, actions: &mut Vec<Action>) {
         b.target,
         b.subject
     );
-    let resp = marked_row(ui, if b.is_head { "●" } else { "" }, text, hover);
+    // A trash can shows at the end of the row under the pointer.
+    let row =
+        egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), ui.spacing().interact_size.y));
+    let hovered = ui.rect_contains_pointer(row);
+    let (resp, trash) = ui
+        .horizontal(|ui| {
+            ui.add_sized([12.0, ui.spacing().interact_size.y], egui::Label::new(if b.is_head { "●" } else { "" }));
+            let resp = ui.selectable_label(false, text).on_hover_text(hover);
+            let trash = !b.is_head
+                && hovered
+                && ui
+                    .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let tip = match b.kind {
+                            BranchKind::Local => "Delete branch…".to_owned(),
+                            BranchKind::Remote => format!("Delete from {}…", b.remote.as_deref().unwrap_or("remote")),
+                        };
+                        art::icon_button(ui, Glyph::Trash, true).on_hover_text(tip).clicked()
+                    })
+                    .inner;
+            (resp, trash)
+        })
+        .inner;
+    if trash {
+        actions.push(Action::AskDeleteBranch(b.clone()));
+    }
     if resp.double_clicked() && !b.is_head {
         actions.push(Action::RequestCheckout(b.into()));
     }
@@ -1573,8 +2171,12 @@ fn branch_row(ui: &mut egui::Ui, b: &Branch, actions: &mut Vec<Action>) {
         if ui.button("Create branch from here…").clicked() {
             actions.push(Action::ShowNewBranch(Some(StartPoint { label: b.name.clone(), rev: b.name.clone() })));
         }
-        if b.kind == BranchKind::Local && ui.add_enabled(!b.is_head, egui::Button::new("Delete…")).clicked() {
-            actions.push(Action::AskDeleteBranch(b.name.clone()));
+        let delete_label = match b.kind {
+            BranchKind::Local => "Delete…".to_owned(),
+            BranchKind::Remote => format!("Delete from {}…", b.remote.as_deref().unwrap_or("remote")),
+        };
+        if ui.add_enabled(!b.is_head, egui::Button::new(delete_label)).clicked() {
+            actions.push(Action::AskDeleteBranch(b.clone()));
         }
         ui.separator();
         if ui.button("Copy name").clicked() {
@@ -1606,19 +2208,21 @@ fn tag_row(ui: &mut egui::Ui, t: &Tag, actions: &mut Vec<Action>) {
 }
 
 fn ref_badge(ui: &mut egui::Ui, r: &str) {
+    let p = Palette::of(ui.visuals());
     let (text, color) = if let Some(branch) = r.strip_prefix("HEAD -> ") {
-        (branch, Color32::from_rgb(60, 160, 80))
+        (branch, p.ok)
     } else if let Some(tag) = r.strip_prefix("tag: ") {
-        (tag, Color32::from_rgb(200, 150, 40))
+        (tag, p.warn)
     } else if r == "HEAD" {
-        (r, Color32::from_rgb(60, 160, 80))
+        (r, p.ok)
     } else {
-        (r, Color32::from_rgb(70, 130, 210))
+        (r, p.fg_dim)
     };
     egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, color))
-        .corner_radius(3.0)
-        .inner_margin(egui::Margin::symmetric(4, 0))
+        .fill(p.wash(color))
+        .stroke(egui::Stroke::new(1.0, theme::mix(color, 0.45, p.panel)))
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::symmetric(6, 0))
         .show(ui, |ui| {
             ui.label(RichText::new(text).small().color(color));
         });

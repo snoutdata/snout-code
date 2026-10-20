@@ -1,6 +1,9 @@
 mod app;
+mod art;
 mod diff_view;
+mod graph;
 mod terminal;
+mod theme;
 
 fn main() -> eframe::Result {
     // `snout [path]` opens (and remembers) the repository containing `path`.

@@ -8,15 +8,17 @@ A small, fast desktop Git client in Rust. It focuses on the everyday loop: see w
 
 - **Repositories:** a list of your repositories, with a filter. The open repository expands into its directory tree; pick a folder to see only the files under it.
 - **Opening:** ⌘O, the welcome screen, or drag a folder onto the window. A folder that is not a repository can be searched for repositories (4 levels deep) or initialized. Clone from a URL.
-- **Files:** working tree status (staged, partly staged, untracked, conflicted), with a filter, sortable columns, multi-select (⌘-click, ⇧-click, ⌘A) and a context menu.
+- **Files:** working tree status (staged, partly staged, untracked, conflicted), with a filter, sortable columns, multi-select (⌘-click, ⇧-click, ⌘A) and a context menu. Discard reverts files to HEAD; Delete moves them to the Trash (⌘⌫). Both ask first.
 - **Changes:** whole-file diff, side by side or unified, with an optional compact view (3 lines of context). Compare HEAD with the working tree, the index with the working tree, or HEAD with the index.
 - **Commit:** message and amend (pre-fills the last message); ⌘↩ commits.
 - **Check out:** a ⇧⌘O picker over local branches, remote branches and tags, or any commit you type (a SHA, `HEAD~2`), with a live preview. With uncommitted changes you choose to keep them or to stash, check out and re-apply. If re-applying conflicts, the stash is kept so nothing is lost.
-- **Branches:** local branches, branches per remote, and tags, with ahead/behind counts and a detached HEAD indicator. Create a branch from any branch, tag or commit; delete one (with a force option).
-- **Journal:** recent commits with branch and tag badges and unpushed markers. Right-click a commit to check it out or start a branch there.
+- **Branches:** local branches, branches per remote, and tags, with ahead/behind counts and a detached HEAD indicator. Create a branch from any branch, tag or commit. Delete a branch from the trash can on its row or its context menu: a local one (with a force option, and optionally its upstream on the remote too) or one on a remote.
+- **Journal:** recent commits on a graph of their branches and merges, with branch and tag badges and unpushed commits drawn solid. Search by message, author, SHA or ref. Right-click a commit to check it out or start a branch there.
+- **Commit view:** click a commit to see what it did: the files it changed, the diff of each against its parent, the full message, author and committer, and links to its parents. Click another commit (or press ↑ ↓) to move through the history; Esc goes back to the working tree.
 - **Remote:** pull, fetch (all remotes, with prune) and push. The first push sets the upstream. When a pull cannot combine the branches, snout says why and offers a way forward: merge or rebase when both sides have new commits, or reset to the remote (keeping your commits on a backup branch) when the remote's history was replaced.
 - **GitHub:** opens the repository on github.com.
 - **Claude Code console:** see below.
+- **Appearance:** a warm dark theme and a light one, following the system or chosen from the toolbar. Empty panes and the welcome screen carry small line drawings.
 
 The view re-reads the repository when the window regains focus, on F5 or ⌘R, and while the console's agent is working.
 
@@ -86,7 +88,10 @@ In the background, logs go to `$TMPDIR/snout.log`.
 | ⌘J | Show or hide the Claude Code console |
 | F5 or ⌘R | Refresh |
 | ⌘A | Select all files (when no text field has focus) |
+| ⌘⌫ | Move the selected files to the Trash, after asking |
 | ⌘↩ | Commit (in the message field) |
+| Esc | Leave the commit view |
+| ↑ ↓ | Previous or next commit, in the commit view |
 
 On Windows and Linux, use Ctrl in place of ⌘.
 
@@ -100,6 +105,8 @@ crates/
 
 `snout-core` runs the `git` CLI instead of using libgit2, so authentication, hooks and settings such as `pull.rebase` behave exactly as they do in a terminal. Read-only calls set `GIT_OPTIONAL_LOCKS=0` so they don't contend with other processes for `index.lock`, and `GIT_TERMINAL_PROMPT=0` so nothing waits on a hidden prompt. Network operations run on a worker thread.
 
+The drawings and icons are SVG path data, flattened and triangulated once and painted with egui, so they follow the theme and add no image files.
+
 The console is `portable-pty` plus the `vt100` parser, painted with egui. It answers the start-up queries terminal apps send (cursor position, device attributes, background colour). Symbols missing from egui's bundled fonts fall back to the system's (Apple Symbols and Menlo on macOS, DejaVu Sans Mono on Linux, Segoe UI Symbol on Windows).
 
 ## Roadmap: MCP
@@ -110,10 +117,10 @@ The console is `portable-pty` plus the `vt100` parser, painted with egui. It ans
 |---|---|
 | `status` | `Repo::status` |
 | `diff` | `Repo::file_diff` |
-| `stage`, `unstage`, `discard` | same names |
+| `stage`, `unstage`, `discard`, `delete_files` | same names |
 | `commit` | `Repo::commit` |
-| `branches`, `tags`, `checkout`, `create_branch`, `delete_branch` | same names |
-| `log` | `Repo::log` |
+| `branches`, `tags`, `checkout`, `create_branch`, `delete_branch`, `delete_remote_branch` | same names |
+| `log`, `show` | `Repo::log`, `Repo::commit_details` |
 | `fetch`, `pull`, `push`, `reset_to_upstream` | same names (`pull_with` takes merge or rebase) |
 
 Since the GUI re-reads state from Git rather than caching it, changes an agent makes show up in the GUI. Console sessions will get these tools through `claude --mcp-config`.

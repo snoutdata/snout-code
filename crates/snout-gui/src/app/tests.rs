@@ -87,6 +87,73 @@ fn renders_repo_and_diff() {
     h.state_mut().settings.side_by_side = false;
     h.run_steps(3);
     screenshot(&mut h, "-unified");
+
+    let ctx = h.ctx.clone();
+    h.state_mut().handle(Action::SetTheme(ThemeChoice::Light), &ctx);
+    h.run_steps(3);
+    assert!(!h.ctx.global_style().visuals.dark_mode);
+    screenshot(&mut h, "-light");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn clicking_a_commit_shows_what_it_changed() {
+    let dir = demo_repo("commit-view");
+    // A merge, so the graph has a second lane.
+    git(&dir, &["stash", "-u", "-q"]);
+    git(&dir, &["switch", "-q", "feature/diff-view"]);
+    std::fs::write(dir.join("README.md"), "# demo\n\nNow with a diff view.\n").unwrap();
+    git(&dir, &["commit", "-qam", "Describe the diff view"]);
+    git(&dir, &["switch", "-q", "main"]);
+    git(&dir, &["merge", "-q", "--no-ff", "-m", "Merge feature/diff-view", "feature/diff-view"]);
+    git(&dir, &["stash", "pop", "-q"]);
+    let mut h = harness(Some(dir.clone()));
+    assert_eq!(h.state().graph.iter().map(|r| r.width).max(), Some(2));
+
+    h.get_by_label("Initial import").click();
+    h.run_steps(3);
+    let view = h.state().commit_view.as_ref().expect("a click opens the commit");
+    let details = view.details.as_ref().unwrap();
+    assert_eq!(details.summary(), "Initial import");
+    assert_eq!(details.files.len(), 3);
+    assert_eq!(view.selected.as_deref(), Some("README.md"), "the first file is picked");
+    assert!(matches!(view.diff, Some(Ok(_))));
+    h.get_by_label("status.rs").click();
+    h.run_steps(3);
+    let view = h.state().commit_view.as_ref().unwrap();
+    assert_eq!(view.diff.as_ref().unwrap().as_ref().unwrap().diff.path, "status.rs");
+    screenshot(&mut h, "-commit");
+
+    // A click moves to another commit, on its text or on the graph beside it.
+    h.get_by_label("Describe the diff view").click();
+    h.run_steps(3);
+    let details = h.state().commit_view.as_ref().unwrap().details.as_ref().unwrap();
+    assert_eq!(details.files[0].path, "README.md");
+    // The graph column ends where the Message column's header starts.
+    let x = h.get_by_label("Message").rect().min.x - 10.0;
+    let at = egui::pos2(x, h.get_by_label("Initial import").rect().center().y);
+    h.event(egui::Event::PointerMoved(at));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    h.run_steps(3);
+    let details = h.state().commit_view.as_ref().unwrap().details.as_ref().unwrap();
+    assert_eq!(details.summary(), "Initial import", "a click on the graph column");
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+    assert!(h.state().commit_view.is_none());
+    screenshot(&mut h, "-graph");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -164,8 +231,8 @@ fn pull_from_a_replaced_remote_offers_a_reset() {
 fn welcome_screen_without_repo() {
     let mut h = harness(None);
     assert!(h.state().repo.is_none());
-    h.get_by_label("📂 Open local repository…   ⌘O");
-    h.get_by_label("🔍 Find repositories in folder…");
+    h.get_by_label("Open local repository…   ⌘O");
+    h.get_by_label("Find repositories in folder…");
     screenshot(&mut h, "-welcome");
 }
 
@@ -284,6 +351,11 @@ fn claude_console_runs_in_the_repo_and_refreshes_git() {
     wait_until(&mut h, "the agent to write a file", |app| console_text(app).contains("⏺ writing AGENT.md"));
     wait_until(&mut h, "the git view to refresh", |app| app.status.files.len() == files_before + 1);
     screenshot(&mut h, "-console");
+    let ctx = h.ctx.clone();
+    h.state_mut().handle(Action::SetTheme(ThemeChoice::Light), &ctx);
+    h.run_steps(2);
+    screenshot(&mut h, "-console-light");
+    h.state_mut().handle(Action::SetTheme(ThemeChoice::Dark), &ctx);
 
     // ⌘J hides the console; the session keeps running.
     h.key_press_modifiers(egui::Modifiers::COMMAND, Key::J);
@@ -332,6 +404,9 @@ fn ui_glyphs_exist_in_fonts() {
         // What Claude Code draws.
         "╭─╮│╰╯ ✻✶✳✢·⏺⎿❯›↓↑←→⏵⏸✓✗✔✘•▐▛▜▌▝▘█░▒▓…⧉",
         include_str!("../diff_view.rs"),
+        include_str!("../art.rs"),
+        include_str!("../graph.rs"),
+        include_str!("../theme.rs"),
         include_str!("../../../snout-core/src/diff.rs"),
     ];
     let mut missing = BTreeSet::new();
@@ -348,4 +423,133 @@ fn ui_glyphs_exist_in_fonts() {
         }
     }
     assert!(missing.is_empty(), "glyphs missing from fonts: {missing:#?}");
+}
+
+#[test]
+fn every_dialog_renders_in_both_themes() {
+    let dir = demo_repo("dialogs");
+    let mut h = harness(Some(dir.clone()));
+    let ctx = h.ctx.clone();
+    let entries = h.state().status.files.clone();
+    let make = |name: &str| match name {
+        "error" => Dialog::Error(
+            "fatal: unable to access 'https://example.com/repo.git/': Could not resolve host: example.com".into(),
+        ),
+        "info" => Dialog::Info {
+            title: "main now matches origin/main".into(),
+            text: "Your previous commits are kept on the branch backup/main-1.".into(),
+            mood: Mood::Done,
+        },
+        "discard" => Dialog::ConfirmDiscard(entries.clone()),
+        "confirm" => Dialog::ConfirmCheckout(CheckoutTarget::Tag("v0.1".into())),
+        "picker" => Dialog::Checkout(CheckoutPicker::default()),
+        "branch" => Dialog::NewBranch { name: "feature/graph".into(), start: None, checkout: true },
+        "delete" => Dialog::DeleteBranch {
+            name: "feature/diff-view".into(),
+            force: false,
+            upstream: Some(RemoteRef { remote: "origin".into(), branch: "feature/diff-view".into() }),
+            with_upstream: true,
+        },
+        "delete-remote" => {
+            Dialog::DeleteRemoteBranch(RemoteRef { remote: "origin".into(), branch: "feature/diff-view".into() })
+        }
+        "delete-files" => Dialog::ConfirmDeleteFiles(entries.clone()),
+        "divergent" => Dialog::PullProblem {
+            problem: PullProblem::Divergent,
+            details: "hint: You have divergent branches and need to specify how to reconcile them.".into(),
+        },
+        "init" => Dialog::InitRepo(PathBuf::from("/Users/demo/projects")),
+        _ => {
+            Dialog::Clone { url: "https://github.com/snout-dev/snout-git.git".into(), parent: "/Users/demo/dev".into() }
+        }
+    };
+    for theme in [ThemeChoice::Dark, ThemeChoice::Light] {
+        h.state_mut().handle(Action::SetTheme(theme), &ctx);
+        for name in [
+            "error",
+            "info",
+            "discard",
+            "confirm",
+            "picker",
+            "branch",
+            "delete",
+            "delete-remote",
+            "delete-files",
+            "divergent",
+            "init",
+            "clone",
+        ] {
+            h.state_mut().dialog = Some(make(name));
+            h.run_steps(3);
+            assert!(h.state().dialog.is_some(), "{name} stays open");
+            screenshot(&mut h, &format!("-dlg-{name}-{theme:?}"));
+        }
+    }
+
+    // Esc closes any dialog.
+    h.state_mut().dialog = Some(make("init"));
+    h.run_steps(2);
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+    assert!(h.state().dialog.is_none(), "Esc closes");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn deletes_branches_locally_and_on_the_remote() {
+    let local = demo_repo("delete");
+    let remote = local.with_extension("remote.git");
+    let _ = std::fs::remove_dir_all(&remote);
+    git(&local, &["init", "-q", "--bare", "-b", "main", remote.to_str().unwrap()]);
+    git(&local, &["remote", "set-url", "origin", remote.to_str().unwrap()]);
+    git(&local, &["push", "-q", "-u", "origin", "main", "feature/diff-view", "main:topic"]);
+    let mut h = harness(Some(local.clone()));
+    let ctx = h.ctx.clone();
+    let branch = |h: &Harness<'_, SnoutApp>, name: &str| h.state().branches.iter().find(|b| b.name == name).cloned();
+
+    // Hovering a branch shows its trash can.
+    h.get_all_by_label("feature/diff-view").next().unwrap().hover();
+    h.run_steps(2);
+    screenshot(&mut h, "-branch-hover");
+    h.get_by_label("Trash");
+
+    // A local branch with an upstream offers to delete that too.
+    let feature = branch(&h, "feature/diff-view").expect("local branch");
+    h.state_mut().handle(Action::AskDeleteBranch(feature), &ctx);
+    h.run_steps(2);
+    let Some(Dialog::DeleteBranch { upstream: Some(up), with_upstream, .. }) = &mut h.state_mut().dialog else {
+        panic!("delete dialog offering the upstream")
+    };
+    assert_eq!(up.label(), "origin/feature/diff-view");
+    *with_upstream = true;
+    h.run_steps(2);
+    h.get_by_label("Delete branch").click();
+    h.run_steps(2);
+    wait_for_job(&mut h);
+    assert!(branch(&h, "feature/diff-view").is_none(), "local branch gone");
+    assert!(branch(&h, "origin/feature/diff-view").is_none(), "remote branch gone");
+
+    // A remote branch on its own.
+    let topic = branch(&h, "origin/topic").expect("remote branch");
+    h.state_mut().handle(Action::AskDeleteBranch(topic), &ctx);
+    h.run_steps(2);
+    h.get_by_label("Delete from origin").click();
+    h.run_steps(2);
+    wait_for_job(&mut h);
+    assert!(branch(&h, "origin/topic").is_none());
+    let out = Command::new("git").arg("-C").arg(&remote).args(["branch", "--list"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "* main");
+
+    // Delete asks before touching files, and only offers what is on disk.
+    let files = h.state().status.files.clone();
+    h.state_mut().handle(Action::AskDeleteFiles(files), &ctx);
+    h.run_steps(2);
+    let Some(Dialog::ConfirmDeleteFiles(entries)) = &h.state().dialog else { panic!("confirmation") };
+    assert_eq!(entries.len(), 3);
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert!(h.state().dialog.is_none() && local.join("NOTES.md").exists());
+
+    let _ = std::fs::remove_dir_all(&local);
+    let _ = std::fs::remove_dir_all(&remote);
 }

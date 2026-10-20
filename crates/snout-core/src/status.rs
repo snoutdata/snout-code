@@ -18,7 +18,7 @@ pub enum Change {
 }
 
 impl Change {
-    fn from_code(c: u8) -> Option<Self> {
+    pub(crate) fn from_code(c: u8) -> Option<Self> {
         Some(match c {
             b'M' => Self::Modified,
             b'T' => Self::TypeChanged,

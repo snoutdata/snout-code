@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 
+use crate::art::{self, Glyph};
 use crate::terminal::{Launch, Terminal};
+use crate::theme::Palette;
 
 /// Inherited variables that would make Claude Code think it runs nested inside another
 /// session (snout started from a Claude Code terminal), or misreport the terminal.
@@ -82,8 +84,8 @@ impl Console {
     pub fn ui(&mut self, ui: &mut egui::Ui, root: Option<&Path>) -> Option<ConsoleEvent> {
         let mut event = None;
         let Some(root) = root else {
-            header(ui, "", |ui| {
-                if ui.small_button("✕").on_hover_text("Hide (⌘J)").clicked() {
+            header(ui, "", None, |ui| {
+                if art::icon_button(ui, Glyph::Close, true).on_hover_text("Hide (⌘J)").clicked() {
                     event = Some(ConsoleEvent::Close);
                 }
             });
@@ -98,24 +100,23 @@ impl Console {
         let mut stop = false;
         let exit = self.sessions.get_mut(root).and_then(|s| s.term.exit_status().map(str::to_owned));
         let title = self.sessions.get(root).map(|s| s.term.title()).unwrap_or_default();
-        header(ui, &title, |ui| {
-            if ui.small_button("✕").on_hover_text("Hide (⌘J); the session keeps running").clicked() {
+        let running = self.sessions.contains_key(root) && exit.is_none();
+        header(ui, &title, Some(running), |ui| {
+            if art::icon_button(ui, Glyph::Close, true).on_hover_text("Hide (⌘J); the session keeps running").clicked()
+            {
                 event = Some(ConsoleEvent::Close);
             }
-            if self.sessions.contains_key(root)
-                && exit.is_none()
-                && ui.small_button("⏹ End").on_hover_text("End this session").clicked()
-            {
+            ui.add_space(4.0);
+            if running && art::chip_button(ui, Glyph::Stop, "End").on_hover_text("End this session").clicked() {
                 stop = true;
             }
-            if ui
-                .small_button("↻ Continue")
+            if art::chip_button(ui, Glyph::Refresh, "Continue")
                 .on_hover_text("Restart with the most recent conversation in this folder (claude --continue)")
                 .clicked()
             {
                 restart = Some(vec!["--continue".into()]);
             }
-            if ui.small_button("✳ New").on_hover_text("Restart with a new conversation").clicked() {
+            if art::chip_button(ui, Glyph::Plus, "New").on_hover_text("Restart with a new conversation").clicked() {
                 restart = Some(Vec::new());
             }
         });
@@ -166,15 +167,30 @@ impl Console {
     }
 }
 
-fn header(ui: &mut egui::Ui, title: &str, buttons: impl FnOnce(&mut egui::Ui)) {
+/// The pane's title row: the spark, the name, the session's own title, and a dot that is
+/// green while the session runs (`running` is `None` when there is no session to speak of).
+fn header(ui: &mut egui::Ui, title: &str, running: Option<bool>, buttons: impl FnOnce(&mut egui::Ui)) {
+    let p = Palette::of(ui.visuals());
     ui.horizontal(|ui| {
-        ui.label(RichText::new("✳ Claude Code").strong());
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+        Glyph::Spark.drawing().paint(ui.painter(), rect, Some(p.fg));
+        ui.label(RichText::new("Claude Code").strong());
+        if let Some(running) = running {
+            let (dot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+            ui.painter().circle_filled(dot.center(), 3.5, if running { p.ok } else { p.fg_dim });
+        }
         let title = title.trim().trim_start_matches(['✳', '✻', '·', '✶', '✢', '*', ' ']);
         if !title.is_empty() && title != "Claude Code" {
-            ui.weak(title);
+            ui.add(egui::Label::new(RichText::new(title).color(p.fg_dim)).truncate());
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), buttons);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            buttons(ui);
+        });
     });
+    ui.add_space(4.0);
+    ui.separator();
 }
 
 /// `claude` on PATH or in the places its installers put it (an app started from Finder

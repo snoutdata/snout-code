@@ -3,6 +3,8 @@
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Sense, TextStyle, pos2, vec2};
 use snout_core::{FileDiff, RowKind};
 
+use crate::theme::Palette;
+
 /// Unchanged lines kept around each change in compact mode.
 const CONTEXT: usize = 3;
 
@@ -179,14 +181,10 @@ struct Colors {
 
 impl Colors {
     fn new(v: &egui::Visuals) -> Self {
-        let (add, del) = if v.dark_mode {
-            (Color32::from_rgb(28, 64, 38), Color32::from_rgb(82, 32, 36))
-        } else {
-            (Color32::from_rgb(218, 251, 225), Color32::from_rgb(255, 222, 222))
-        };
+        let p = Palette::of(v);
         Self {
-            add,
-            del,
+            add: p.diff_add(),
+            del: p.diff_del(),
             empty: v.faint_bg_color,
             gap: v.extreme_bg_color,
             text: v.text_color(),

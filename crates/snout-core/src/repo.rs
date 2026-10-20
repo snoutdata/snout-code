@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::git::{run, run_raw, run_with_stdin};
 use crate::status::FileEntry;
-use crate::{Branch, Commit, DiffBase, Error, FileDiff, Result, Status, Tag};
+use crate::{Branch, Commit, CommitDetails, CommitFile, DiffBase, Error, FileDiff, Result, Status, Tag};
 use crate::{branches, diff, log, status, tags};
 
 /// A Git working tree. Cheap to clone and `Send`, so it can be moved to worker threads.
@@ -75,10 +75,11 @@ impl Repo {
         Ok(tags::parse(&out.stdout_str()))
     }
 
-    /// Most recent commits reachable from HEAD, newest first.
+    /// Most recent commits reachable from HEAD, newest first, never a parent before its
+    /// children (so a graph can be drawn from the list).
     pub fn log(&self, limit: usize) -> Result<Vec<Commit>> {
         let n = format!("-n{limit}");
-        let out = run_raw(&self.root, &["log", &n, log::FORMAT, log::DATE, "HEAD"], None)?;
+        let out = run_raw(&self.root, &["log", "--date-order", &n, log::FORMAT, log::DATE, "HEAD"], None)?;
         if !out.success {
             // An unborn branch has no history; that is not an error.
             return if self.has_head()? { Err(git_error("log", &out)) } else { Ok(Vec::new()) };
@@ -152,7 +153,35 @@ impl Repo {
             DiffBase::IndexToWorktree => (self.blob("", &entry.path)?, self.worktree_file(&entry.path)?),
             DiffBase::HeadToIndex => (self.blob("HEAD", old_path)?, self.blob("", &entry.path)?),
         };
-        Ok(diff::compute(entry.path.clone(), base, &old, &new))
+        Ok(diff::compute(entry.path.clone(), Some(base), &old, &new))
+    }
+
+    /// One commit in full: message, author and committer, parents, and the files it
+    /// changed relative to its first parent (renames detected).
+    pub fn commit_details(&self, rev: &str) -> Result<CommitDetails> {
+        let id = self.resolve_commit(rev)?;
+        let out = self.git(&["show", "-s", log::DETAILS_FORMAT, log::DATE, &id])?;
+        let mut details =
+            log::parse_details(&out.stdout_str()).ok_or_else(|| Error::Invalid(format!("cannot read commit {id}")))?;
+        let mut args = vec!["diff-tree", "-r", "-z", "-M", "--name-status", "--no-commit-id"];
+        match details.parents.first() {
+            Some(parent) => args.extend([parent.as_str(), &id]),
+            None => args.extend(["--root", &id]),
+        }
+        details.files = log::parse_name_status(&self.git(&args)?.stdout_str());
+        Ok(details)
+    }
+
+    /// What `file` looked like before and after `commit`. `parent` is the side to compare
+    /// against (normally the first parent); `None` for a root commit.
+    pub fn commit_file_diff(&self, commit: &str, parent: Option<&str>, file: &CommitFile) -> Result<FileDiff> {
+        let old_path = file.orig_path.as_deref().unwrap_or(&file.path);
+        let old = match parent {
+            Some(parent) => self.blob(parent, old_path)?,
+            None => Vec::new(),
+        };
+        let new = self.blob(commit, &file.path)?;
+        Ok(diff::compute(file.path.clone(), None, &old, &new))
     }
 
     /// Contents of `path` at `rev` (`""` = index). Missing objects yield empty content.
@@ -232,6 +261,41 @@ impl Repo {
         Ok(())
     }
 
+    /// Delete files from the working tree: to the Trash when `to_trash` and the system has a
+    /// `trash` command (macOS 15 and later), for good otherwise. Tracked files then show as
+    /// deleted, ready to stage; files that were only added to the index are un-added too, so
+    /// nothing is left staged for a file that is gone.
+    pub fn delete_files(&self, entries: &[FileEntry], to_trash: bool) -> Result<()> {
+        let paths: Vec<PathBuf> =
+            entries.iter().map(|e| self.root.join(&e.path)).filter(|p| p.symlink_metadata().is_ok()).collect();
+        if paths.is_empty() {
+            return Ok(());
+        }
+        if to_trash && can_trash() {
+            let out = std::process::Command::new(TRASH).args(&paths).output()?;
+            if !out.status.success() {
+                return Err(Error::Invalid(format!(
+                    "could not move to the Trash: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )));
+            }
+        } else {
+            for p in &paths {
+                if p.symlink_metadata()?.is_dir() {
+                    std::fs::remove_dir_all(p)?;
+                } else {
+                    std::fs::remove_file(p)?;
+                }
+            }
+        }
+        let unadd: Vec<String> =
+            entries.iter().filter(|e| e.index == Some(crate::Change::Added)).map(|e| e.path.clone()).collect();
+        if !unadd.is_empty() {
+            self.git(&with_paths(&["rm", "--cached", "-q", "-f"], &unadd))?;
+        }
+        Ok(())
+    }
+
     /// Commit the index. Returns git's summary output.
     pub fn commit(&self, message: &str, amend: bool) -> Result<String> {
         if message.trim().is_empty() {
@@ -269,6 +333,19 @@ impl Repo {
             .ok_or_else(|| Error::Invalid("no remote configured".into()))?;
         Ok(self.git(&["push", "-u", &remote, &head])?.text())
     }
+
+    /// Delete `branch` on `remote` (`git push <remote> --delete <branch>`).
+    pub fn delete_remote_branch(&self, remote: &str, branch: &str) -> Result<String> {
+        Ok(self.git(&["push", remote, "--delete", branch])?.text())
+    }
+}
+
+/// macOS's command that moves files to the Trash.
+const TRASH: &str = "/usr/bin/trash";
+
+/// Whether [`Repo::delete_files`] can move files to the Trash rather than delete them for good.
+pub fn can_trash() -> bool {
+    Path::new(TRASH).exists()
 }
 
 fn with_paths<'a>(args: &[&'a str], paths: &'a [String]) -> Vec<&'a str> {
@@ -345,10 +422,59 @@ mod tests {
         repo.checkout(&main.into(), crate::LocalChanges::Keep).unwrap();
         assert_eq!(repo.status().unwrap().branch.head.as_deref(), Some("main"));
 
+        fs::write(repo.root().join("a.txt"), "one\nTWO\n").unwrap();
+        fs::write(repo.root().join("b.txt"), "bee\n").unwrap();
+        repo.stage(&["a.txt".into(), "b.txt".into()]).unwrap();
+        repo.commit("second\n\nwith a body", false).unwrap();
+        let details = repo.commit_details("HEAD").unwrap();
+        assert_eq!((details.summary(), details.body()), ("second", "with a body"));
+        assert_eq!(details.parents.len(), 1);
+        let paths: Vec<&str> = details.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt", "b.txt"]);
+        let d = repo.commit_file_diff(&details.id, Some(&details.parents[0]), &details.files[0]).unwrap();
+        assert_eq!((d.additions, d.deletions), (1, 0));
+        let root = repo.commit_details(&details.parents[0]).unwrap();
+        assert!(root.parents.is_empty());
+        assert_eq!(root.files.len(), 1, "a root commit lists what it added");
+        assert_eq!(root.files[0].change, crate::Change::Added);
+
         let log = repo.log(10).unwrap();
-        assert_eq!(log.len(), 1);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].parents, [log[1].id.clone()]);
         assert!(log[0].unpushed, "no upstream means unpushed");
         assert!(serde_json::to_string(&log).is_ok());
+
+        fs::remove_dir_all(repo.root()).unwrap();
+    }
+
+    #[test]
+    fn delete_files_leaves_tracked_ones_deleted_and_unadds_new_ones() {
+        let repo = scratch_repo("delete");
+        fs::write(repo.root().join("kept.txt"), "one\n").unwrap();
+        repo.stage(&["kept.txt".into()]).unwrap();
+        repo.commit("first", false).unwrap();
+        fs::create_dir_all(repo.root().join("dir")).unwrap();
+        fs::write(repo.root().join("dir/new.txt"), "new\n").unwrap();
+        fs::write(repo.root().join("added.txt"), "added\n").unwrap();
+        repo.stage(&["added.txt".into()]).unwrap();
+
+        let files = repo.status().unwrap().files;
+        assert_eq!(files.len(), 2);
+        let tracked = FileEntry {
+            path: "kept.txt".into(),
+            orig_path: None,
+            index: None,
+            worktree: Some(crate::Change::Modified),
+            conflicted: false,
+        };
+        let all: Vec<FileEntry> = files.into_iter().chain([tracked]).collect();
+        repo.delete_files(&all, false).unwrap();
+
+        let st = repo.status().unwrap();
+        assert_eq!(st.files.len(), 1, "{:?}", st.files);
+        assert_eq!(st.files[0].path, "kept.txt");
+        assert_eq!(st.files[0].worktree, Some(crate::Change::Deleted));
+        assert!(!repo.root().join("dir/new.txt").exists() && !repo.root().join("added.txt").exists());
 
         fs::remove_dir_all(repo.root()).unwrap();
     }
@@ -375,6 +501,14 @@ mod tests {
         repo.pull().unwrap();
         let remote_branch = repo.branches().unwrap().into_iter().find(|b| b.kind == crate::BranchKind::Remote).unwrap();
         assert_eq!(remote_branch.name, "origin/main");
+
+        // A branch pushed, then deleted on the remote.
+        repo.create_branch("topic", None, false).unwrap();
+        run(repo.root(), &["push", "-q", "origin", "topic"]).unwrap();
+        assert!(repo.branches().unwrap().iter().any(|b| b.name == "origin/topic"));
+        repo.delete_remote_branch("origin", "topic").unwrap();
+        assert!(!repo.branches().unwrap().iter().any(|b| b.name == "origin/topic"));
+        assert!(repo.branches().unwrap().iter().any(|b| b.name == "topic"), "local branch stays");
 
         fs::remove_dir_all(repo.root()).unwrap();
         fs::remove_dir_all(&remote).unwrap();

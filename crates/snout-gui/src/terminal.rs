@@ -285,6 +285,9 @@ impl Terminal {
                     _ => {}
                 }
             }
+            // Follow the theme, also for the colour queries TUIs send later.
+            let hooks = parser.callbacks_mut();
+            (hooks.fg, hooks.bg) = (default_fg(ui.visuals()), default_bg(ui.visuals()));
             paint(ui, &parser, inner, cell, &font, focused, self.selection);
         }
         if !out.is_empty() {
@@ -439,12 +442,13 @@ fn ctrl_byte(key: Key) -> Option<u8> {
 
 // ----- Painting ------------------------------------------------------------------------
 
+/// The pane's own colours, so the terminal reads as part of it rather than a box inside it.
 fn default_fg(v: &egui::Visuals) -> Color32 {
-    if v.dark_mode { Color32::from_gray(220) } else { Color32::from_gray(30) }
+    crate::theme::Palette::of(v).fg
 }
 
 fn default_bg(v: &egui::Visuals) -> Color32 {
-    if v.dark_mode { Color32::from_gray(16) } else { Color32::from_gray(252) }
+    crate::theme::Palette::of(v).panel
 }
 
 /// The xterm palette.
