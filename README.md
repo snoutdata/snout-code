@@ -6,11 +6,11 @@ A small, fast desktop Git client in Rust. It focuses on the everyday loop: see w
 
 ## Features
 
-- **Repositories:** a list of your repositories, with a filter. The open repository expands into its directory tree; pick a folder to see only the files under it.
+- **Repositories:** a list of your repositories, with a filter, sorted into groups you name. Drag a repository onto a group (or use its context menu) to file it there, and onto the space below the list to take it out. The open repository shows its branch and number of changes, and expands into its directory tree; pick a folder to see only the files under it.
 - **Opening:** ⌘O, the welcome screen, or drag a folder onto the window. A folder that is not a repository can be searched for repositories (4 levels deep) or initialized. Clone from a URL.
 - **Files:** working tree status (staged, partly staged, untracked, conflicted), with a filter, sortable columns, multi-select (⌘-click, ⇧-click, ⌘A) and a context menu. Discard reverts files to HEAD; Delete moves them to the Trash (⌘⌫). Both ask first.
 - **Changes:** whole-file diff, side by side or unified, with an optional compact view (3 lines of context). Compare HEAD with the working tree, the index with the working tree, or HEAD with the index.
-- **Commit:** message and amend (pre-fills the last message); ⌘↩ commits.
+- **Commit:** message and amend (pre-fills the last message); ⌘↩ commits. With nothing staged, Commit takes the files selected in Files, or every changed file when none is selected, so staging is optional; the label beside the button says which. **Draft** has Claude Code write the message from what the commit would record, in the style of your recent commits, building on anything you already typed.
 - **Check out:** a ⇧⌘O picker over local branches, remote branches and tags, or any commit you type (a SHA, `HEAD~2`), with a live preview. With uncommitted changes you choose to keep them or to stash, check out and re-apply. If re-applying conflicts, the stash is kept so nothing is lost.
 - **Branches:** local branches, branches per remote, and tags, with ahead/behind counts and a detached HEAD indicator. Create a branch from any branch, tag or commit. Delete a branch from the trash can on its row or its context menu: a local one (with a force option, and optionally its upstream on the remote too) or one on a remote.
 - **Journal:** recent commits on a graph of their branches and merges, with branch and tag badges and unpushed commits drawn solid. Search by message, author, SHA or ref. Right-click a commit to check it out or start a branch there.
@@ -32,6 +32,8 @@ Press ⌘J or click **✳ Claude** to run [Claude Code](https://docs.claude.com/
 - **New** starts a fresh conversation, **Continue** resumes the latest one in that folder (`claude --continue`), and **End** stops the session.
 - The Git panes refresh once the agent goes quiet, and every 3 seconds while it keeps working.
 - The console is a real pseudo-terminal, so Claude Code behaves as it does in your terminal: Shift+Tab cycles modes, Esc interrupts, Shift+Enter or Option+Enter adds a newline, Ctrl+V pastes an image, ⌘V pastes text, and you can drag to select and press ⌘C to copy.
+
+**Draft**, in the Commit pane, runs Claude Code separately in print mode (`claude -p`, with its tools turned off) and sends it the patch the commit would record on stdin. It does not touch the console's session.
 
 snout looks for `claude` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin`. Claude Code itself is installed and signed in separately.
 

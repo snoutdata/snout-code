@@ -495,10 +495,12 @@ pub enum Glyph {
     Plus,
     Stop,
     Close,
+    Repo,
+    Folder,
 }
 
 impl Glyph {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 24] = [
         Self::Open,
         Self::Pull,
         Self::Fetch,
@@ -521,6 +523,8 @@ impl Glyph {
         Self::Plus,
         Self::Stop,
         Self::Close,
+        Self::Repo,
+        Self::Folder,
     ];
 
     pub fn drawing(self) -> &'static Drawing {
@@ -626,6 +630,14 @@ impl Glyph {
             Self::Close => {
                 d.line("M7 7L17 17").line("M17 7L7 17");
             }
+            Self::Repo => {
+                d.line("M5.5 18.5V5.5Q5.5 3.5 7.5 3.5H18.5V16.5H7.5Q5.5 16.5 5.5 18.5Q5.5 20.5 7.5 20.5H18.5");
+                d.path("M9.5 3.5H13.5V10.5L11.5 9L9.5 10.5Z", Fill::Accent);
+            }
+            Self::Folder => {
+                d.path("M3 6.5Q3 5 4.5 5H9.2L11.2 7H19.5Q21 7 21 8.5V17.5Q21 19 19.5 19H4.5Q3 19 3 17.5Z", Fill::None);
+                d.path("M3 6.5Q3 5 4.5 5H9.2L11.2 7H19.5Q21 7 21 8.5V10H3Z", Fill::Accent);
+            }
             Self::Search => {
                 d.ellipse(pos2(10.5, 10.5), 6.5, 6.5, Fill::Accent, true);
                 d.line("M15.3 15.3L20.5 20.5");
@@ -684,7 +696,7 @@ pub fn glyph_button_sized(
 }
 
 /// A quiet pill for pane headers: glyph and label, filled only under the pointer.
-pub fn chip_button(ui: &mut egui::Ui, glyph: Glyph, text: &str) -> egui::Response {
+pub fn chip_button(ui: &mut egui::Ui, glyph: Glyph, text: &str, enabled: bool) -> egui::Response {
     let p = Palette::of(ui.visuals());
     let (icon, gap, pad) = (14.0, 5.0, vec2(8.0, 3.0));
     let galley = egui::WidgetText::from(text).into_galley(
@@ -694,9 +706,10 @@ pub fn chip_button(ui: &mut egui::Ui, glyph: Glyph, text: &str) -> egui::Respons
         egui::TextStyle::Button,
     );
     let size = vec2(icon + gap + galley.size().x, icon.max(galley.size().y)) + pad * 2.0;
-    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
     if ui.is_rect_visible(rect) {
-        let hot = resp.hovered() || resp.has_focus();
+        let hot = enabled && (resp.hovered() || resp.has_focus());
         if hot {
             ui.painter().rect(
                 rect,
@@ -706,14 +719,15 @@ pub fn chip_button(ui: &mut egui::Ui, glyph: Glyph, text: &str) -> egui::Respons
                 egui::StrokeKind::Inside,
             );
         }
-        let ink = if hot { p.fg } else { p.fg_dim };
+        // Full ink whenever it can be pressed; only a disabled chip looks faded.
+        let ink = if enabled { p.fg } else { p.fg_dim.gamma_multiply(0.6) };
         let icon_rect = Rect::from_min_size(pos2(rect.left() + pad.x, rect.center().y - icon / 2.0), Vec2::splat(icon));
         glyph.drawing().paint(ui.painter(), icon_rect, Some(ink));
         let text_pos = pos2(icon_rect.max.x + gap, rect.center().y - galley.size().y / 2.0);
         ui.painter().galley(text_pos, galley, ink);
     }
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text));
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, text));
+    if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
 }
 
 /// A small frameless icon button, for pane headers.

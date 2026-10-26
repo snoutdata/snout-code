@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, Color32, CornerRadius, FontId, Key, Margin, Rect, RichText, Sense, Stroke, Ui, vec2};
 use snout_core::{Branch, BranchKind, CheckoutTarget, FileEntry, LocalChanges, PullMode, PullProblem, Tag};
 
-use super::{Action, SnoutApp, repo_dir_name, state_color};
+use super::{Action, SnoutApp, dir_name, repo_dir_name, repos, state_color};
 use crate::art::{self, Glyph};
 use crate::theme::{self, Palette, mix};
 
@@ -41,6 +41,12 @@ pub(super) enum Dialog {
     },
     /// A folder that is not a repository was opened.
     InitRepo(PathBuf),
+    /// Name a new group (and put `repo` in it), or rename the group `rename`.
+    GroupName {
+        rename: Option<String>,
+        name: String,
+        repo: Option<PathBuf>,
+    },
     Clone {
         url: String,
         parent: String,
@@ -155,7 +161,7 @@ impl SnoutApp {
         let branch = self.status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
         let upstream = self.status.branch.upstream.clone().unwrap_or_else(|| "its upstream".into());
         let Some(dialog) = &mut self.dialog else { return };
-        let (branches, tags, repo) = (&self.branches, &self.tags, self.repo.as_ref());
+        let (branches, tags, repo, groups) = (&self.branches, &self.tags, self.repo.as_ref(), &self.settings.groups);
         let mut close = false;
 
         let p = Palette::of(&ctx.global_style().visuals);
@@ -408,6 +414,52 @@ impl SnoutApp {
                                 name: name.trim().to_owned(),
                                 start: start.as_ref().map(|s| s.rev.clone()),
                                 checkout: *checkout,
+                            });
+                            close = true;
+                        }
+                        close |= theme::plain_button(ui, "Cancel").clicked();
+                    });
+                }
+                Dialog::GroupName { rename, name, repo } => {
+                    let title = if rename.is_some() { "Rename group" } else { "New group" };
+                    header(ui, Glyph::Folder, Tone::Calm, title, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            match (rename.as_deref(), repo.as_deref()) {
+                                (Some(old), _) => {
+                                    dim(ui, "Renaming");
+                                    chip(ui, old);
+                                }
+                                (None, Some(repo)) => {
+                                    chip(ui, &dir_name(repo));
+                                    dim(ui, "goes into the new group.");
+                                }
+                                (None, None) => {
+                                    dim(ui, "Groups keep related repositories together. Drag repositories onto one.")
+                                }
+                            }
+                        });
+                    });
+                    let mut enter = false;
+                    let problem = repos::group_name_problem(groups, name.trim(), rename.as_deref());
+                    body(ui, |ui| {
+                        field_label(ui, "Name");
+                        let edit = ui.add(field(egui::TextEdit::singleline(name).hint_text("Work")));
+                        edit.request_focus();
+                        enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                        if let Some(problem) = problem {
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(problem).size(12.0).color(Palette::of(ui.visuals()).warn));
+                        }
+                    });
+                    let verb = if rename.is_some() { "Rename" } else { "Create" };
+                    footer(ui, &[("↵", "save"), ("esc", "cancel")], |ui| {
+                        let ok = !name.trim().is_empty() && problem.is_none();
+                        if theme::primary_button(ui, ok, verb).clicked() || (ok && enter) {
+                            actions.push(Action::SaveGroup {
+                                rename: rename.clone(),
+                                name: name.trim().to_owned(),
+                                repo: repo.clone(),
                             });
                             close = true;
                         }

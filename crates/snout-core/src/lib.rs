@@ -27,6 +27,6 @@ pub use error::{Error, Result};
 pub use github::github_web_url;
 pub use log::{Commit, CommitDetails, CommitFile};
 pub use pull::{PullMode, PullProblem};
-pub use repo::{Repo, can_trash};
+pub use repo::{Repo, Tracking, can_trash};
 pub use status::{BranchInfo, Change, FileEntry, Status};
 pub use tags::Tag;

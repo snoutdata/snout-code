@@ -1,13 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Key, RichText, Sense};
 use egui_extras::{Column, TableBuilder};
 use serde::{Deserialize, Serialize};
 use snout_core::{
     Branch, BranchKind, CheckoutTarget, Commit, CommitDetails, CommitFile, DiffBase, FileEntry, LocalChanges, PullMode,
-    PullProblem, Repo, Status, Tag,
+    PullProblem, Repo, Status, Tag, Tracking,
 };
 
 use crate::art::{self, Glyph, glyph_button};
@@ -16,9 +17,15 @@ use crate::graph::{self, GraphRow};
 use crate::theme::{self, Palette, ThemeChoice};
 use console::{Console, ConsoleEvent};
 use dialogs::{CheckoutPicker, Dialog, Mood, RemoteRef, StartPoint};
+use draft::Draft;
+use repos::RepoGroup;
+use survey::Survey;
 
 mod console;
 mod dialogs;
+mod draft;
+mod repos;
+mod survey;
 #[cfg(test)]
 mod tests;
 
@@ -30,6 +37,7 @@ const SCAN_DEPTH: usize = 4;
 #[serde(default)]
 struct Settings {
     repos: Vec<PathBuf>,
+    groups: Vec<RepoGroup>,
     current: Option<PathBuf>,
     diff_base: DiffBase,
     side_by_side: bool,
@@ -43,6 +51,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             repos: Vec::new(),
+            groups: Vec::new(),
             current: None,
             diff_base: DiffBase::default(),
             side_by_side: true,
@@ -50,6 +59,24 @@ impl Default for Settings {
             console_open: false,
             theme: ThemeChoice::default(),
         }
+    }
+}
+
+/// The part of [`Settings`] written to disk as soon as it changes.
+#[derive(Default)]
+struct Persisted {
+    repos: Vec<PathBuf>,
+    groups: Vec<RepoGroup>,
+    current: Option<PathBuf>,
+}
+
+impl Persisted {
+    fn of(s: &Settings) -> Self {
+        Self { repos: s.repos.clone(), groups: s.groups.clone(), current: s.current.clone() }
+    }
+
+    fn matches(&self, s: &Settings) -> bool {
+        self.repos == s.repos && self.groups == s.groups && self.current == s.current
     }
 }
 
@@ -78,6 +105,19 @@ enum Action {
     PickScanFolder,
     Scan(PathBuf),
     RemoveRepo(PathBuf),
+    /// Ask for a name, then make a group (and put the repository in it).
+    ShowNewGroup(Option<PathBuf>),
+    ShowRenameGroup(String),
+    SaveGroup {
+        /// The group being renamed; a new one when `None`.
+        rename: Option<String>,
+        name: String,
+        repo: Option<PathBuf>,
+    },
+    /// Put a repository in a group, or in none.
+    MoveToGroup(PathBuf, Option<String>),
+    /// Remove a group; its repositories stay in the list.
+    DeleteGroup(String),
     ShowClone,
     Clone {
         url: String,
@@ -91,6 +131,9 @@ enum Action {
     AskDeleteFiles(Vec<FileEntry>),
     DeleteFiles(Vec<FileEntry>),
     Commit,
+    /// Have Claude Code write the commit message from what the commit would record.
+    DraftMessage,
+    CancelDraft,
     ShowCheckout,
     /// Check out, asking first what to do with local changes if there are any.
     RequestCheckout(CheckoutTarget),
@@ -194,6 +237,8 @@ pub struct SnoutApp {
 
     commit_msg: String,
     amend: bool,
+    /// Claude Code writing the commit message.
+    draft: Option<Draft>,
 
     bottom_tab: BottomTab,
     output: Vec<OutputLine>,
@@ -203,8 +248,16 @@ pub struct SnoutApp {
     was_focused: bool,
     title: String,
     console: Console,
-    /// The repository list and current repository as last written to disk.
-    persisted: (Vec<PathBuf>, Option<PathBuf>),
+    /// The repository list, groups and current repository as last written to disk.
+    persisted: Persisted,
+    /// How each listed repository stands against its upstream (`None`: no upstream).
+    tracking: HashMap<PathBuf, Option<Tracking>>,
+    survey: Option<Survey>,
+    /// When a survey last fetched, and how often one should; never in tests.
+    fetched_at: Option<Instant>,
+    fetch_every: Option<Duration>,
+    /// Count again without fetching, e.g. after work done in other windows.
+    recount: bool,
 }
 
 impl SnoutApp {
@@ -234,6 +287,7 @@ impl SnoutApp {
             diff: None,
             commit_msg: String::new(),
             amend: false,
+            draft: None,
             bottom_tab: BottomTab::Journal,
             output: Vec::new(),
             message: "Ready".into(),
@@ -242,9 +296,14 @@ impl SnoutApp {
             was_focused: true,
             title: String::new(),
             console: Console::default(),
-            persisted: (Vec::new(), None),
+            persisted: Persisted::default(),
+            tracking: HashMap::new(),
+            survey: None,
+            fetched_at: None,
+            fetch_every: (!cfg!(test)).then_some(survey::FETCH_EVERY),
+            recount: false,
         };
-        app.persisted = (app.settings.repos.clone(), app.settings.current.clone());
+        app.persisted = Persisted::of(&app.settings);
         if let Some(path) = open_arg {
             app.open_path(&path);
         } else if let Some(path) = app.settings.current.clone() {
@@ -270,6 +329,7 @@ impl SnoutApp {
                 self.journal_filter.clear();
                 self.commit_msg.clear();
                 self.amend = false;
+                self.draft = None;
                 self.refresh();
                 self.message = format!("Opened {}", path.display());
             }
@@ -316,6 +376,9 @@ impl SnoutApp {
             }
             Err(e) => return self.fail(e.to_string()),
         }
+        let b = &self.status.branch;
+        let tracking = b.upstream.is_some().then_some(Tracking { ahead: b.ahead, behind: b.behind });
+        self.tracking.insert(repo.root().to_owned(), tracking);
         self.branches = repo.branches().unwrap_or_else(|e| {
             self.log_output(e.to_string(), true);
             Vec::new()
@@ -335,6 +398,22 @@ impl SnoutApp {
         });
         if self.dir_filter.as_ref().is_some_and(|d| self.dirs.binary_search(d).is_err()) {
             self.dir_filter = None;
+        }
+    }
+
+    /// What Commit records: the staged changes; with nothing staged, the selected files,
+    /// or every changed file when none is selected.
+    fn commit_scope(&self) -> Scope {
+        let staged = self.status.staged_count();
+        if staged > 0 {
+            return Scope::Staged(staged);
+        }
+        let selected = self.selected_entries();
+        let (entries, all) = if selected.is_empty() { (self.status.files.clone(), true) } else { (selected, false) };
+        match stage_paths(&entries) {
+            paths if !paths.is_empty() => Scope::Files { paths, all },
+            _ if self.amend => Scope::MessageOnly,
+            _ => Scope::Nothing,
         }
     }
 
@@ -423,6 +502,42 @@ impl SnoutApp {
         self.refresh();
     }
 
+    fn poll_draft(&mut self) {
+        let Some(result) = self.draft.as_ref().and_then(Draft::poll) else { return };
+        self.draft = None;
+        match result {
+            Ok(message) => {
+                self.commit_msg = message;
+                self.done("Claude drafted the commit message");
+            }
+            Err(e) => self.fail(format!("Claude could not draft the message:\n{e}")),
+        }
+    }
+
+    fn start_draft(&mut self, ctx: &egui::Context) {
+        let Some(repo) = self.repo.clone() else { return };
+        let Some(program) = self.console.claude() else {
+            return self.fail(
+                "Claude Code was not found. Install it from https://docs.claude.com/en/docs/claude-code.".into(),
+            );
+        };
+        let patch = match repo.commit_patch(self.amend, &self.commit_scope().paths()) {
+            Ok(patch) => patch,
+            Err(e) => return self.fail(e.to_string()),
+        };
+        // When amending, the last subject is the one being rewritten.
+        let recent: Vec<&str> =
+            self.log.iter().skip(usize::from(self.amend)).take(12).map(|c| c.summary.as_str()).collect();
+        let prompt = draft::prompt(&recent, &self.commit_msg, self.amend);
+        match Draft::start(&program, repo.root(), &prompt, &patch, ctx) {
+            Ok(draft) => {
+                self.draft = Some(draft);
+                self.message = "Claude is drafting the commit message…".into();
+            }
+            Err(e) => self.fail(e),
+        }
+    }
+
     fn add_found(&mut self, root: &Path, repos: Vec<PathBuf>) {
         if repos.is_empty() {
             self.dialog = Some(Dialog::Info {
@@ -485,6 +600,7 @@ impl SnoutApp {
             }),
             Action::RemoveRepo(path) => {
                 self.settings.repos.retain(|p| p != &path);
+                repos::move_to_group(&mut self.settings.groups, &path, None);
                 if self.settings.current.as_ref() == Some(&path) {
                     self.settings.current = None;
                     self.repo = None;
@@ -492,6 +608,26 @@ impl SnoutApp {
                     self.refresh();
                 }
             }
+            Action::ShowNewGroup(repo) => {
+                self.dialog = Some(Dialog::GroupName { rename: None, name: String::new(), repo });
+            }
+            Action::ShowRenameGroup(name) => {
+                self.dialog = Some(Dialog::GroupName { rename: Some(name.clone()), name, repo: None });
+            }
+            Action::SaveGroup { rename, name, repo } => {
+                let groups = &mut self.settings.groups;
+                match rename.and_then(|old| groups.iter_mut().find(|g| g.name == old)) {
+                    Some(g) => g.name = name.clone(),
+                    None => groups.push(RepoGroup { name: name.clone(), repos: Vec::new() }),
+                }
+                if let Some(repo) = repo {
+                    repos::move_to_group(groups, &repo, Some(&name));
+                }
+            }
+            Action::MoveToGroup(path, group) => {
+                repos::move_to_group(&mut self.settings.groups, &path, group.as_deref())
+            }
+            Action::DeleteGroup(name) => self.settings.groups.retain(|g| g.name != name),
             Action::ShowClone => {
                 let parent = self
                     .settings
@@ -537,7 +673,7 @@ impl SnoutApp {
                 };
                 local(self, &label, repo.unwrap().delete_files(&entries, true));
             }
-            Action::Commit => match repo.unwrap().commit(&self.commit_msg, self.amend) {
+            Action::Commit => match repo.unwrap().commit(&self.commit_msg, self.amend, &self.commit_scope().paths()) {
                 Ok(summary) => {
                     self.done(format!("Committed {summary}"));
                     self.commit_msg.clear();
@@ -546,6 +682,11 @@ impl SnoutApp {
                 }
                 Err(e) => self.fail(e.to_string()),
             },
+            Action::DraftMessage => self.start_draft(ctx),
+            Action::CancelDraft => {
+                self.draft = None;
+                self.message = "Stopped drafting".into();
+            }
             Action::ShowCheckout => self.dialog = Some(Dialog::Checkout(CheckoutPicker::default())),
             Action::RequestCheckout(target) => {
                 if self.has_tracked_changes() {
@@ -683,8 +824,43 @@ impl SnoutApp {
         let focused = ctx.input(|i| i.viewport().focused).unwrap_or(true);
         if focused && !self.was_focused && self.job.is_none() {
             self.refresh();
+            self.recount = true;
         }
         self.was_focused = focused;
+    }
+
+    /// Keep the ahead and behind counts of the listed repositories current: take in what a
+    /// running survey found, and start the next one when a fetch is due, when asked to
+    /// count again, or when the list has repositories not yet counted.
+    fn survey(&mut self, ctx: &egui::Context) {
+        if let Some(survey) = &self.survey {
+            survey.hold(self.job.is_some());
+            let (done, over) = survey.poll();
+            let fetched = survey.fetches;
+            for (path, tracking) in done {
+                let open = self.settings.current.as_ref() == Some(&path);
+                self.tracking.insert(path, tracking);
+                if fetched && open && self.job.is_none() {
+                    self.refresh(); // its remote branches may have moved too
+                }
+            }
+            if !over {
+                return;
+            }
+            self.survey = None;
+        }
+        let repos = self.settings.repos.clone();
+        let due = self.fetch_every.is_some_and(|every| self.fetched_at.is_none_or(|at| at.elapsed() >= every));
+        if due {
+            self.fetched_at = Some(Instant::now());
+            self.survey = Some(Survey::start(repos, true, ctx));
+        } else if self.recount || repos.iter().any(|p| !self.tracking.contains_key(p)) {
+            self.survey = Some(Survey::start(repos, false, ctx));
+        }
+        self.recount = false;
+        if let (Some(every), Some(at)) = (self.fetch_every, self.fetched_at) {
+            ctx.request_repaint_after(every.saturating_sub(at.elapsed()));
+        }
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
@@ -818,14 +994,14 @@ impl SnoutApp {
     /// changes, instead of waiting for eframe's periodic save, so a crash or a forced
     /// quit cannot lose them.
     fn persist_repos(&mut self, frame: &mut eframe::Frame) {
-        if self.persisted.0 == self.settings.repos && self.persisted.1 == self.settings.current {
+        if self.persisted.matches(&self.settings) {
             return;
         }
         if let Some(storage) = frame.storage_mut() {
             eframe::set_value(storage, eframe::APP_KEY, &self.settings);
             storage.flush();
         }
-        self.persisted = (self.settings.repos.clone(), self.settings.current.clone());
+        self.persisted = Persisted::of(&self.settings);
     }
 
     fn update_title(&mut self, ctx: &egui::Context) {
@@ -952,106 +1128,6 @@ impl SnoutApp {
                 }
             });
         });
-    }
-
-    fn repos_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        ui.horizontal(|ui| {
-            pane_title(ui, "Repositories");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button("☰", |ui| open_menu_items(ui, actions));
-            });
-        });
-        ui.separator();
-        if self.settings.repos.len() > 6 {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.repo_filter).hint_text("🔍 Filter").desired_width(f32::INFINITY),
-            );
-        }
-        let needle = self.repo_filter.to_lowercase();
-        let mut repos: Vec<(String, PathBuf)> = self
-            .settings
-            .repos
-            .iter()
-            .map(|p| (dir_name(p), p.clone()))
-            .filter(|(name, _)| needle.is_empty() || name.to_lowercase().contains(&needle))
-            .collect();
-        repos.sort_by_key(|(name, _)| name.to_lowercase());
-
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            if self.settings.repos.is_empty() {
-                ui.weak("No repositories yet.\nUse ☰, ⌘O, or drop a folder here.");
-            }
-            for (name, path) in repos {
-                let is_current = self.settings.current.as_ref() == Some(&path);
-                let text = if is_current {
-                    RichText::new(format!("{name} ({})", self.head_label())).strong()
-                } else if path.is_dir() {
-                    RichText::new(name)
-                } else {
-                    RichText::new(format!("{name} (missing)")).weak()
-                };
-                if is_current {
-                    self.repo_tree(ui, &path, text, actions);
-                    continue;
-                }
-                let resp = ui.selectable_label(false, text).on_hover_text(path.display().to_string());
-                if resp.clicked() {
-                    actions.push(Action::OpenRepo(path.clone()));
-                }
-                resp.context_menu(|ui| {
-                    if ui.button("Reveal in Finder").clicked() {
-                        actions.push(Action::Reveal(path.clone()));
-                    }
-                    if ui.button("Copy path").clicked() {
-                        actions.push(Action::Copy(path.display().to_string()));
-                    }
-                    if ui.button("Remove from list").clicked() {
-                        actions.push(Action::RemoveRepo(path.clone()));
-                    }
-                });
-            }
-        });
-    }
-
-    /// The open repository, expandable into its directory tree. Picking a directory
-    /// narrows the Files pane to it; picking the repository shows everything again.
-    fn repo_tree(&mut self, ui: &mut egui::Ui, root: &Path, text: RichText, actions: &mut Vec<Action>) {
-        let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for dir in &self.dirs {
-            let parent = dir.rfind('/').map_or("", |i| &dir[..i]);
-            children.entry(parent).or_default().push(dir);
-        }
-        let mut changed: HashMap<&str, usize> = HashMap::new();
-        for f in &self.status.files {
-            let mut end = f.path.len();
-            while let Some(slash) = f.path[..end].rfind('/') {
-                *changed.entry(&f.path[..slash]).or_default() += 1;
-                end = slash;
-            }
-        }
-        let tree = DirTree { root, children: &children, changed: &changed, selected: self.dir_filter.as_deref() };
-        let mut picked: Option<Option<String>> = None;
-
-        let id = ui.make_persistent_id(("repo-tree", root));
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-            .show_header(ui, |ui| {
-                let resp =
-                    ui.selectable_label(self.dir_filter.is_none(), text).on_hover_text(root.display().to_string());
-                if resp.clicked() {
-                    picked = Some(None);
-                }
-                resp.context_menu(|ui| {
-                    reveal_items(ui, root, actions);
-                    if ui.button("Remove from list").clicked() {
-                        actions.push(Action::RemoveRepo(root.to_owned()));
-                    }
-                });
-            })
-            .body(|ui| tree.show(ui, "", &mut picked, actions));
-        if let Some(dir) = picked {
-            self.dir_filter = dir;
-            self.anchor = None;
-        }
     }
 
     fn branches_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
@@ -1347,35 +1423,53 @@ impl SnoutApp {
     }
 
     fn commit_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        pane_title(ui, "Commit");
+        let scope = self.commit_scope();
+        let has_changes = self.repo.is_some() && scope != Scope::Nothing;
+        ui.horizontal(|ui| {
+            pane_title(ui, "Commit");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.draft.is_some() {
+                    if art::chip_button(ui, Glyph::Close, "Stop", true).clicked() {
+                        actions.push(Action::CancelDraft);
+                    }
+                    ui.spinner();
+                    return;
+                }
+                let tip = if has_changes {
+                    format!("Claude Code writes the message from {}, building on anything you typed", scope.what())
+                } else {
+                    "Nothing to commit".to_owned()
+                };
+                if art::chip_button(ui, Glyph::Spark, "Draft", has_changes).on_hover_text(tip).clicked() {
+                    actions.push(Action::DraftMessage);
+                }
+            });
+        });
         ui.separator();
-        let staged = self.status.staged_count();
-        let can_commit = self.repo.is_some() && !self.commit_msg.trim().is_empty() && (staged > 0 || self.amend);
+        let can_commit = has_changes && !self.commit_msg.trim().is_empty();
 
         egui::Panel::bottom("commit_actions").show(ui, |ui| {
             // Side by side when there is room, the button under the checkbox when not.
             let narrow = ui.available_width() < 320.0;
             let had_amend = self.amend;
             let has_log = !self.log.is_empty();
-            let commit = |ui: &mut egui::Ui, amend: bool, actions: &mut Vec<Action>| {
+            let commit = |ui: &mut egui::Ui, actions: &mut Vec<Action>| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let hint = if staged == 0 && !amend { "Nothing staged" } else { "⌘↩" };
+                    let hint = format!("Commits {}  ⌘↩", scope.what());
                     if theme::primary_button(ui, can_commit, "Commit").on_hover_text(hint).clicked() {
                         actions.push(Action::Commit);
                     }
-                    if staged == 0 && !amend {
-                        ui.weak("nothing staged");
-                    }
+                    ui.add(egui::Label::new(RichText::new(scope.label()).weak()).truncate());
                 });
             };
             let amend = &mut self.amend;
             if narrow {
                 ui.add_enabled(has_log, egui::Checkbox::new(amend, "Amend last commit"));
-                ui.horizontal(|ui| commit(ui, *amend, actions));
+                ui.horizontal(|ui| commit(ui, actions));
             } else {
                 ui.horizontal(|ui| {
                     ui.add_enabled(has_log, egui::Checkbox::new(amend, "Amend last commit"));
-                    commit(ui, *amend, actions);
+                    commit(ui, actions);
                 });
             }
             if self.amend
@@ -1387,10 +1481,11 @@ impl SnoutApp {
             }
         });
         egui::CentralPanel::default().show(ui, |ui| {
-            let edit = ui.add_sized(
-                ui.available_size(),
-                egui::TextEdit::multiline(&mut self.commit_msg).hint_text("Commit message"),
-            );
+            let hint = if self.draft.is_some() { "Claude is writing…" } else { "Commit message" };
+            let edit = ui.add_enabled_ui(self.draft.is_none(), |ui| {
+                ui.add_sized(ui.available_size(), egui::TextEdit::multiline(&mut self.commit_msg).hint_text(hint))
+            });
+            let edit = edit.inner;
             if edit.has_focus() && can_commit && ui.input(|i| i.modifiers.command && i.key_pressed(Key::Enter)) {
                 actions.push(Action::Commit);
             }
@@ -1760,7 +1855,9 @@ impl eframe::App for SnoutApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_job();
+        self.poll_draft();
         self.auto_refresh(&ctx);
+        self.survey(&ctx);
         let mut actions = Vec::new();
         self.shortcuts(&ctx, &mut actions);
 
@@ -1857,7 +1954,7 @@ impl eframe::App for SnoutApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        self.persisted = (self.settings.repos.clone(), self.settings.current.clone());
+        self.persisted = Persisted::of(&self.settings);
         eframe::set_value(storage, eframe::APP_KEY, &self.settings);
     }
 }
@@ -1889,50 +1986,6 @@ fn install_fonts(ctx: &egui::Context) {
         }
     }
     ctx.set_fonts(fonts);
-}
-
-/// The directory tree of the open repository, for [`SnoutApp::repo_tree`].
-struct DirTree<'a> {
-    root: &'a Path,
-    children: &'a BTreeMap<&'a str, Vec<&'a str>>,
-    /// Changed files under each directory, recursively.
-    changed: &'a HashMap<&'a str, usize>,
-    selected: Option<&'a str>,
-}
-
-impl DirTree<'_> {
-    fn show(&self, ui: &mut egui::Ui, parent: &str, picked: &mut Option<Option<String>>, actions: &mut Vec<Action>) {
-        let Some(dirs) = self.children.get(parent) else { return };
-        for &dir in dirs {
-            let name = dir.rsplit('/').next().unwrap_or(dir);
-            let changed = self.changed.get(dir).copied().unwrap_or(0);
-            let label = |ui: &mut egui::Ui, picked: &mut Option<Option<String>>, actions: &mut Vec<Action>| {
-                let mut text = RichText::new(format!("📁 {name}"));
-                if changed > 0 {
-                    text = text.color(ui.visuals().warn_fg_color);
-                }
-                let mut resp = ui.selectable_label(self.selected == Some(dir), text);
-                if changed > 0 {
-                    resp = resp.on_hover_text(format!("{changed} changed"));
-                }
-                if resp.clicked() {
-                    *picked = Some(Some(dir.to_owned()));
-                }
-                resp.context_menu(|ui| reveal_items(ui, &self.root.join(dir), actions));
-            };
-            if self.children.contains_key(dir) {
-                let id = ui.make_persistent_id(("dir", self.root, dir));
-                egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-                    .show_header(ui, |ui| label(ui, picked, actions))
-                    .body(|ui| self.show(ui, dir, picked, actions));
-            } else {
-                ui.horizontal(|ui| {
-                    ui.add_space(ui.spacing().indent);
-                    label(ui, picked, actions);
-                });
-            }
-        }
-    }
 }
 
 fn reveal_items(ui: &mut egui::Ui, path: &Path, actions: &mut Vec<Action>) {
@@ -2064,6 +2117,53 @@ fn open_menu_items(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     }
     if ui.button("Clone from GitHub…").clicked() {
         actions.push(Action::ShowClone);
+    }
+}
+
+/// What a commit records; see [`SnoutApp::commit_scope`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Scope {
+    Staged(usize),
+    /// Files to add first; `all` when nothing was selected.
+    Files {
+        paths: Vec<String>,
+        all: bool,
+    },
+    /// Amending with nothing new: only the message changes.
+    MessageOnly,
+    Nothing,
+}
+
+impl Scope {
+    fn paths(&self) -> Vec<String> {
+        match self {
+            Scope::Files { paths, .. } => paths.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Beside the Commit button.
+    fn label(&self) -> String {
+        match self {
+            Scope::Staged(n) => format!("{n} staged"),
+            Scope::Files { paths, all: true } => format!("all {} changed", paths.len()),
+            Scope::Files { paths, all: false } => format!("{} selected", paths.len()),
+            Scope::MessageOnly => "message only".to_owned(),
+            Scope::Nothing => "nothing to commit".to_owned(),
+        }
+    }
+
+    /// In a sentence: "Commits …".
+    fn what(&self) -> String {
+        match self {
+            Scope::Staged(_) => "the staged changes".to_owned(),
+            Scope::Files { paths, all: true } if paths.len() == 1 => "the changed file".to_owned(),
+            Scope::Files { paths, all: true } => format!("all {} changed files", paths.len()),
+            Scope::Files { paths, .. } if paths.len() == 1 => "the selected file".to_owned(),
+            Scope::Files { paths, .. } => format!("the {} selected files", paths.len()),
+            Scope::MessageOnly => "the new message for the last commit".to_owned(),
+            Scope::Nothing => "nothing".to_owned(),
+        }
     }
 }
 

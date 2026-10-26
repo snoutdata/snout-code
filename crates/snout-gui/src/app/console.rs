@@ -13,7 +13,7 @@ use crate::theme::Palette;
 
 /// Inherited variables that would make Claude Code think it runs nested inside another
 /// session (snout started from a Claude Code terminal), or misreport the terminal.
-const ENV_REMOVE: &[&str] =
+pub(super) const ENV_REMOVE: &[&str] =
     &["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "TERM_PROGRAM", "TERM_PROGRAM_VERSION"];
 
 /// Refresh the Git panes once the agent has been quiet this long...
@@ -48,6 +48,11 @@ impl Console {
         self.focus_next = true;
     }
 
+    /// The `claude` to run: the override, or the one found on this machine.
+    pub fn claude(&self) -> Option<PathBuf> {
+        self.program.clone().or_else(find_claude)
+    }
+
     #[cfg(test)]
     pub fn session_text(&self, root: &Path) -> Option<String> {
         self.sessions.get(root).map(|s| s.term.contents())
@@ -56,7 +61,7 @@ impl Console {
     pub fn start(&mut self, root: &Path, args: &[String], ctx: &egui::Context) {
         self.sessions.remove(root);
         self.error = None;
-        let Some(program) = self.program.clone().or_else(find_claude) else {
+        let Some(program) = self.claude() else {
             self.error = Some(
                 "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, \
                  /opt/homebrew/bin, /usr/local/bin.\nInstall it from https://docs.claude.com/en/docs/claude-code \
@@ -107,16 +112,17 @@ impl Console {
                 event = Some(ConsoleEvent::Close);
             }
             ui.add_space(4.0);
-            if running && art::chip_button(ui, Glyph::Stop, "End").on_hover_text("End this session").clicked() {
+            if running && art::chip_button(ui, Glyph::Stop, "End", true).on_hover_text("End this session").clicked() {
                 stop = true;
             }
-            if art::chip_button(ui, Glyph::Refresh, "Continue")
+            if art::chip_button(ui, Glyph::Refresh, "Continue", true)
                 .on_hover_text("Restart with the most recent conversation in this folder (claude --continue)")
                 .clicked()
             {
                 restart = Some(vec!["--continue".into()]);
             }
-            if art::chip_button(ui, Glyph::Plus, "New").on_hover_text("Restart with a new conversation").clicked() {
+            if art::chip_button(ui, Glyph::Plus, "New", true).on_hover_text("Restart with a new conversation").clicked()
+            {
                 restart = Some(Vec::new());
             }
         });

@@ -107,7 +107,7 @@ mod tests {
     fn commit(repo: &Repo, file: &str, text: &str) {
         fs::write(repo.root().join(file), text).unwrap();
         repo.stage(&[file.into()]).unwrap();
-        repo.commit(&format!("edit {file}"), false).unwrap();
+        repo.commit(&format!("edit {file}"), false, &[]).unwrap();
     }
 
     #[test]

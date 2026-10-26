@@ -193,12 +193,12 @@ mod tests {
         run(&dir, &["checkout", "-q", "-b", "main"]).unwrap();
         fs::write(dir.join("f.txt"), "base\n").unwrap();
         repo.stage(&["f.txt".into()]).unwrap();
-        repo.commit("base", false).unwrap();
+        repo.commit("base", false, &[]).unwrap();
         run(&dir, &["tag", "-a", "v1", "-m", "Version 1"]).unwrap();
         repo.create_branch("other", None, true).unwrap();
         fs::write(dir.join("f.txt"), "other\n").unwrap();
         repo.stage(&["f.txt".into()]).unwrap();
-        repo.commit("other change", false).unwrap();
+        repo.commit("other change", false, &[]).unwrap();
         repo.checkout(&CheckoutTarget::Branch("main".into()), LocalChanges::Keep).unwrap();
         repo
     }

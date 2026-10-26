@@ -2,10 +2,19 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::git::{run, run_raw, run_with_stdin};
+use crate::git::{run, run_in_index, run_raw, run_unattended, run_with_stdin};
 use crate::status::FileEntry;
 use crate::{Branch, Commit, CommitDetails, CommitFile, DiffBase, Error, FileDiff, Result, Status, Tag};
 use crate::{branches, diff, log, status, tags};
+
+/// How the current branch stands against its upstream.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Tracking {
+    /// Commits to push.
+    pub ahead: u32,
+    /// Commits to pull.
+    pub behind: u32,
+}
 
 /// A Git working tree. Cheap to clone and `Send`, so it can be moved to worker threads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,6 +76,19 @@ impl Repo {
     pub fn branches(&self) -> Result<Vec<Branch>> {
         let out = self.git(&["for-each-ref", branches::FORMAT, "refs/heads", "refs/remotes"])?;
         Ok(branches::parse(&out.stdout_str()))
+    }
+
+    /// How the current branch stands against its upstream, as of the last fetch; `None`
+    /// when it has none (or HEAD is detached or unborn). Cheaper than [`Self::status`],
+    /// which also scans the working tree.
+    pub fn tracking(&self) -> Result<Option<Tracking>> {
+        let out = run_raw(&self.root, &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], None)?;
+        if !out.success {
+            return Ok(None);
+        }
+        let text = out.stdout_str();
+        let mut counts = text.split_whitespace().map(|n| n.parse().unwrap_or(0));
+        Ok(Some(Tracking { ahead: counts.next().unwrap_or(0), behind: counts.next().unwrap_or(0) }))
     }
 
     /// Tags, newest first.
@@ -142,6 +164,38 @@ impl Repo {
 
     pub fn last_commit_message(&self) -> Result<String> {
         Ok(self.git(&["log", "-1", "--format=%B"])?.stdout_str().trim_end().to_owned())
+    }
+
+    /// What the next commit would record, as a stat summary followed by the patch: the
+    /// staged changes, or with `amend` everything the amended commit would hold. `paths`
+    /// are added first, as [`Repo::commit`] would add them, in a scratch copy of the index.
+    pub fn commit_patch(&self, amend: bool, paths: &[String]) -> Result<String> {
+        let base = amend && self.git(&["rev-parse", "-q", "--verify", "HEAD^"]).is_ok();
+        let mut args = vec!["diff", "--cached", "--no-ext-diff", "--find-renames"];
+        if base {
+            args.push("HEAD^");
+        }
+        let stat_args = [&args[..], &["--stat=100"]].concat();
+        if paths.is_empty() {
+            let stat = self.git(&stat_args)?.stdout_str();
+            return Ok(format!("{stat}\n{}", self.git(&args)?.stdout_str()));
+        }
+        let index = self.root.join(self.git(&["rev-parse", "--git-path", "index"])?.stdout_str().trim_end());
+        let scratch = std::env::temp_dir().join(format!(
+            "snout-index-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())
+        ));
+        let patch = (|| {
+            if index.exists() {
+                std::fs::copy(&index, &scratch)?;
+            }
+            run_in_index(&self.root, &scratch, &with_paths(&["add", "-A"], paths))?;
+            let stat = run_in_index(&self.root, &scratch, &stat_args)?.stdout_str();
+            Ok(format!("{stat}\n{}", run_in_index(&self.root, &scratch, &args)?.stdout_str()))
+        })();
+        let _ = std::fs::remove_file(&scratch);
+        patch
     }
 
     /// Full-file diff of one path. For renames, pass the entry so the old side uses the
@@ -297,7 +351,9 @@ impl Repo {
     }
 
     /// Commit the index. Returns git's summary output.
-    pub fn commit(&self, message: &str, amend: bool) -> Result<String> {
+    /// Commit the index, after adding `paths` to it. If the commit fails, `paths` are
+    /// unstaged again so the index is as it was.
+    pub fn commit(&self, message: &str, amend: bool, paths: &[String]) -> Result<String> {
         if message.trim().is_empty() {
             return Err(Error::Invalid("commit message is empty".into()));
         }
@@ -305,7 +361,11 @@ impl Repo {
         if amend {
             args.push("--amend");
         }
-        run_with_stdin(&self.root, &args, Some(message.as_bytes()))?;
+        self.stage(paths)?;
+        if let Err(e) = run_with_stdin(&self.root, &args, Some(message.as_bytes())) {
+            let _ = self.unstage(paths);
+            return Err(e);
+        }
         Ok(self.git(&["log", "-1", "--format=%h %s"])?.stdout_str().trim_end().to_owned())
     }
 
@@ -313,6 +373,12 @@ impl Repo {
 
     pub fn fetch(&self) -> Result<String> {
         Ok(self.git(&["fetch", "--all", "--prune"])?.text())
+    }
+
+    /// [`Self::fetch`] with nobody watching: it never waits on a prompt or a stalled
+    /// connection.
+    pub fn fetch_unattended(&self) -> Result<()> {
+        run_unattended(&self.root, &["fetch", "--all", "--prune", "--quiet"]).map(drop)
     }
 
     /// Push the current branch, setting the upstream on first push.
@@ -391,7 +457,7 @@ mod tests {
         repo.stage(&["a.txt".into()]).unwrap();
         assert_eq!(repo.status().unwrap().staged_count(), 1);
 
-        let summary = repo.commit("first", false).unwrap();
+        let summary = repo.commit("first", false, &[]).unwrap();
         assert!(summary.ends_with("first"));
         assert!(repo.status().unwrap().files.is_empty());
 
@@ -425,7 +491,7 @@ mod tests {
         fs::write(repo.root().join("a.txt"), "one\nTWO\n").unwrap();
         fs::write(repo.root().join("b.txt"), "bee\n").unwrap();
         repo.stage(&["a.txt".into(), "b.txt".into()]).unwrap();
-        repo.commit("second\n\nwith a body", false).unwrap();
+        repo.commit("second\n\nwith a body", false, &[]).unwrap();
         let details = repo.commit_details("HEAD").unwrap();
         assert_eq!((details.summary(), details.body()), ("second", "with a body"));
         assert_eq!(details.parents.len(), 1);
@@ -452,7 +518,7 @@ mod tests {
         let repo = scratch_repo("delete");
         fs::write(repo.root().join("kept.txt"), "one\n").unwrap();
         repo.stage(&["kept.txt".into()]).unwrap();
-        repo.commit("first", false).unwrap();
+        repo.commit("first", false, &[]).unwrap();
         fs::create_dir_all(repo.root().join("dir")).unwrap();
         fs::write(repo.root().join("dir/new.txt"), "new\n").unwrap();
         fs::write(repo.root().join("added.txt"), "added\n").unwrap();
@@ -480,6 +546,48 @@ mod tests {
     }
 
     #[test]
+    fn commit_patch_holds_what_the_commit_would() {
+        let repo = scratch_repo("patch");
+        fs::write(repo.root().join("a.txt"), "one\n").unwrap();
+        repo.stage(&["a.txt".into()]).unwrap();
+        assert!(repo.commit_patch(false, &[]).unwrap().contains("+one"), "staged, before the first commit");
+        repo.commit("first", false, &[]).unwrap();
+        fs::write(repo.root().join("a.txt"), "one\ntwo\n").unwrap();
+        repo.stage(&["a.txt".into()]).unwrap();
+        repo.commit("second", false, &[]).unwrap();
+        fs::write(repo.root().join("b.txt"), "bee\n").unwrap();
+        repo.stage(&["b.txt".into()]).unwrap();
+        fs::write(repo.root().join("a.txt"), "unstaged\n").unwrap();
+
+        let next = repo.commit_patch(false, &[]).unwrap();
+        assert!(next.contains("b.txt | 1 +") && next.contains("+bee"), "{next}");
+        assert!(!next.contains("two") && !next.contains("unstaged"), "{next}");
+        let amended = repo.commit_patch(true, &[]).unwrap();
+        assert!(amended.contains("+two") && amended.contains("+bee") && !amended.contains("unstaged"), "{amended}");
+
+        // Picked files, untracked ones too, without touching the real index.
+        fs::write(repo.root().join("c.txt"), "sea\n").unwrap();
+        let picked = repo.commit_patch(false, &["a.txt".into(), "c.txt".into()]).unwrap();
+        assert!(picked.contains("+unstaged") && picked.contains("+sea") && picked.contains("+bee"), "{picked}");
+        let st = repo.status().unwrap();
+        assert_eq!(st.staged_count(), 1, "the index is untouched");
+
+        // Committing them adds them first.
+        repo.commit("third", false, &["a.txt".into(), "c.txt".into()]).unwrap();
+        assert!(repo.status().unwrap().files.is_empty());
+        // A failed commit leaves them unstaged again.
+        fs::write(repo.root().join("d.txt"), "dee\n").unwrap();
+        run(repo.root(), &["config", "core.hooksPath", ".hooks"]).unwrap();
+        fs::create_dir_all(repo.root().join(".hooks")).unwrap();
+        fs::write(repo.root().join(".hooks/pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(repo.root().join(".hooks/pre-commit")).status().unwrap();
+        assert!(repo.commit("fourth", false, &["d.txt".into()]).is_err());
+        assert_eq!(repo.status().unwrap().staged_count(), 0);
+
+        fs::remove_dir_all(repo.root()).unwrap();
+    }
+
+    #[test]
     fn push_sets_upstream_then_fetch_and_pull() {
         let repo = scratch_repo("push");
         let remote = repo.root().with_extension("remote.git");
@@ -489,13 +597,30 @@ mod tests {
 
         fs::write(repo.root().join("a.txt"), "one\n").unwrap();
         repo.stage(&["a.txt".into()]).unwrap();
-        repo.commit("first", false).unwrap();
+        repo.commit("first", false, &[]).unwrap();
         assert_eq!(repo.status().unwrap().branch.upstream, None);
+        assert_eq!(repo.tracking().unwrap(), None);
 
         repo.push().unwrap();
         let st = repo.status().unwrap();
         assert_eq!(st.branch.upstream.as_deref(), Some("origin/main"));
         assert!(repo.log(10).unwrap().iter().all(|c| !c.unpushed));
+
+        assert_eq!(repo.tracking().unwrap(), Some(Tracking::default()));
+        // Another clone pushes; a fetch makes it a commit to pull.
+        let other = repo.root().with_extension("other");
+        let _ = fs::remove_dir_all(&other);
+        run(repo.root(), &["clone", "-q", &remote.to_string_lossy(), &other.to_string_lossy()]).unwrap();
+        run(
+            &other,
+            &["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "theirs"],
+        )
+        .unwrap();
+        run(&other, &["push", "-q"]).unwrap();
+        assert_eq!(repo.tracking().unwrap().unwrap().behind, 0, "not fetched yet");
+        repo.fetch_unattended().unwrap();
+        assert_eq!(repo.tracking().unwrap(), Some(Tracking { ahead: 0, behind: 1 }));
+        fs::remove_dir_all(&other).unwrap();
 
         repo.fetch().unwrap();
         repo.pull().unwrap();

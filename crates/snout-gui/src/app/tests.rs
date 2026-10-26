@@ -162,7 +162,7 @@ fn directory_tree_narrows_the_file_list() {
     let dir = demo_repo("tree");
     let mut h = harness(Some(dir.clone()));
     assert_eq!(h.state().dirs, ["src"]);
-    h.get_by_label("📁 src").click();
+    h.get_by_role_and_label(egui::accesskit::Role::ListItem, "src").click();
     h.run_steps(2);
     assert_eq!(h.state().dir_filter.as_deref(), Some("src"));
     h.get_by_label("main.rs");
@@ -204,6 +204,181 @@ fn clone_of_replaced_remote(name: &str) -> (PathBuf, PathBuf) {
     (root, local)
 }
 
+/// Press at `from`, move to `to` in steps, and release there.
+fn drag(h: &mut Harness<'_, SnoutApp>, from: egui::Pos2, to: egui::Pos2) {
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    h.event(egui::Event::PointerMoved(from));
+    h.event(button(from, true));
+    h.run_steps(1);
+    for i in 1..=8 {
+        h.event(egui::Event::PointerMoved(from + (to - from) * (i as f32 / 8.0)));
+        h.run_steps(1);
+    }
+    h.event(button(to, false));
+    h.run_steps(3);
+}
+
+#[test]
+fn groups_hold_repositories_dragged_onto_them() {
+    let dir = demo_repo("groups");
+    let other = demo_repo("groups-other");
+    let mut h = harness(Some(dir.clone()));
+    let ctx = h.ctx.clone();
+    h.state_mut().settings.repos.push(other.clone());
+    let other_name = dir_name(&other);
+    let root = h.state().settings.current.clone().unwrap();
+
+    // + → New group…
+    h.state_mut().handle(Action::ShowNewGroup(None), &ctx);
+    h.run_steps(2);
+    let Some(Dialog::GroupName { name, .. }) = &mut h.state_mut().dialog else { panic!("group dialog") };
+    *name = "Work".into();
+    h.run_steps(1);
+    h.get_by_label("Create").click();
+    h.run_steps(2);
+    assert_eq!(h.state().settings.groups.len(), 1);
+    h.state_mut().handle(Action::ShowNewGroup(None), &ctx);
+    h.run_steps(1);
+    let Some(Dialog::GroupName { name, .. }) = &mut h.state_mut().dialog else { panic!("group dialog") };
+    *name = "work".into();
+    h.run_steps(2);
+    h.get_by_label("There is already a group with this name");
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+
+    // Drag a repository onto the group's row.
+    let from = h.get_by_role_and_label(egui::accesskit::Role::ListItem, &other_name).rect().center();
+    let to = h.get_by_role_and_label(egui::accesskit::Role::ListItem, "Work").rect().center();
+    drag(&mut h, from, to);
+    assert_eq!(h.state().settings.groups[0].repos, std::slice::from_ref(&other), "dropped into the group");
+    h.event(egui::Event::PointerMoved(egui::pos2(700.0, 500.0)));
+    h.run_steps(3);
+    screenshot(&mut h, "-groups");
+    h.state_mut().handle(Action::SetTheme(ThemeChoice::Light), &ctx);
+    h.run_steps(2);
+    screenshot(&mut h, "-groups-light");
+    h.state_mut().handle(Action::SetTheme(ThemeChoice::Dark), &ctx);
+    h.run_steps(2);
+
+    // The arrow folds the group away and opens it again; the row's name does too.
+    let row = h.get_by_role_and_label(egui::accesskit::Role::ListItem, "Work").rect();
+    let arrow = egui::pos2(row.left() + 9.0, row.center().y);
+    for (at, shown) in [(arrow, false), (row.center(), true)] {
+        h.event(egui::Event::PointerMoved(at));
+        for pressed in [true, false] {
+            let button = egui::PointerButton::Primary;
+            h.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers: Default::default() });
+        }
+        h.run_steps(2);
+        let found = h.query_by_role_and_label(egui::accesskit::Role::ListItem, &other_name).is_some();
+        assert_eq!(found, shown);
+    }
+
+    // The open one too, then out again onto the empty space below the list.
+    let from = h.get_by_role_and_label(egui::accesskit::Role::ListItem, &dir_name(&dir)).rect().center();
+    let to = h.get_by_role_and_label(egui::accesskit::Role::ListItem, &other_name).rect().center();
+    drag(&mut h, from, to);
+    assert_eq!(h.state().settings.groups[0].repos.len(), 2, "dropped onto a member");
+    let from = h.get_by_role_and_label(egui::accesskit::Role::ListItem, &other_name).rect().center();
+    let below = h.get_by_label("Branches").rect().min - egui::vec2(-40.0, 40.0);
+    drag(&mut h, from, below);
+    assert_eq!(h.state().settings.groups[0].repos, std::slice::from_ref(&root), "taken out of the group");
+
+    // Renaming keeps the members; deleting leaves them in the list.
+    h.state_mut().handle(Action::SaveGroup { rename: Some("Work".into()), name: "Clients".into(), repo: None }, &ctx);
+    assert_eq!(h.state().settings.groups[0].name, "Clients");
+    assert_eq!(h.state().settings.groups[0].repos.len(), 1);
+    h.state_mut().handle(Action::RemoveRepo(root), &ctx);
+    assert!(h.state().settings.groups[0].repos.is_empty(), "removing a repository takes it out of its group");
+    h.state_mut().handle(Action::DeleteGroup("Clients".into()), &ctx);
+    assert!(h.state().settings.groups.is_empty() && h.state().settings.repos == [other.clone()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+fn claude_drafts_the_commit_message_from_the_staged_patch() {
+    let dir = demo_repo("draft");
+    let bin_dir = scratch_dir("draft-bin");
+    let bin = bin_dir.join("claude");
+    // A stand-in for `claude -p`: keeps its prompt and stdin, answers in a code fence.
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh
+printf '%s' \"$2\" > '{0}/prompt.txt'
+cat > '{0}/stdin.txt'
+             printf '```\\nGreet snout\\n\\nSay hello to snout and run.\\n```\\n'\n",
+            bin_dir.display()
+        ),
+    )
+    .unwrap();
+    Command::new("chmod").arg("+x").arg(&bin).status().unwrap();
+
+    let mut h = harness(Some(dir.clone()));
+    h.state_mut().console.program = Some(bin.clone());
+    h.state_mut().commit_msg = "greeting".into();
+    h.run_steps(1);
+    h.get_by_label("Draft").click();
+    h.run_steps(1);
+    assert!(h.state().draft.is_some());
+    wait_until(&mut h, "the draft", |app| app.draft.is_none());
+    assert_eq!(h.state().commit_msg, "Greet snout\n\nSay hello to snout and run.");
+    let stdin = std::fs::read_to_string(bin_dir.join("stdin.txt")).unwrap();
+    assert!(stdin.contains("src/main.rs") && stdin.contains("+    println!(\"hello, snout\");"), "{stdin}");
+    assert!(!stdin.contains("status.rs"), "only what is staged");
+    let prompt = std::fs::read_to_string(bin_dir.join("prompt.txt")).unwrap();
+    assert!(prompt.contains("- Second commit") && prompt.contains("greeting"), "{prompt}");
+    screenshot(&mut h, "-draft");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&bin_dir);
+}
+
+#[test]
+fn with_nothing_staged_commit_and_draft_take_the_selected_files() {
+    let dir = demo_repo("pick");
+    git(&dir, &["reset", "-q"]);
+    let bin_dir = scratch_dir("pick-bin");
+    let bin = bin_dir.join("claude");
+    std::fs::write(&bin, format!("#!/bin/sh\ncat > '{}/stdin.txt'\necho 'Pick two files'\n", bin_dir.display()))
+        .unwrap();
+    Command::new("chmod").arg("+x").arg(&bin).status().unwrap();
+
+    let mut h = harness(Some(dir.clone()));
+    h.state_mut().console.program = Some(bin.clone());
+    h.run_steps(1);
+    assert_eq!(h.state().status.staged_count(), 0);
+    h.get_by_label("all 3 changed");
+
+    // Unstaged changes are enough: pick two files, the second with ⌘.
+    h.get_by_label("main.rs").click();
+    h.run_steps(1);
+    h.get_by_label("NOTES.md").click_modifiers(egui::Modifiers::COMMAND);
+    h.run_steps(1);
+    h.get_by_label("2 selected");
+    h.get_by_label("Draft").click();
+    h.run_steps(1);
+    wait_until(&mut h, "the draft", |app| app.draft.is_none());
+    let stdin = std::fs::read_to_string(bin_dir.join("stdin.txt")).unwrap();
+    assert!(stdin.contains("+    run();") && stdin.contains("+untracked"), "{stdin}");
+    assert!(!stdin.contains("status.rs"), "only the selected files: {stdin}");
+    assert_eq!(h.state().status.staged_count(), 0, "drafting leaves the index alone");
+    screenshot(&mut h, "-pick");
+
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Commit").click();
+    h.run_steps(2);
+    let left: Vec<String> = h.state().status.files.iter().map(|f| f.path.clone()).collect();
+    assert_eq!(left, ["status.rs"]);
+    assert_eq!(h.state().log[0].summary, "Pick two files");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&bin_dir);
+}
+
 fn wait_for_job(h: &mut Harness<'_, SnoutApp>) {
     wait_until(h, "the job to finish", |app| app.job.is_none());
     h.run_steps(2);
@@ -225,6 +400,48 @@ fn pull_from_a_replaced_remote_offers_a_reset() {
     assert!(local.join("new.txt").exists() && !local.join("old.txt").exists());
     assert!(h.state().branches.iter().any(|b| b.name.starts_with("backup/main-")), "backup branch listed");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn repositories_with_commits_to_pull_say_so_in_the_list() {
+    let root = scratch_dir("incoming");
+    let remote = root.join("remote.git");
+    git(&root, &["init", "-q", "--bare", "-b", "main", remote.to_str().unwrap()]);
+    let seed = root.join("seed");
+    std::fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["init", "-q", "-b", "main"]);
+    let commit = |dir: &Path, msg: &str| {
+        let who = ["-c", "user.name=Demo", "-c", "user.email=demo@example.com", "-c", "commit.gpgsign=false"];
+        git(dir, &[&who[..], &["commit", "-q", "--allow-empty", "-m", msg]].concat());
+    };
+    commit(&seed, "first");
+    git(&seed, &["push", "-q", remote.to_str().unwrap(), "main"]);
+    git(&root, &["clone", "-q", remote.to_str().unwrap(), "behind"]);
+    git(&root, &["clone", "-q", remote.to_str().unwrap(), "pusher"]);
+    let (behind, pusher) = (root.join("behind"), root.join("pusher"));
+    commit(&pusher, "theirs");
+    git(&pusher, &["push", "-q"]);
+
+    let dir = demo_repo("incoming-open");
+    let mut h = harness(Some(dir.clone()));
+    h.state_mut().settings.repos.push(behind.clone());
+    let to_pull = |app: &SnoutApp, n| app.tracking.get(&behind) == Some(&Some(Tracking { ahead: 0, behind: n }));
+    // A fetch is due: the pass fetches first, so it sees the commit pushed elsewhere.
+    h.state_mut().fetch_every = Some(Duration::from_secs(3600));
+    wait_until(&mut h, "the fetch to count the pushed commit", |app| to_pull(app, 1));
+    let open = h.state().settings.current.clone().unwrap();
+    assert_eq!(h.state().tracking.get(&open), Some(&None), "no upstream, no counts");
+    screenshot(&mut h, "-incoming");
+
+    // Fetched in a terminal: counted again when the window comes back.
+    commit(&pusher, "more");
+    git(&pusher, &["push", "-q"]);
+    git(&behind, &["fetch", "-q"]);
+    wait_until(&mut h, "the fetching pass to end", |app| app.survey.is_none());
+    h.state_mut().recount = true;
+    wait_until(&mut h, "the recount", |app| to_pull(app, 2));
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
