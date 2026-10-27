@@ -4,6 +4,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
 use super::*;
+use menu::Command as Menu;
 
 fn git(dir: &Path, args: &[&str]) {
     let ok = Command::new("git").arg("-C").arg(dir).args(args).status().unwrap().success();
@@ -769,4 +770,53 @@ fn deletes_branches_locally_and_on_the_remote() {
 
     let _ = std::fs::remove_dir_all(&local);
     let _ = std::fs::remove_dir_all(&remote);
+}
+
+/// The menu bar drawn where there is no native one: items run their commands, are greyed
+/// out when those would do nothing, and Help opens About.
+#[test]
+fn menu_bar() {
+    let dir = demo_repo("menu");
+    let mut h = harness(Some(dir.clone()));
+    h.state_mut().draw_menu = true;
+    h.run_steps(2);
+
+    h.get_by_label("View").click();
+    h.run_steps(2);
+    screenshot(&mut h, "-menu");
+    h.get_by_label("Unified Diff").click();
+    h.run_steps(2);
+    assert!(!h.state().settings.side_by_side);
+
+    // Nothing is selected, so there is nothing to stage, but there is something to commit.
+    assert!(!h.state().command_enabled(Menu::Stage));
+    assert!(h.state().command_enabled(Menu::Draft));
+    assert!(!h.state().command_enabled(Menu::Commit), "no message yet");
+    h.state_mut().commit_msg = "Tidy up".into();
+    assert!(h.state().command_enabled(Menu::Commit));
+
+    h.get_by_label("Help").click();
+    h.run_steps(2);
+    h.get_by_label("About snout").click();
+    h.run_steps(2);
+    assert!(matches!(h.state().dialog, Some(Dialog::About)));
+    assert!(!h.state().command_enabled(Menu::Pull), "not while a dialog is up");
+    screenshot(&mut h, "-about");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The Edit menu hands the focused field the events its keys would have: here ⌘A then ⌘X.
+#[test]
+fn edit_menu_reaches_text_fields() {
+    let dir = demo_repo("edit-menu");
+    let mut h = harness(Some(dir.clone()));
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).click();
+    h.run_steps(2);
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).type_text("Fix the diff view");
+    h.run_steps(2);
+    assert_eq!(h.state().commit_msg, "Fix the diff view");
+    h.state_mut().picked.extend([Menu::SelectAll, Menu::Cut]);
+    h.run_steps(2);
+    assert_eq!(h.state().commit_msg, "");
+    let _ = std::fs::remove_dir_all(&dir);
 }

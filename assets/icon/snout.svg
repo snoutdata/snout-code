@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- snout's app icon: the SnoutData butterfly, its body a commit chain and its veins branches.
+       Light paper squircle on the macOS icon grid (824 at 100), so it never reads as Studio's
+       dark round mark beside it in the Dock. House style: round ink line, flat fills, one green. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#f7f7f4"/>
+  <path fill="#ebeae4" d="M190 560C170 380 330 250 520 256C720 262 860 380 840 570C822 740 660 800 500 796C330 792 206 720 190 560Z"/>
+  <path d="M250 812C400 798 620 798 774 812" fill="none" stroke="#26251e" stroke-opacity=".3" stroke-width="16" stroke-linecap="round"/>
+  <g transform="translate(140 170) scale(6.2)" stroke="#26251e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <g id="wing">
+      <path fill="#d4d4d2" d="M60 44C50 28 30 12 16 14C6 16 8 32 16 42C22 50 36 54 60 53Z"/>
+      <path fill="#5da183" d="M60 58C44 58 26 62 24 74C22 86 34 92 44 86C52 81 58 74 60 68Z"/>
+      <path fill="none" d="M60 50C50 50 46 36 33 36"/>
+      <path fill="none" d="M60 66C52 66 50 74 42 74"/>
+      <path fill="none" d="M58 30C54 22 50 16 44 12"/>
+      <circle cx="29.5" cy="36" r="3.6" fill="#f7f7f4"/>
+      <circle cx="38.5" cy="74" r="3.6" fill="#f7f7f4"/>
+      <circle cx="43" cy="11" r="2.2" fill="#26251e"/>
+    </g>
+    <use href="#wing" transform="matrix(-1 0 0 1 120 0)"/>
+    <path fill="none" d="M60 32V92"/>
+    <circle cx="60" cy="34" r="4.6" fill="#5da183"/>
+    <circle cx="60" cy="50" r="4.2" fill="#f7f7f4"/>
+    <circle cx="60" cy="66" r="4.2" fill="#f7f7f4"/>
+    <circle cx="60" cy="82" r="4.2" fill="#f7f7f4"/>
+  </g>
+  <path fill="#26251e" d="M206 662Q213 683 234 690Q213 697 206 718Q199 697 178 690Q199 683 206 662Z"/>
+  <path fill="#26251e" d="M806 640Q811 655 826 660Q811 665 806 680Q801 665 786 660Q801 655 806 640Z"/>
+</svg>

@@ -213,6 +213,27 @@ impl Drawing {
         self.dot(60.0, 94.0, 2.6);
     }
 
+    /// One wing pair of snout's mark: veins that are branches, each ending in a commit.
+    fn git_wings(&mut self) {
+        self.path("M60 44C50 28 30 12 16 14C6 16 8 32 16 42C22 50 36 54 60 53Z", Fill::Tint);
+        self.path("M60 58C44 58 26 62 24 74C22 86 34 92 44 86C52 81 58 74 60 68Z", Fill::Accent);
+        self.line("M60 50C50 50 46 36 33 36").line("M60 66C52 66 50 74 42 74").line("M58 30C54 22 50 16 44 12");
+        self.circle(29.5, 36.0, 3.6, Fill::Paper).circle(38.5, 74.0, 3.6, Fill::Paper);
+        self.dot(43.0, 11.0, 2.2);
+    }
+
+    /// snout's mark, the app icon's drawing: the brand butterfly with a commit chain for a
+    /// body, its newest commit green. A `0 0 120 100` box, like the butterfly.
+    fn git_butterfly(&mut self) {
+        self.git_wings();
+        self.with([-1.0, 0.0, 0.0, 1.0, 120.0, 0.0], Self::git_wings);
+        self.line("M60 32V92");
+        self.circle(60.0, 34.0, 4.6, Fill::Accent);
+        for y in [50.0, 66.0, 82.0] {
+            self.circle(60.0, y, 4.2, Fill::Paper);
+        }
+    }
+
     // ----- Painting ------------------------------------------------------------------
 
     /// Paint fitted into `rect` (keeping its proportions, centred). `ink` is the line colour;
@@ -796,11 +817,49 @@ pub fn sparkle() -> &'static Drawing {
     &D
 }
 
-/// The art logo on its own, `0 0 120 100`.
-pub fn butterfly() -> &'static Drawing {
+/// snout's mark on its own, `0 0 120 100`.
+pub fn mark() -> &'static Drawing {
     static D: LazyLock<Drawing> = LazyLock::new(|| {
-        let mut d = Drawing::new(120.0, 100.0, 3.0);
-        d.butterfly();
+        let mut d = Drawing::new(120.0, 100.0, 3.2);
+        d.git_butterfly();
+        d
+    });
+    &D
+}
+
+/// The About banner, a wide `0 0 440 124` box: the mark over what snout holds, each on its
+/// own thread: your repositories, the diff, the history (the green, it is what snout draws
+/// best) and the agent beside it.
+pub fn about() -> &'static Drawing {
+    static D: LazyLock<Drawing> = LazyLock::new(|| {
+        let mut d = Drawing::new(440.0, 124.0, 2.5);
+        d.shape(
+            "M22 86C16 54 80 32 160 36C240 40 330 26 398 44C436 54 434 98 404 108C340 122 120 122 54 114C32 110 24 100 22 86Z",
+            Fill::Blob,
+        );
+        d.ground("M40 116C140 112 300 112 400 116");
+        d.ground("M204 40C160 46 104 54 76 68").ground("M212 48C196 54 178 58 164 64");
+        d.ground("M228 48C246 54 270 60 290 70").ground("M236 40C290 46 352 54 380 66");
+        // Your repositories.
+        d.path("M46 78Q46 72 52 72H62L68 78H88Q94 78 94 84V102Q94 108 88 108H52Q46 108 46 102Z", Fill::Tint);
+        d.path("M46 88Q46 84 50 84H90Q94 84 94 88V102Q94 108 88 108H52Q46 108 46 102Z", Fill::Paper);
+        // The diff.
+        d.rotated(-4.0, 160.0, 88.0, |d| {
+            d.rect(142.0, 64.0, 36.0, 46.0, 3.0, Fill::Paper);
+            d.shape("M146 80H174V88H146Z", Fill::Tint);
+            d.line("M150 74H170").line("M150 84H166").line("M150 94H170").line("M150 103H162");
+        });
+        // The history.
+        d.line("M258 102H324");
+        d.line("M272 102C282 102 280 82 292 82H304C314 82 312 102 322 102");
+        d.circle(262.0, 102.0, 4.5, Fill::Paper).circle(292.0, 82.0, 4.5, Fill::Paper);
+        d.circle(304.0, 82.0, 5.5, Fill::Accent).circle(322.0, 102.0, 4.5, Fill::Paper);
+        // The agent.
+        d.rect(352.0, 68.0, 58.0, 42.0, 6.0, Fill::Paper);
+        d.path("M352 78V74Q352 68 358 68H404Q410 68 410 74V78Z", Fill::Tint);
+        d.line("M361 87L369 93L361 99").line("M374 99H390");
+        d.placed(190.0, 0.0, 0.5, Drawing::git_butterfly);
+        d.spark(118.0, 24.0, 0.7).spark(322.0, 22.0, 0.8).spark(30.0, 52.0, 0.5).spark(420.0, 34.0, 0.5);
         d
     });
     &D
@@ -886,7 +945,7 @@ mod tests {
         for g in Glyph::ALL {
             assert!(!g.drawing().parts.is_empty(), "{g:?}");
         }
-        for d in [welcome(), butterfly(), clean(), pick(), seed(), sparkle()] {
+        for d in [welcome(), mark(), about(), clean(), pick(), seed(), sparkle()] {
             assert!(d.parts.iter().any(|p| !p.tris.is_empty()));
         }
     }

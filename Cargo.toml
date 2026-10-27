@@ -23,3 +23,12 @@ portable-pty = "0.9"
 vt100 = "0.16"
 anyhow = "1"
 rfd = "0.17"
+# The native macOS menu bar.
+muda = { version = "0.21", default-features = false }
+# eframe's windowing; snout only switches off its default macOS menu.
+winit = { version = "0.30", default-features = false }
+# One AppKit setting: no window tabs (macOS would add their items to the View menu).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow"] }
+# Paste from the Edit menu (egui-winit already links it).
+arboard = { version = "3", default-features = false }

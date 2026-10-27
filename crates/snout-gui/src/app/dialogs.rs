@@ -10,6 +10,7 @@ use crate::art::{self, Glyph};
 use crate::theme::{self, Palette, mix};
 
 pub(super) enum Dialog {
+    About,
     Error(String),
     Info {
         title: String,
@@ -168,7 +169,7 @@ impl SnoutApp {
         let dark = ctx.global_style().visuals.dark_mode;
         let width = match dialog {
             Dialog::Checkout(_) => 580.0,
-            Dialog::Error(_) | Dialog::PullProblem { .. } | Dialog::Clone { .. } => 520.0,
+            Dialog::About | Dialog::Error(_) | Dialog::PullProblem { .. } | Dialog::Clone { .. } => 520.0,
             _ => 460.0,
         };
         let modal = egui::Modal::new(egui::Id::unique("dialog"))
@@ -193,6 +194,37 @@ impl SnoutApp {
             ui.set_width(width);
             ui.spacing_mut().item_spacing.y = 0.0;
             match dialog {
+                Dialog::About => {
+                    egui::Frame::new().inner_margin(Margin { left: SIDE, right: SIDE, top: 24, bottom: 20 }).show(
+                        ui,
+                        |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.vertical_centered(|ui| {
+                                let w = ui.available_width();
+                                art::about().show(ui, vec2(w, w * 124.0 / 440.0));
+                                ui.add_space(14.0);
+                                ui.label(RichText::new("snout").size(26.0).strong().color(p.fg));
+                                ui.add_space(2.0);
+                                dim(ui, &format!("Version {}", env!("CARGO_PKG_VERSION")));
+                                ui.add_space(12.0);
+                                ui.label(
+                                    RichText::new("A small, fast desktop Git client, with Claude Code beside it.")
+                                        .color(p.fg),
+                                );
+                                ui.add_space(12.0);
+                                ui.hyperlink_to("github.com/snoutdata/snout-git", super::menu::SOURCE_URL);
+                                ui.add_space(4.0);
+                                ui.hyperlink_to("snoutdata.com", super::menu::WEBSITE_URL);
+                                ui.add_space(12.0);
+                                dim(ui, "Made by SnoutData. MIT License.");
+                            });
+                        },
+                    );
+                    footer(ui, &[("esc", "close")], |ui| {
+                        close =
+                            theme::primary_button(ui, true, "OK").clicked() || ui.input(|i| i.key_pressed(Key::Enter));
+                    });
+                }
                 Dialog::Error(msg) => {
                     header(ui, Glyph::Alert, Tone::Danger, "Something went wrong", |ui| {
                         dim(ui, "Git reported this:");

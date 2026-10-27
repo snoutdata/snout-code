@@ -24,6 +24,7 @@ use survey::Survey;
 mod console;
 mod dialogs;
 mod draft;
+mod menu;
 mod repos;
 mod survey;
 #[cfg(test)]
@@ -258,6 +259,12 @@ pub struct SnoutApp {
     fetch_every: Option<Duration>,
     /// Count again without fetching, e.g. after work done in other windows.
     recount: bool,
+    /// The native menu bar, once installed (see [`SnoutApp::install_menu`]).
+    native: Option<menu::Native>,
+    /// Draw the menu bar in the window: where there is no native one.
+    draw_menu: bool,
+    /// Menu commands to run at the start of the next frame, before any widget.
+    picked: Vec<menu::Command>,
 }
 
 impl SnoutApp {
@@ -302,6 +309,9 @@ impl SnoutApp {
             fetched_at: None,
             fetch_every: (!cfg!(test)).then_some(survey::FETCH_EVERY),
             recount: false,
+            native: None,
+            draw_menu: !cfg!(target_os = "macos"),
+            picked: Vec::new(),
         };
         app.persisted = Persisted::of(&app.settings);
         if let Some(path) = open_arg {
@@ -310,6 +320,11 @@ impl SnoutApp {
             app.open_repo(&path);
         }
         app
+    }
+
+    /// Put up the native menu bar. Not done in [`SnoutApp::new`], so tests run without one.
+    pub fn install_menu(&mut self, ctx: &egui::Context) {
+        self.native = menu::Native::install(ctx);
     }
 
     // ----- State ---------------------------------------------------------------------
@@ -403,6 +418,14 @@ impl SnoutApp {
 
     /// What Commit records: the staged changes; with nothing staged, the selected files,
     /// or every changed file when none is selected.
+    /// A message, something to record, and Claude not writing the message.
+    fn can_commit(&self) -> bool {
+        self.repo.is_some()
+            && self.draft.is_none()
+            && !self.commit_msg.trim().is_empty()
+            && self.commit_scope() != Scope::Nothing
+    }
+
     fn commit_scope(&self) -> Scope {
         let staged = self.status.staged_count();
         if staged > 0 {
@@ -1859,11 +1882,19 @@ impl eframe::App for SnoutApp {
         self.auto_refresh(&ctx);
         self.survey(&ctx);
         let mut actions = Vec::new();
+        // Before any widget runs: an Edit item hands egui a key or clipboard event.
+        self.native_menu(&ctx, &mut actions);
         self.shortcuts(&ctx, &mut actions);
 
         let p = Palette::of(&ctx.global_style().visuals);
         let pane = theme::pane(p);
         let bar = egui::Frame::new().fill(p.ground).inner_margin(egui::Margin::symmetric(8, 6));
+        if self.draw_menu {
+            egui::Panel::top("menu")
+                .frame(bar.inner_margin(egui::Margin::symmetric(8, 2)))
+                .show_separator_line(false)
+                .show(ui, |ui| self.menu_bar_ui(ui, &mut actions));
+        }
         egui::Panel::top("toolbar").frame(bar).show_separator_line(false).show(ui, |ui| {
             self.toolbar(ui, &mut actions);
         });
@@ -1997,14 +2028,14 @@ fn reveal_items(ui: &mut egui::Ui, path: &Path, actions: &mut Vec<Action>) {
     }
 }
 
-/// "snout" with the butterfly beside it and a green stroke under it, the website's lockup.
+/// "snout" with its mark beside it and a green stroke under it, after the website's lockup.
 fn wordmark(ui: &mut egui::Ui, p: &Palette) {
     let galley = ui.painter().layout_no_wrap("snout".into(), egui::FontId::proportional(40.0), p.fg);
     let fly = egui::vec2(52.0, 44.0);
     let size = egui::vec2(fly.x + 10.0 + galley.size().x, galley.size().y.max(fly.y) + 8.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let fly_rect = egui::Rect::from_min_size(egui::pos2(rect.min.x, rect.center().y - fly.y / 2.0 - 4.0), fly);
-    art::butterfly().paint(ui.painter(), fly_rect, None);
+    art::mark().paint(ui.painter(), fly_rect, None);
     let text_pos = egui::pos2(fly_rect.max.x + 10.0, rect.center().y - galley.size().y / 2.0 - 4.0);
     let text_rect = egui::Rect::from_min_size(text_pos, galley.size());
     ui.painter().galley(text_pos, galley, p.fg);

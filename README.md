@@ -19,6 +19,7 @@ A small, fast desktop Git client in Rust. It focuses on the everyday loop: see w
 - **GitHub:** opens the repository on github.com.
 - **Claude Code console:** see below.
 - **Appearance:** a warm dark theme and a light one, following the system or chosen from the toolbar. Empty panes and the welcome screen carry small line drawings.
+- **Menu bar:** every command in one place (File, Edit, View, Repository, Window, Help), greyed out when it would do nothing. On macOS it is the native menu bar; on Windows and Linux it is drawn above the toolbar. **About snout** shows the version and where the project lives.
 
 The view re-reads the repository when the window regains focus, on F5 or ⌘R, and while the console's agent is working.
 
@@ -67,6 +68,21 @@ To put `snout` on your `PATH`:
 cargo install --path crates/snout-gui
 ```
 
+### macOS app
+
+`scripts/package-mac.sh` builds `snout.app` and a disk image to install it from, in `target/release/bundle/`:
+
+```sh
+scripts/package-mac.sh               # for this Mac's architecture
+scripts/package-mac.sh --universal   # Apple silicon and Intel in one app
+```
+
+Open the `.dmg` and drag snout into Applications. Without signing settings the app is signed ad hoc: it opens as is on the Mac that built it, and a copy downloaded on another Mac has to be allowed once in System Settings > Privacy & Security. To sign with a Developer ID and notarize, so it opens on any Mac, set `SNOUT_APPLE_DIR` and `SNOUT_NOTARY_ISSUER` in the environment or in a gitignored `.signing.env`; the comment at the top of the script lists what the folder holds.
+
+Releases on GitHub carry a signed and notarized `.dmg`.
+
+Opened from Finder, snout takes `PATH` from your login shell, so Git's hooks and credential helpers and Claude Code's tools find what they find in a terminal.
+
 ### The launcher script
 
 On macOS and Linux, `snout.sh` rebuilds the release binary when the sources have changed and starts the app in the background:
@@ -107,7 +123,7 @@ crates/
 
 `snout-core` runs the `git` CLI instead of using libgit2, so authentication, hooks and settings such as `pull.rebase` behave exactly as they do in a terminal. Read-only calls set `GIT_OPTIONAL_LOCKS=0` so they don't contend with other processes for `index.lock`, and `GIT_TERMINAL_PROMPT=0` so nothing waits on a hidden prompt. Network operations run on a worker thread.
 
-The drawings and icons are SVG path data, flattened and triangulated once and painted with egui, so they follow the theme and add no image files.
+The drawings and icons are SVG path data, flattened and triangulated once and painted with egui, so they follow the theme and add no image files. The one image is the app icon in `assets/icon/`, which `scripts/make-icons.sh` rebuilds from `snout.svg`.
 
 The console is `portable-pty` plus the `vt100` parser, painted with egui. It answers the start-up queries terminal apps send (cursor position, device attributes, background colour). Symbols missing from egui's bundled fonts fall back to the system's (Apple Symbols and Menlo on macOS, DejaVu Sans Mono on Linux, Segoe UI Symbol on Windows).
 
