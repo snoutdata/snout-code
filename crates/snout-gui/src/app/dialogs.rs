@@ -203,7 +203,7 @@ impl SnoutApp {
                                 let w = ui.available_width();
                                 art::about().show(ui, vec2(w, w * 124.0 / 440.0));
                                 ui.add_space(14.0);
-                                ui.label(RichText::new("SnoutGIT").size(26.0).strong().color(p.fg));
+                                ui.label(RichText::new("SnoutCode").size(26.0).strong().color(p.fg));
                                 ui.add_space(2.0);
                                 dim(ui, &format!("Version {}", env!("CARGO_PKG_VERSION")));
                                 ui.add_space(12.0);
@@ -212,7 +212,7 @@ impl SnoutApp {
                                         .color(p.fg),
                                 );
                                 ui.add_space(12.0);
-                                ui.hyperlink_to("github.com/snoutdata/snout-git", super::menu::SOURCE_URL);
+                                ui.hyperlink_to("github.com/snoutdata/snout-code", super::menu::SOURCE_URL);
                                 ui.add_space(4.0);
                                 ui.hyperlink_to("snoutdata.com", super::menu::WEBSITE_URL);
                                 ui.add_space(12.0);

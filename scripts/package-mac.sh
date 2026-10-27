@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build SnoutGIT.app and a .dmg to install it from, in target/release/bundle/.
+# Build SnoutCode.app and a .dmg to install it from, in target/release/bundle/.
 #
 #   scripts/package-mac.sh               for this Mac's architecture
 #   scripts/package-mac.sh --universal   Apple silicon and Intel in one binary
@@ -30,7 +30,7 @@ esac
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 OUT="$ROOT/target/release/bundle"
-APP="$OUT/SnoutGIT.app"
+APP="$OUT/SnoutCode.app"
 
 if $universal; then
   for t in aarch64-apple-darwin x86_64-apple-darwin; do
@@ -54,9 +54,9 @@ cat >"$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>SnoutGIT</string>
-  <key>CFBundleDisplayName</key><string>SnoutGIT</string>
-  <key>CFBundleIdentifier</key><string>com.snoutdata.git</string>
+  <key>CFBundleName</key><string>SnoutCode</string>
+  <key>CFBundleDisplayName</key><string>SnoutCode</string>
+  <key>CFBundleIdentifier</key><string>com.snoutdata.code</string>
   <key>CFBundleExecutable</key><string>snout</string>
   <key>CFBundleIconFile</key><string>snout</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -79,8 +79,8 @@ if [[ -n "${SNOUT_APPLE_DIR:-}" ]]; then
   [[ -f "$SNOUT_APPLE_DIR/developerID.p12" ]] || { echo "No developerID.p12 in $SNOUT_APPLE_DIR" >&2; exit 1; }
   INTER="$SNOUT_APPLE_DIR/DeveloperIDG2CA.cer"
   [[ -f "$INTER" ]] || curl -fsSL -o "$INTER" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
-  KC="$HOME/Library/Keychains/snout-git-signing.keychain-db"
-  KCPW="snout-git-$$"
+  KC="$HOME/Library/Keychains/snout-code-signing.keychain-db"
+  KCPW="snout-code-$$"
   ORIG_KEYCHAINS="$(security list-keychains -d user | sed -e 's/"//g' -e 's/^[[:space:]]*//')"
   cleanup_keychain() {
     # shellcheck disable=SC2086
@@ -109,12 +109,12 @@ else
 fi
 codesign --verify --strict "$APP"
 
-DMG="$OUT/SnoutGIT-$VERSION-$ARCH.dmg"
+DMG="$OUT/SnoutCode-$VERSION-$ARCH.dmg"
 STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
-hdiutil create -quiet -volname "SnoutGIT" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+hdiutil create -quiet -volname "SnoutCode" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 rm -rf "$STAGE"
 
 if [[ -n "$IDENTITY" ]]; then

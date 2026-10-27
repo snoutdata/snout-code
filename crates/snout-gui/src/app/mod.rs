@@ -1029,8 +1029,8 @@ impl SnoutApp {
 
     fn update_title(&mut self, ctx: &egui::Context) {
         let title = match &self.repo {
-            Some(repo) => format!("{} ({}) · SnoutGIT", repo.name(), self.head_label()),
-            None => "SnoutGIT".into(),
+            Some(repo) => format!("{} ({}) · SnoutCode", repo.name(), self.head_label()),
+            None => "SnoutCode".into(),
         };
         if title != self.title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -2028,9 +2028,9 @@ fn reveal_items(ui: &mut egui::Ui, path: &Path, actions: &mut Vec<Action>) {
     }
 }
 
-/// "SnoutGIT" with its mark beside it and a green stroke under it, after the website's lockup.
+/// "SnoutCode" with its mark beside it and a green stroke under it, after the website's lockup.
 fn wordmark(ui: &mut egui::Ui, p: &Palette) {
-    let galley = ui.painter().layout_no_wrap("SnoutGIT".into(), egui::FontId::proportional(40.0), p.fg);
+    let galley = ui.painter().layout_no_wrap("SnoutCode".into(), egui::FontId::proportional(40.0), p.fg);
     let fly = egui::vec2(52.0, 44.0);
     let size = egui::vec2(fly.x + 10.0 + galley.size().x, galley.size().y.max(fly.y) + 8.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());

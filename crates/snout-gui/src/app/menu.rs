@@ -13,8 +13,8 @@ use super::dialogs::Dialog;
 use super::{Action, Scope, SnoutApp, on_disk, stage_paths, unstage_paths};
 use crate::theme::ThemeChoice;
 
-pub(super) const SOURCE_URL: &str = "https://github.com/snoutdata/snout-git";
-pub(super) const ISSUES_URL: &str = "https://github.com/snoutdata/snout-git/issues";
+pub(super) const SOURCE_URL: &str = "https://github.com/snoutdata/snout-code";
+pub(super) const ISSUES_URL: &str = "https://github.com/snoutdata/snout-code/issues";
 pub(super) const WEBSITE_URL: &str = "https://snoutdata.com";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -106,9 +106,9 @@ pub(super) fn bar(mac: bool) -> Vec<Menu> {
     let mut menus = Vec::new();
     if mac {
         menus.push(Menu {
-            title: "SnoutGIT",
+            title: "SnoutCode",
             entries: vec![
-                item(C::About, "About SnoutGIT"),
+                item(C::About, "About SnoutCode"),
                 Entry::Separator,
                 Entry::System(System::Services),
                 Entry::Separator,
@@ -116,7 +116,7 @@ pub(super) fn bar(mac: bool) -> Vec<Menu> {
                 Entry::System(System::HideOthers),
                 Entry::System(System::ShowAll),
                 Entry::Separator,
-                keyed(C::Quit, "Quit SnoutGIT", false, Key::Q),
+                keyed(C::Quit, "Quit SnoutCode", false, Key::Q),
             ],
         });
     }
@@ -194,12 +194,12 @@ pub(super) fn bar(mac: bool) -> Vec<Menu> {
         },
     });
     let mut help = vec![
-        item(C::Source, "SnoutGIT on GitHub"),
+        item(C::Source, "SnoutCode on GitHub"),
         item(C::Issues, "Report an Issue"),
         item(C::Website, "SnoutData Website"),
     ];
     if !mac {
-        help.extend([Entry::Separator, item(C::About, "About SnoutGIT")]);
+        help.extend([Entry::Separator, item(C::About, "About SnoutCode")]);
     }
     menus.push(Menu { title: "Help", entries: help });
     menus
@@ -498,7 +498,7 @@ mod native {
                 }
                 Entry::System(s) => Box::new(match s {
                     System::Services => PredefinedMenuItem::services(None),
-                    System::Hide => PredefinedMenuItem::hide(Some("Hide SnoutGIT")),
+                    System::Hide => PredefinedMenuItem::hide(Some("Hide SnoutCode")),
                     System::HideOthers => PredefinedMenuItem::hide_others(None),
                     System::ShowAll => PredefinedMenuItem::show_all(None),
                     System::Minimize => PredefinedMenuItem::minimize(None),

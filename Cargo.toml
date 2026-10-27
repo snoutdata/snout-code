@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
-repository = "https://github.com/snoutdata/snout-git"
+repository = "https://github.com/snoutdata/snout-code"
 
 [workspace.dependencies]
 snout-core = { path = "crates/snout-core" }

@@ -1,8 +1,8 @@
-# SnoutGIT
+# SnoutCode
 
 A small, fast desktop Git client in Rust. It focuses on the everyday loop: see what changed, read the diff, stage, commit, switch branches, push. It also runs Claude Code in a docked console, so an agent can work in the repository while you watch the changes appear.
 
-![SnoutGIT main window](docs/screenshot.png)
+![SnoutCode main window](docs/screenshot.png)
 
 ## Features
 
@@ -15,11 +15,11 @@ A small, fast desktop Git client in Rust. It focuses on the everyday loop: see w
 - **Branches:** local branches, branches per remote, and tags, with ahead/behind counts and a detached HEAD indicator. Create a branch from any branch, tag or commit. Delete a branch from the trash can on its row or its context menu: a local one (with a force option, and optionally its upstream on the remote too) or one on a remote.
 - **Journal:** recent commits on a graph of their branches and merges, with branch and tag badges and unpushed commits drawn solid. Search by message, author, SHA or ref. Right-click a commit to check it out or start a branch there.
 - **Commit view:** click a commit to see what it did: the files it changed, the diff of each against its parent, the full message, author and committer, and links to its parents. Click another commit (or press ↑ ↓) to move through the history; Esc goes back to the working tree.
-- **Remote:** pull, fetch (all remotes, with prune) and push. The first push sets the upstream. When a pull cannot combine the branches, SnoutGIT says why and offers a way forward: merge or rebase when both sides have new commits, or reset to the remote (keeping your commits on a backup branch) when the remote's history was replaced.
+- **Remote:** pull, fetch (all remotes, with prune) and push. The first push sets the upstream. When a pull cannot combine the branches, SnoutCode says why and offers a way forward: merge or rebase when both sides have new commits, or reset to the remote (keeping your commits on a backup branch) when the remote's history was replaced.
 - **GitHub:** opens the repository on github.com.
 - **Claude Code console:** see below.
 - **Appearance:** a warm dark theme and a light one, following the system or chosen from the toolbar. Empty panes and the welcome screen carry small line drawings.
-- **Menu bar:** every command in one place (File, Edit, View, Repository, Window, Help), greyed out when it would do nothing. On macOS it is the native menu bar; on Windows and Linux it is drawn above the toolbar. **About SnoutGIT** shows the version and where the project lives.
+- **Menu bar:** every command in one place (File, Edit, View, Repository, Window, Help), greyed out when it would do nothing. On macOS it is the native menu bar; on Windows and Linux it is drawn above the toolbar. **About SnoutCode** shows the version and where the project lives.
 
 The view re-reads the repository when the window regains focus, on F5 or ⌘R, and while the console's agent is working.
 
@@ -36,7 +36,7 @@ Press ⌘J or click **✳ Claude** to run [Claude Code](https://docs.claude.com/
 
 **Draft**, in the Commit pane, runs Claude Code separately in print mode (`claude -p`, with its tools turned off) and sends it the patch the commit would record on stdin. It does not touch the console's session.
 
-SnoutGIT looks for `claude` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin`. Claude Code itself is installed and signed in separately.
+SnoutCode looks for `claude` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin`. Claude Code itself is installed and signed in separately.
 
 ## Building
 
@@ -55,8 +55,8 @@ SnoutGIT looks for `claude` on `PATH`, then in `~/.local/bin`, `~/.claude/local`
 ### Build and run
 
 ```sh
-git clone https://github.com/snoutdata/snout-git.git
-cd snout-git
+git clone https://github.com/snoutdata/snout-code.git
+cd snout-code
 cargo build --release
 ./target/release/snout                 # reopen what you had last time
 ./target/release/snout ~/dev/my-repo   # open a repository (any folder inside it works)
@@ -70,18 +70,18 @@ cargo install --path crates/snout-gui
 
 ### macOS app
 
-`scripts/package-mac.sh` builds `SnoutGIT.app` and a disk image to install it from, in `target/release/bundle/`:
+`scripts/package-mac.sh` builds `SnoutCode.app` and a disk image to install it from, in `target/release/bundle/`:
 
 ```sh
 scripts/package-mac.sh               # for this Mac's architecture
 scripts/package-mac.sh --universal   # Apple silicon and Intel in one app
 ```
 
-Open the `.dmg` and drag SnoutGIT into Applications. Without signing settings the app is signed ad hoc: it opens as is on the Mac that built it, and a copy downloaded on another Mac has to be allowed once in System Settings > Privacy & Security. To sign with a Developer ID and notarize, so it opens on any Mac, set `SNOUT_APPLE_DIR` and `SNOUT_NOTARY_ISSUER` in the environment or in a gitignored `.signing.env`; the comment at the top of the script lists what the folder holds.
+Open the `.dmg` and drag SnoutCode into Applications. Without signing settings the app is signed ad hoc: it opens as is on the Mac that built it, and a copy downloaded on another Mac has to be allowed once in System Settings > Privacy & Security. To sign with a Developer ID and notarize, so it opens on any Mac, set `SNOUT_APPLE_DIR` and `SNOUT_NOTARY_ISSUER` in the environment or in a gitignored `.signing.env`; the comment at the top of the script lists what the folder holds.
 
 Releases on GitHub carry a signed and notarized `.dmg`.
 
-Opened from Finder, SnoutGIT takes `PATH` from your login shell, so Git's hooks and credential helpers and Claude Code's tools find what they find in a terminal.
+Opened from Finder, SnoutCode takes `PATH` from your login shell, so Git's hooks and credential helpers and Claude Code's tools find what they find in a terminal.
 
 ### The launcher script
 

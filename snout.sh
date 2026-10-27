@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build (if needed) and start SnoutGIT.
+# Build (if needed) and start SnoutCode.
 #
 #   ./snout.sh                 start with the repositories you had open last time
 #   ./snout.sh <path>          open a repository (any folder inside it), or a folder to search/init
@@ -53,5 +53,5 @@ if $foreground; then
   exec "$BIN" "${args[@]+"${args[@]}"}"
 else
   nohup "$BIN" "${args[@]+"${args[@]}"}" >"$LOG" 2>&1 &
-  echo "SnoutGIT started${repo:+ with $repo} (log: $LOG)"
+  echo "SnoutCode started${repo:+ with $repo} (log: $LOG)"
 fi

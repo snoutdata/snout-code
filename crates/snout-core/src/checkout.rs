@@ -69,7 +69,7 @@ impl Repo {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let stashed = match local {
             LocalChanges::Keep => false,
-            LocalChanges::Stash => self.stash_push(&format!("SnoutGIT: before checking out {}", target.label()))?,
+            LocalChanges::Stash => self.stash_push(&format!("SnoutCode: before checking out {}", target.label()))?,
         };
 
         let out = match self.git(&args) {

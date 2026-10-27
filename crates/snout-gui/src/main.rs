@@ -12,7 +12,7 @@ fn main() -> eframe::Result {
     let open_arg = std::env::args_os().nth(1).map(std::path::PathBuf::from);
 
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("SnoutGIT")
+        .with_title("SnoutCode")
         .with_inner_size([1400.0, 900.0])
         .with_min_inner_size([800.0, 500.0]);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon/snout-512.png")) {
