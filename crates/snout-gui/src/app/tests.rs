@@ -797,7 +797,7 @@ fn menu_bar() {
 
     h.get_by_label("Help").click();
     h.run_steps(2);
-    h.get_by_label("About snout").click();
+    h.get_by_label("About SnoutGIT").click();
     h.run_steps(2);
     assert!(matches!(h.state().dialog, Some(Dialog::About)));
     assert!(!h.state().command_enabled(Menu::Pull), "not while a dialog is up");

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build snout.app and a .dmg to install it from, in target/release/bundle/.
+# Build SnoutGIT.app and a .dmg to install it from, in target/release/bundle/.
 #
 #   scripts/package-mac.sh               for this Mac's architecture
 #   scripts/package-mac.sh --universal   Apple silicon and Intel in one binary
@@ -30,7 +30,7 @@ esac
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 OUT="$ROOT/target/release/bundle"
-APP="$OUT/snout.app"
+APP="$OUT/SnoutGIT.app"
 
 if $universal; then
   for t in aarch64-apple-darwin x86_64-apple-darwin; do
@@ -54,8 +54,8 @@ cat >"$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>snout</string>
-  <key>CFBundleDisplayName</key><string>snout</string>
+  <key>CFBundleName</key><string>SnoutGIT</string>
+  <key>CFBundleDisplayName</key><string>SnoutGIT</string>
   <key>CFBundleIdentifier</key><string>com.snoutdata.git</string>
   <key>CFBundleExecutable</key><string>snout</string>
   <key>CFBundleIconFile</key><string>snout</string>
@@ -109,12 +109,12 @@ else
 fi
 codesign --verify --strict "$APP"
 
-DMG="$OUT/snout-$VERSION-$ARCH.dmg"
+DMG="$OUT/SnoutGIT-$VERSION-$ARCH.dmg"
 STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
-hdiutil create -quiet -volname "snout" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+hdiutil create -quiet -volname "SnoutGIT" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 rm -rf "$STAGE"
 
 if [[ -n "$IDENTITY" ]]; then

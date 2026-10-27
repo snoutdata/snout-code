@@ -203,7 +203,7 @@ impl SnoutApp {
                                 let w = ui.available_width();
                                 art::about().show(ui, vec2(w, w * 124.0 / 440.0));
                                 ui.add_space(14.0);
-                                ui.label(RichText::new("snout").size(26.0).strong().color(p.fg));
+                                ui.label(RichText::new("SnoutGIT").size(26.0).strong().color(p.fg));
                                 ui.add_space(2.0);
                                 dim(ui, &format!("Version {}", env!("CARGO_PKG_VERSION")));
                                 ui.add_space(12.0);
