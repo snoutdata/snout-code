@@ -266,6 +266,7 @@ public final class ProjectSync {
         o.gradleOutput = from.gradleOutput;
         o.buildRoot = from.buildRoot;
         o.bridgeRoot = from.bridgeRoot;
+        o.daemonRegistry = from.daemonRegistry;
         return o;
     }
 

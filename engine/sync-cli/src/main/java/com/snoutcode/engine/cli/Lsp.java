@@ -28,6 +28,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
@@ -79,13 +80,44 @@ final class Lsp {
     }
 
     static int run(Options options, PrintStream log) throws IOException, InterruptedException {
+        // The Gradle daemons the engine starts are its own (see Daemons), and end with it: when
+        // the session ends, and on any other exit (the app gone, a signal) through the hook.
+        File registry = Daemons.registry(cacheDir(options), options.projectDir.getCanonicalFile());
+        AtomicBoolean stopped = new AtomicBoolean();
+        Runnable stopDaemons = () -> {
+            if (stopped.compareAndSet(false, true)) {
+                Daemons.stop(registry, DAEMON_GRACE_MILLIS, log);
+            }
+        };
+        Thread hook = new Thread(stopDaemons, "stop-gradle-daemons");
+        Runtime.getRuntime().addShutdownHook(hook);
+        try {
+            return session(options, log, registry);
+        } finally {
+            stopDaemons.run();
+            try {
+                Runtime.getRuntime().removeShutdownHook(hook);
+            } catch (IllegalStateException e) {
+                // already shutting down
+            }
+        }
+    }
+
+    /** How long the daemons get to end on their own before they are killed. */
+    static final long DAEMON_GRACE_MILLIS = 3000;
+
+    private static Path cacheDir(Options options) {
+        return (options.cacheDir != null ? options.cacheDir.toPath() : defaultCacheDir()).toAbsolutePath();
+    }
+
+    private static int session(Options options, PrintStream log, File daemonRegistry) throws IOException, InterruptedException {
         // Standard output carries LSP alone: keep anything else that prints off it.
         BufferedOutputStream appOut = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
         System.setOut(log);
         Readiness readiness = new Readiness(message -> LspProxy.write(appOut, message));
         File projectDir = options.projectDir.getCanonicalFile();
         String hash = Sync.sha256(projectDir.getAbsolutePath().getBytes(StandardCharsets.UTF_8)).substring(0, 16);
-        Path cache = (options.cacheDir != null ? options.cacheDir.toPath() : defaultCacheDir()).toAbsolutePath();
+        Path cache = cacheDir(options);
         Path home = cache.resolve("jdtls").resolve(hash);
         Files.createDirectories(home);
         Path modelFile = home.resolve("model.json");
@@ -109,6 +141,7 @@ final class Lsp {
         sync.projectCacheDir = cache.resolve("gradle").resolve(hash).toFile();
         sync.buildRoot = cache.resolve("build").resolve(hash).toFile();
         sync.bridgeRoot = cache.resolve("bridge").resolve(hash).toFile();
+        sync.daemonRegistry = daemonRegistry;
         sync.gradleOutput = options.verbose ? log : OutputStream.nullOutputStream();
         project.jdks.addAll(options.jdks);
         project.cacheDir = cache;

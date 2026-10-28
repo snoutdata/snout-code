@@ -50,6 +50,11 @@ public final class Sync {
          * against one compile of them (see {@link ScalaBridge}); null to use {@link #buildRoot}.
          */
         public File bridgeRoot;
+        /**
+         * The registry of the engine's own Gradle daemons (see {@link Daemons}); null for the
+         * user's, in the Gradle user home.
+         */
+        public File daemonRegistry;
     }
 
     private Sync() {
@@ -110,6 +115,9 @@ public final class Sync {
         }
         if (options.gradleVersion != null) {
             connector.useGradleVersion(options.gradleVersion);
+        }
+        if (options.daemonRegistry != null) {
+            Daemons.configure(connector, options.daemonRegistry);
         }
         return connector;
     }

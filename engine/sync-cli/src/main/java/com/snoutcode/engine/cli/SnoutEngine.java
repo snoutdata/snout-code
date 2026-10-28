@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -110,6 +111,14 @@ public final class SnoutEngine {
         }
         options.gradleOutput = verbose ? stderr : OutputStream.nullOutputStream();
         project.log = verbose ? stderr : null;
+        // The engine's own daemons, which the lsp command of the same folder then takes warm; they
+        // stop after a short idle time (see Daemons).
+        try {
+            options.daemonRegistry = Daemons.registry(project.cacheDir, options.projectDir.getCanonicalFile());
+        } catch (IOException e) {
+            stderr.println("not a directory: " + options.projectDir);
+            return 2;
+        }
 
         try {
             JsonObject model = ProjectSync.run(project);

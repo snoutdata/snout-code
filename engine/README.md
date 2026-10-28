@@ -38,7 +38,7 @@ The folder is the project. It may be one Gradle build or hold many:
 - A folder that is a build, or lies inside one, is that build: the nearest folder at or above it with a `settings.gradle(.kts)`, else the nearest with a `build.gradle(.kts)`. The search upward stops below the user's home.
 - Any other folder holds every build under it: each folder with a settings script, or with a build script and no settings script above it. A build owns everything below it (subprojects, included builds, `buildSrc`), so the search does not descend into one. It skips `build`, `.gradle`, `node_modules`, `out`, `target` and hidden folders, and stops 8 levels down.
 
-Each build syncs on its own Gradle daemon, several at once, and on a JDK its Gradle version runs on, chosen from the JDKs found on the machine (`JAVA_HOME`, this JVM, the macOS and Linux JDK folders, SDKMAN, `~/.jdks`, Gradle's provisioned toolchains, the JDKs the app downloads to `~/Library/Application Support/SnoutCode/jdks`, the engine's build JDK in `~/Library/Caches/SnoutCode/build-jdk`, and the `jdks` and `build-jdk` folders of `--cache-dir`) and those given with `--jdk`:
+Each build syncs on its own Gradle daemon (one of the engine's, see [Gradle daemons](#gradle-daemons)), several at once, and on a JDK its Gradle version runs on, chosen from the JDKs found on the machine (`JAVA_HOME`, this JVM, the macOS and Linux JDK folders, SDKMAN, `~/.jdks`, Gradle's provisioned toolchains, the JDKs the app downloads to `~/Library/Application Support/SnoutCode/jdks`, the engine's build JDK in `~/Library/Caches/SnoutCode/build-jdk`, and the `jdks` and `build-jdk` folders of `--cache-dir`) and those given with `--jdk`:
 
 - Gradle older than 6.7 gets Java 11.
 - Newer Gradle gets the Java its build script names (a toolchain, `jvmToolchain`, a source or target compatibility, a `--release`) when that is newer than 17, else 17.
@@ -91,6 +91,7 @@ All of it lives under the cache directory (`~/Library/Caches/SnoutCode` on macOS
 | `jdtls/<hash>/config/` | jdtls's OSGi configuration, with the bundle added |
 | `jdtls/<hash>/workspace/` | jdtls's workspace: the JDT projects, their output folders, indexes and log |
 | `jdtls/<hash>/runs/` | Argument files of the processes the engine launches, while they run |
+| `daemons/<hash>/` | The registry and logs of the engine's own Gradle daemons (see [Gradle daemons](#gradle-daemons)) |
 
 A build whose sync fails keeps its entry from the last model that synced it, marked `stale`, so a broken build file does not cost its modules. A build that never synced has no modules; the importer still claims the folder, so jdtls's Gradle importer never runs Buildship on it.
 
@@ -108,6 +109,16 @@ A build whose sync fails keeps its entry from the last model that synced it, mar
 | `--max-heap <size>` | jdtls's heap limit, or `auto` (the default): 512 MB, plus 150 MB per thousand Java and Scala source files and 0.5 MB per library, rounded up to 256 MB, from 1 GB to 8 GB (at most a quarter of the memory). The parallel collector, unless a `--jvm-arg` names another. |
 | `--jvm-arg <arg>` | An extra JVM argument for jdtls; repeatable. |
 | `--gradle-user-home`, `--gradle-version`, `--no-sources`, `--offline`, `--verbose` | As for `sync`. |
+
+### Gradle daemons
+
+The engine runs Gradle on daemons of its own, never on one the user started from a terminal, and stops them when it ends:
+
+- **Private.** Each folder has a daemon registry of its own (`daemons/<hash>/` under the cache directory, set through the Tooling API's connector), and a Gradle client looks for daemons only in its registry. So `./gradlew` in a terminal never runs on the engine's daemons, nor the engine on the user's, and `./gradlew --stop` leaves the engine's alone. Nothing else about a daemon changes: it runs on the JDK chosen for its build (above), with the build's `org.gradle.jvmargs` and the shared Gradle user home and caches.
+- **Stopped on exit.** When the engine ends (the app shuts it down, closes its input, quits or dies, or a signal), it stops the daemons of its registry: each gets SIGTERM, which a daemon answers in well under a second, and those still running after 3 seconds are killed. The daemons are found by their logs (`<Gradle version>/daemon-<pid>.out.log`), and a process counts only when it runs Gradle's daemon and started before its log was last written (a daemon writes to it as it stops, so a later process that got its pid does not count). `GradleConnector.disconnect()` cannot do this: it reaches only connections still open (the engine closes each after its build), and does nothing on Gradle before 6.8.
+- **Short lived.** The engine's daemons stop after 15 minutes without a build, not Gradle's 3 hours, so they go even when the engine is killed outright.
+
+`snout-engine sync` uses the same registry and idle time, but leaves its daemons running, so that `lsp` on the same folder starts on warm daemons.
 
 ### Starting from the cache
 
