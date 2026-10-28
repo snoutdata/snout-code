@@ -2,6 +2,9 @@
 //! the pseudo-terminal of `snout_core::pty`, painted cell by cell. One session per
 //! repository, kept alive while switching between them. When the agent has printed and
 //! gone quiet, the Git views are re-read, since it may have changed files.
+//!
+//! `claude` starts with the variables that connect it to this window's IDE server; the
+//! header says when it is connected, and switches the editor's following of its edits.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -131,6 +134,7 @@ fn hsla((r, g, b): Rgb) -> Hsla {
 impl ConsolePanel {
     fn new(model: Entity<Model>, kind: Kind, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
+        cx.observe_global::<crate::claude_ide::IdeStatus>(|_, cx| cx.notify()).detach();
         // The reader thread cannot reach GPUI; look for new output on a short timer.
         cx.spawn(async move |this, cx| {
             loop {
@@ -202,7 +206,12 @@ impl ConsolePanel {
         };
         let p = palette(cx);
         let env_remove: &[&str] = if self.kind == Kind::Claude { ENV_REMOVE } else { &[] };
-        let launch = Launch { program: &program, args, cwd: root, env: &[], env_remove };
+        // Claude Code connects to this window's IDE server.
+        let env = match self.kind {
+            Kind::Claude => cx.try_global::<crate::claude_ide::IdeEnv>().map(|e| e.0.clone()).unwrap_or_default(),
+            Kind::Shell => Vec::new(),
+        };
+        let launch = Launch { program: &program, args, cwd: root, env: &env, env_remove };
         match Pty::spawn(&launch, rgb(p.fg), rgb(p.panel), || {}) {
             Ok(pty) => {
                 self.sessions.insert(root.to_owned(), Session { pty, seen_gen: 0, refreshed: Instant::now() });
@@ -215,6 +224,14 @@ impl ConsolePanel {
 
     pub fn session_text(&self, root: &Path) -> Option<String> {
         self.sessions.get(root).map(|s| s.pty.contents())
+    }
+
+    /// Type `text` into the session of `root`, as a paste.
+    pub fn type_text(&self, root: &Path, text: &str) {
+        if let Some(s) = self.sessions.get(root) {
+            let bracketed = s.pty.parser().screen().bracketed_paste();
+            s.pty.send(&pty::paste_bytes(text, bracketed));
+        }
     }
 
     fn cell_at(&self, pos: Point<Pixels>) -> Option<(u16, u16)> {
@@ -272,6 +289,9 @@ impl Render for ConsolePanel {
         let p = palette(cx);
         let root = self.root(cx).or_else(|| self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()));
         let kind = self.kind;
+        let connected =
+            kind == Kind::Claude && cx.try_global::<crate::claude_ide::IdeStatus>().is_some_and(|s| s.clients > 0);
+        let follow = self.model.read(cx).settings.follow_claude;
         let header = |title: String, running: Option<bool>, buttons: Vec<gpui::AnyElement>| {
             let title = title.trim().trim_start_matches(['✳', '✻', '·', '✶', '✢', '*', ' ']).to_owned();
             div()
@@ -288,6 +308,31 @@ impl Render for ConsolePanel {
                         .child(div().whitespace_nowrap().child(kind.title()))
                         .when_some(running, |d, on| {
                             d.child(div().size(px(7.)).rounded(px(4.)).bg(if on { p.ok } else { p.fg_dim }))
+                        })
+                        .when(connected, |d| {
+                            d.child(
+                                div()
+                                    .id("claude-connected")
+                                    .debug_selector(|| "claude-connected".into())
+                                    .flex_none()
+                                    .whitespace_nowrap()
+                                    .px(px(7.))
+                                    .h(px(18.))
+                                    .flex()
+                                    .items_center()
+                                    .rounded(px(9.))
+                                    .bg(p.wash(p.ok))
+                                    .text_color(p.ok)
+                                    .text_size(px(11.5))
+                                    .tooltip(|w, cx| {
+                                        gpui_component::tooltip::Tooltip::new(
+                                            "Claude Code sees the editor: its selection, open files and problems, \
+                                             and proposes changes there for you to accept or reject.",
+                                        )
+                                        .build(w, cx)
+                                    })
+                                    .child("Claude connected"),
+                            )
                         })
                         .when(!title.is_empty() && title != kind.title(), |d| {
                             d.child(
@@ -328,8 +373,27 @@ impl Render for ConsolePanel {
                     .on_click(cx.listener(move |this, _, window, cx| this.start(&root, &args, window, cx)))
                     .into_any_element()
             };
+        let follow_button = look::toggle("follow", "Follow", follow, &p)
+            .h(px(22.))
+            .tooltip(move |w, cx| {
+                let tip = if follow {
+                    "Following: the editor opens the files Claude Code changes and lights the change"
+                } else {
+                    "Not following: a dot on a tab marks a file Claude Code changed"
+                };
+                gpui_component::tooltip::Tooltip::new(tip).build(w, cx)
+            })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.model.update(cx, |m, cx| {
+                    m.settings.follow_claude = !m.settings.follow_claude;
+                    m.persist();
+                    cx.notify();
+                })
+            }))
+            .into_any_element();
         let mut buttons = match kind {
             Kind::Claude => vec![
+                follow_button,
                 restart("new", Glyph::Plus, "New", "Restart with a new conversation", Vec::new(), root.clone()),
                 restart(
                     "continue",

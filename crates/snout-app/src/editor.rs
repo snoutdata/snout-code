@@ -6,6 +6,7 @@
 //! edited or double-clicked.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -28,9 +29,11 @@ use snout_core::gutter::{LineChange, LineChangeKind};
 use crate::editing::{self, Edit};
 use crate::lang::providers::DocLink;
 
+mod claude;
 mod lang_features;
 use crate::look;
 use crate::theme::{mix, palette};
+pub use claude::{Answer, Outcome, Proposal, Review, STREAM_TICK};
 pub use lang_features::{class_file_name, is_class_file_path};
 
 actions!(
@@ -48,6 +51,9 @@ actions!(
         OrganizeImports,
         ShowSignature,
         CancelRename,
+        AcceptChanges,
+        RejectChanges,
+        SendToClaude,
     ]
 );
 
@@ -186,6 +192,10 @@ pub enum EditorEvent {
     Changed,
     /// It wrote its text to the file.
     Saved,
+    /// It took the file's new text from disk; this was the text before.
+    Reloaded(String),
+    /// A new file Claude proposed was rejected: the tab has nothing left to show.
+    Discarded,
 }
 
 pub struct EditorPanel {
@@ -231,6 +241,15 @@ pub struct EditorPanel {
     pub rename: Option<Entity<InputState>>,
     /// A class file of a library (`jdt://`), shown read only.
     pub class_file: Option<(lsp_types::Uri, PathBuf)>,
+    /// A change Claude proposes, under review, and the ones waiting after it.
+    pub review: Option<Review>,
+    pub queue: VecDeque<Proposal>,
+    /// Claude changed the file while the editor did not follow: a dot on the tab.
+    pub touched: bool,
+    /// Lines of a followed change, fading.
+    pub flash: Option<claude::Flash>,
+    _review_task: Option<Task<()>>,
+    _flash_task: Option<Task<()>>,
     _diff: Option<Task<()>>,
     focus: FocusHandle,
     _poll: Task<()>,
@@ -265,10 +284,17 @@ impl EditorPanel {
                         this.dirty = dirty;
                     }
                     this.diff_soon(cx);
+                    this.review_changed(cx);
                     cx.emit(EditorEvent::Changed);
                     cx.notify();
                 }
-                InputEvent::Focus => cx.emit(EditorEvent::Focused),
+                InputEvent::Focus => {
+                    if this.touched {
+                        this.touched = false;
+                        cx.notify();
+                    }
+                    cx.emit(EditorEvent::Focused)
+                }
                 _ => {}
             }),
             // The caret moved or the text changed: find the brackets again, and let the
@@ -316,6 +342,12 @@ impl EditorPanel {
             signature_line: None,
             rename: None,
             class_file: None,
+            review: None,
+            queue: VecDeque::new(),
+            touched: false,
+            flash: None,
+            _review_task: None,
+            _flash_task: None,
             _diff: None,
             focus: cx.focus_handle(),
             _poll: poll,
@@ -450,7 +482,9 @@ impl EditorPanel {
             cx.notify();
             return;
         }
+        let before = std::mem::take(&mut self.saved);
         self.reload(window, cx);
+        cx.emit(EditorEvent::Reloaded(before));
     }
 
     /// Frame the bracket at the caret and its match, once per caret move or edit.
@@ -696,7 +730,9 @@ impl EditorPanel {
     fn gutter(&self, cx: &App) -> impl IntoElement {
         let p = palette(cx);
         let colors = [p.ok, if p.dark { p.accent } else { p.warn }, p.error];
-        let (state, changes, painted) = (self.state.clone(), self.changes.clone(), self.painted.clone());
+        // Under review, the gutter shows the proposed change instead of Git's.
+        let changes = self.review_gutter().map_or_else(|| self.changes.clone(), Arc::new);
+        let (state, painted) = (self.state.clone(), self.painted.clone());
         canvas(
             |_, _, _| {},
             move |_, _, window, cx| {
@@ -845,12 +881,18 @@ impl Render for EditorPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let _ = &self.focus;
+        let reviewing = self.review.is_some();
+        let has_lang = self.lang.is_some();
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(p.panel)
-            .key_context("EditorPanel")
+            .key_context(if reviewing { "EditorPanel ClaudeReview" } else { "EditorPanel" })
+            .when(reviewing, |d| {
+                d.on_action(cx.listener(|this, _: &AcceptChanges, w, cx| this.accept_review(w, cx)))
+                    .on_action(cx.listener(|this, _: &RejectChanges, w, cx| this.reject_review(w, cx)))
+            })
             .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx)))
             .on_action(cx.listener(|this, _: &ToggleComment, w, cx| this.toggle_comment(w, cx)))
             .on_action(cx.listener(|this, _: &DuplicateLine, w, cx| this.duplicate_line(w, cx)))
@@ -867,6 +909,7 @@ impl Render for EditorPanel {
             })
             .when_some(self.error.clone(), |d, e| d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(e)))
             .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
+            .children(self.review_bar(cx))
             .child(
                 div()
                     .flex_1()
@@ -879,7 +922,14 @@ impl Render for EditorPanel {
                             cx.stop_propagation();
                         }
                     }))
-                    .child(Editor::new(&self.state).appearance(false).h_full().text_size(px(font_size(cx))))
+                    .child(
+                        Editor::new(&self.state)
+                            .appearance(false)
+                            .h_full()
+                            .text_size(px(font_size(cx)))
+                            .context_menu(move |menu, _, _| context_menu(menu, has_lang)),
+                    )
+                    .children(self.claude_overlay(cx))
                     .child(self.gutter(cx))
                     .child(self.problem_marks(cx))
                     .children(self.signature_popup(cx))
@@ -887,6 +937,26 @@ impl Render for EditorPanel {
                     .children(self.rename_box(cx)),
             )
     }
+}
+
+/// The editor's right-click menu: the code's own items, sending the selection to Claude
+/// Code, and the clipboard.
+fn context_menu(menu: gpui_component::native_menu::NativeMenu, lang: bool) -> gpui_component::native_menu::NativeMenu {
+    use gpui_component::input as i;
+    let menu = if lang {
+        menu.menu("Go to Definition", Box::new(i::GoToDefinition))
+            .menu("Quick Fix…", Box::new(i::ToggleCodeActions))
+            .separator()
+    } else {
+        menu
+    };
+    menu.menu("Send Selection to Claude", Box::new(SendToClaude))
+        .separator()
+        .menu("Cut", Box::new(i::Cut))
+        .menu("Copy", Box::new(i::Copy))
+        .menu("Paste", Box::new(i::Paste))
+        .separator()
+        .menu("Select All", Box::new(i::SelectAll))
 }
 
 /// Close an editor tab (`then` does the closing), asking first whether to save it when

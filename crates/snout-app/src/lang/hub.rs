@@ -958,3 +958,27 @@ fn initialize_params(root: &Path) -> Value {
         }
     })
 }
+
+#[cfg(test)]
+impl LangHub {
+    /// Hold `list` as what a server of `root` published for `uri`, without running one
+    /// (tests of what reads the diagnostics).
+    pub fn insert_published(&mut self, root: &Path, uri: String, list: Vec<Diagnostic>) {
+        let server = self.servers.entry(root.to_owned()).or_insert_with(|| Server {
+            root: root.to_owned(),
+            jdk: None,
+            client: None,
+            stage: Stage::Ready,
+            progress: Progress::default(),
+            initialized: false,
+            diagnostics: BTreeMap::new(),
+            crashes: 0,
+            started: Instant::now(),
+            first_diagnostics: None,
+            generation: 0,
+            stopped: true,
+            _tasks: Vec::new(),
+        });
+        server.diagnostics.insert(uri, list);
+    }
+}

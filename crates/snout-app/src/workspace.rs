@@ -78,6 +78,8 @@ pub struct Workspace {
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::tool_windows::GradlePanel>,
     pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
+    /// Claude Code's connection to this window, when the app runs one.
+    pub claude: Option<crate::claude_ide::bridge::Bridge>,
     _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -315,9 +317,11 @@ impl Workspace {
             settings_sheet: None,
             gradle,
             notifications,
+            claude: None,
             _save_layout: None,
             _subscriptions: subscriptions,
         };
+        crate::claude_ide::bridge::start(&mut this, window, cx);
         for editor in restored.1 {
             this.track_editor(&editor, window, cx);
             // A library class file's tab fills once the server can show it.
@@ -507,6 +511,13 @@ impl Workspace {
                     for twin in this.twins_of(editor, cx) {
                         twin.update(cx, |t, cx| t.mark_saved(cx));
                     }
+                }
+                EditorEvent::Reloaded(before) => {
+                    crate::claude_ide::bridge::followed_reload(this, editor, before, window, cx)
+                }
+                EditorEvent::Discarded => {
+                    let e = editor.clone();
+                    this.dock.update(cx, |d, cx| d.remove_panel(e, window, cx));
                 }
             }
         }));
@@ -704,6 +715,33 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_editor(path, at, preview, true, true, window, cx);
+    }
+
+    /// Open `path` in a tab (or find its tab) without taking the keyboard from where it
+    /// is, as Claude Code's requests do; `front` brings the tab forward.
+    pub fn reveal_file(
+        &mut self,
+        path: PathBuf,
+        preview: bool,
+        front: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorPanel> {
+        self.open_editor(path, None, preview, front, false, window, cx)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn open_editor(
+        &mut self,
+        path: PathBuf,
+        at: Option<(u32, u32)>,
+        preview: bool,
+        front: bool,
+        focus: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorPanel> {
         self.editors.retain(|e| e.upgrade().is_some());
         let open = self.editors(cx).into_iter().find(|e| e.read(cx).path == path);
         let reusable = if open.is_none() && preview {
@@ -732,17 +770,24 @@ impl Workspace {
                 editor
             }
         };
+        if !front {
+            cx.notify();
+            return editor;
+        }
         self.set_active_editor(Some(&editor), cx);
         if self.side.read(cx).activity == Activity::Git {
             self.show_activity(Activity::Project, window, cx);
         }
         let id = PanelId::from(editor.entity_id());
         self.dock.update(cx, |d, cx| d.select_panel(id, window, cx));
-        editor.update(cx, |e, cx| match at {
-            Some((line, column)) => e.go_to(line, column, window, cx),
-            None => e.state.update(cx, |s, cx| s.focus(window, cx)),
-        });
+        if focus {
+            editor.update(cx, |e, cx| match at {
+                Some((line, column)) => e.go_to(line, column, window, cx),
+                None => e.state.update(cx, |s, cx| s.focus(window, cx)),
+            });
+        }
         cx.notify();
+        editor
     }
 
     /// Put up the go-to-file or find-in-files box over the open repository.
@@ -1050,6 +1095,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(Some(-1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(None, cx)))
             .on_action(cx.listener(|this, _: &CloseTab, w, cx| this.close_tab(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::editor::SendToClaude, w, cx| {
+                crate::claude_ide::bridge::send_selection(this, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &Quit, w, cx| {
                 if this.confirm_unsaved(true, w, cx) {
                     cx.quit();

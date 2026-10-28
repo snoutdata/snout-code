@@ -70,6 +70,9 @@ pub struct Settings {
     pub fetch_minutes: u64,
     /// The `claude` program to run; looked up on the usual paths when unset.
     pub claude_path: Option<PathBuf>,
+    /// The editor follows the files Claude Code changes: opens them, scrolls to the
+    /// change and lights it briefly. Off, a dot on the tab says so.
+    pub follow_claude: bool,
 }
 
 impl Default for Settings {
@@ -96,6 +99,7 @@ impl Default for Settings {
             show_whitespace: false,
             fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,
             claude_path: None,
+            follow_claude: true,
         }
     }
 }

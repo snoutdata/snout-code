@@ -2,7 +2,9 @@
 //! on the ground colour, as the Git view's panes do, and the center's tab groups get the
 //! editor's own tab bar: a file icon, the name (in italics for the preview tab), a dot
 //! while the file has unsaved changes, a close button on hover, a double click to keep a
-//! preview, and a middle click to close.
+//! preview, and a middle click to close. A tab with changes Claude Code proposes carries a
+//! badge with their count; one Claude changed while the editor did not follow, a small
+//! accent dot.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -241,16 +243,18 @@ fn tab(
 ) -> AnyElement {
     let p = palette(cx);
     let editor = editor_of(panel);
-    let (name, dirty, preview, path) = match &editor {
+    let (name, dirty, preview, path, reviews, touched) = match &editor {
         Some(e) => {
             let e = e.read(cx);
-            (e.name(), e.dirty, e.preview, Some(e.path.clone()))
+            (e.name(), e.dirty, e.preview, Some(e.path.clone()), e.review_count(), e.touched)
         }
         None => (
             PanelHandle::of(panel).and_then(|h| h.tab_name(cx)).unwrap_or_else(|| panel.panel_name(cx).into()),
             false,
             false,
             None,
+            0,
+            false,
         ),
     };
     let closable = group.is_panel_closable(panel.panel_id(cx), cx);
@@ -333,6 +337,35 @@ fn tab(
                 .when(preview, |d| d.italic())
                 .child(name.clone()),
         )
+        .when(touched && !selected, |d| {
+            d.child(
+                div()
+                    .debug_selector(move || format!("touched-{ix}"))
+                    .flex_none()
+                    .size(px(5.))
+                    .rounded_full()
+                    .bg(p.accent),
+            )
+        })
+        .when(reviews > 0, |d| {
+            d.child(
+                div()
+                    .debug_selector(move || format!("review-badge-{ix}"))
+                    .flex_none()
+                    .min_w(px(16.))
+                    .h(px(16.))
+                    .px(px(4.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(8.))
+                    .bg(p.accent)
+                    .text_color(p.on_accent)
+                    .text_size(px(10.5))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(reviews.to_string()),
+            )
+        })
         .child(trailing)
         // The tab in front is underlined in the accent colour.
         .when(selected, |d| d.child(div().absolute().left_0().right_0().bottom_0().h(px(2.)).bg(p.accent)))
@@ -340,6 +373,14 @@ fn tab(
             let (group, editor) = (group.clone(), editor.clone());
             move |e: &ClickEvent, window, cx| {
                 group.select_tab(ix, window, cx);
+                if let Some(editor) = &editor
+                    && editor.read(cx).touched
+                {
+                    editor.update(cx, |e, cx| {
+                        e.touched = false;
+                        cx.notify();
+                    });
+                }
                 if e.click_count() >= 2
                     && let Some(editor) = &editor
                 {

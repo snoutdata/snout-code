@@ -96,6 +96,9 @@ mod shots {
         Settings(snout_app::settings_view::Page),
         /// The background tasks' popover: the engine build and a Git job running.
         Tasks,
+        /// A change Claude Code proposes, under review in its tab: part way through
+        /// typing itself in, or all in; Claude connected in the console.
+        Review(Option<f32>),
     }
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
@@ -250,6 +253,42 @@ mod shots {
                 })
                 .unwrap();
             }
+            Some(Select::Review(held)) => {
+                std::fs::create_dir_all(repo.join("src/main/java/demo")).unwrap();
+                let file = repo.join("src/main/java/demo/Greeter.java");
+                std::fs::write(&file, GREETER_V1).unwrap();
+                git(&repo, &["add", "src/main/java/demo/Greeter.java"]);
+                git(&repo, &["commit", "-qm", "Add the greeter"]);
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((0, 0))), cx)));
+                // Claude Code connected, its console showing.
+                let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+                let fake = repo.join("fake-claude");
+                let script = "#!/bin/sh\nprintf '\\033]0;Making the greeter null safe\\007'\nprintf '\\033[1;32m●\\033[0m Update(\\033[36msrc/main/java/demo/Greeter.java\\033[0m)\\n'\nprintf '  Waiting for your review in the editor\\n> '\nsleep 30\n";
+                std::fs::write(&fake, script).unwrap();
+                Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+                cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+                cx.update(|cx| cx.set_global(snout_app::claude_ide::IdeStatus { clients: 1 }));
+                cx.update_window(handle.into(), |_, window, cx| {
+                    let ws = ws.read(cx);
+                    let greeter =
+                        ws.editors(cx).into_iter().find(|e| e.read(cx).path.ends_with("Greeter.java")).unwrap();
+                    greeter.update(cx, |e, cx| {
+                        let quiet: snout_app::editor::Answer = Box::new(|_| {});
+                        e.propose("✻ [Claude Code] Greeter.java ⧉".into(), GREETER_V2.into(), quiet, window, cx);
+                        // A second change waits its turn.
+                        let quiet: snout_app::editor::Answer = Box::new(|_| {});
+                        let next = GREETER_V2.replace("Says hello.", "Says hello, politely.");
+                        e.propose("✻ [Claude Code] Greeter.java (2) ⧉".into(), next, quiet, window, cx);
+                        match held {
+                            Some(fraction) => e.hold_stream_at(fraction, window, cx),
+                            None => e.finish_stream(window, cx),
+                        }
+                    });
+                })
+                .unwrap();
+            }
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -330,5 +369,8 @@ mod shots {
         shot("settings-light", ThemeChoice::Light, Activity::Project, Some(Select::Settings(Page::Editor)));
         shot("tasks-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Tasks));
         shot("tasks-light", ThemeChoice::Light, Activity::Project, Some(Select::Tasks));
+        shot("review-streaming-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(Some(0.45))));
+        shot("review-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(None)));
+        shot("review-light", ThemeChoice::Light, Activity::Project, Some(Select::Review(None)));
     }
 }

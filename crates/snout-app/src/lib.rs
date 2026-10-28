@@ -3,6 +3,7 @@
 pub mod art;
 pub mod background;
 pub mod branch_popup;
+pub mod claude_ide;
 pub mod console;
 pub mod dialogs;
 pub mod editing;
@@ -88,6 +89,10 @@ pub fn run() {
         init(&settings, cx);
         // Language servers start in the app (tests opt in).
         cx.set_global(lang::hub::LangEnabled(true));
+        // So does the server Claude Code connects to (tests use a scratch folder).
+        if let Some(lock_dir) = claude_ide::lockfile::default_dir() {
+            cx.set_global(claude_ide::IdeConfig { lock_dir });
+        }
         // The splash covers the moment until the window can paint; it goes on its first frame.
         let splash = splash::open(cx);
         cx.spawn(async move |cx| {

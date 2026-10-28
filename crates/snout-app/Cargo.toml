@@ -46,6 +46,11 @@ grep-matcher = "0.1"
 fuzzy-matcher = "0.3"
 # Reads the earlier app's eframe storage (RON), never writes it.
 ron = "0.12"
+# Claude Code's IDE connection: a WebSocket server on 127.0.0.1, the diffs it proposes,
+# and whether the process that wrote a lock file is still alive.
+tungstenite = "0.29"
+similar.workspace = true
+libc = "0.2"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

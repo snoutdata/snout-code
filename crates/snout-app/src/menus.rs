@@ -130,6 +130,9 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Go to Symbol in Workspace…", Box::new(GoToSymbol)),
         ("Go to Symbol in File…", Box::new(GoToSymbolInFile)),
         ("Show Problems", Box::new(ShowProblems)),
+        ("Send Selection to Claude", Box::new(e::SendToClaude)),
+        ("Accept Claude's Change", Box::new(e::AcceptChanges)),
+        ("Reject Claude's Change", Box::new(e::RejectChanges)),
         ("Undo", Box::new(Undo)),
         ("Redo", Box::new(Redo)),
         ("Zoom In", Box::new(ZoomIn)),
@@ -228,6 +231,12 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", crate::search::SearchUp, Some("SearchBox > Input")),
         KeyBinding::new("down", crate::search::SearchDown, Some("SearchBox > Input")),
         KeyBinding::new("escape", crate::search::SearchClose, Some("SearchBox > Input")),
+        // A change Claude Code proposes: ⌘↩ accepts it, Esc (once the editor has nothing
+        // of its own to dismiss) rejects it.
+        KeyBinding::new("cmd-enter", crate::editor::AcceptChanges, Some("ClaudeReview")),
+        KeyBinding::new("cmd-enter", crate::editor::AcceptChanges, Some("ClaudeReview > Input")),
+        KeyBinding::new("escape", crate::editor::RejectChanges, Some("ClaudeReview")),
+        KeyBinding::new("cmd-alt-k", crate::editor::SendToClaude, Some("EditorPanel")),
     ]);
 }
 
@@ -329,6 +338,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
             MenuItem::action("Go to Symbol in Workspace…", GoToSymbol),
             MenuItem::action("Go to Symbol in File…", GoToSymbolInFile),
             MenuItem::action("Show Problems", ShowProblems),
+            MenuItem::separator(),
+            MenuItem::action("Send Selection to Claude", crate::editor::SendToClaude),
         ]),
         Menu::new("Repository").items([
             MenuItem::action("Pull", Pull),
