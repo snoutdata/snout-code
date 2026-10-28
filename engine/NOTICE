@@ -1,0 +1,26 @@
+snout-engine
+Copyright (c) 2026 SNOUTDATA INC
+
+This product includes software adapted from IntelliJ IDEA Community Edition
+(https://github.com/JetBrains/intellij-community), Copyright 2000-2026 JetBrains s.r.o. and
+contributors, licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+The adapted files keep their JetBrains copyright headers and state what was changed. They come
+from plugins/gradle/tooling-extension-impl and plugins/gradle/tooling-extension-api:
+
+  sync-plugin/src/main/java/com/snoutcode/engine/sync/SnoutSyncPlugin.java
+      from .../tooling/internal/init/JetGradlePlugin.gradle
+  sync-plugin/src/main/java/com/snoutcode/engine/sync/ClasspathResolver.java
+      from .../impl/model/dependencyModel/GradleDependencyResolver.java and
+           .../impl/model/dependencyModel/auxiliary/LegacyAuxiliaryArtifactResolver.java
+  sync-plugin/src/main/java/com/snoutcode/engine/sync/SourceSetReader.java
+      from .../impl/model/sourceSetModel/GradleSourceSetModelBuilder.java,
+           .../tooling/builder/AnnotationProcessingModelBuilder.java and
+           .../impl/util/javaPluginUtil/*
+  sync-plugin/src/main/java/com/snoutcode/engine/sync/TestTaskReader.java
+      from .../tooling/builder/ExternalTestsModelBuilderImpl.kt
+  sync-plugin/src/main/java/com/snoutcode/engine/sync/Reflect.java
+      from .../toolingExtension/util/GradleReflectionUtil.java
+
+The rest of snout-engine is licensed under the MIT License; see LICENSE at the repository root.

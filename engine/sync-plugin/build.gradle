@@ -1,0 +1,29 @@
+// Model builders injected into the user's Gradle build through an init script.
+//
+// This jar runs inside whatever Gradle daemon the user's build uses, so it targets Java 8
+// bytecode and touches newer Gradle APIs only through reflection or guarded helper classes.
+// The BuildAction lives here too: the Tooling API ships it into the daemon.
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    compileOnly gradleApi()
+    compileOnly "org.gradle:gradle-tooling-api:${rootProject.toolingApiVersion}"
+
+    testImplementation gradleApi()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 8
+}
+
+tasks.named('test') {
+    // ProjectBuilder defines classes in Gradle's class loader, which JDK 17 only allows when opened.
+    jvmArgs '--add-opens', 'java.base/java.lang=ALL-UNNAMED'
+}
+
+jar {
+    archiveBaseName = 'snout-sync-plugin'
+}
