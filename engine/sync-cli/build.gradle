@@ -88,6 +88,9 @@ def jlinkRuntime = tasks.register('jlinkRuntime') {
         if (jlink.waitFor() != 0) {
             throw new GradleException("jlink failed:\n${output}")
         }
+        // jlink writes some files read only (the legal notices), which a later sync of
+        // the distribution could not replace.
+        out.eachFileRecurse { it.setWritable(true, true) }
     }
 }
 
@@ -100,8 +103,6 @@ tasks.register('snoutDist', Sync) {
     }
     from(jlinkRuntime) {
         into 'runtime'
-        // jlink writes the legal notices read only, which a later sync could not replace.
-        eachFile { it.permissions { user { write = true } } }
     }
     into rootProject.layout.buildDirectory.dir('dist')
     doLast {
