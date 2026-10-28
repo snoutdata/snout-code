@@ -14,10 +14,10 @@ use snout_core::art::Glyph;
 use crate::art::glyph;
 use crate::theme::{Palette, mix, palette};
 
-/// The egui app's proportional and monospace typefaces.
-pub const FONT: &str = "Ubuntu";
+/// The interface's typeface (Inter, bundled) and the editor's (Hack).
+pub const FONT: &str = "Inter";
 pub const MONO: &str = "Hack";
-/// egui's text sizes: body and buttons, monospace, small.
+/// Text sizes: body and buttons, monospace, small.
 pub const BODY: f32 = 13.0;
 pub const MONO_SIZE: f32 = 13.0;
 pub const SMALL: f32 = 9.0;

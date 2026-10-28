@@ -29,7 +29,7 @@ gpui-base = { version = "=0.8.1", default-features = false }
 gpui-platform.workspace = true
 # GPUI Kit's icons (Lucide) and other assets.
 gpui-kit-assets = "=0.8.1"
-# The egui app's own typefaces (Ubuntu Light and Hack), so the Git view reads the same.
+# Hack, the editor's typeface (the egui app's monospace one).
 epaint_default_fonts = "=0.37.0"
 # Grammars GPUI Kit does not carry: Groovy (Gradle scripts) and Java properties files. The
 # tree-sitter version is the one GPUI Kit's highlighter links.

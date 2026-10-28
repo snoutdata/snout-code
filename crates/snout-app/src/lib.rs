@@ -34,11 +34,20 @@ use gpui::{App, AppContext as _, Bounds, Entity, WindowBounds, WindowOptions, px
 use crate::model::Model;
 use crate::settings::{Settings, Store};
 
+/// The typefaces the app carries: Inter for the interface (SIL Open Font License 1.1, see
+/// `assets/fonts/inter/OFL.txt`) and Hack for code.
+const FONTS: [&[u8]; 5] = [
+    include_bytes!("../assets/fonts/inter/Inter-Regular.ttf"),
+    include_bytes!("../assets/fonts/inter/Inter-Medium.ttf"),
+    include_bytes!("../assets/fonts/inter/Inter-SemiBold.ttf"),
+    include_bytes!("../assets/fonts/inter/Inter-Italic.ttf"),
+    epaint_default_fonts::HACK_REGULAR,
+];
+
 /// Everything the app needs before its first window: the Kit, theme, keys, menus.
 pub fn init(settings: &Settings, cx: &mut App) {
     gpui_component::init(cx);
-    let fonts = [epaint_default_fonts::UBUNTU_LIGHT, epaint_default_fonts::HACK_REGULAR];
-    if let Err(e) = cx.text_system().add_fonts(fonts.map(std::borrow::Cow::Borrowed).to_vec()) {
+    if let Err(e) = cx.text_system().add_fonts(FONTS.map(std::borrow::Cow::Borrowed).to_vec()) {
         eprintln!("Could not load the fonts: {e}");
     }
     theme::apply(settings.theme, None, cx);

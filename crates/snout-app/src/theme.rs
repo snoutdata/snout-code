@@ -1,5 +1,6 @@
-//! The look: the SnoutData palettes (Studio's Gold for dark, the website's warm neutrals for
-//! light), carried over from the egui app and laid onto GPUI Kit's theme.
+//! The look, in one place: a neutral dark palette (near black greys, one blue accent,
+//! hairline separators) and its light twin, the type, and the editor's syntax colours, laid
+//! onto GPUI Kit's theme. Every view takes its colours from [`palette`].
 
 use gpui::{App, Global, Hsla, Rgba, Window, WindowAppearance};
 use gpui_component::{Theme, ThemeMode};
@@ -71,42 +72,44 @@ struct Base {
     error: u32,
 }
 
-const GOLD: Base = Base {
-    ground: 0x050403,
-    panel: 0x0d0c0b,
-    card: 0x191714,
-    input: 0x1b1917,
-    stripe: 0x12110f,
-    button: 0x1e1b18,
-    button_hover: 0x2a2622,
-    active: 0x2a2419,
-    border: 0x262320,
-    fg: 0xe9e4dc,
-    fg_dim: 0x8f887e,
-    accent: 0xe0b256,
-    on_accent: 0x1a1408,
-    ok: 0x6fd08c,
-    warn: 0xe0b34a,
-    error: 0xf0705c,
+/// Dark: the chrome (title bar, stripes, tool windows) a step lighter than the editor.
+const DARK: Base = Base {
+    ground: 0x2a2c30,
+    panel: 0x1f2023,
+    card: 0x2d2f34,
+    input: 0x1f2023,
+    stripe: 0x25272b,
+    button: 0x35373c,
+    button_hover: 0x3a3d43,
+    active: 0x2b3f63,
+    border: 0x393b41,
+    fg: 0xdcdfe4,
+    fg_dim: 0x8b8f97,
+    accent: 0x3b78e7,
+    on_accent: 0xffffff,
+    ok: 0x5cb46a,
+    warn: 0xdba43f,
+    error: 0xe0605a,
 };
 
+/// Light: white editor, a pale grey chrome.
 const LIGHT: Base = Base {
-    ground: 0xeae9e1,
-    panel: 0xf7f7f4,
+    ground: 0xf3f4f6,
+    panel: 0xffffff,
     card: 0xffffff,
     input: 0xffffff,
-    stripe: 0xf0efe9,
-    button: 0xecebe4,
-    button_hover: 0xe3e1d8,
-    active: 0xe9e7de,
-    border: 0xe5e3da,
-    fg: 0x26251e,
-    fg_dim: 0x76756d,
-    accent: 0x26251e,
-    on_accent: 0xf7f7f4,
-    ok: 0x18794e,
-    warn: 0xb06d0a,
-    error: 0xc0392b,
+    stripe: 0xf6f7f9,
+    button: 0xeceef1,
+    button_hover: 0xe3e5e9,
+    active: 0xd6e2fa,
+    border: 0xdcdee3,
+    fg: 0x1e1f23,
+    fg_dim: 0x676b74,
+    accent: 0x3266d4,
+    on_accent: 0xffffff,
+    ok: 0x2d8a42,
+    warn: 0xa66b00,
+    error: 0xcc3a32,
 };
 
 impl Palette {
@@ -141,8 +144,8 @@ impl Palette {
         }
     }
 
-    pub fn gold() -> Self {
-        Self::derive(&GOLD, true)
+    pub fn dark() -> Self {
+        Self::derive(&DARK, true)
     }
 
     pub fn light() -> Self {
@@ -186,7 +189,7 @@ pub struct Current(pub Palette);
 impl Global for Current {}
 
 pub fn palette(cx: &App) -> Palette {
-    cx.try_global::<Current>().map_or_else(Palette::gold, |c| c.0)
+    cx.try_global::<Current>().map_or_else(Palette::dark, |c| c.0)
 }
 
 /// Whether `choice` means dark right now.
@@ -201,7 +204,7 @@ pub fn is_dark(choice: ThemeChoice, cx: &App) -> bool {
 /// Follow `choice`: pick the palette and lay it onto GPUI Kit's theme.
 pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
     let dark = is_dark(choice, cx);
-    let p = if dark { Palette::gold() } else { Palette::light() };
+    let p = if dark { Palette::dark() } else { Palette::light() };
     cx.set_global(Current(p));
     Theme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, window, cx);
     Theme::update(cx, |t| {
@@ -241,7 +244,7 @@ pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
         t.table_active = p.selection();
         t.table_head = p.panel;
         t.tab = p.ground;
-        t.tab_active = p.panel;
+        t.tab_active = p.ground;
         t.tab_active_foreground = p.fg;
         t.tab_bar = p.ground;
         t.tab_foreground = p.fg_dim;
@@ -252,17 +255,19 @@ pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
         t.title_bar_border = p.border;
         t.status_bar = p.ground;
         t.status_bar_border = p.border;
-        t.link = if dark { p.accent } else { p.fg };
+        t.link = p.accent;
         t.window_border = p.border;
-        t.font_size = gpui::px(14.);
-        t.radius = gpui::px(6.);
-        t.radius_lg = gpui::px(12.);
+        t.font_family = crate::look::FONT.into();
+        t.mono_font_family = crate::look::MONO.into();
+        t.font_size = gpui::px(crate::look::BODY);
+        t.radius = gpui::px(5.);
+        t.radius_lg = gpui::px(8.);
         t.highlight_theme = std::sync::Arc::new(syntax(&p));
     });
 }
 
-/// The editor's colours: the syntax in the palette's own tones (gold keywords, the
-/// drawings' green for strings, clay for numbers), and its gutter and current line.
+/// The editor's colours: the syntax in muted tones that sit on the neutral greys, and its
+/// gutter and current line.
 pub fn syntax(p: &Palette) -> gpui_component::highlighter::HighlightTheme {
     let hex = |c: Hsla| {
         let c: Rgba = c.into();
@@ -318,7 +323,7 @@ pub fn syntax(p: &Palette) -> gpui_component::highlighter::HighlightTheme {
     });
     style_json["syntax"] = syntax;
     let json = serde_json::json!({
-        "name": if p.dark { "SnoutCode Gold" } else { "SnoutCode Light" },
+        "name": if p.dark { "SnoutCode Dark" } else { "SnoutCode Light" },
         "appearance": if p.dark { "dark" } else { "light" },
         "style": style_json,
     });
@@ -342,28 +347,28 @@ pub struct SyntaxColors {
 pub fn syntax_colors(p: &Palette) -> SyntaxColors {
     if p.dark {
         SyntaxColors {
-            keyword: p.accent,
-            ty: hex(0x8fb3e0),
-            function: hex(0xf0d9a6),
-            string: hex(0x9fcf8f),
-            number: hex(0xe39a78),
-            comment: hex(0x7c756b),
-            attribute: hex(0xc2a6e0),
-            property: hex(0xd9cfc1),
-            punctuation: mix(p.fg, 0.7, p.panel),
+            keyword: hex(0xd29b74),
+            ty: hex(0xc9cdd4),
+            function: hex(0x62aaee),
+            string: hex(0x78b383),
+            number: hex(0x44b0bd),
+            comment: hex(0x7c8089),
+            attribute: hex(0xbcb46e),
+            property: hex(0xc58bc0),
+            punctuation: mix(p.fg, 0.75, p.panel),
             gutter: mix(p.fg, 0.32, p.panel),
         }
     } else {
         SyntaxColors {
-            keyword: hex(0x8a5a00),
-            ty: hex(0x2f62a0),
-            function: hex(0x6b4a12),
-            string: hex(0x2c7a3e),
-            number: hex(0xb3501d),
-            comment: hex(0x8d8a80),
-            attribute: hex(0x7a4fae),
-            property: hex(0x4a473d),
-            punctuation: mix(p.fg, 0.7, p.panel),
+            keyword: hex(0x1d3fa6),
+            ty: hex(0x23252b),
+            function: hex(0x0d6680),
+            string: hex(0x247a35),
+            number: hex(0x2556d8),
+            comment: hex(0x8a8d93),
+            attribute: hex(0x8f7d12),
+            property: hex(0x7d2391),
+            punctuation: mix(p.fg, 0.75, p.panel),
             gutter: mix(p.fg, 0.38, p.panel),
         }
     }

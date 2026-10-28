@@ -142,7 +142,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Unified Diff", Box::new(Unified)),
         ("Compact Diff", Box::new(Compact)),
         ("Theme: Match the System", Box::new(ThemeSystem)),
-        ("Theme: Gold (Dark)", Box::new(ThemeDark)),
+        ("Theme: Dark", Box::new(ThemeDark)),
         ("Theme: Light", Box::new(ThemeLight)),
         ("Open on GitHub", Box::new(Github)),
         ("Reveal in Finder", Box::new(Reveal)),
