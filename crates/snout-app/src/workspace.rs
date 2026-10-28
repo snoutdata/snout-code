@@ -183,6 +183,15 @@ impl Workspace {
         cx.notify();
     }
 
+    /// ↑ ↓ in the commit view; elsewhere, and in a terminal, the keys go on as usual.
+    fn step_commit(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if in_terminal(window) || self.model.read(cx).commit_view.is_none() {
+            cx.propagate();
+            return;
+        }
+        self.model.update(cx, |m, cx| m.step_commit(up, cx));
+    }
+
     fn send(&mut self, action: Action, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| m.handle(action, cx));
     }
@@ -428,11 +437,15 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &gpui_component::input::SelectAll, _, cx| {
                 this.model.update(cx, |m, cx| m.select_all_files(cx))
             }))
-            .on_action(cx.listener(|this, _: &Back, _, cx| {
-                if this.model.read(cx).commit_view.is_some() {
+            .on_action(cx.listener(|this, _: &Back, w, cx| {
+                if in_terminal(w) || this.model.read(cx).commit_view.is_none() {
+                    cx.propagate();
+                } else {
                     this.send(Action::CloseCommit, cx);
                 }
-            }));
+            }))
+            .on_action(cx.listener(|this, _: &PrevCommit, w, cx| this.step_commit(true, w, cx)))
+            .on_action(cx.listener(|this, _: &NextCommit, w, cx| this.step_commit(false, w, cx)));
         let root = act!(root, Open, free, |_| Action::PickFolder);
         let root = act!(root, FindRepos, free, |_| Action::PickScanFolder);
         let root = act!(root, CloneRepo, free, |_| Action::ShowClone);
@@ -469,6 +482,11 @@ impl Render for Workspace {
             )
             .child(self.status_bar(cx))
     }
+}
+
+/// Whether a terminal has the keyboard: then Esc and the arrows are its own.
+fn in_terminal(window: &Window) -> bool {
+    window.context_stack().iter().any(|c| c.contains("Terminal"))
 }
 
 /// Actions every window answers, whatever has focus.

@@ -451,6 +451,23 @@ impl Model {
         cx.notify();
     }
 
+    /// In the commit view, step to the commit above (`up`) or below in the Journal as it is
+    /// filtered; with the shown commit filtered out, start at the top.
+    pub fn step_commit(&mut self, up: bool, cx: &mut Context<Self>) {
+        let Some(view) = &self.commit_view else { return };
+        let visible = self.journal_rows();
+        let at = visible.iter().position(|&i| Some(self.log[i].id.as_str()) == view.id());
+        let next = match at {
+            Some(at) if up => at.checked_sub(1),
+            Some(at) => Some(at + 1),
+            None => Some(0),
+        };
+        if let Some(&i) = next.and_then(|n| visible.get(n)) {
+            let id = self.log[i].id.clone();
+            self.handle(Action::ShowCommit(id), cx);
+        }
+    }
+
     pub fn select_commit_file(&mut self, path: String, cx: &mut Context<Self>) {
         if let Some(view) = &mut self.commit_view {
             view.selected = Some(path);

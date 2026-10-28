@@ -402,6 +402,15 @@ fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert_eq!(model.read(cx).selected.len(), 3, "⌘A selects every listed file"));
     let first = cx.update(|_, cx| model.read(cx).log[1].id.clone());
     act(&model, cx, Action::ShowCommit(first));
+    cx.simulate_keystrokes("up");
+    let top = cx.update(|_, cx| model.read(cx).log[0].id.clone());
+    cx.update(|_, cx| assert_eq!(model.read(cx).commit_view.as_ref().unwrap().id(), Some(top.as_str()), "↑ steps up"));
+    cx.simulate_keystrokes("up");
+    cx.update(|_, cx| assert_eq!(model.read(cx).commit_view.as_ref().unwrap().id(), Some(top.as_str()), "and stops"));
+    cx.simulate_keystrokes("down");
+    cx.update(|_, cx| {
+        assert_ne!(model.read(cx).commit_view.as_ref().unwrap().id(), Some(top.as_str()), "↓ steps down")
+    });
     cx.simulate_keystrokes("escape");
     cx.update(|_, cx| assert!(model.read(cx).commit_view.is_none(), "Esc leaves the commit view"));
     cx.simulate_keystrokes("cmd-backspace");
