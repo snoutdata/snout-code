@@ -2,10 +2,10 @@
 //! start.spring.io or (without the network) from a template of our own. No drawing; every
 //! function here is blocking and runs off the main thread.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
 use anyhow::{Context as _, bail};
+use snout_host::{Cmd, Host};
 
 /// The Gradle a Java project's wrapper runs: the one the engine builds with, so it is
 /// usually on this Mac already and a new project syncs without downloading Gradle.
@@ -61,8 +61,19 @@ pub struct Boot {
     pub dependencies: Vec<String>,
 }
 
-/// Why `b` cannot make a project in `dir`, if it cannot: the first problem, in words.
-pub fn problem(b: &Basics, location: &Path) -> Option<String> {
+/// Whether `dir` on `host` is there and holds anything (or cannot be read).
+pub fn occupied(host: &dyn Host, dir: &Path) -> bool {
+    host.exists(dir) && host.read_dir(dir).map(|d| !d.is_empty()).unwrap_or(true)
+}
+
+/// The words for a project folder that [`occupied`] says is taken.
+pub fn occupied_problem(dir: &Path) -> String {
+    format!("{} already exists and is not empty.", dir.display())
+}
+
+/// Why `b` cannot make a project in `location`, if it cannot: the first problem, in words.
+/// `occupied` says whether the project's folder there is taken, when that is known.
+pub fn problem(b: &Basics, location: &Path, occupied: Option<bool>) -> Option<String> {
     let name = b.name.trim();
     if name.is_empty() {
         return Some("Give the project a name.".into());
@@ -73,9 +84,8 @@ pub fn problem(b: &Basics, location: &Path) -> Option<String> {
     if location.as_os_str().is_empty() || !location.is_absolute() {
         return Some("Choose where the project goes.".into());
     }
-    let dir = location.join(name);
-    if dir.exists() && std::fs::read_dir(&dir).map(|mut d| d.next().is_some()).unwrap_or(true) {
-        return Some(format!("{} already exists and is not empty.", dir.display()));
+    if occupied == Some(true) {
+        return Some(occupied_problem(&location.join(name)));
     }
     if !is_dotted(&b.group, false) {
         return Some("The group is a dotted name, such as com.example.".into());
@@ -127,17 +137,22 @@ pub fn class_stem(name: &str) -> String {
     if stem.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) { stem } else { format!("App{stem}") }
 }
 
-fn write(dir: &Path, rel: &str, text: &str) -> anyhow::Result<()> {
+fn write(host: &dyn Host, dir: &Path, rel: &str, text: &str) -> anyhow::Result<()> {
+    write_bytes(host, dir, rel, text.as_bytes(), None)
+}
+
+fn write_bytes(host: &dyn Host, dir: &Path, rel: &str, bytes: &[u8], mode: Option<u32>) -> anyhow::Result<()> {
     let path = dir.join(rel);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        host.create_dir_all(parent)?;
     }
-    std::fs::write(&path, text).with_context(|| format!("write {}", path.display()))
+    host.write_mode(&path, bytes, mode).with_context(|| format!("write {}", path.display()))
 }
 
 /// The Gradle wrapper, so the project builds with `./gradlew` and a known Gradle.
-fn write_wrapper(dir: &Path, version: &str) -> anyhow::Result<()> {
+fn write_wrapper(host: &dyn Host, dir: &Path, version: &str) -> anyhow::Result<()> {
     write(
+        host,
         dir,
         "gradle/wrapper/gradle-wrapper.properties",
         &format!(
@@ -146,14 +161,9 @@ fn write_wrapper(dir: &Path, version: &str) -> anyhow::Result<()> {
              networkTimeout=10000\nvalidateDistributionUrl=true\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n"
         ),
     )?;
-    std::fs::write(dir.join("gradle/wrapper/gradle-wrapper.jar"), WRAPPER_JAR)?;
-    write(dir, "gradlew", GRADLEW)?;
-    write(dir, "gradlew.bat", GRADLEW_BAT)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(dir.join("gradlew"), std::fs::Permissions::from_mode(0o755))?;
-    }
+    write_bytes(host, dir, "gradle/wrapper/gradle-wrapper.jar", WRAPPER_JAR, None)?;
+    write_bytes(host, dir, "gradlew", GRADLEW.as_bytes(), Some(0o755))?;
+    write(host, dir, "gradlew.bat", GRADLEW_BAT)?;
     Ok(())
 }
 
@@ -161,8 +171,8 @@ const GITIGNORE: &str = ".gradle/\nbuild/\n!gradle/wrapper/gradle-wrapper.jar\no
 
 /// A plain Java application built by Gradle, in `dir` (made if missing): the wrapper, the
 /// build and settings scripts, a main class and a JUnit test for it.
-pub fn write_java(dir: &Path, b: &Basics) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dir)?;
+pub fn write_java(host: &dyn Host, dir: &Path, b: &Basics) -> anyhow::Result<()> {
+    host.create_dir_all(dir)?;
     let main = format!("{}.Main", b.package);
     let (settings, build) = match b.dsl {
         Dsl::Kotlin => (
@@ -206,11 +216,12 @@ pub fn write_java(dir: &Path, b: &Basics) -> anyhow::Result<()> {
             ),
         ),
     };
-    write(dir, b.dsl.settings_file(), &settings)?;
-    write(dir, b.dsl.build_file(), &build)?;
+    write(host, dir, b.dsl.settings_file(), &settings)?;
+    write(host, dir, b.dsl.build_file(), &build)?;
     let pkg_dir = b.package.replace('.', "/");
     let pkg = &b.package;
     write(
+        host,
         dir,
         &format!("src/main/java/{pkg_dir}/Main.java"),
         &format!(
@@ -221,6 +232,7 @@ pub fn write_java(dir: &Path, b: &Basics) -> anyhow::Result<()> {
         ),
     )?;
     write(
+        host,
         dir,
         &format!("src/test/java/{pkg_dir}/MainTest.java"),
         &format!(
@@ -230,9 +242,9 @@ pub fn write_java(dir: &Path, b: &Basics) -> anyhow::Result<()> {
              assertEquals(\"Hello from you!\", Main.greeting(\"you\"));\n    }}\n}}\n"
         ),
     )?;
-    std::fs::create_dir_all(dir.join("src/main/resources"))?;
-    write(dir, ".gitignore", GITIGNORE)?;
-    write_wrapper(dir, GRADLE_VERSION)
+    host.create_dir_all(&dir.join("src/main/resources"))?;
+    write(host, dir, ".gitignore", GITIGNORE)?;
+    write_wrapper(host, dir, GRADLE_VERSION)
 }
 
 /// A dependency the offline Spring Boot template knows: its Initializr id and what it adds.
@@ -370,8 +382,8 @@ pub const KNOWN: &[KnownDependency] = &[
 /// A Spring Boot application made here, for when start.spring.io cannot be reached: the
 /// template start.spring.io itself makes, with the dependencies of [`KNOWN`] among those
 /// chosen (the others are left out). Gradle downloads Spring Boot once it has the network.
-pub fn write_boot_offline(dir: &Path, b: &Basics, boot: &Boot) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dir)?;
+pub fn write_boot_offline(host: &dyn Host, dir: &Path, b: &Basics, boot: &Boot) -> anyhow::Result<()> {
+    host.create_dir_all(dir)?;
     let kotlin = b.dsl == Dsl::Kotlin;
     let dep = |conf: &str, coords: &str| {
         if kotlin { format!("    {conf}(\"{coords}\")\n") } else { format!("    {conf} '{coords}'\n") }
@@ -430,12 +442,13 @@ pub fn write_boot_offline(dir: &Path, b: &Basics, boot: &Boot) -> anyhow::Result
             ),
         )
     };
-    write(dir, b.dsl.settings_file(), &settings)?;
-    write(dir, b.dsl.build_file(), &build)?;
+    write(host, dir, b.dsl.settings_file(), &settings)?;
+    write(host, dir, b.dsl.build_file(), &build)?;
     let pkg_dir = b.package.replace('.', "/");
     let pkg = &b.package;
     let app = format!("{}Application", class_stem(&b.name));
     write(
+        host,
         dir,
         &format!("src/main/java/{pkg_dir}/{app}.java"),
         &format!(
@@ -446,6 +459,7 @@ pub fn write_boot_offline(dir: &Path, b: &Basics, boot: &Boot) -> anyhow::Result
         ),
     )?;
     write(
+        host,
         dir,
         &format!("src/test/java/{pkg_dir}/{app}Tests.java"),
         &format!(
@@ -454,13 +468,13 @@ pub fn write_boot_offline(dir: &Path, b: &Basics, boot: &Boot) -> anyhow::Result
              @SpringBootTest\nclass {app}Tests {{\n\n    @Test\n    void contextLoads() {{\n    }}\n\n}}\n"
         ),
     )?;
-    write(dir, "src/main/resources/application.properties", &format!("spring.application.name={}\n", b.name))?;
+    write(host, dir, "src/main/resources/application.properties", &format!("spring.application.name={}\n", b.name))?;
     if web {
-        std::fs::create_dir_all(dir.join("src/main/resources/static"))?;
-        std::fs::create_dir_all(dir.join("src/main/resources/templates"))?;
+        host.create_dir_all(&dir.join("src/main/resources/static"))?;
+        host.create_dir_all(&dir.join("src/main/resources/templates"))?;
     }
-    write(dir, ".gitignore", GITIGNORE)?;
-    write_wrapper(dir, BOOT_GRADLE_VERSION)
+    write(host, dir, ".gitignore", GITIGNORE)?;
+    write_wrapper(host, dir, BOOT_GRADLE_VERSION)
 }
 
 /// The address of start.spring.io's zip for `b` and `boot`.
@@ -499,49 +513,52 @@ fn encode(s: &str) -> String {
 
 /// Download the project for `b` and `boot` from start.spring.io into `dir` (which must not
 /// exist or be empty). Fails with the reason, in words.
-pub fn download_boot(base: &str, dir: &Path, b: &Basics, boot: &Boot) -> anyhow::Result<()> {
+pub fn download_boot(host: &dyn Host, base: &str, dir: &Path, b: &Basics, boot: &Boot) -> anyhow::Result<()> {
     let parent = dir.parent().context("no folder above the project")?;
-    std::fs::create_dir_all(parent)?;
+    host.create_dir_all(parent)?;
     let stage = parent.join(format!(".{}.new-project", b.name));
-    let _ = std::fs::remove_dir_all(&stage);
-    std::fs::create_dir_all(&stage)?;
+    let _ = host.remove_dir_all(&stage);
+    host.create_dir_all(&stage)?;
     let result = (|| {
         let zip = stage.join("starter.zip");
         let url = starter_url(base, b, boot);
-        let out = Command::new("curl")
-            .args(["-fsSL", "--max-time", "60", "--connect-timeout", "10", "-o"])
-            .arg(&zip)
-            .arg(&url)
-            .output()
-            .context("run curl")?;
+        let curl =
+            Cmd::new("curl").args(["-fsSL", "--max-time", "60", "--connect-timeout", "10", "-o"]).arg(&zip).arg(&url);
+        let out = host.run(&curl, None).context("run curl")?;
         if !out.status.success() {
             let why = String::from_utf8_lossy(&out.stderr).trim().trim_start_matches("curl: ").to_owned();
             bail!("start.spring.io could not make the project ({why})");
         }
         let unpacked = stage.join("unpacked");
-        let ok = Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(&unpacked).status()?.success();
+        let unzip = if host.info().is_mac() {
+            Cmd::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(&unpacked)
+        } else {
+            Cmd::new("unzip").arg("-q").arg(&zip).arg("-d").arg(&unpacked)
+        };
+        let ok = host.run(&unzip, None)?.status.success();
         if !ok {
             bail!("the project from start.spring.io could not be unpacked");
         }
         // The zip holds one folder (baseDir); its contents are the project.
-        let top = std::fs::read_dir(&unpacked)?.flatten().map(|e| e.path()).collect::<Vec<PathBuf>>();
+        let top = host.read_dir(&unpacked)?;
         let from = match top.as_slice() {
-            [one] if one.is_dir() => one.clone(),
+            [one] if one.is_dir => one.path.clone(),
             _ => unpacked.clone(),
         };
-        if dir.exists() {
-            std::fs::remove_dir(dir).context("the project folder is not empty")?;
+        if host.exists(dir) {
+            host.remove_dir(dir).context("the project folder is not empty")?;
         }
-        std::fs::rename(&from, dir).context("move the project into place")?;
+        host.rename(&from, dir).context("move the project into place")?;
         Ok(())
     })();
-    let _ = std::fs::remove_dir_all(&stage);
+    let _ = host.remove_dir_all(&stage);
     result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn basics(dsl: Dsl) -> Basics {
         Basics {
@@ -563,16 +580,18 @@ mod tests {
         std::fs::create_dir_all(dir.join("taken")).unwrap();
         std::fs::write(dir.join("taken/x"), "").unwrap();
         let mut b = basics(Dsl::Kotlin);
-        assert_eq!(problem(&b, &dir), None);
+        let host = snout_host::local();
+        let occupied = |b: &Basics| Some(occupied(&*host, &dir.join(&b.name)));
+        assert_eq!(problem(&b, &dir, occupied(&b)), None);
         b.name = "taken".into();
-        assert!(problem(&b, &dir).unwrap().contains("not empty"));
+        assert!(problem(&b, &dir, occupied(&b)).unwrap().contains("not empty"));
         b.name = "ok".into();
         b.package = "com.example.class".into();
-        assert!(problem(&b, &dir).unwrap().contains("package"));
+        assert!(problem(&b, &dir, None).unwrap().contains("package"));
         b.package = "com.example".into();
         b.group = "com..example".into();
-        assert!(problem(&b, &dir).unwrap().contains("group"));
-        assert!(problem(&basics(Dsl::Kotlin), Path::new("relative")).is_some());
+        assert!(problem(&b, &dir, None).unwrap().contains("group"));
+        assert!(problem(&basics(Dsl::Kotlin), Path::new("relative"), None).is_some());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -581,7 +600,7 @@ mod tests {
         for dsl in [Dsl::Kotlin, Dsl::Groovy] {
             let dir = std::env::temp_dir().join(format!("snout-new-java-{dsl:?}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
-            write_java(&dir, &basics(dsl)).unwrap();
+            write_java(&*snout_host::local(), &dir, &basics(dsl)).unwrap();
             let build = std::fs::read_to_string(dir.join(dsl.build_file())).unwrap();
             assert!(build.contains("JavaLanguageVersion.of(21)"), "{build}");
             assert!(build.contains("com.example.myshop.Main"), "{build}");
@@ -602,7 +621,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("snout-new-boot-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let boot = Boot { version: "4.1.2".into(), dependencies: vec!["web".into(), "lombok".into(), "kafka".into()] };
-        write_boot_offline(&dir, &basics(Dsl::Kotlin), &boot).unwrap();
+        write_boot_offline(&*snout_host::local(), &dir, &basics(Dsl::Kotlin), &boot).unwrap();
         let build = std::fs::read_to_string(dir.join("build.gradle.kts")).unwrap();
         assert!(build.contains("id(\"org.springframework.boot\") version \"4.1.2\""), "{build}");
         assert!(build.contains("spring-boot-starter-webmvc-test\""), "{build}");
@@ -626,16 +645,23 @@ mod tests {
         let Some(out) = std::env::var_os("SNOUT_NEW_PROJECTS").map(PathBuf::from) else { return };
         let boot = Boot { version: OFFLINE_BOOT.into(), dependencies: vec!["web".into(), "lombok".into()] };
         let mut b = basics(Dsl::Kotlin);
-        write_java(&out.join("java-kotlin"), &b).unwrap();
+        write_java(&*snout_host::local(), &out.join("java-kotlin"), &b).unwrap();
         b.dsl = Dsl::Groovy;
         b.java = 8;
-        write_java(&out.join("java-groovy-8"), &b).unwrap();
+        write_java(&*snout_host::local(), &out.join("java-groovy-8"), &b).unwrap();
         b.java = 17;
-        write_boot_offline(&out.join("boot-offline"), &b, &boot).unwrap();
+        write_boot_offline(&*snout_host::local(), &out.join("boot-offline"), &b, &boot).unwrap();
         let catalog =
             crate::new_project::initializr::fetch(crate::new_project::initializr::START_SPRING_IO, None).unwrap();
         assert!(catalog.dependency("web").is_some() && !catalog.boot.is_empty(), "{catalog:?}");
         b.name = "boot-online".into();
-        download_boot(crate::new_project::initializr::START_SPRING_IO, &out.join("boot-online"), &b, &boot).unwrap();
+        download_boot(
+            &*snout_host::local(),
+            crate::new_project::initializr::START_SPRING_IO,
+            &out.join("boot-online"),
+            &b,
+            &boot,
+        )
+        .unwrap();
     }
 }

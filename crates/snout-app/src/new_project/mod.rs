@@ -6,7 +6,7 @@
 pub mod generate;
 pub mod initializr;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -83,6 +83,9 @@ pub struct NewProjectView {
     pub loading: bool,
     /// The project is being made.
     pub creating: bool,
+    /// Whether the project's folder is taken, as the host said for the folder named then.
+    occupied: Option<(PathBuf, bool)>,
+    _occupied: Option<Task<()>>,
     /// Why the last Create failed; with `offer_offline`, a Spring Boot project can be made
     /// here instead.
     pub error: Option<String>,
@@ -153,6 +156,8 @@ impl NewProjectView {
             catalog_error: None,
             loading: false,
             creating: false,
+            occupied: None,
+            _occupied: None,
             error: None,
             offer_offline: false,
             service: service.unwrap_or_else(|| initializr::START_SPRING_IO.to_owned()),
@@ -223,14 +228,40 @@ impl NewProjectView {
 
     /// The folder the project goes in.
     pub fn target(&self, cx: &App) -> PathBuf {
-        let location = PathBuf::from(expand_home(&self.text(&self.location, cx)));
+        let location = PathBuf::from(expand_home(&self.text(&self.location, cx), cx));
         location.join(self.text(&self.name, cx))
+    }
+
+    /// Ask the host, off the UI thread, whether the project's folder is taken, unless that is
+    /// known for the folder named now.
+    fn check_target(&mut self, cx: &mut Context<Self>) {
+        let target = self.target(cx);
+        if self.occupied.as_ref().is_some_and(|(t, _)| *t == target) || !target.is_absolute() {
+            return;
+        }
+        self.occupied = Some((target.clone(), false));
+        let host = crate::host::host(cx);
+        let look = cx.background_executor().spawn({
+            let target = target.clone();
+            async move { generate::occupied(&*host, &target) }
+        });
+        self._occupied = Some(cx.spawn(async move |this, cx| {
+            let taken = look.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.occupied.as_ref().is_some_and(|(t, _)| *t == target) {
+                    this.occupied = Some((target, taken));
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     /// Why Create cannot go ahead, if it cannot.
     pub fn problem(&self, cx: &App) -> Option<String> {
-        let location = PathBuf::from(expand_home(&self.text(&self.location, cx)));
-        if let Some(p) = generate::problem(&self.basics(cx), &location) {
+        let location = PathBuf::from(expand_home(&self.text(&self.location, cx), cx));
+        let target = self.target(cx);
+        let occupied = self.occupied.as_ref().filter(|(t, _)| *t == target).map(|(_, taken)| *taken);
+        if let Some(p) = generate::problem(&self.basics(cx), &location, occupied) {
             return Some(p);
         }
         if self.kind == Kind::SpringBoot && self.catalog.is_none() {
@@ -291,10 +322,13 @@ impl NewProjectView {
         let work = cx.background_spawn({
             let dir = dir.clone();
             async move {
+                if generate::occupied(&*host, &dir) {
+                    anyhow::bail!("{}", generate::occupied_problem(&dir));
+                }
                 match kind {
-                    Kind::Java => generate::write_java(&dir, &basics),
-                    Kind::SpringBoot if offline => generate::write_boot_offline(&dir, &basics, &boot),
-                    Kind::SpringBoot => generate::download_boot(&service, &dir, &basics, &boot),
+                    Kind::Java => generate::write_java(&*host, &dir, &basics),
+                    Kind::SpringBoot if offline => generate::write_boot_offline(&*host, &dir, &basics, &boot),
+                    Kind::SpringBoot => generate::download_boot(&*host, &service, &dir, &basics, &boot),
                 }?;
                 if git && snout_core::Repo::open(&host, &dir).is_err() {
                     snout_core::Repo::init(&host, &dir).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -355,10 +389,12 @@ pub struct ServiceGlobal(pub String);
 
 impl gpui::Global for ServiceGlobal {}
 
-/// `~/x` with the home folder spelled out.
-fn expand_home(s: &str) -> String {
-    match (s.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => Path::new(&home).join(rest).display().to_string(),
+/// `~/x` with the home folder (on the host) spelled out.
+fn expand_home(s: &str, cx: &App) -> String {
+    let host = crate::host::host(cx);
+    let home = &host.info().home;
+    match s.strip_prefix("~/") {
+        Some(rest) if !home.as_os_str().is_empty() => home.join(rest).display().to_string(),
         _ => s.to_owned(),
     }
 }
@@ -639,6 +675,7 @@ impl NewProjectView {
 impl Render for NewProjectView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.derive_if_changed(window, cx);
+        self.check_target(cx);
         let p = palette(cx);
         let problem = self.problem(cx);
         let can_create = problem.is_none() && !self.creating;
