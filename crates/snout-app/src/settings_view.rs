@@ -205,7 +205,7 @@ impl SettingsView {
 }
 
 /// A labelled row of a page: the label on the left, the control after it.
-fn row(label: &'static str, control: impl IntoElement, p: &Palette) -> gpui::Div {
+pub(crate) fn row(label: &'static str, control: impl IntoElement, p: &Palette) -> gpui::Div {
     div()
         .flex()
         .items_center()
@@ -215,7 +215,7 @@ fn row(label: &'static str, control: impl IntoElement, p: &Palette) -> gpui::Div
         .child(control)
 }
 
-fn section(text: &'static str, p: &Palette) -> gpui::Div {
+pub(crate) fn section(text: &'static str, p: &Palette) -> gpui::Div {
     div().pt(px(14.)).pb(px(6.)).text_color(p.fg_dim).text_size(px(12.)).font_weight(FontWeight::MEDIUM).child(text)
 }
 
@@ -259,7 +259,7 @@ fn stepper(
 }
 
 /// A drop-down of `choices` (value, label), the current one checked.
-fn choice(
+pub(crate) fn choice(
     id: &'static str,
     current: &str,
     choices: Vec<(String, String)>,

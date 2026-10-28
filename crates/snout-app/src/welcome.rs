@@ -179,7 +179,13 @@ impl Render for WelcomePanel {
                 Some(Action::PickFolder),
             ))
             .child(action("welcome-clone", Icon::Fetch, "Clone Repository…", "From a Git URL", Some(Action::ShowClone)))
-            .child(action("welcome-new", Icon::Plus, "New Project", "Coming soon", None));
+            .child(action(
+                "welcome-new",
+                Icon::Plus,
+                "New Project…",
+                "Java or Spring Boot, with Gradle",
+                Some(Action::ShowNewProject),
+            ));
 
         let rows: Vec<_> = recent
             .iter()

@@ -941,3 +941,101 @@ fn the_keymap_page_rebinds_a_command_by_its_keys(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert!(ws.read(cx).search.is_some(), "⌘K does"));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// Pump the test window until `done`, for work on the background executor.
+fn pump(cx: &mut VisualTestContext, secs: u64, mut done: impl FnMut(&mut VisualTestContext) -> bool) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while std::time::Instant::now() < deadline {
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        if done(cx) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    false
+}
+
+#[gpui::test]
+fn the_new_project_dialog_makes_java_and_spring_boot_projects_and_opens_them(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let repo = demo_repo("new-project-from");
+    let place = scratch_dir("new-project-into");
+    // start.spring.io stands in as an address nothing answers: the offline template.
+    cx.update(|cx| cx.set_global(crate::new_project::ServiceGlobal("http://127.0.0.1:9".into())));
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let click = |cx: &mut VisualTestContext, id: &str| {
+        let id: &'static str = Box::leak(id.to_owned().into_boxed_str());
+        let at = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id} is drawn")).center();
+        cx.simulate_click(at, gpui::Modifiers::none());
+        cx.run_until_parked();
+    };
+    let fill = |cx: &mut VisualTestContext, name: &str| {
+        let (name, place) = (name.to_owned(), place.display().to_string());
+        cx.update(|w, cx| {
+            let view = ws.read(cx).new_project.clone().unwrap();
+            let (n, l) = (view.read(cx).name.clone(), view.read(cx).location.clone());
+            n.update(cx, |i, cx| i.set_value(name, w, cx));
+            l.update(cx, |i, cx| i.set_value(place, w, cx));
+        });
+        cx.run_until_parked();
+    };
+
+    // A plain Java project, Groovy DSL, Java 17.
+    cx.dispatch_action(crate::menus::NewProject);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("new-project").is_some(), "File ▸ New Project… puts up the dialog");
+    fill(cx, "hello-app");
+    click(cx, "new-project-groovy");
+    cx.update(|_, cx| {
+        let view = ws.read(cx).new_project.clone().unwrap();
+        view.update(cx, |v, _| v.java = 17);
+        let b = view.read(cx).basics(cx);
+        assert_eq!((b.artifact.as_str(), b.package.as_str()), ("hello-app", "com.example.helloapp"));
+        assert_eq!(view.read(cx).problem(cx), None);
+    });
+    click(cx, "new-project-create");
+    let dir = place.join("hello-app");
+    assert!(
+        pump(cx, 30, |cx| cx.update(|_, cx| model.read(cx).project_root().as_deref() == Some(dir.as_path()))),
+        "the new project opens"
+    );
+    assert!(dir.join("build.gradle").is_file() && dir.join(".git").exists());
+    assert!(std::fs::read_to_string(dir.join("build.gradle")).unwrap().contains("JavaLanguageVersion.of(17)"));
+    assert!(dir.join("src/main/java/com/example/helloapp/Main.java").is_file());
+    cx.update(|_, cx| assert!(ws.read(cx).new_project.is_none(), "the dialog goes"));
+    // The name is taken now: the dialog says so and Create waits.
+    cx.dispatch_action(crate::menus::NewProject);
+    cx.run_until_parked();
+    fill(cx, "hello-app");
+    cx.update(|_, cx| {
+        let view = ws.read(cx).new_project.clone().unwrap();
+        assert!(view.read(cx).problem(cx).unwrap().contains("not empty"));
+    });
+
+    // Spring Boot without start.spring.io: the known dependencies, and a project made here.
+    click(cx, "new-project-kind-spring-boot");
+    assert!(
+        pump(cx, 30, |cx| cx.update(|_, cx| ws.read(cx).new_project.as_ref().unwrap().read(cx).catalog.is_some())),
+        "the dependencies come (the offline list)"
+    );
+    cx.update(|_, cx| {
+        let v = ws.read(cx).new_project.clone().unwrap();
+        assert!(v.read(cx).catalog_error.as_ref().unwrap().contains("could not be reached"));
+    });
+    fill(cx, "shop");
+    click(cx, "new-project-next");
+    click(cx, "new-project-dep-web");
+    click(cx, "new-project-dep-data-jpa");
+    click(cx, "new-project-create");
+    let shop = place.join("shop");
+    assert!(
+        pump(cx, 30, |cx| cx.update(|_, cx| model.read(cx).project_root().as_deref() == Some(shop.as_path()))),
+        "the Spring Boot project opens"
+    );
+    let build = std::fs::read_to_string(shop.join("build.gradle.kts")).unwrap();
+    assert!(build.contains("spring-boot-starter-webmvc") && build.contains("spring-boot-starter-data-jpa"), "{build}");
+    assert!(shop.join("src/main/java/com/example/shop/ShopApplication.java").is_file());
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(place);
+}

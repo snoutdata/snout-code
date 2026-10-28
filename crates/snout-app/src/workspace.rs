@@ -96,6 +96,8 @@ pub struct Workspace {
     pub welcome: Entity<WelcomePanel>,
     /// The Edit Configurations dialog, while it shows.
     pub config_dialog: Option<Entity<crate::run::config_dialog::ConfigDialog>>,
+    /// The New Project dialog, while it shows.
+    pub new_project: Option<Entity<crate::new_project::NewProjectView>>,
     /// Claude Code's connection to this window, when the app runs one.
     pub claude: Option<crate::claude_ide::bridge::Bridge>,
     /// Every panel the window made, and where it goes when a layout does not place it.
@@ -414,6 +416,7 @@ impl Workspace {
             build_window,
             welcome,
             config_dialog: None,
+            new_project: None,
             claude: None,
             panels,
             shown: root.clone(),
@@ -834,6 +837,7 @@ impl Workspace {
             ModelEvent::Message => {}
             ModelEvent::Closed => self.after_close(window, cx),
             ModelEvent::Switch(path) => self.switch_project(path.clone(), window, cx),
+            ModelEvent::NewProject => self.open_new_project(window, cx),
             ModelEvent::OpenFile(path, at, preview) => {
                 model.update(cx, |m, _| m.pending_file = None);
                 self.open_file(path.clone(), *at, *preview, window, cx)
@@ -1082,6 +1086,37 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Put up the New Project dialog. The project it makes opens.
+    pub fn open_new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::new_project::{NewProjectEvent, NewProjectView};
+        if self.new_project.is_some() {
+            return;
+        }
+        // Beside the project open last, else in the home folder.
+        let m = self.model.read(cx);
+        let location = m
+            .recent_projects()
+            .first()
+            .and_then(|p| p.parent().map(PathBuf::from))
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .unwrap_or_default();
+        let cache = m.support_dir().map(|d| d.join("start-spring-io.json"));
+        let view = cx.new(|cx| NewProjectView::new(location, cache, window, cx));
+        cx.subscribe_in(&view, window, |this, _, e: &NewProjectEvent, window, cx| {
+            this.new_project = None;
+            window.focus(&this.focus, cx);
+            if let NewProjectEvent::Created(dir) = e {
+                this.send(Action::OpenPath(dir.clone()), cx);
+            }
+            cx.notify();
+        })
+        .detach();
+        let name = view.read(cx).name.clone();
+        cx.defer_in(window, move |_, window, cx| name.update(cx, |i, cx| i.focus(window, cx)));
+        self.new_project = Some(view);
+        cx.notify();
+    }
+
     /// Put `next` in place, save it, and make the window follow it.
     pub fn apply_settings(&mut self, next: crate::settings::Settings, window: &mut Window, cx: &mut Context<Self>) {
         let before = self.model.read(cx).settings.clone();
@@ -1267,6 +1302,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
+            .on_action(cx.listener(|this, _: &NewProject, w, cx| this.open_new_project(w, cx)))
             .on_action(cx.listener(|this, a: &HideToolWindow, w, cx| {
                 let place = if a.0 { DockPlacement::Right } else { DockPlacement::Bottom };
                 this.hide_dock(place, w, cx)
@@ -1435,6 +1471,18 @@ impl Render for Workspace {
                     .bg(gpui::black().opacity(0.4))
                     .occlude()
                     .child(sheet)
+            }))
+            .children(self.new_project.clone().map(|dialog| {
+                div()
+                    .id("new-project-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui::black().opacity(0.4))
+                    .occlude()
+                    .child(dialog)
             }))
             .children(self.config_dialog.clone().map(|dialog| {
                 div()

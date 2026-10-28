@@ -83,6 +83,7 @@ actions!(
         RefreshSpring,
         CollapseSpring,
         ShowSpring,
+        NewProject,
     ]
 );
 
@@ -114,6 +115,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
     use crate::editor as e;
     use gpui_component::input as i;
     vec![
+        ("New Project…", Box::new(NewProject)),
         ("Open Project…", Box::new(Open)),
         ("Close Project", Box::new(CloseProject)),
         ("Clear Recent Projects", Box::new(ClearRecent)),
@@ -224,6 +226,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
             MenuItem::action("Quit SnoutCode", Quit),
         ]),
         Menu::new("File").items([
+            MenuItem::action("New Project…", NewProject),
             MenuItem::action("Open Project…", Open),
             MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent))),
             MenuItem::action("Close Project", CloseProject),

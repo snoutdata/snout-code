@@ -172,6 +172,8 @@ pub enum Action {
     CloseRepo,
     /// Empty the recent projects list.
     ClearRecent,
+    /// Put up the New Project dialog.
+    ShowNewProject,
 }
 
 /// What the workspace should do in response to the model.
@@ -191,6 +193,8 @@ pub enum ModelEvent {
     OpenFile(PathBuf, Option<(u32, u32)>, bool),
     /// The project was closed.
     Closed,
+    /// Put up the New Project dialog.
+    NewProject,
     /// Another project is to open in place of the one open: the workspace settles the
     /// open tabs first, then calls [`Model::switch_project`].
     Switch(PathBuf),
@@ -976,6 +980,7 @@ impl Model {
             }
             Action::CloseRepo => self.close_repo(cx),
             Action::ClearRecent => self.settings.recent = Some(Vec::new()),
+            Action::ShowNewProject => cx.emit(ModelEvent::NewProject),
             Action::PickFolder => self.pick_folder("Open project", Action::OpenPath, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
             Action::InitRepo(path) => match Repo::init(&path) {

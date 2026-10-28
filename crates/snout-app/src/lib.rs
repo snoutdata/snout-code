@@ -17,6 +17,7 @@ pub mod lang;
 pub mod look;
 pub mod menus;
 pub mod model;
+pub mod new_project;
 pub mod panels;
 pub mod project_model;
 pub mod project_view;

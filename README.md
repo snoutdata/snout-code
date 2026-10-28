@@ -29,6 +29,8 @@ Java files of a Gradle build get errors and warnings (squiggles, gutter dots and
 
 The engine runs Gradle on a JDK that suits the build. SnoutCode looks for installed JDKs; when none fits it offers to download Eclipse Temurin into `~/Library/Application Support/SnoutCode/jdks`. The app runs without the engine too, without these features.
 
+File ▸ New Project… (also on the Welcome page) makes a Gradle project and opens it: a Java application, written by SnoutCode itself and so made without the network (Kotlin or Groovy build script, the Java version, group, artifact and package), or a Spring Boot application from start.spring.io, with its Spring Boot and Java versions and the dependencies it offers. When start.spring.io cannot be reached, the dialog says so and makes the Spring Boot project from a template of its own, with the common dependencies. A Git repository is created in the new folder unless asked not to.
+
 ### Claude Code console
 
 ![Claude Code in the console](docs/claude-console.png)

@@ -112,6 +112,8 @@ mod shots {
         Spring(SpringShot),
         /// The Keymap page with Go to File moved onto Settings' keys.
         Keymap,
+        /// The New Project dialog: 0 a Java project, 1 a Spring Boot one, 2 its dependencies.
+        NewProject(u8),
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -304,6 +306,32 @@ mod shots {
                         s.draft.keymap.insert("snout::ToggleConsole".into(), vec![]);
                         s.taken = Some(("snout::GoToFile".into(), "cmd-,".into(), vec!["snout::OpenSettings".into()]));
                         s.key_search.update(cx, |i, cx| i.set_value("go", window, cx));
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::NewProject(page)) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.open_new_project(window, cx));
+                    let view = ws.read(cx).new_project.clone().unwrap();
+                    view.update(cx, |v, cx| {
+                        v.name.update(cx, |i, cx| i.set_value("inventory-service", window, cx));
+                        v.location.update(cx, |i, cx| i.set_value("/Users/demo/Projects", window, cx));
+                        if page > 0 {
+                            use snout_app::new_project::initializr::Catalog;
+                            let mut c = Catalog::offline(Some("4.1.2".into()));
+                            c.offline = false;
+                            c.boot = vec![
+                                ("4.2.0-RC1".into(), "4.2.0 (RC1)".into()),
+                                ("4.1.2".into(), "4.1.2".into()),
+                                ("4.0.9".into(), "4.0.9".into()),
+                            ];
+                            v.catalog = Some(c);
+                            v.kind = snout_app::new_project::Kind::SpringBoot;
+                            v.picking = page == 2;
+                            v.deps = vec!["web".into(), "data-jpa".into(), "lombok".into()];
+                        }
                         cx.notify();
                     });
                 })
@@ -1407,6 +1435,10 @@ mod shots {
         shot("settings-light", ThemeChoice::Light, Activity::Project, Some(Select::Settings(Page::Editor)));
         shot("keymap-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Keymap));
         shot("keymap-light", ThemeChoice::Light, Activity::Project, Some(Select::Keymap));
+        shot("new-project-java-dark", ThemeChoice::Dark, Activity::Project, Some(Select::NewProject(0)));
+        shot("new-project-java-light", ThemeChoice::Light, Activity::Project, Some(Select::NewProject(0)));
+        shot("new-project-spring-dark", ThemeChoice::Dark, Activity::Project, Some(Select::NewProject(1)));
+        shot("new-project-deps-dark", ThemeChoice::Dark, Activity::Project, Some(Select::NewProject(2)));
         shot("tasks-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Tasks));
         shot("tasks-light", ThemeChoice::Light, Activity::Project, Some(Select::Tasks));
         shot("review-streaming-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(Some(0.45))));
