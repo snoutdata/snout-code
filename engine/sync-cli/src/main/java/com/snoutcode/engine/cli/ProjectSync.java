@@ -265,6 +265,7 @@ public final class ProjectSync {
         o.offline = from.offline;
         o.gradleOutput = from.gradleOutput;
         o.buildRoot = from.buildRoot;
+        o.bridgeRoot = from.bridgeRoot;
         return o;
     }
 

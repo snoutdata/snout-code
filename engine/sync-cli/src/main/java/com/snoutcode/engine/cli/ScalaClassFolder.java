@@ -38,13 +38,25 @@ final class ScalaClassFolder {
      * root ({@code 0}, {@code 1}, ...; {@code other} for files found in none), so each can carry
      * its source root as the source attachment: jdtls then shows the Scala source for a Scala type
      * instead of decompiling it.
+     *
+     * <p>The folders are stable: one for each root that holds a {@code .scala} file, whether or not
+     * a class was compiled from it yet, and {@code other} once it was needed. jdtls holds them as
+     * libraries from its start, so they must not come and go with a compile.
      */
     static List<Folder> mirror(Path classes, Path mirrorRoot, List<Path> sourceRoots) throws IOException {
         Map<String, Set<Path>> wanted = new TreeMap<>();
+        for (int i : scalaRoots(sourceRoots)) {
+            wanted.put(Integer.toString(i), new HashSet<>());
+        }
+        if (Files.isDirectory(mirrorRoot.resolve("other"))) {
+            wanted.put("other", new HashSet<>());
+        }
         ScalaFilesByName byName = new ScalaFilesByName(sourceRoots);
-        List<Path> files;
-        try (Stream<Path> walk = Files.walk(classes)) {
-            files = walk.filter(p -> p.toString().endsWith(".class")).toList();
+        List<Path> files = List.of();
+        if (Files.isDirectory(classes)) {
+            try (Stream<Path> walk = Files.walk(classes)) {
+                files = walk.filter(p -> p.toString().endsWith(".class")).toList();
+            }
         }
         for (Path file : files) {
             String source;
@@ -76,12 +88,64 @@ final class ScalaClassFolder {
             link(file, mirrorRoot.resolve(group).resolve(relative.toString()));
         }
         prune(mirrorRoot, wanted);
+        return folders(mirrorRoot, sourceRoots, wanted);
+    }
+
+    /**
+     * The folders {@link #mirror} will give, before anything is compiled: one per root that holds
+     * a {@code .scala} file, created empty, so jdtls can take them as libraries at once.
+     */
+    static List<Folder> planned(Path mirrorRoot, List<Path> sourceRoots) throws IOException {
+        Map<String, Set<Path>> wanted = new TreeMap<>();
+        for (int i : scalaRoots(sourceRoots)) {
+            wanted.put(Integer.toString(i), Set.of());
+        }
+        if (Files.isDirectory(mirrorRoot.resolve("other"))) {
+            wanted.put("other", Set.of());
+        }
+        List<Folder> out = new ArrayList<>();
+        for (Folder f : folders(mirrorRoot, sourceRoots, wanted)) {
+            Files.createDirectories(f.classesDir());
+            out.add(new Folder(f.classesDir(), f.sourceDir(), countClasses(f.classesDir())));
+        }
+        return out;
+    }
+
+    private static List<Folder> folders(Path mirrorRoot, List<Path> sourceRoots, Map<String, Set<Path>> wanted) throws IOException {
         List<Folder> out = new ArrayList<>();
         for (Map.Entry<String, Set<Path>> e : wanted.entrySet()) {
             Path sourceDir = e.getKey().equals("other") ? null : sourceRoots.get(Integer.parseInt(e.getKey()));
-            out.add(new Folder(mirrorRoot.resolve(e.getKey()), sourceDir, e.getValue().size()));
+            Path dir = mirrorRoot.resolve(e.getKey());
+            Files.createDirectories(dir);
+            out.add(new Folder(dir, sourceDir, e.getValue().size()));
         }
         return out;
+    }
+
+    /** The indexes of the roots that hold at least one {@code .scala} file. */
+    static List<Integer> scalaRoots(List<Path> sourceRoots) throws IOException {
+        List<Integer> out = new ArrayList<>();
+        for (int i = 0; i < sourceRoots.size(); i++) {
+            Path root = sourceRoots.get(i);
+            if (!Files.isDirectory(root)) {
+                continue;
+            }
+            try (Stream<Path> walk = Files.walk(root)) {
+                if (walk.anyMatch(p -> p.getFileName().toString().endsWith(".scala"))) {
+                    out.add(i);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static int countClasses(Path dir) throws IOException {
+        if (!Files.isDirectory(dir)) {
+            return 0;
+        }
+        try (Stream<Path> walk = Files.walk(dir)) {
+            return (int) walk.filter(p -> p.toString().endsWith(".class")).count();
+        }
     }
 
     /** The roots that hold a {@code .scala} file of a given name, read once, when first asked. */
@@ -146,7 +210,7 @@ final class ScalaClassFolder {
                         || !group.contains(relative.subpath(1, relative.getNameCount()))) {
                         Files.delete(p);
                     }
-                } else if (Files.isDirectory(p)) {
+                } else if (Files.isDirectory(p) && !(relative.getNameCount() == 1 && wanted.containsKey(relative.toString()))) {
                     try (Stream<Path> children = Files.list(p)) {
                         if (children.findAny().isEmpty()) {
                             Files.delete(p);

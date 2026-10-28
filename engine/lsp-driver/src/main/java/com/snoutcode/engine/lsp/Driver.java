@@ -105,6 +105,7 @@ public final class Driver {
             }
             long ready = driver.awaitReady(Duration.ofMinutes(20));
             report.addProperty("serviceReadyMillis", ready);
+            report.addProperty("projectReadyMillis", driver.awaitProjectReady(Duration.ofMinutes(20)));
             long buildStart = System.nanoTime();
             JsonElement build = client.request("java/buildWorkspace", new JsonPrimitive(false), Duration.ofMinutes(30));
             report.addProperty("buildStatus", build.toString());
@@ -170,6 +171,33 @@ public final class Driver {
     public long awaitReady(Duration timeout) throws Exception {
         client.serviceReady.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
         return (System.nanoTime() - client.startNanos) / 1_000_000;
+    }
+
+    /**
+     * Waits until the engine says every module is ready ({@code snout/readiness} for the whole
+     * project at {@code ready}); returns the milliseconds since the engine started, or -1 when the
+     * engine sends no readiness.
+     */
+    public long awaitProjectReady(Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            boolean any = false;
+            for (JsonObject n : client.snoutNotifications) {
+                if (!"snout/readiness".equals(n.get("method").getAsString())) {
+                    continue;
+                }
+                any = true;
+                JsonObject p = n.getAsJsonObject("params");
+                if (p.get("module").isJsonNull() && "ready".equals(p.get("stage").getAsString())) {
+                    return (System.nanoTime() - client.startNanos) / 1_000_000;
+                }
+            }
+            if (!any) {
+                return -1; // an engine that reports no readiness: ready with jdtls
+            }
+            Thread.sleep(100);
+        }
+        return -1;
     }
 
     public Path resolve(String file) {

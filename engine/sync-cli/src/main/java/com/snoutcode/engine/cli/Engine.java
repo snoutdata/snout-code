@@ -16,9 +16,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -87,6 +89,18 @@ final class Engine implements GradleRuns.Client {
     private final Map<String, GradleRuns.Run> runs = new ConcurrentHashMap<>();
     private final Map<String, List<String[]>> lastFailedTests = new ConcurrentHashMap<>();
     private final Map<String, JsonObject> tasksCache = new ConcurrentHashMap<>();
+    private final ExecutorService refresher = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "snout-refresh");
+        t.setDaemon(true);
+        return t;
+    });
+    private final Set<Path> openFiles = ConcurrentHashMap.newKeySet();
+    private volatile ScalaBridge.Work bridge;
+    private volatile Set<String> imported = Set.of();
+    private volatile Readiness readiness;
+    private volatile Path modelFile;
+    private volatile Path bridgeState;
+    private volatile boolean verbose;
     private final AtomicInteger runIds = new AtomicInteger();
 
     /**
@@ -152,6 +166,7 @@ final class Engine implements GradleRuns.Client {
             case "snout/runConfigurations" -> runConfigurations(params);
             case "snout/run" -> run(params);
             case "snout/scalaChanged" -> scalaChanged(params, notification);
+            case "snout/readiness" -> readiness == null ? new JsonObject() : readiness.snapshot();
             case "snout/springBeans" -> spring("snout.spring.beans", params);
             case "snout/springEndpoints" -> spring("snout.spring.endpoints", params);
             case "snout/springInjections" -> {
@@ -185,6 +200,7 @@ final class Engine implements GradleRuns.Client {
         runs.values().forEach(GradleRuns.Run::cancel);
         pool.shutdownNow();
         scalaQueue.shutdownNow();
+        refresher.shutdownNow();
     }
 
     // ---- snout/gradleTasks
@@ -552,7 +568,86 @@ final class Engine implements GradleRuns.Client {
         return result;
     }
 
-    // ---- snout/scalaChanged
+    // ---- the Scala bridge, readiness and the model
+
+    /** The bridge's plan for the model (the first {@code snout/scalaChanged} makes one when none was given). */
+    void bridge(ScalaBridge.Work work) {
+        this.bridge = work;
+        if (work != null) {
+            this.imported = work.folderSet();
+        }
+    }
+
+    /** Where the model lives, rewritten when the bridge or a background sync changes it. */
+    void modelFile(Path file) {
+        this.modelFile = file;
+    }
+
+    void attach(Readiness readiness) {
+        this.readiness = readiness;
+    }
+
+    /** The app opened or closed a document: the Scala of open files' builds compiles first. */
+    void documentEvent(String method, JsonObject message) {
+        JsonObject params = message.has("params") && message.get("params").isJsonObject() ? message.getAsJsonObject("params") : null;
+        String uri = params == null ? null : string(object(params, "textDocument"), "uri");
+        Path file = uri == null ? null : Readiness.path(uri);
+        if (file == null) {
+            return;
+        }
+        if ("textDocument/didOpen".equals(method)) {
+            openFiles.add(file);
+        } else {
+            openFiles.remove(file);
+        }
+    }
+
+    /** jdtls imported the projects (its {@code ServiceReady}). */
+    void jdtlsReady() {
+        Readiness r = readiness;
+        if (r != null) {
+            r.jdtlsReady();
+        }
+    }
+
+    /** jdtls's diagnostics for a file, or null while they are held back (see {@link Readiness}). */
+    JsonObject diagnostics(JsonObject message) {
+        Readiness r = readiness;
+        return r == null ? message : r.diagnostics(message);
+    }
+
+    /** The builds of the files open in the editor, whose Scala compiles first. */
+    private List<String> preferredBuilds() {
+        List<String> out = new ArrayList<>();
+        Readiness r = readiness;
+        if (r == null) {
+            return out;
+        }
+        for (String module : r.modulesOf(openFiles)) {
+            for (JsonElement m : array(model, "modules")) {
+                JsonObject o = m.getAsJsonObject();
+                if (module.equals(string(o, "id")) && string(o, "build") != null && !out.contains(string(o, "build"))) {
+                    out.add(string(o, "build"));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The bridge's first compile, in the background while jdtls starts: the units and builds
+     * whose inputs changed since their last good compile, open files' builds first. Each one
+     * done is refreshed in jdtls and its modules made ready.
+     */
+    void startScala(int parallel) {
+        scalaQueue.submit(() -> {
+            try {
+                compileScala(ScalaBridge.Selection.all(), parallel, null);
+            } catch (Exception | LinkageError e) {
+                log.println("snout-engine: the Scala bridge failed: " + SnoutEngine.describe(e));
+            }
+        });
+    }
 
     /**
      * {@code {files?}}: recompiles the Scala of the builds that hold these files (every build
@@ -568,7 +663,21 @@ final class Engine implements GradleRuns.Client {
         CompletableFuture<JsonObject> done = new CompletableFuture<>();
         scalaQueue.submit(() -> {
             try {
-                done.complete(compileScala(files));
+                ScalaBridge.Work work = work();
+                Set<String> units = new LinkedHashSet<>();
+                Set<String> builds = new LinkedHashSet<>();
+                if (files.isEmpty()) {
+                    work.units.forEach(u -> units.add(u.key));
+                    builds.addAll(work.builds());
+                } else {
+                    for (ScalaBridge.Unit u : ScalaBridge.unitsHolding(work, files)) {
+                        units.add(u.key);
+                        u.users.forEach(c -> builds.add(c.buildId));
+                    }
+                    builds.addAll(ScalaBridge.buildsHolding(work, files));
+                }
+                GradleRuns.Run run = newRun();
+                done.complete(compileScala(new ScalaBridge.Selection(builds, builds, units), ProjectSync.defaultParallelism(), run));
             } catch (Exception | LinkageError e) {
                 done.completeExceptionally(e);
             }
@@ -583,85 +692,311 @@ final class Engine implements GradleRuns.Client {
         }
     }
 
-    private JsonObject compileScala(List<Path> files) throws IOException {
+    private ScalaBridge.Work work() throws IOException {
+        if (bridge == null) {
+            ScalaBridge.Work work = ScalaBridge.plan(model, plans.values(), null);
+            ScalaBridge.annotate(work);
+            bridge(work);
+        }
+        return bridge;
+    }
+
+    /**
+     * Runs the bridge on a selection. With a {@code run} (a {@code snout/scalaChanged}), Gradle's
+     * output goes to the app as that run's, with its problems; without, it is the start's
+     * compile, which only logs. Waits until jdtls has read the new classes.
+     */
+    private JsonObject compileScala(ScalaBridge.Selection selection, int parallel, GradleRuns.Run run) throws Exception {
         long start = System.nanoTime();
-        GradleRuns.Run run = newRun();
-        Map<String, JsonObject> entries = new LinkedHashMap<>();
-        List<ProjectSync.Plan> wanted = new ArrayList<>();
-        for (JsonElement g : model.getAsJsonArray("gradleBuilds")) {
-            JsonObject entry = g.getAsJsonObject();
-            ProjectSync.Plan plan = plans.get(string(entry, "id"));
-            if (plan != null && "synced".equals(string(entry, "status")) && Lsp.hasScala(entry)
-                && (files.isEmpty() || ScalaBridge.holdsAny(entry, files))) {
-                entries.put(plan.id(), entry);
-                wanted.add(plan);
+        ScalaBridge.Work work = work();
+        Readiness r = readiness;
+        Map<String, BuildProblems> problems = new ConcurrentHashMap<>();
+        Map<String, LineOutput> outputs = new ConcurrentHashMap<>();
+        List<CompletableFuture<Void>> refreshed = new ArrayList<>();
+        JsonArray builds = new JsonArray();
+        List<String> selected = new ArrayList<>();
+        for (String b : work.builds()) {
+            if (selection.builds() == null || selection.builds().contains(b)) {
+                selected.add(b);
             }
         }
-        JsonArray builds = new JsonArray();
-        List<String> folders = new ArrayList<>();
-        List<BuildProblems.Problem> problems = new ArrayList<>();
+        List<ScalaBridge.Unit> units = work.units.stream()
+            .filter(u -> u.active && (selection.forcedUnits().contains(u.key) || u.users.stream().anyMatch(c -> selected.contains(c.buildId))))
+            .toList();
+        if (selected.isEmpty() && units.isEmpty()) {
+            JsonObject result = new JsonObject();
+            result.addProperty("runId", run == null ? null : run.id);
+            result.add("builds", builds);
+            result.addProperty("millis", 0);
+            if (run != null) {
+                runs.remove(run.id);
+                GradleRuns.finish(run, this, "success", null, null);
+            }
+            return result;
+        }
+        if (run == null) {
+            log.println("snout-engine: compiling Scala in " + selected.size() + " build(s)"
+                + (units.isEmpty() ? "" : ", " + units.size() + " shared folder unit(s) once") + ", in the background");
+        }
+        if (r != null) {
+            for (ScalaBridge.Unit u : units) {
+                r.compiling(List.of(u.module(model)), work.lastMillis("units", u.key));
+            }
+            for (String b : selected) {
+                long expected = work.lastMillis("builds", b);
+                for (ScalaBridge.Unit u : work.unitsOf(b)) {
+                    if (units.contains(u) && work.lastMillis("units", u.key) > 0 && expected > 0) {
+                        expected += work.lastMillis("units", u.key);
+                    }
+                }
+                r.compiling(work.modulesOf(b), expected);
+            }
+        }
+        ScalaBridge.Listener listener = new ScalaBridge.Listener() {
+            @Override
+            public void unitFinished(ScalaBridge.Unit u, ScalaBridge.Result result) {
+                String module = u.module(model);
+                log.println("snout-engine: " + (result.upToDate ? "the shared Scala of " + module + " is up to date"
+                    : "compiled the shared Scala of " + module + " once for " + u.users.size() + " compile(s) in "
+                    + result.compileMillis + " ms") + (result.error == null ? "" : "; " + result.error));
+                List<String> folders = new ArrayList<>();
+                u.folders.forEach(f -> folders.add(f.classesDir().toString()));
+                refreshed.add(bridged(folders, List.of(module), !result.upToDate));
+            }
+
+            @Override
+            public void buildFinished(String b, ScalaBridge.Result result) {
+                log.println("snout-engine: " + (result.upToDate ? "Scala in " + b + " is up to date"
+                    : "compiled Scala in " + b + " (" + String.join(" ", result.tasks) + ") in " + result.compileMillis + " ms")
+                    + (result.error == null ? "" : "; the compile failed: " + result.error));
+                refreshed.add(bridged(work.classFolders(b), work.modulesOf(b), !result.upToDate));
+            }
+        };
+        Map<String, ScalaBridge.Result> results;
         try {
-            // Several builds at once, as the bridge's first compile: a shared source folder
-            // changes every build that compiles it.
-            List<JsonObject> results = ProjectSync.parallel(wanted, ProjectSync.defaultParallelism(), plan -> {
-                JsonObject entry = entries.get(plan.id());
-                BuildProblems found = new BuildProblems();
-                LineOutput output = new LineOutput(line -> {
+            results = ScalaBridge.run(work, selection, parallel, this::preferredBuilds, listener, b -> {
+                if (run == null) {
+                    return verbose ? log : null;
+                }
+                BuildProblems found = problems.computeIfAbsent(b, k -> new BuildProblems());
+                return outputs.computeIfAbsent(b, k -> new LineOutput(line -> {
                     found.accept(line);
                     GradleRuns.output(run, this, "stdout", line);
-                });
-                JsonObject b = new JsonObject();
-                b.addProperty("build", plan.id());
-                try {
-                    ScalaBridge.Result r = ScalaBridge.compile(entry, plan.options(), output);
-                    b.addProperty("millis", r.millis);
-                    b.addProperty("compileMillis", r.compileMillis);
-                    JsonArray tasks = new JsonArray();
-                    r.tasks.forEach(tasks::add);
-                    b.add("tasks", tasks);
-                    b.addProperty("error", r.error);
-                } catch (IOException | RuntimeException e) {
-                    b.addProperty("error", SnoutEngine.describe(e));
-                } finally {
-                    output.close();
-                }
-                synchronized (problems) {
-                    problems.addAll(found.finish());
-                    folders.addAll(ScalaBridge.classFolders(entry));
-                }
-                return b;
+                }));
             });
-            results.forEach(builds::add);
+        } finally {
+            outputs.values().forEach(LineOutput::close);
+        }
+        for (Map.Entry<String, ScalaBridge.Result> e : results.entrySet()) {
+            JsonObject b = new JsonObject();
+            b.addProperty("build", e.getKey());
+            b.addProperty("millis", e.getValue().millis);
+            b.addProperty("compileMillis", e.getValue().compileMillis);
+            JsonArray tasks = new JsonArray();
+            e.getValue().tasks.forEach(tasks::add);
+            b.add("tasks", tasks);
+            b.addProperty("upToDate", e.getValue().upToDate);
+            b.addProperty("error", e.getValue().error);
+            builds.add(b);
+        }
+        writeModel();
+        // A unit that fell back, or a new "other" folder: jdtls must import the class folders again.
+        Set<String> now = work.folderSet();
+        if (!now.equals(imported)) {
+            imported = now;
+            refreshed.add(reimport("the Scala class folders changed"));
+        }
+        for (CompletableFuture<Void> f : refreshed) {
+            try {
+                f.get(10, TimeUnit.MINUTES);
+            } catch (ExecutionException | TimeoutException e) {
+                log.println("snout-engine: jdtls did not take the new Scala classes: " + SnoutEngine.describe(e));
+            }
+        }
+        long millis = (System.nanoTime() - start) / 1_000_000;
+        long failed = results.values().stream().filter(x -> x.error != null).count();
+        if (run == null) {
+            log.println("snout-engine: compiled Scala in " + results.size() + " build(s) in " + millis + " ms"
+                + (failed == 0 ? "" : "; " + failed + " build(s) failed to compile"));
+        }
+        JsonObject result = new JsonObject();
+        if (run != null) {
+            List<BuildProblems.Problem> all = new ArrayList<>();
+            problems.values().forEach(bp -> all.addAll(bp.finish()));
             JsonObject p = new JsonObject();
             p.addProperty("runId", run.id);
-            p.add("problems", BuildProblems.toJson(new ArrayList<>(new java.util.LinkedHashSet<>(problems))));
+            p.add("problems", BuildProblems.toJson(new ArrayList<>(new LinkedHashSet<>(all))));
             notify("snout/buildProblems", p);
-            if (!folders.isEmpty() && jdtls != null) {
-                JsonArray args = new JsonArray();
-                folders.forEach(args::add);
-                long refresh = System.nanoTime();
-                try {
-                    executeCommand("snout.refreshClassFolders", args, 120);
+            runs.remove(run.id);
+            GradleRuns.finish(run, this, failed > 0 ? "failed" : "success", null, null);
+            result.addProperty("runId", run.id);
+        }
+        result.add("builds", builds);
+        result.addProperty("millis", millis);
+        return result;
+    }
+
+    /**
+     * Once jdtls is up, makes it read class folders the bridge filled (when {@code changed}) and
+     * build, then marks the modules ready. Requests queue on one thread and the ones waiting are
+     * taken together, so a burst of compiles costs one refresh and one build.
+     */
+    private CompletableFuture<Void> bridged(List<String> folders, List<String> modules, boolean changed) {
+        Readiness r = readiness;
+        if (r != null) {
+            r.compiled(modules);
+        }
+        Pending p = new Pending(folders, modules, changed, null);
+        pending.add(p);
+        refresher.submit(this::drain);
+        return p.done;
+    }
+
+    private CompletableFuture<Void> reimport(String why) {
+        Pending p = new Pending(List.of(), List.of(), true, why);
+        pending.add(p);
+        refresher.submit(this::drain);
+        return p.done;
+    }
+
+    private record Pending(List<String> folders, List<String> modules, boolean changed, String reimport,
+                           CompletableFuture<Void> done) {
+        Pending(List<String> folders, List<String> modules, boolean changed, String reimport) {
+            this(folders, modules, changed, reimport, new CompletableFuture<>());
+        }
+    }
+
+    private final java.util.concurrent.ConcurrentLinkedQueue<Pending> pending = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    private void drain() {
+        List<Pending> batch = new ArrayList<>();
+        for (Pending p; (p = pending.poll()) != null; ) {
+            batch.add(p);
+        }
+        if (batch.isEmpty()) {
+            return;
+        }
+        try {
+            Jdtls j = jdtls;
+            if (j != null) {
+                j.ready().get();
+                long start = System.nanoTime();
+                String why = batch.stream().map(Pending::reimport).filter(java.util.Objects::nonNull).findFirst().orElse(null);
+                if (why != null) {
+                    executeCommand("snout.reimport", new JsonArray(), 600);
+                    log.println("snout-engine: imported the projects into jdtls again (" + why + ")");
+                }
+                JsonArray folders = new JsonArray();
+                batch.stream().filter(Pending::changed).forEach(p -> p.folders().forEach(folders::add));
+                if (!folders.isEmpty()) {
+                    executeCommand("snout.refreshClassFolders", folders, 120);
                     SpringSupport s = spring;
                     if (s != null) {
                         s.scalaCompiled();
                     }
-                    log.println("snout-engine: refreshed " + folders.size() + " Scala class folder(s) in jdtls in "
-                        + (System.nanoTime() - refresh) / 1_000_000 + " ms");
-                } catch (Exception e) {
-                    log.println("snout-engine: could not refresh the Scala class folders in jdtls: " + SnoutEngine.describe(e));
+                }
+                if (why != null || !folders.isEmpty()) {
+                    j.request("java/buildWorkspace", new com.google.gson.JsonPrimitive(false)).get(30, TimeUnit.MINUTES);
+                    log.println("snout-engine: jdtls read " + folders.size() + " Scala class folder(s) and built in "
+                        + (System.nanoTime() - start) / 1_000_000 + " ms");
                 }
             }
+        } catch (Exception e) {
+            log.println("snout-engine: could not refresh the Scala class folders in jdtls: " + SnoutEngine.describe(e));
         } finally {
-            runs.remove(run.id);
+            Readiness r = readiness;
+            List<String> modules = new ArrayList<>();
+            batch.forEach(p -> modules.addAll(p.modules()));
+            if (r != null) {
+                r.ready(modules);
+            }
+            batch.forEach(p -> p.done().complete(null));
         }
-        JsonObject result = new JsonObject();
-        result.addProperty("runId", run.id);
-        result.add("builds", builds);
-        result.addProperty("millis", (System.nanoTime() - start) / 1_000_000);
-        boolean failed = builds.asList().stream().anyMatch(b -> b.getAsJsonObject().has("error") && !b.getAsJsonObject().get("error").isJsonNull());
-        GradleRuns.finish(run, this, failed ? "failed" : "success", null, null);
-        return result;
+    }
+
+    private void writeModel() {
+        Path file = modelFile;
+        if (file == null) {
+            return;
+        }
+        synchronized (model) {
+            try {
+                Lsp.writeAtomically(file, new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(model));
+            } catch (IOException e) {
+                log.println("snout-engine: could not write the model: " + SnoutEngine.describe(e));
+            }
+        }
+    }
+
+    // ---- syncing again in the background
+
+    /**
+     * After a start from the cached model: syncs the builds whose sync may come out differently
+     * (see {@link ModelCache#uncertain}) once the Scala bridge is done, and when their model
+     * changed, takes it: the model file and its inputs, the bridge, jdtls's projects.
+     */
+    void resyncLater(Set<String> builds, ProjectSync.Options options, Runnable recordInputs) {
+        scalaQueue.submit(() -> {
+            try {
+                List<ProjectSync.Plan> wanted = plans.values().stream().filter(p -> builds.contains(p.id())).toList();
+                if (wanted.isEmpty()) {
+                    return;
+                }
+                log.println("snout-engine: syncing " + wanted.size() + " build(s) again in the background: " + String.join(", ", builds));
+                List<JsonObject> entries = ProjectSync.lanes(wanted, options.parallel, plan -> ProjectSync.syncOne(plan, options.log));
+                List<String> changed = new ArrayList<>();
+                synchronized (model) {
+                    JsonArray all = model.getAsJsonArray("gradleBuilds");
+                    for (JsonObject fresh : entries) {
+                        for (int i = 0; i < all.size(); i++) {
+                            JsonObject old = all.get(i).getAsJsonObject();
+                            if (!string(old, "id").equals(string(fresh, "id"))) {
+                                continue;
+                            }
+                            if ("failed".equals(string(fresh, "status")) && !"failed".equals(string(old, "status"))) {
+                                break; // keep the last good model, as a start does
+                            }
+                            if (!ScalaBridge.canonicalHash(old).equals(ScalaBridge.canonicalHash(fresh))) {
+                                all.set(i, fresh);
+                                changed.add(string(fresh, "id"));
+                            }
+                        }
+                    }
+                    if (!changed.isEmpty()) {
+                        ProjectModel.assemble(model);
+                    }
+                }
+                recordInputs.run();
+                if (changed.isEmpty()) {
+                    log.println("snout-engine: the background sync found nothing new");
+                    return;
+                }
+                log.println("snout-engine: the background sync changed " + String.join(", ", changed));
+                ScalaBridge.Work work = ScalaBridge.plan(model, plans.values(), bridge == null ? null : bridgeState);
+                ScalaBridge.annotate(work);
+                bridge = work;
+                Readiness r = readiness;
+                if (r != null) {
+                    r.model(model);
+                }
+                writeModel();
+                imported = work.folderSet();
+                reimport("the background sync changed " + String.join(", ", changed)).get(10, TimeUnit.MINUTES);
+                compileScala(new ScalaBridge.Selection(new LinkedHashSet<>(changed), Set.of(), Set.of()), ProjectSync.defaultParallelism(), null);
+                notify("snout/modelChanged", new JsonObject());
+            } catch (Exception | LinkageError e) {
+                log.println("snout-engine: the background sync failed: " + SnoutEngine.describe(e));
+            }
+        });
+    }
+
+    /** Where the bridge keeps its state, for a plan made after a background sync. */
+    void bridgeState(Path file) {
+        this.bridgeState = file;
+    }
+
+    void verbose(boolean verbose) {
+        this.verbose = verbose;
     }
 
     // ---- helpers for Launches
@@ -787,6 +1122,10 @@ final class Engine implements GradleRuns.Client {
             throw RequestError.invalid("missing " + key);
         }
         return value;
+    }
+
+    static JsonObject object(JsonObject o, String key) {
+        return o == null || !o.has(key) || !o.get(key).isJsonObject() ? null : o.getAsJsonObject(key);
     }
 
     static String string(JsonObject o, String key) {

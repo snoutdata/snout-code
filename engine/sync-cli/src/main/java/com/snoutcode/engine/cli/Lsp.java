@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -66,7 +68,8 @@ final class Lsp {
         boolean sources = true;
         boolean offline;
         boolean verbose;
-        String maxHeap = "2G";
+        /** jdtls's {@code -Xmx}, or {@code auto}: by the project's size (see {@link #autoHeap}). */
+        String maxHeap = "auto";
         final List<String> jvmArgs = new ArrayList<>();
         final List<File> jdks = new ArrayList<>();
         int parallel;
@@ -77,14 +80,17 @@ final class Lsp {
 
     static int run(Options options, PrintStream log) throws IOException, InterruptedException {
         // Standard output carries LSP alone: keep anything else that prints off it.
-        OutputStream appOut = new FileOutputStream(FileDescriptor.out);
+        BufferedOutputStream appOut = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
         System.setOut(log);
+        Readiness readiness = new Readiness(message -> LspProxy.write(appOut, message));
         File projectDir = options.projectDir.getCanonicalFile();
         String hash = Sync.sha256(projectDir.getAbsolutePath().getBytes(StandardCharsets.UTF_8)).substring(0, 16);
         Path cache = (options.cacheDir != null ? options.cacheDir.toPath() : defaultCacheDir()).toAbsolutePath();
         Path home = cache.resolve("jdtls").resolve(hash);
         Files.createDirectories(home);
         Path modelFile = home.resolve("model.json");
+        Path inputsFile = home.resolve("model-inputs.json");
+        Path bridgeState = home.resolve("scala-bridge.json");
 
         File jdtls = options.jdtlsHome != null ? options.jdtlsHome : installed("jdtls");
         File bundle = options.bundle != null ? options.bundle : installedBundle();
@@ -102,6 +108,7 @@ final class Lsp {
         sync.offline = options.offline;
         sync.projectCacheDir = cache.resolve("gradle").resolve(hash).toFile();
         sync.buildRoot = cache.resolve("build").resolve(hash).toFile();
+        sync.bridgeRoot = cache.resolve("bridge").resolve(hash).toFile();
         sync.gradleOutput = options.verbose ? log : OutputStream.nullOutputStream();
         project.jdks.addAll(options.jdks);
         project.cacheDir = cache;
@@ -109,29 +116,41 @@ final class Lsp {
         if (options.parallel > 0) {
             project.parallel = options.parallel;
         }
+        String optionsKey = optionsKey(options, sync);
 
         JsonObject model;
         List<ProjectSync.Plan> plans = List.of();
-        // Each stage announces itself on stderr, for a client that shows progress.
-        log.println("snout-engine: syncing " + projectDir);
+        JsonObject inputs = null;
+        Set<String> uncertain = Set.of();
         try {
             plans = ProjectSync.plan(project);
-            model = ProjectSync.sync(project, plans);
-            // A broken build file must not cost the user the editor: a build that fails now keeps
-            // its model from the last sync that worked.
-            int stale = keepLastGood(model, modelFile);
-            if (stale > 0) {
-                log.println("snout-engine: using the last good model for " + stale + " build(s) that failed");
+            // A start whose builds did not change since the last sync takes that sync's model.
+            JsonObject cached = readModel(modelFile);
+            String changed = cached == null ? null : ModelCache.changed(ModelCache.read(inputsFile), plans, optionsKey);
+            if (cached != null && changed == null) {
+                model = cached;
+                uncertain = ModelCache.uncertain(model);
+                log.println("snout-engine: the builds did not change since the last sync; using its model"
+                    + (uncertain.isEmpty() ? "" : " (" + uncertain.size() + " build(s) sync again in the background)"));
+            } else {
+                // Each stage announces itself on stderr, for a client that shows progress.
+                log.println("snout-engine: syncing " + projectDir + (changed == null ? "" : " (" + changed + ")"));
+                readiness.syncing();
+                model = ProjectSync.sync(project, plans);
+                // A broken build file must not cost the user the editor: a build that fails now keeps
+                // its model from the last sync that worked.
+                int stale = keepLastGood(model, modelFile);
+                if (stale > 0) {
+                    log.println("snout-engine: using the last good model for " + stale + " build(s) that failed");
+                }
+                inputs = ModelCache.inputs(model, plans, optionsKey, options.gradleUserHome);
             }
             log.println("snout-engine: " + SnoutEngine.summary(model));
-            if (options.scalaBridge) {
-                compileScala(model, plans, project.parallel, log);
-            }
         } catch (IOException | RuntimeException e) {
             log.println("snout-engine: sync failed: " + SnoutEngine.describe(e));
-            if (Files.isRegularFile(modelFile)) {
+            model = readModel(modelFile);
+            if (model != null) {
                 log.println("snout-engine: using the model from the last sync");
-                model = null;
             } else {
                 model = new JsonObject();
                 model.addProperty("modelVersion", ProjectSync.MODEL_VERSION);
@@ -140,11 +159,23 @@ final class Lsp {
                 model.addProperty("syncError", SnoutEngine.describe(e));
             }
         }
-        if (model != null) {
-            writeAtomically(modelFile, new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(model));
-        } else {
-            model = JsonParser.parseString(Files.readString(modelFile)).getAsJsonObject();
+        // The Scala bridge's class folders go into the model before jdtls starts, empty when
+        // nothing compiled them yet: jdtls imports them now and reads the classes once compiled.
+        ScalaBridge.Work bridge = null;
+        if (options.scalaBridge) {
+            try {
+                bridge = ScalaBridge.plan(model, plans, bridgeState);
+                ScalaBridge.annotate(bridge);
+            } catch (IOException | RuntimeException e) {
+                log.println("snout-engine: could not plan the Scala bridge: " + SnoutEngine.describe(e));
+                bridge = null;
+            }
         }
+        writeAtomically(modelFile, new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(model));
+        if (inputs != null) {
+            ModelCache.write(inputsFile, inputs);
+        }
+        readiness.model(model);
 
         List<Path> bundles = new ArrayList<>();
         bundles.add(bundle.toPath());
@@ -166,11 +197,7 @@ final class Lsp {
         command.add("-Djava.import.generatesMetadataFilesAtProjectRoot=false");
         command.add("-Dsnout.model=" + modelFile);
         command.add("-Dsun.zip.disableMemoryMapping=true");
-        command.add("-XX:+UseParallelGC");
-        command.add("-XX:GCTimeRatio=4");
-        command.add("-XX:AdaptiveSizePolicyWeight=90");
-        command.add("-Xms100m");
-        command.add("-Xmx" + options.maxHeap);
+        command.addAll(heapArguments(options.maxHeap, model, options.jvmArgs));
         command.add("--add-modules=ALL-SYSTEM");
         command.add("--add-opens");
         command.add("java.base/java.util=ALL-UNNAMED");
@@ -184,16 +211,37 @@ final class Lsp {
         command.add("-data");
         command.add(home.resolve("workspace").toString());
 
-        log.println("snout-engine: starting jdtls");
+        log.println("snout-engine: starting jdtls (" + command.stream().filter(a -> a.startsWith("-Xmx")).reduce((a, b) -> b).orElse("")
+            + ")");
         Process process = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.INHERIT).start();
         LspProxy proxy = new LspProxy(System.in, appOut, process, log);
         Engine engine = new Engine(model, plans, proxy::toApp, log, home.resolve("runs"));
         engine.attach(proxy);
+        engine.attach(readiness);
+        engine.modelFile(modelFile);
+        engine.bridgeState(bridgeState);
+        engine.verbose(options.verbose);
+        engine.bridge(bridge);
         proxy.attach(engine);
         SpringSupport spring = springBundle == null ? null : new SpringSupport(proxy, proxy::toApp, log);
         if (spring != null) {
             proxy.attach(spring);
             engine.attach(spring);
+        }
+        // The Scala bridge compiles while jdtls starts; a module is ready once jdtls has its classes.
+        if (bridge != null) {
+            engine.startScala(project.parallel);
+        }
+        if (!uncertain.isEmpty()) {
+            JsonObject synced = model;
+            List<ProjectSync.Plan> planned = plans;
+            engine.resyncLater(uncertain, project, () -> {
+                try {
+                    ModelCache.write(inputsFile, ModelCache.inputs(synced, planned, optionsKey, options.gradleUserHome));
+                } catch (IOException e) {
+                    log.println("snout-engine: could not record the sync's inputs: " + SnoutEngine.describe(e));
+                }
+            });
         }
         Thread stop = new Thread(() -> {
             engine.shutdown();
@@ -213,43 +261,111 @@ final class Lsp {
         return exit;
     }
 
+    /** The model written last, or null when there is none or it is of another format. */
+    private static JsonObject readModel(Path file) {
+        try {
+            if (!Files.isRegularFile(file)) {
+                return null;
+            }
+            JsonObject model = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            return model.has("modelVersion") && model.get("modelVersion").getAsInt() == ProjectSync.MODEL_VERSION
+                && model.has("gradleBuilds") ? model : null;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
     /**
-     * Runs the Scala bridge for every build that synced and has Scala, several builds at once,
-     * each with the JDK and caches its sync used.
+     * What a cached model depends on besides the build files: the options that change a sync, and
+     * the sync plugin and model format of this engine.
      */
-    private static void compileScala(JsonObject model, List<ProjectSync.Plan> plans, int parallel, PrintStream log)
-        throws IOException {
-        Map<String, JsonObject> entries = new HashMap<>();
-        for (JsonElement g : model.getAsJsonArray("gradleBuilds")) {
-            JsonObject entry = g.getAsJsonObject();
-            if ("synced".equals(entry.get("status").getAsString()) && hasScala(entry)) {
-                entries.put(entry.get("id").getAsString(), entry);
+    static String optionsKey(Options options, Sync.Options sync) {
+        StringBuilder s = new StringBuilder();
+        s.append("model ").append(ProjectSync.MODEL_VERSION).append(' ')
+            .append(com.snoutcode.engine.sync.ProjectModelBuilder.MODEL_VERSION).append('\n');
+        File plugin = Sync.pluginClasspath();
+        s.append(plugin.getAbsolutePath()).append(' ').append(plugin.length()).append(' ').append(plugin.lastModified()).append('\n');
+        s.append(sync.javaHome).append('\n').append(options.jdks).append('\n').append(sync.gradleUserHome).append('\n')
+            .append(sync.gradleVersion).append('\n').append(sync.sources).append(' ').append(sync.offline).append('\n')
+            .append(sync.buildRoot).append('\n');
+        return Sync.sha256(s.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * jdtls's heap: {@code -Xmx} as given, or by the project's size when {@code auto}; and the
+     * parallel collector (as vscode-java runs jdtls), unless the JVM arguments name a collector.
+     * G1 was measured on a large project: a higher peak and no faster.
+     */
+    static List<String> heapArguments(String maxHeap, JsonObject model, List<String> jvmArgs) {
+        List<String> out = new ArrayList<>();
+        if (jvmArgs.stream().noneMatch(a -> a.matches("-XX:\\+Use\\w+GC"))) {
+            out.add("-XX:+UseParallelGC");
+            out.add("-XX:GCTimeRatio=4");
+            out.add("-XX:AdaptiveSizePolicyWeight=90");
+        }
+        out.add("-Xms100m");
+        out.add("-Xmx" + (maxHeap == null || maxHeap.equals("auto") ? autoHeap(model) : maxHeap));
+        return out;
+    }
+
+    /**
+     * A heap limit by the project's size: 512 MB, plus 150 MB per thousand Java and Scala source
+     * files and half a megabyte per library, rounded up to 256 MB; at least 1 GB, at most 8 GB
+     * or a quarter of the machine's memory. A project of 3,400 source files and 540 libraries
+     * gets 1.5 GB: jdtls's live data peaked at 0.6 GB there while it imported, indexed and built
+     * everything, and 1.2 GB ran as fast as 2 GB with 0.6 GB less resident.
+     */
+    static String autoHeap(JsonObject model) {
+        long files = 0;
+        Set<String> dirs = new java.util.LinkedHashSet<>();
+        for (JsonElement m : model.has("modules") ? model.getAsJsonArray("modules") : new JsonArray()) {
+            JsonObject module = m.getAsJsonObject();
+            for (JsonElement r : module.has("sourceRoots") ? module.getAsJsonArray("sourceRoots") : new JsonArray()) {
+                JsonObject root = r.getAsJsonObject();
+                if (root.has("dir") && !root.has("owner") && !(root.has("shared") && root.get("shared").getAsBoolean())
+                    && !String.valueOf(root.get("type")).contains("resources")) {
+                    dirs.add(root.get("dir").getAsString());
+                }
             }
         }
-        List<ProjectSync.Plan> scala = plans.stream().filter(p -> entries.containsKey(p.id())).toList();
-        if (scala.isEmpty()) {
-            return;
+        for (JsonElement r : model.has("sharedSourceRoots") ? model.getAsJsonArray("sharedSourceRoots") : new JsonArray()) {
+            JsonObject root = r.getAsJsonObject();
+            if (root.has("dir") && !String.valueOf(root.get("type")).contains("resources")) {
+                dirs.add(root.get("dir").getAsString());
+            }
         }
-        log.println("snout-engine: compiling Scala in " + scala.size() + " build(s)");
-        long start = System.nanoTime();
-        List<ScalaBridge.Result> results = ProjectSync.parallel(scala, parallel, plan -> {
-            try {
-                ScalaBridge.Result r = ScalaBridge.compile(entries.get(plan.id()), plan.options());
-                log.println("snout-engine: compiled Scala in " + plan.id() + " (" + String.join(" ", r.tasks) + ") in "
-                    + r.millis + " ms; " + r.sourceSets + " class folder(s) for jdtls"
-                    + (r.error == null ? "" : "; the compile failed: " + r.error));
-                return r;
+        for (String dir : dirs) {
+            Path d = Path.of(dir);
+            if (!Files.isDirectory(d)) {
+                continue;
+            }
+            try (Stream<Path> walk = Files.walk(d)) {
+                files += walk.filter(f -> {
+                    String n = f.getFileName().toString();
+                    return n.endsWith(".java") || n.endsWith(".scala");
+                }).count();
             } catch (IOException | RuntimeException e) {
-                ScalaBridge.Result r = new ScalaBridge.Result();
-                r.error = SnoutEngine.describe(e);
-                log.println("snout-engine: could not compile Scala in " + plan.id() + ": " + r.error);
-                return r;
+                // a folder we cannot read adds nothing
             }
-        });
-        int folders = results.stream().mapToInt(r -> r.sourceSets).sum();
-        long failed = results.stream().filter(r -> r.error != null).count();
-        log.println("snout-engine: compiled Scala in " + scala.size() + " build(s) in " + (System.nanoTime() - start) / 1_000_000
-            + " ms; " + folders + " class folder(s) for jdtls" + (failed == 0 ? "" : "; " + failed + " build(s) failed to compile"));
+        }
+        int libraries = model.has("libraries") ? model.getAsJsonArray("libraries").size() : 0;
+        long mb = 512 + files * 150 / 1000 + libraries / 2;
+        mb = (mb + 255) / 256 * 256;
+        long physical = physicalMemoryMb();
+        long max = physical > 0 ? Math.min(8192, physical / 4) : 8192;
+        mb = Math.max(1024, Math.min(max, mb));
+        return mb + "m";
+    }
+
+    private static long physicalMemoryMb() {
+        try {
+            if (java.lang.management.ManagementFactory.getOperatingSystemMXBean() instanceof com.sun.management.OperatingSystemMXBean os) {
+                return os.getTotalMemorySize() / (1024 * 1024);
+            }
+        } catch (RuntimeException | LinkageError e) {
+            // unknown
+        }
+        return -1;
     }
 
     /**
@@ -436,7 +552,7 @@ final class Lsp {
         }
     }
 
-    private static void writeAtomically(Path file, String text) throws IOException {
+    static void writeAtomically(Path file, String text) throws IOException {
         Path temp = Files.createTempFile(file.getParent(), file.getFileName().toString(), ".tmp");
         Files.writeString(temp, text + "\n", StandardCharsets.UTF_8);
         Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

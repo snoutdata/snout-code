@@ -18,6 +18,7 @@
    <extension point="org.eclipse.jdt.ls.core.delegateCommandHandler">
       <delegateCommandHandler class="com.snoutcode.engine.jdtls.SnoutCommands">
          <command id="snout.refreshClassFolders"/>
+         <command id="snout.reimport"/>
       </delegateCommandHandler>
    </extension>
    <!-- Marks the projects this bundle owns: com.snoutcode.engine.jdtls.nature -->

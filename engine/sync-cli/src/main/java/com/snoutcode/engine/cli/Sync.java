@@ -45,6 +45,11 @@ public final class Sync {
         public OutputStream gradleOutput;
         /** When set, every project's build directory moves under here; see {@link #buildDirInitScript}. */
         public File buildRoot;
+        /**
+         * The Scala bridge's own build directories, for builds that compile shared Scala folders
+         * against one compile of them (see {@link ScalaBridge}); null to use {@link #buildRoot}.
+         */
+        public File bridgeRoot;
     }
 
     private Sync() {

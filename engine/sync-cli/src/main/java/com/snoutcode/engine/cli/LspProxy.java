@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 final class LspProxy implements Engine.Jdtls {
     private final InputStream appIn;
-    private final OutputStream appOut;
+    private final BufferedOutputStream appOut;
     private final Process jdtls;
     private final OutputStream jdtlsIn;
     private final PrintStream log;
@@ -45,7 +45,7 @@ final class LspProxy implements Engine.Jdtls {
 
     LspProxy(InputStream appIn, OutputStream appOut, Process jdtls, PrintStream log) {
         this.appIn = new BufferedInputStream(appIn);
-        this.appOut = new BufferedOutputStream(appOut);
+        this.appOut = appOut instanceof BufferedOutputStream b ? b : new BufferedOutputStream(appOut);
         this.jdtls = jdtls;
         this.jdtlsIn = new BufferedOutputStream(jdtls.getOutputStream());
         this.log = log;
@@ -85,6 +85,9 @@ final class LspProxy implements Engine.Jdtls {
                 if (method != null && method.startsWith("snout/")) {
                     engine.receive(message);
                     continue;
+                }
+                if ("textDocument/didOpen".equals(method) || "textDocument/didClose".equals(method)) {
+                    engine.documentEvent(method, message);
                 }
                 SpringSupport s = spring;
                 if (s != null && s.fromApp(message)) {
@@ -136,6 +139,7 @@ final class LspProxy implements Engine.Jdtls {
                     JsonElement type = message.getAsJsonObject("params").get("type");
                     if (type != null && "ServiceReady".equals(type.getAsString()) && !serviceReady.isDone()) {
                         serviceReady.complete(null);
+                        engine.jdtlsReady();
                         SpringSupport s = spring;
                         if (s != null) {
                             s.start();
@@ -149,6 +153,13 @@ final class LspProxy implements Engine.Jdtls {
                     }
                     if ("textDocument/publishDiagnostics".equals(method(message)) && message.get("params").isJsonObject()) {
                         message = s.jdtlsDiagnostics(message);
+                    }
+                }
+                if ("textDocument/publishDiagnostics".equals(method(message)) && message.get("params").isJsonObject()) {
+                    // Held back while the file's Scala is not in jdtls yet.
+                    message = engine.diagnostics(message);
+                    if (message == null) {
+                        continue;
                     }
                 }
                 toApp(message);
@@ -166,9 +177,17 @@ final class LspProxy implements Engine.Jdtls {
 
     /** Sends a message to the app; safe from any thread. */
     void toApp(JsonObject message) {
-        synchronized (appOut) {
+        write(appOut, message);
+    }
+
+    /**
+     * Writes a message to the app's stream, between whole messages: the engine writes to it before
+     * jdtls (and this proxy) starts, too.
+     */
+    static void write(BufferedOutputStream out, JsonObject message) {
+        synchronized (out) {
             try {
-                Rpc.write(appOut, message);
+                Rpc.write(out, message);
             } catch (IOException e) {
                 // The app is gone; jdtls will see its input close.
             }

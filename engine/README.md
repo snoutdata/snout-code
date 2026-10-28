@@ -71,20 +71,23 @@ A sync only configures the builds. No task runs, so nothing is compiled and no `
 snout-engine lsp /path/to/folder --java-home /path/to/jdk17
 ```
 
-The command speaks LSP on stdin and stdout, so the app spawns it and talks to it like any language server. Before it starts jdtls it:
+The command speaks LSP on stdin and stdout, so the app spawns it and talks to it like any language server. It:
 
-1. syncs the folder's builds as `sync` does, with every build directory moved out of the project (an init script sets each project's `layout.buildDirectory`) and Gradle's project caches with them;
-2. runs the **Scala bridge**, for each build that has Scala, several builds at once: jdtls cannot read Scala source, so for each source set with Scala files it runs that source set's Scala compile task, and nothing else. The task compiles the Java of a joint source set too, so the bridge keeps a mirror with only the classes whose `SourceFile` is a `.scala` file, hard linked and grouped by the source root that holds the file, and records them in the model. `ScalaBridge.compile` is the one entry point, for recompiling later;
-3. writes the model where the importer reads it, and starts jdtls with the importer bundle, the Spring bundle and java-debug's;
+1. takes the model of the last sync when the builds did not change since (see [Starting from the cache](#starting-from-the-cache)), else syncs the folder's builds as `sync` does, with every build directory moved out of the project (an init script sets each project's `layout.buildDirectory`) and Gradle's project caches with them;
+2. writes the model where the importer reads it, with the class folders of the **Scala bridge** in it (empty until compiled), and starts jdtls with the importer bundle, the Spring bundle and java-debug's;
+3. meanwhile runs the Scala bridge, in the background: jdtls cannot read Scala source, so for each source set with Scala files it runs that source set's Scala compile task, and nothing else, several builds at once, the builds of the files open in the editor first. A Scala folder that several builds compile is compiled once (see [Shared Scala, compiled once](#shared-scala-compiled-once)). The task compiles the Java of a joint source set too, so the bridge keeps a mirror with only the classes whose `SourceFile` is a `.scala` file, hard linked and grouped by the source root that holds the file, and records them in the model. As each compile finishes, jdtls reads its classes and builds what uses them, and the modules it serves are ready (see [Readiness](#readiness));
 4. relays LSP between the app and jdtls, answering the `snout/` methods itself (see [The engine's methods](#the-engines-methods)).
 
 All of it lives under the cache directory (`~/Library/Caches/SnoutCode` on macOS), keyed by a hash of the folder:
 
 | Path | Contents |
 | --- | --- |
-| `build/<hash>/` | Gradle build directories, including the compiled Scala |
+| `build/<hash>/` | Gradle build directories: what tests and tasks compile, and the bridge's Scala of builds that share no Scala folder |
+| `bridge/<hash>/` | The bridge's build directories for builds that compile a shared Scala folder, and the shared folders' own compiles under `shared/` |
 | `gradle/<hash>/<build>-<hash>/` | Gradle's project cache of each build |
 | `jdtls/<hash>/model.json` | The model the importer reads |
+| `jdtls/<hash>/model-inputs.json` | What the model was synced from, to tell whether the next start can take it |
+| `jdtls/<hash>/scala-bridge.json` | The fingerprint of each Scala compile's inputs at its last good compile |
 | `jdtls/<hash>/config/` | jdtls's OSGi configuration, with the bundle added |
 | `jdtls/<hash>/workspace/` | jdtls's workspace: the JDT projects, their output folders, indexes and log |
 | `jdtls/<hash>/runs/` | Argument files of the processes the engine launches, while they run |
@@ -102,9 +105,41 @@ A build whose sync fails keeps its entry from the last model that synced it, mar
 | `--spring-bundle <jar>` | Use another Spring bundle. |
 | `--no-spring` | No Spring support: the bundle is not loaded and the `snout/spring*` methods fail. |
 | `--no-scala-bridge` | Do not compile Scala. |
-| `--max-heap <size>` | jdtls's heap limit (default `2G`). |
+| `--max-heap <size>` | jdtls's heap limit, or `auto` (the default): 512 MB, plus 150 MB per thousand Java and Scala source files and 0.5 MB per library, rounded up to 256 MB, from 1 GB to 8 GB (at most a quarter of the memory). The parallel collector, unless a `--jvm-arg` names another. |
 | `--jvm-arg <arg>` | An extra JVM argument for jdtls; repeatable. |
 | `--gradle-user-home`, `--gradle-version`, `--no-sources`, `--offline`, `--verbose` | As for `sync`. |
+
+### Starting from the cache
+
+The model is kept with a record of what it was synced from: the scripts the sync saw each build load (settings, build and applied scripts, version catalogs, the wrapper's properties), each build's and included build's settings and build scripts and `gradle.properties` (whether they exist or not), its `buildSrc` folder, the Gradle user home's `gradle.properties` and init scripts, the builds the folder holds with each one's Gradle version and JDK, and the engine's options and sync plugin. Files count by content, `buildSrc` by its files' sizes and times. When nothing of it changed, the start skips the sync and takes the model as it is; the stderr line says `the builds did not change since the last sync`.
+
+What a sync may give differently with the same inputs is synced again in the background, once the Scala bridge is done: a build that failed for a reason that may pass (the network, a daemon), dynamic or snapshot versions, libraries no longer on disk. When their model changed, the engine writes it, imports the projects into jdtls again (`snout.reimport`, a command of the importer bundle), compiles their Scala and sends `snout/modelChanged`.
+
+jdtls's workspace (`jdtls/<hash>/workspace`) persists too, with its search indexes: a start reads them, and writes none again unless their libraries or sources changed.
+
+### Shared Scala, compiled once
+
+Independent builds often compile one folder of Java and Scala into each of them (services that list a `core/src/main/java` in their Scala source sets). JDT needs one copy of its classes, owned by the one JDT project the importer makes for the folder (see [Source folders that several projects compile](#source-folders-that-several-projects-compile)), so the bridge compiles it once, as a **unit**:
+
+- A unit is the Scala source folders that the same compiles share, for builds on one Scala version (`2.13`, `3`), on Gradle 6.1 or newer.
+- It compiles in one of its builds, the representative (the user with the newest Java, then the longest classpath), as a task an init script registers there, made from that build's Scala compile: its compiler, options and JDK. Its classpath is the representative's, with each library another user has in a newer version, or that the representative lacks, put in: the union, as the importer gives the folder's JDT project. Java and Scala in it compile jointly, so each sees the other.
+- Each user then compiles only its own Scala: the init script leaves the shared folders out of its Scala compile, and puts the unit's classes on the classpath of its compile tasks (but the Java compile of the same source set, which runs before the Scala and never saw them). Its own Java and Scala still compile jointly.
+- These builds compile into the bridge's own build directories (`bridge/<hash>/`), so a test or task run, which compiles the folder into the build as its script says, never mixes with them.
+- The unit's classes go to jdtls once, as the shared JDT project's library; the users' own mirrors leave the shared folders out.
+- A unit that fails to compile before it ever worked (a folder that needs something of each build) falls back to compiling the folder in each build, and does so on later starts while its inputs stay the same.
+
+Each unit and build has a fingerprint of its inputs: its sources' paths, sizes and times, its build's model (classpath, compiler settings), and the units it uses. A compile whose fingerprint is the one of its last good compile does not run; when nothing changed, a start runs no Gradle for Scala at all.
+
+### Readiness
+
+The engine tells the app how far each module is with `snout/readiness` notifications (see [Notifications to the app](#notifications-to-the-app)), one per change, and the whole project's as `module: null`. A module is:
+
+- `syncing`: only the project as a whole, while the Gradle sync runs;
+- `compilingScala`: its Scala, or a shared folder it compiles, is compiling for jdtls; its percent moves with the time the last compile took;
+- `importing`: jdtls is importing it, or reading its new Scala classes and building;
+- `ready`: jdtls has it all.
+
+A module without Scala is ready when jdtls is (its `ServiceReady`), one with Scala when jdtls has built against its new classes. Until then, jdtls's diagnostics for its files are held back, since they would report the Scala types not compiled yet as missing; the latest go out when it is ready. Shared source folders are modules of their own here, named as in `sharedSourceRoots` and marked `shared`.
 
 ### The importer
 
@@ -124,7 +159,7 @@ Each Gradle project with Java sources becomes one JDT project, the way Buildship
 Independent builds often compile one folder into each of them, as services compile a shared `core/src/main/java` that is not a Gradle project. JDT cannot hold the same files in several projects: every copy is indexed, searched and compiled again, so find references lists each use once per copy, and going to a definition picks one copy at random. So each source folder has one owner in the workspace:
 
 - A folder inside a project that compiles it belongs to that project (`app` compiling `../lib/src/main/java` gets it from `lib`).
-- Any other folder that more than one project compiles gets a JDT project of its own, named after its tree (`core` for `core/src/main/java` and `core/src/test/java`). Its classpath satisfies every user: the union of their libraries, the newest version of each, test only where every user has it test only, plus the projects they depend on that do not lead back to a user. Its JDK and compiler settings are those of the user with the newest language level. It exports the Scala bridge classes of its folders, taken from one user's compile.
+- Any other folder that more than one project compiles gets a JDT project of its own, named after its tree (`core` for `core/src/main/java` and `core/src/test/java`). Its classpath satisfies every user: the union of their libraries, the newest version of each, test only where every user has it test only, plus the projects they depend on that do not lead back to a user. Its JDK and compiler settings are those of the user with the newest language level. It exports the Scala bridge classes of its folders: the one compile of them (see [Shared Scala, compiled once](#shared-scala-compiled-once)), else one user's.
 - The users drop the folder and their Scala bridge classes for it, and depend on its owner instead.
 
 A folder only one project compiles stays linked into that project.
@@ -148,7 +183,8 @@ Builds are named by their id in the model (`gradleBuilds[].id`); `build` may be 
 | `snout/testsInFile` | `{ uri \| path, text? }` | `{ language, module, classes: [ { name, simpleName, range, methods: [ { name, range } ] } ] }`: the test classes (nested ones as `Outer$Inner`) and methods of a Java or Scala file, with the LSP range of each name, for gutter run icons. `text` is the editor's unsaved text. |
 | `snout/runConfigurations` | `{ module? }` | `{ configurations: [ { id, kind, name, module, build, ... } ] }`, see below. |
 | `snout/run` | `{ config, debug?, dryRun? }` | `{ runId, ... }` at once; `config` is a configuration or its `id`. With `debug`: `debug: { dapPort, attach, listening }`. With `dryRun`: what would run, and nothing starts (below). |
-| `snout/scalaChanged` | `{ files? }` | `{ runId, millis, builds: [ { build, tasks, millis, compileMillis, error } ] }` when the compile is done. Also accepted as a notification, which queues the compile. |
+| `snout/scalaChanged` | `{ files? }` | `{ runId, millis, builds: [ { build, tasks, millis, compileMillis, upToDate, error } ] }` when the compile is done and jdtls has the classes. Also accepted as a notification, which queues the compile. |
+| `snout/readiness` | `{}` | `{ stage, percent, modules: [ { module, stage, percent, shared? } ] }`: what the `snout/readiness` notifications said last. |
 | `snout/springBeans` | `{ module? }` | The beans of each Spring module's application context, for a bean list: `{ modules: [ { module, project, applications, scanPackages, scansEverything, xmlFiles, libraryBeans, beans: [Bean] } ] }`. See [Spring](#spring). |
 | `snout/springEndpoints` | `{ module? }` | The request mappings of the controllers in each module's context, sorted by path: `{ endpoints: [Endpoint] }`. |
 | `snout/springInjections` | `{ uri \| path }` | For gutter icons and "go to bean" or "go to usages", per line of a Java or Scala file: `{ uri, lines: [ { line, injections: [Injection], beans: [Bean with injectedInto] } ] }`. |
@@ -163,6 +199,8 @@ Builds are named by their id in the model (`gradleBuilds[].id`); `build` may be 
 | `snout/buildProblems` | `{ runId, problems: [ { file, line, column, severity: "error" \| "warning" \| "info", message } ] }`, once per run, read from the output: javac, scalac (Zinc's `[Error] file:line:col:` and the older form) and kotlinc. Lines and columns are 1-based; column 0 is unknown. |
 | `snout/debugReady` | `{ runId, dapPort, attach }`, when the debuggee's JDWP agent listens. |
 | `snout/taskFinished` | `{ runId, outcome: "success" \| "failed" \| "cancelled", millis, exitCode?, error?, tests?: { passed, failed, skipped } }`, last. |
+| `snout/readiness` | `{ module, stage: "syncing" \| "compilingScala" \| "importing" \| "ready", percent, shared?, millis }` for a module as it moves on (see [Readiness](#readiness)); `{ module: null, stage, percent, modules, ready, millis }` for the whole project: its least advanced module's stage, their percent on average, how many there are and are ready. `millis` counts from the engine's start. |
+| `snout/modelChanged` | `{}`, when a background sync changed the model the engine wrote. |
 
 ### Running Gradle
 
@@ -186,7 +224,7 @@ java-debug resolves sources, evaluates expressions and replaces code in the runn
 
 ### Scala, incrementally
 
-The Scala bridge compiles Scala once, before jdtls starts. Afterwards, `snout/scalaChanged` (the app sends it when a `.scala` file is saved, created or deleted) recompiles the builds whose Scala source folders hold the files, every build with Scala when none are given, one compile at a time. It runs Gradle's own Scala compile task again: the build directories, and with them Zinc's analysis, persist under the cache, so the compile is incremental, recompiling the changed files and those that depend on what changed. The class mirrors relink only what changed, and the engine then asks jdtls (`snout.refreshClassFolders`, a command of the importer bundle) to refresh the class folders: JDT reads them again and rebuilds the Java that uses them. Problems of the compile come as `snout/buildProblems`.
+The Scala bridge compiles Scala at the start, while jdtls starts. Afterwards, `snout/scalaChanged` (the app sends it when a `.scala` file is saved, created or deleted) recompiles the builds whose Scala source folders hold the files, every build with Scala when none are given, one change at a time; a file of a shared folder recompiles its unit, then every build that uses it. It runs Gradle's own Scala compile tasks again: the build directories, and with them Zinc's analysis, persist under the cache, so the compile is incremental, recompiling the changed files and those that depend on what changed. The class mirrors relink only what changed, and the engine then asks jdtls (`snout.refreshClassFolders`, a command of the importer bundle) to refresh the class folders: JDT reads them again and rebuilds the Java that uses them. Problems of the compile come as `snout/buildProblems`.
 
 Zinc falls back to a full compile when a change invalidates more than half of a source set's files.
 
@@ -355,7 +393,7 @@ A Scala or Groovy source set that also compiles `.java` files (joint compilation
 ## Credits
 
 Parts of `sync-plugin` are adapted from IntelliJ IDEA Community Edition, under the Apache License 2.0. The distribution carries Eclipse JDT LS 1.61.0, under the Eclipse Public License 2.0; 1.61.0 is the last release that runs on Java 21. It also carries java-debug 0.53.1 (microsoft/java-debug), under the Eclipse Public License 1.0. See [NOTICE](NOTICE).
-- `snout-engine lsp` reads the model once, when it starts. After a build file changes, restart it.
+- `snout-engine lsp` syncs when it starts, or takes the last model when the builds did not change. After a build file changes, restart it.
 - The engine does not watch Scala files itself; the app sends `snout/scalaChanged`.
 - Spring: conditions and profiles are not evaluated; test sources, Kotlin, Lombok-generated constructors and beans that `ImportBeanDefinitionRegistrar`s or `BeanFactoryPostProcessor`s register are not seen; Scala positions come from the text, so a member is found by its name.
 - A `main` configuration runs jdtls's compile of the Java, which does not run annotation processors, with the resource folders as they are: no `processResources` filtering.
