@@ -31,3 +31,13 @@ tasks.register('hello') {
         println 'hello from the hello task'
     }
 }
+
+// Shows the heap the Scala compiler gets in a run (the engine's init script sets one when the
+// build does not).
+def scalaProbe = tasks.register('scalaProbe', ScalaCompile)
+tasks.register('scalaHeap') {
+    def probe = scalaProbe.get()
+    doLast {
+        println "scala heap ${probe.scalaCompileOptions.forkOptions.memoryMaximumSize}"
+    }
+}

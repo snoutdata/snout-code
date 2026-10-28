@@ -97,6 +97,16 @@ class EngineIntegrationTest {
     }
 
     @Test
+    void givesTheScalaCompilerRoomInEveryRun() throws Exception {
+        JsonObject params = new JsonObject();
+        params.addProperty("task", ":app:scalaHeap");
+        String runId = engine.dispatch("snout/runTask", params, false).getAsJsonObject().get("runId").getAsString();
+        JsonObject done = await("snout/taskFinished", runId, p -> true);
+        assertEquals("success", done.get("outcome").getAsString(), done.toString());
+        assertTrue(lines(runId).contains("scala heap " + ScalaBridge.SCALA_COMPILER_HEAP), lines(runId).toString());
+    }
+
+    @Test
     void reportsCompilerProblems() throws Exception {
         Path broken = project.resolve("app/src/main/java/demo/app/Broken.java");
         Files.writeString(broken, """
