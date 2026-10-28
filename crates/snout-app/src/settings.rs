@@ -43,6 +43,8 @@ pub struct Settings {
     /// The bottom dock (the Claude Code console) is showing.
     pub console_open: bool,
     pub theme: ThemeChoice,
+    /// The dock layout as GPUI Kit's dock writes it: panels, sizes, open docks.
+    pub dock: Option<serde_json::Value>,
 }
 
 impl Default for Settings {
@@ -56,6 +58,7 @@ impl Default for Settings {
             compact: true,
             console_open: false,
             theme: ThemeChoice::default(),
+            dock: None,
         }
     }
 }

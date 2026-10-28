@@ -2,13 +2,20 @@
 //! dock holding the panel the activity bar picked, tabs in the center, the Claude Code
 //! console and Output in the bottom dock), and a status bar.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Context, Entity, ExternalPaths, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, Styled as _, Subscription, Window, div, px,
 };
+use gpui::{Global, Task};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dock::{DockArea, DockLayout, DockPlacement, DockSkin, PanelId, panel_handle};
+use gpui_component::dock::{
+    BasePanelView, DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin, DockToggleEvent, PanelId,
+    panel_handle, register_panel,
+};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::spinner::Spinner;
 use gpui_component::{Disableable as _, Selectable as _, Sizable as _, Theme};
@@ -40,7 +47,81 @@ pub struct Workspace {
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
     focus: gpui::FocusHandle,
     title: String,
+    _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The layout format this build writes; a saved layout of another version is ignored.
+const LAYOUT_VERSION: usize = 1;
+
+/// The panels of the window being restored, by name, for the dock's panel registry.
+struct PanelPool(HashMap<&'static str, Arc<dyn BasePanelView>>);
+
+impl Global for PanelPool {}
+
+/// The first layout: the side panel on the left, the tabs in the center, the console and
+/// Output in the bottom dock.
+fn default_layout(
+    dock: &Entity<DockArea>,
+    panels: &[(Arc<dyn BasePanelView>, DockPlacement)],
+    window: &mut Window,
+    cx: &mut App,
+) {
+    dock.update(cx, |d, cx| {
+        let mut regions = [
+            (DockPlacement::Left, DockLayout::tabs(), px(320.)),
+            (DockPlacement::Center, DockLayout::tabs(), px(0.)),
+            (DockPlacement::Bottom, DockLayout::tabs(), px(260.)),
+        ];
+        for (view, place) in panels {
+            if let Some((_, layout, _)) = regions.iter_mut().find(|(p, _, _)| p == place) {
+                *layout = std::mem::replace(layout, DockLayout::tabs()).panel_view(view.clone(), cx);
+            }
+        }
+        for (place, layout, size) in regions {
+            if place == DockPlacement::Center {
+                d.set_center(layout, window, cx);
+            } else {
+                d.set_dock(place, layout, window, cx);
+                d.set_dock_size(place, size, window, cx);
+            }
+        }
+    });
+}
+
+/// Put back the layout saved last time, with the panels this window already made; a
+/// panel the saved layout lacks (one added since) goes to its usual place. False when
+/// the saved layout cannot be used.
+fn restore_layout(
+    dock: &Entity<DockArea>,
+    state: serde_json::Value,
+    panels: &[(Arc<dyn BasePanelView>, DockPlacement)],
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Ok(state) = serde_json::from_value::<DockAreaState>(state) else { return false };
+    if state.version != Some(LAYOUT_VERSION) {
+        return false;
+    }
+    let pool: HashMap<&'static str, Arc<dyn BasePanelView>> =
+        panels.iter().map(|(view, _)| (view.panel_name(cx), view.clone())).collect();
+    for name in pool.keys().copied() {
+        register_panel(cx, name, move |_, _, cx| cx.global::<PanelPool>().0[name].clone());
+    }
+    cx.set_global(PanelPool(pool));
+    let loaded = dock.update(cx, |d, cx| d.load(state, window, cx));
+    cx.remove_global::<PanelPool>();
+    if loaded.is_err() {
+        return false;
+    }
+    dock.update(cx, |d, cx| {
+        for (view, place) in panels {
+            if d.panel(view.panel_id(cx)).is_none() {
+                d.add_panel_view(view.clone(), *place, None, window, cx);
+            }
+        }
+    });
+    true
 }
 
 impl Workspace {
@@ -52,42 +133,65 @@ impl Workspace {
         let output = cx.new(|cx| OutputPanel::new(model.clone(), cx));
         let center = crate::center::build(&model, window, cx);
         let console = crate::console::build(&model, window, cx);
-        let (dock, _skin) = DockSkin::dock_area("snout-code", Some(1), window, cx);
+        let (dock, _skin) = DockSkin::dock_area("snout-code", Some(LAYOUT_VERSION), window, cx);
 
-        let welcome_id = PanelId::from(welcome.entity_id());
-        let mut tabs = Tabs { welcome: welcome_id, diff: None, journal: None, commit: None, console: None };
-        dock.update(cx, |d, cx| {
-            let left = DockLayout::tabs().panel_view(panel_handle(side.clone()), cx);
-            d.set_dock(DockPlacement::Left, left, window, cx);
-            d.set_dock_size(DockPlacement::Left, px(320.), window, cx);
-            let mut center_tabs = DockLayout::tabs().panel_view(panel_handle(welcome.clone()), cx);
-            for (kind, view) in center {
-                let id = view.panel_id(cx);
-                match kind {
-                    crate::center::Kind::Diff => tabs.diff = Some(id),
-                    crate::center::Kind::Journal => tabs.journal = Some(id),
-                    crate::center::Kind::Commit => tabs.commit = Some(id),
-                }
-                center_tabs = center_tabs.panel_view(view, cx);
+        // Every panel, where it goes when the saved layout does not place it.
+        let mut panels: Vec<(Arc<dyn BasePanelView>, DockPlacement)> = vec![
+            (panel_handle(side.clone()), DockPlacement::Left),
+            (panel_handle(welcome.clone()), DockPlacement::Center),
+        ];
+        let mut tabs = Tabs {
+            welcome: PanelId::from(welcome.entity_id()),
+            diff: None,
+            journal: None,
+            commit: None,
+            console: None,
+        };
+        for (kind, view) in center {
+            let id = view.panel_id(cx);
+            match kind {
+                crate::center::Kind::Diff => tabs.diff = Some(id),
+                crate::center::Kind::Journal => tabs.journal = Some(id),
+                crate::center::Kind::Commit => tabs.commit = Some(id),
             }
-            d.set_center(center_tabs, window, cx);
-            let mut bottom = DockLayout::tabs();
-            if let Some(console) = console {
-                tabs.console = Some(console.panel_id(cx));
-                bottom = bottom.panel_view(console, cx);
-            }
-            bottom = bottom.panel_view(panel_handle(output.clone()), cx);
-            d.set_dock(DockPlacement::Bottom, bottom, window, cx);
-            d.set_dock_size(DockPlacement::Bottom, px(260.), window, cx);
-            d.set_dock_collapsible(DockPlacement::Bottom, true, window, cx);
-        });
-        let open = model.read(cx).settings.console_open;
-        if !open {
-            dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Bottom, window, cx));
+            panels.push((view, DockPlacement::Center));
         }
+        if let Some(console) = console {
+            tabs.console = Some(console.panel_id(cx));
+            panels.push((console, DockPlacement::Bottom));
+        }
+        panels.push((panel_handle(output.clone()), DockPlacement::Bottom));
+
+        let saved = model.read(cx).settings.dock.clone();
+        let restored = saved.is_some_and(|state| restore_layout(&dock, state, &panels, window, cx));
+        if !restored {
+            default_layout(&dock, &panels, window, cx);
+        }
+        let open = model.read(cx).settings.console_open;
+        dock.update(cx, |d, cx| {
+            d.set_dock_collapsible(DockPlacement::Bottom, true, window, cx);
+            if d.is_dock_open(DockPlacement::Bottom) != open {
+                d.toggle_dock(DockPlacement::Bottom, window, cx);
+            }
+        });
 
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
+            cx.subscribe(&dock, |this, _, e: &DockEvent, cx| {
+                if matches!(e, DockEvent::LayoutChanged) {
+                    this.save_layout_soon(cx);
+                }
+            }),
+            // The bottom dock's own collapse control shows or hides the console too.
+            cx.subscribe(&dock, |this, _, e: &DockToggleEvent, cx| {
+                if e.placement() == DockPlacement::Bottom {
+                    this.model.update(cx, |m, cx| {
+                        m.settings.console_open = e.is_open();
+                        m.persist();
+                        cx.notify();
+                    });
+                }
+            }),
             cx.subscribe_in(&model, window, Self::on_model_event),
             // Coming back to the window, re-read the repository and count again, so
             // changes made elsewhere (terminal, editor, an agent) show up at once.
@@ -109,9 +213,12 @@ impl Workspace {
             menu_checks: None,
             focus: cx.focus_handle(),
             title: String::new(),
+            _save_layout: None,
             _subscriptions: subscriptions,
         };
-        this.show_repo_tabs(window, cx);
+        if !restored {
+            this.show_repo_tabs(window, cx);
+        }
         window.focus(&this.focus, cx);
         this
     }
@@ -190,6 +297,24 @@ impl Workspace {
             return;
         }
         self.model.update(cx, |m, cx| m.step_commit(up, cx));
+    }
+
+    /// Save the dock layout once it has stopped changing for a moment (a drag resizes it
+    /// many times).
+    fn save_layout_soon(&mut self, cx: &mut Context<Self>) {
+        self._save_layout = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+            let _ = this.update(cx, |this, cx| this.save_layout(cx));
+        }));
+    }
+
+    pub fn save_layout(&mut self, cx: &mut Context<Self>) {
+        let state = self.dock.read(cx).dump(cx);
+        let Ok(value) = serde_json::to_value(state) else { return };
+        self.model.update(cx, |m, _| {
+            m.settings.dock = Some(value);
+            m.persist();
+        });
     }
 
     fn send(&mut self, action: Action, cx: &mut Context<Self>) {

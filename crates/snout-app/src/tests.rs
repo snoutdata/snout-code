@@ -471,3 +471,57 @@ fn a_folder_dropped_on_the_window_opens(cx: &mut TestAppContext) {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[gpui::test]
+fn the_dock_layout_is_saved_and_restored(cx: &mut TestAppContext) {
+    use gpui_component::dock::DockPlacement;
+    let repo = demo_repo("layout");
+    let (model, ws, vcx) = open(cx, with_repo(&repo));
+    vcx.update(|w, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.dock.update(cx, |d, cx| d.set_dock_size(DockPlacement::Left, gpui::px(410.), w, cx));
+            ws.set_activity(Activity::Git, w, cx);
+        })
+    });
+    // The save waits for the layout to settle.
+    vcx.executor().advance_clock(std::time::Duration::from_secs(1));
+    vcx.run_until_parked();
+    let saved = vcx.update(|_, cx| model.read(cx).settings.clone());
+    assert!(saved.dock.is_some(), "the layout was saved");
+
+    // A new window over the saved settings has the same layout and every panel.
+    let model2 = cx.update(|cx| cx.new(|cx| Model::new(saved.clone(), None, cx)));
+    let mut ws2 = None;
+    let (_, vcx2) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Workspace::new(model2.clone(), window, cx));
+        ws2 = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    vcx2.run_until_parked();
+    let ws2 = ws2.unwrap();
+    vcx2.update(|_, cx| {
+        let ws = ws2.read(cx);
+        let d = ws.dock.read(cx);
+        assert_eq!(d.dock_size(DockPlacement::Left), Some(gpui::px(410.)));
+        let ids = [Some(ws.tabs.welcome), ws.tabs.diff, ws.tabs.journal, ws.tabs.commit, ws.tabs.console];
+        assert!(ids.into_iter().flatten().all(|id| d.panel(id).is_some()), "every panel is placed");
+        assert!(crate::console::console_of(ws, cx).is_some());
+    });
+
+    // A layout this build cannot read falls back to the usual one.
+    let mut broken = saved;
+    broken.dock = Some(serde_json::json!({ "version": 99, "center": "nonsense" }));
+    let model3 = cx.update(|cx| cx.new(|cx| Model::new(broken, None, cx)));
+    let mut ws3 = None;
+    let (_, vcx3) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Workspace::new(model3.clone(), window, cx));
+        ws3 = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    vcx3.run_until_parked();
+    let ws3 = ws3.unwrap();
+    vcx3.update(|_, cx| {
+        assert_eq!(ws3.read(cx).dock.read(cx).dock_size(DockPlacement::Left), Some(gpui::px(320.)));
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
