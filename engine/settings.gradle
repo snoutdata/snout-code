@@ -1,0 +1,4 @@
+rootProject.name = 'snout-engine'
+
+include 'sync-plugin'
+include 'sync-cli'

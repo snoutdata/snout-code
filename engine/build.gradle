@@ -1,0 +1,42 @@
+// snout-engine: the JVM side of SnoutCode.
+//
+// sync-plugin  model builders that run inside the user's Gradle daemon (Java 8 bytecode)
+// sync-cli     the Tooling API client: `snout-engine sync <projectDir>`
+
+ext {
+    toolingApiVersion = '8.10.2'
+    junitVersion = '5.11.3'
+}
+
+subprojects {
+    group = 'com.snoutcode.engine'
+    version = '0.1.0'
+
+    repositories {
+        mavenCentral()
+        maven {
+            name = 'gradleReleases'
+            url = 'https://repo.gradle.org/gradle/libs-releases'
+            content { includeGroup 'org.gradle' }
+        }
+    }
+
+    plugins.withType(JavaPlugin).configureEach {
+        dependencies {
+            testImplementation platform("org.junit:junit-bom:${rootProject.junitVersion}")
+            testImplementation 'org.junit.jupiter:junit-jupiter'
+            testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+        }
+        tasks.withType(JavaCompile).configureEach {
+            options.encoding = 'UTF-8'
+            options.compilerArgs += ['-Xlint:all', '-Xlint:-options', '-Xlint:-processing', '-Xlint:-serial']
+        }
+        tasks.withType(Test).configureEach {
+            useJUnitPlatform()
+            testLogging {
+                events 'failed'
+                exceptionFormat 'full'
+            }
+        }
+    }
+}
