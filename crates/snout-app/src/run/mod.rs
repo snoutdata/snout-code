@@ -155,6 +155,8 @@ pub struct Session {
     pub dropped: usize,
     /// Asked for before the Java engine was ready: it starts once it is.
     pub waiting: bool,
+    /// The program's process, when the engine started it itself (a main class).
+    pub pid: Option<u32>,
 }
 
 impl Session {
@@ -753,6 +755,7 @@ impl Runs {
             debug: launch.debug().then(debug::Debugger::default),
             dropped: 0,
             waiting: false,
+            pid: None,
         };
         let what = match &launch {
             Launch::Config { config, .. } => match (config.kind, &config.main_class, &config.task) {
@@ -898,6 +901,7 @@ impl Runs {
             debug: launch.debug().then(debug::Debugger::default),
             dropped: 0,
             waiting: false,
+            pid: None,
         };
         s.lines.push(ConsoleLine::system(format!("Running {}", launch.title())));
         if matches!(launch, Launch::Tests { .. }) {
@@ -934,6 +938,7 @@ impl Runs {
         };
         let run_id = v.get("runId").and_then(Value::as_str).map(str::to_owned);
         s.run_id = run_id.clone();
+        s.pid = v.get("pid").and_then(Value::as_u64).map(|p| p as u32);
         // The command line a main class runs with, as the engine launched it.
         if let Some(command) = v.get("command").and_then(Value::as_array) {
             let words: Vec<String> = command

@@ -63,7 +63,7 @@ impl Page {
             Page::Keymap => "shortcuts keys bindings",
             Page::Editor => "tab size indent soft wrap whitespace font",
             Page::VersionControl => "git fetch interval background",
-            Page::Gradle => "build tools jdk java",
+            Page::Gradle => "build tools jdk java daemon idle timeout",
             Page::ClaudeCode => "tools agent console program path",
         }
     }
@@ -217,6 +217,12 @@ pub(crate) fn row(label: &'static str, control: impl IntoElement, p: &Palette) -
 
 pub(crate) fn section(text: &'static str, p: &Palette) -> gpui::Div {
     div().pt(px(14.)).pb(px(6.)).text_color(p.fg_dim).text_size(px(12.)).font_weight(FontWeight::MEDIUM).child(text)
+}
+
+/// The daemons' idle time one step up (`by` 1) or down: a minute at a time up to 5, then 5.
+fn step_idle(minutes: u64, by: i32) -> u64 {
+    let step = if minutes < 5 || (minutes == 5 && by < 0) { 1 } else { 5 };
+    (minutes as i64 + i64::from(by) * step).clamp(1, 240) as u64
 }
 
 /// A − value + stepper.
@@ -519,6 +525,7 @@ impl SettingsView {
                 if self.jdks.is_empty() {
                     body = body.child(div().pt(px(8.)).text_color(p.fg_dim).child("No JDK was found on this Mac."));
                 }
+                let view = cx.entity();
                 body.child(
                     div()
                         .pt(px(10.))
@@ -526,6 +533,30 @@ impl SettingsView {
                         .text_color(p.fg_dim)
                         .child("The Java server restarts on the chosen JDK the next time it starts."),
                 )
+                .child(section("Gradle daemons", &p))
+                .child(row(
+                    "Stop idle daemons after",
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(stepper(
+                            "settings-daemon-idle",
+                            d.daemon_idle_minutes.to_string(),
+                            move |by, _, cx| {
+                                view.update(cx, |v, cx| {
+                                    v.set(cx, |s| s.daemon_idle_minutes = step_idle(s.daemon_idle_minutes, by))
+                                })
+                            },
+                            &p,
+                        ))
+                        .child(div().text_color(p.fg_dim).child("minutes")),
+                    &p,
+                ))
+                .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                    "SnoutCode's own Gradle daemons stop after this long without a build. A new value \
+                             holds for the daemons started after the Java engine starts again.",
+                ))
                 .into_any_element()
             }
             Page::ClaudeCode => body
@@ -963,9 +994,19 @@ mod tests {
     use super::Page;
 
     #[test]
+    fn the_daemon_idle_time_steps_by_minutes_then_by_five() {
+        assert_eq!(super::step_idle(15, 1), 20);
+        assert_eq!(super::step_idle(5, -1), 4);
+        assert_eq!(super::step_idle(4, 1), 5);
+        assert_eq!(super::step_idle(1, -1), 1);
+        assert_eq!(super::step_idle(240, 1), 240);
+    }
+
+    #[test]
     fn the_search_finds_pages_by_title_group_and_keyword() {
         assert!(Page::Gradle.matches("build"));
         assert!(Page::Gradle.matches("JDK"));
+        assert!(Page::Gradle.matches("daemon"));
         assert!(Page::Editor.matches("wrap"));
         assert!(Page::ClaudeCode.matches("tools"));
         assert!(!Page::Keymap.matches("theme"));

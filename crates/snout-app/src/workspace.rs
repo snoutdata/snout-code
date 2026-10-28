@@ -51,6 +51,7 @@ pub struct Tabs {
     pub run: PanelId,
     pub debug: PanelId,
     pub build: PanelId,
+    pub processes: PanelId,
 }
 
 pub struct Workspace {
@@ -87,6 +88,9 @@ pub struct Workspace {
     /// The project's Spring model, for the Spring window and the editors' gutters.
     pub spring: Entity<crate::spring::Spring>,
     pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
+    /// The processes SnoutCode runs, and their tool window.
+    pub processes: Entity<crate::processes::Processes>,
+    pub processes_window: Entity<crate::processes::window::ProcessesWindow>,
     /// Runs, tests and the debugger, and their tool windows.
     pub runs: Entity<crate::run::Runs>,
     pub run_window: Entity<crate::run::windows::RunWindow>,
@@ -237,6 +241,8 @@ impl Workspace {
         cx.set_global(crate::run::RunsHandle(runs.clone()));
         let marks = runs.read(cx).marks.clone();
         cx.set_global(crate::run::MarksHandle(marks));
+        let processes = cx.new(|cx| crate::processes::Processes::new(model.clone(), hub.clone(), runs.clone(), cx));
+        cx.set_global(crate::processes::ProcessesHandle(processes.clone()));
         let spring = cx.new(|cx| crate::spring::Spring::new(runs.clone(), hub.clone(), cx));
         cx.set_global(crate::spring::SpringHandle(spring.clone()));
         let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), cx));
@@ -268,6 +274,7 @@ impl Workspace {
         let debug_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Debug, window, cx));
         let build_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Build, window, cx));
         let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
+        let processes_window = cx.new(|cx| crate::processes::window::ProcessesWindow::new(processes.clone(), cx));
         let spring_window = cx.new(|cx| crate::spring::window::SpringWindow::new(spring.clone(), window, cx));
         let mut tabs = Tabs {
             welcome: PanelId::from(welcome.entity_id()),
@@ -281,6 +288,7 @@ impl Workspace {
             run: PanelId::from(run_window.entity_id()),
             debug: PanelId::from(debug_window.entity_id()),
             build: PanelId::from(build_window.entity_id()),
+            processes: PanelId::from(processes_window.entity_id()),
         };
         if let Some(console) = console {
             tabs.console = Some(console.panel_id(cx));
@@ -293,6 +301,7 @@ impl Workspace {
         panels.push((panel_handle(run_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(debug_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(processes_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
         panels.push((panel_handle(spring_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
@@ -410,6 +419,8 @@ impl Workspace {
             spring_window,
             spring,
             notifications,
+            processes,
+            processes_window,
             runs,
             run_window,
             debug_window,
@@ -1338,6 +1349,17 @@ impl Render for Workspace {
                 if !this.tool_open(Tool::Spring, cx) {
                     this.toggle_tool(Tool::Spring, w, cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &ShowProcesses, w, cx| {
+                if !this.tool_open(Tool::Processes, cx) {
+                    this.toggle_tool(Tool::Processes, w, cx);
+                }
+                this.processes.update(cx, |p, cx| p.look(cx));
+            }))
+            .on_action(cx.listener(|this, _: &StopIdleProcesses, _, cx| {
+                this.processes.update(cx, |p, cx| {
+                    p.stop_idle(cx);
+                });
             }))
             .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &RunSelected, w, cx| this.run_selected(false, w, cx)))

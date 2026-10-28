@@ -83,6 +83,9 @@ pub struct Settings {
     pub sessions: std::collections::BTreeMap<PathBuf, serde_json::Value>,
     /// The shortcuts changed from the defaults (see [`crate::keymap`]).
     pub keymap: crate::keymap::Overrides,
+    /// How long the Java engine's own Gradle daemons stay without a build before they stop, in
+    /// minutes.
+    pub daemon_idle_minutes: u64,
 }
 
 impl Default for Settings {
@@ -114,6 +117,7 @@ impl Default for Settings {
             opened: Default::default(),
             sessions: Default::default(),
             keymap: Default::default(),
+            daemon_idle_minutes: crate::processes::DEFAULT_IDLE_MINUTES,
         }
     }
 }
@@ -222,6 +226,9 @@ fn migrate(mut s: Settings) -> Settings {
     }
     if s.fetch_minutes == 0 {
         s.fetch_minutes = defaults.fetch_minutes;
+    }
+    if !(1..=24 * 60).contains(&s.daemon_idle_minutes) {
+        s.daemon_idle_minutes = defaults.daemon_idle_minutes;
     }
     if s.ui_font.trim().is_empty() {
         s.ui_font = defaults.ui_font;

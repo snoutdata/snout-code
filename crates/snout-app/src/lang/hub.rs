@@ -34,6 +34,8 @@ pub enum Stage {
     Restarting,
     /// The engine is being built (snout.sh, in development): it starts once it is.
     WaitingForEngine,
+    /// Stopped from the Processes window: it starts again on Restart.
+    Stopped,
     Failed(String),
 }
 
@@ -48,6 +50,7 @@ impl Stage {
             Stage::Ready => "Ready".into(),
             Stage::Restarting => "Restarting".into(),
             Stage::WaitingForEngine => "Waiting for snout-engine".into(),
+            Stage::Stopped => "Stopped".into(),
             Stage::Failed(why) => why.clone(),
         }
     }
@@ -214,6 +217,11 @@ impl Server {
 
     pub fn ready(&self) -> bool {
         self.initialized && self.client.as_ref().is_some_and(Client::is_alive)
+    }
+
+    /// The engine's process, while it runs.
+    pub fn pid(&self) -> Option<u32> {
+        self.client.as_ref().filter(|c| c.is_alive()).map(Client::pid)
     }
 }
 
@@ -561,6 +569,7 @@ impl LangHub {
         // Messages of the process going away are those of an earlier generation.
         server.generation = next_generation();
         server.crashes = 0;
+        server.stopped = false;
         server.initialized = false;
         server.progress.clear();
         if let Some(old) = server.client.take() {
@@ -577,8 +586,41 @@ impl LangHub {
         cx.notify();
     }
 
+    /// Stop the engine of `root` (and with it its language server and Gradle daemons), and
+    /// keep it stopped until it is restarted. Its documents stay, for the restart.
+    pub fn stop_engine(&mut self, root: &Path, cx: &mut Context<Self>) {
+        let Some(server) = self.servers.get_mut(root) else { return };
+        // What the process says until it ends is of an earlier generation.
+        server.generation = next_generation();
+        server.initialized = false;
+        server.progress.clear();
+        server.stage = Stage::Stopped;
+        if let Some(client) = server.client.take() {
+            let pid = client.pid();
+            eprintln!("[java] stopping the engine for {} (pid {pid}) on request", root.display());
+            std::thread::spawn(move || client.shutdown_blocking(Duration::from_secs(5)));
+        }
+        self.clear_diagnostics(root, cx);
+        cx.emit(HubEvent::Changed);
+        cx.notify();
+    }
+
+    /// Forget what the engine of `root` published, in the editors too.
+    fn clear_diagnostics(&mut self, root: &Path, cx: &mut Context<Self>) {
+        let Some(server) = self.servers.get_mut(root) else { return };
+        let cleared: Vec<String> = std::mem::take(&mut server.diagnostics).into_keys().collect();
+        for uri in cleared {
+            if let Some(doc) = self.docs.get(&uri) {
+                for editor in doc.editors.iter().filter_map(|e| e.upgrade()) {
+                    editor.update(cx, |e, cx| e.set_diagnostics(Vec::new(), cx));
+                }
+            }
+        }
+    }
+
     /// Start (or restart) the engine of `root` on its JDK.
     fn spawn(&mut self, root: &Path, cx: &mut Context<Self>) {
+        let idle_minutes = self.model.read(cx).settings.daemon_idle_minutes;
         let Some(server) = self.servers.get_mut(root) else { return };
         let Some(jdk) = server.jdk.clone() else { return };
         if self.engine_build.as_ref().is_some_and(|b| !b.finished()) {
@@ -589,7 +631,7 @@ impl LangHub {
             server.stage = Stage::Failed("The Java engine is not built (run snout.sh)".into());
             return;
         };
-        let (client, events) = match Client::spawn(java::engine_command(&dist, root, &jdk.home)) {
+        let (client, events) = match Client::spawn(java::engine_command(&dist, root, &jdk.home, idle_minutes)) {
             Ok(c) => c,
             Err(e) => {
                 server.stage = Stage::Failed(format!("The Java engine did not start: {e}"));
@@ -841,18 +883,11 @@ impl LangHub {
         server.client = None;
         server.initialized = false;
         server.progress.clear();
-        let cleared: Vec<String> = std::mem::take(&mut server.diagnostics).into_keys().collect();
         if server.started.elapsed() > Duration::from_secs(300) {
             server.crashes = 0;
         }
         server.crashes += 1;
-        for uri in cleared {
-            if let Some(doc) = self.docs.get(&uri) {
-                for editor in doc.editors.iter().filter_map(|e| e.upgrade()) {
-                    editor.update(cx, |e, cx| e.set_diagnostics(Vec::new(), cx));
-                }
-            }
-        }
+        self.clear_diagnostics(root, cx);
         let server = self.servers.get_mut(root).expect("still there");
         if server.crashes > 5 {
             server.stage = Stage::Failed("The Java server keeps stopping".into());

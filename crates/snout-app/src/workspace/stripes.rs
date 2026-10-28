@@ -38,6 +38,8 @@ pub enum Tool {
     Gradle,
     Spring,
     Notifications,
+    /// Not on a stripe: the status bar and View ▸ Processes open it.
+    Processes,
 }
 
 impl Tool {
@@ -60,6 +62,7 @@ impl Tool {
             Tool::Gradle => Icon::Build,
             Tool::Spring => Icon::Leaf,
             Tool::Notifications => Icon::Bell,
+            Tool::Processes => Icon::Gear,
         }
     }
 
@@ -75,6 +78,7 @@ impl Tool {
             Tool::Gradle => "Gradle",
             Tool::Spring => "Spring",
             Tool::Notifications => "Notifications",
+            Tool::Processes => "Processes",
         }
     }
 
@@ -90,6 +94,7 @@ impl Tool {
             Tool::Gradle => "stripe-gradle",
             Tool::Spring => "stripe-spring",
             Tool::Notifications => "stripe-notifications",
+            Tool::Processes => "stripe-processes",
         }
     }
 }
@@ -173,6 +178,7 @@ impl Workspace {
             Tool::Gradle => Some(self.tabs.gradle),
             Tool::Spring => Some(self.tabs.spring),
             Tool::Notifications => Some(self.tabs.notifications),
+            Tool::Processes => Some(self.tabs.processes),
         }
     }
 

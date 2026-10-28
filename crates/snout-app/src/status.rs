@@ -33,6 +33,7 @@ pub struct StatusBar {
     /// The Git view shows: the branch takes the breadcrumbs' place.
     pub git: bool,
     _hub_watch: Option<Subscription>,
+    _processes_watch: Option<Subscription>,
     _watch: Vec<Subscription>,
 }
 
@@ -85,6 +86,7 @@ impl StatusBar {
             git: false,
             tasks_open: false,
             _hub_watch: None,
+            _processes_watch: None,
             _watch: watch,
         }
     }
@@ -93,6 +95,43 @@ impl StatusBar {
     pub fn set_hub(&mut self, hub: Entity<crate::lang::LangHub>, cx: &mut Context<Self>) {
         self._hub_watch = Some(cx.observe(&hub, |_, _, cx| cx.notify()));
         self.hub = Some(hub);
+        self._processes_watch = crate::processes::processes(cx).map(|p| cx.observe(&p, |_, _, cx| cx.notify()));
+    }
+
+    /// The processes item: how much memory SnoutCode's processes take; a click shows them.
+    fn processes_item(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let processes = crate::processes::processes(cx)?;
+        let (count, memory, _) = crate::processes::totals(&processes.read(cx).rows);
+        if count == 0 {
+            return None;
+        }
+        let p = palette(cx);
+        let hover_bg = p.button_hover;
+        let tip: SharedString = format!(
+            "SnoutCode's processes: {count} running, {} of memory. Click to show them.",
+            crate::processes::bytes(memory)
+        )
+        .into();
+        Some(
+            div()
+                .id("status-processes")
+                .debug_selector(|| "status-processes".into())
+                .flex_none()
+                .h(px(20.))
+                .px(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .rounded(px(4.))
+                .whitespace_nowrap()
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover_bg))
+                .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+                .child(icon(Icon::Gear, 12., p.fg_dim))
+                .child(crate::processes::bytes(memory))
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ShowProcesses), cx))
+                .into_any_element(),
+        )
     }
 
     /// What the Java server of the editor in front (or of the project) is doing, and
@@ -383,6 +422,7 @@ impl Render for StatusBar {
         let p = palette(cx);
         let java_item = self.shows_java_missing(cx).then(|| self.java_missing_item(cx));
         let java = self.java_status(cx);
+        let processes = self.processes_item(cx);
         let crumbs = if self.git { None } else { self.breadcrumbs(cx) };
         let status = if self.git { None } else { self.editor_status(cx) };
         let m = self.model.read(cx);
@@ -464,6 +504,7 @@ impl Render for StatusBar {
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ShowProblems), cx)),
                 )
             })
+            .children(processes)
             .when(self.editor_status(cx).is_some_and(|s| s.read_only) && !self.git, |d| {
                 d.child(
                     div()

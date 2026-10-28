@@ -114,6 +114,9 @@ mod shots {
         Keymap,
         /// The New Project dialog: 0 a Java project, 1 a Spring Boot one, 2 its dependencies.
         NewProject(u8),
+        /// The Processes window: the engine, its language server and Gradle daemons, a run,
+        /// a test JVM, a terminal and a leftover.
+        Processes,
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -697,6 +700,105 @@ mod shots {
                         ws.toggle_tool(snout_app::workspace::Tool::Gradle, window, cx);
                         ws.show_bottom(ws.tabs.build, window, cx);
                     });
+                })
+                .unwrap();
+            }
+            Some(Select::Processes) => {
+                use snout_app::processes::{Kind, Row};
+                let engine_root = repo.clone();
+                let row =
+                    |pid: u32, depth: usize, kind: Kind, purpose: &str, mb: u64, cpu: f32, up: u64, state: &str| Row {
+                        pid: Some(pid),
+                        start: 0,
+                        depth,
+                        kind,
+                        purpose: purpose.into(),
+                        project: Some("shop".into()),
+                        memory: mb << 20,
+                        cpu,
+                        uptime: up,
+                        state: state.into(),
+                        busy: matches!(state, "Ready" | "Building" | "Running" | "Debugging" | "Indexing"),
+                        idle: state.starts_with("Idle") || state == "Left over",
+                    };
+                let rows = vec![
+                    row(48211, 0, Kind::App, "SnoutCode: the window, the editors and Git", 412, 2.1, 7_440, "Running"),
+                    row(
+                        48302,
+                        1,
+                        Kind::Engine { root: engine_root.clone() },
+                        "Java engine for shop: reads the Gradle build, runs and tests the code",
+                        236,
+                        0.4,
+                        7_380,
+                        "Ready",
+                    ),
+                    row(
+                        48377,
+                        2,
+                        Kind::LanguageServer { root: engine_root.clone() },
+                        "Java language server for shop: completion, errors, navigation",
+                        1_310,
+                        3.8,
+                        7_352,
+                        "Ready",
+                    ),
+                    row(
+                        51022,
+                        2,
+                        Kind::Run { session: Some(1) },
+                        "ShopApplication: your program, being debugged",
+                        388,
+                        12.5,
+                        512,
+                        "Debugging",
+                    ),
+                    row(
+                        48455,
+                        2,
+                        Kind::Daemon { version: "8.10.2".into() },
+                        "Gradle daemon 8.10.2 for shop: syncs the build, runs tasks and tests",
+                        702,
+                        86.0,
+                        7_300,
+                        "Building",
+                    ),
+                    row(
+                        52107,
+                        3,
+                        Kind::Tests { session: Some(2) },
+                        "Tests of OrderServiceTest: the test JVM Gradle started",
+                        301,
+                        97.2,
+                        14,
+                        "Running",
+                    ),
+                    row(
+                        49120,
+                        2,
+                        Kind::Daemon { version: "7.6.4".into() },
+                        "Gradle daemon 7.6.4 for shop: syncs the build, runs tasks and tests",
+                        455,
+                        0.0,
+                        5_100,
+                        "Idle for 6 min, stops after 15",
+                    ),
+                    row(48299, 1, Kind::Terminal, "Terminal: your zsh shell in shop", 6, 0.0, 7_420, "Running"),
+                    row(
+                        39004,
+                        0,
+                        Kind::Leftover,
+                        "Gradle daemon 8.5, left over from an earlier session",
+                        520,
+                        0.0,
+                        93_600,
+                        "Left over",
+                    ),
+                ];
+                let processes = cx.update(|cx| ws.read(cx).processes.clone());
+                cx.update(|cx| processes.update(cx, |p, cx| p.set_rows(rows, cx)));
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.toggle_tool(snout_app::workspace::Tool::Processes, window, cx));
                 })
                 .unwrap();
             }
@@ -1629,6 +1731,9 @@ mod shots {
         shot("debug-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Debug));
         shot("debug-light", ThemeChoice::Light, Activity::Project, Some(Select::Debug));
         shot("gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Gradle));
+        shot("processes-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Processes));
+        shot("processes-light", ThemeChoice::Light, Activity::Project, Some(Select::Processes));
+        shot("settings-gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Gradle)));
         real_spring_shot(ThemeChoice::Dark);
         shot("spring-gutter-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));
         shot("spring-gutter-light", ThemeChoice::Light, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));

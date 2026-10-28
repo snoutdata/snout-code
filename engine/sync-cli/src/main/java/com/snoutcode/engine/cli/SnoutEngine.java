@@ -35,6 +35,8 @@ public final class SnoutEngine {
         "  --no-sources                do not look up source jars",
         "  --offline                   run Gradle offline",
         "  --verbose                   show Gradle's output on stderr",
+        "  --daemon-idle-minutes <n>   stop the Gradle daemons after n minutes without a build (default: "
+            + Daemons.IDLE_MINUTES + ")",
         "",
         "lsp: syncs the model, compiles the Scala that Java code uses, then runs jdtls with the SnoutCode",
         "importer and java-debug, and speaks LSP on stdin and stdout: jdtls's methods, and the engine's",
@@ -43,7 +45,7 @@ public final class SnoutEngine {
         "Nothing is written into the project directory.",
         "",
         "options: --java-home, --jdk, --parallel, --gradle-user-home, --gradle-version, --no-sources,",
-        "--offline and --verbose as for sync, and:",
+        "--offline, --verbose and --daemon-idle-minutes as for sync, and:",
         "  --cache-dir <dir>           caches, models and jdtls workspaces (default: the user cache dir)",
         "  --jdtls-java-home <dir>     Java 21+ for jdtls (default: this JVM)",
         "  --jdtls <dir>               jdtls installation (default: the bundled one)",
@@ -92,6 +94,7 @@ public final class SnoutEngine {
                     case "--no-sources" -> options.sources = false;
                     case "--offline" -> options.offline = true;
                     case "--verbose" -> verbose = true;
+                    case "--daemon-idle-minutes" -> Daemons.idleMinutes(Integer.parseInt(args[++i]));
                     default -> {
                         stderr.println("unknown option: " + args[i] + "\n\n" + USAGE);
                         return 2;
@@ -155,6 +158,7 @@ public final class SnoutEngine {
                     case "--no-sources" -> options.sources = false;
                     case "--offline" -> options.offline = true;
                     case "--verbose" -> options.verbose = true;
+                    case "--daemon-idle-minutes" -> Daemons.idleMinutes(Integer.parseInt(args[++i]));
                     case "--cache-dir" -> options.cacheDir = new File(args[++i]);
                     case "--jdtls-java-home" -> options.jdtlsJavaHome = new File(args[++i]);
                     case "--jdtls" -> options.jdtlsHome = new File(args[++i]);

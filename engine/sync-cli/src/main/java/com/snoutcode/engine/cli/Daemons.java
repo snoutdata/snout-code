@@ -28,9 +28,9 @@ import java.util.regex.Pattern;
  * land on one of the engine's. Nothing else about the daemon changes: its JVM, JVM arguments
  * ({@code org.gradle.jvmargs}) and Gradle user home are the build's.
  *
- * <p>The engine's daemons stop after {@link #IDLE_MINUTES} minutes without a build, instead of
- * Gradle's three hours, in case the engine dies before it can stop them; and the engine stops
- * them when it exits ({@link #stop}).
+ * <p>The engine's daemons stop after {@link #IDLE_MINUTES} minutes without a build (or as many as
+ * {@code --daemon-idle-minutes} says), instead of Gradle's three hours, in case the engine dies
+ * before it can stop them; and the engine stops them when it exits ({@link #stop}).
  *
  * <p>The Tooling API's own way, {@code GradleConnector.disconnect()}, does not do: it reaches
  * only the connections still open (the engine closes each after its build) and does nothing on
@@ -39,8 +39,11 @@ import java.util.regex.Pattern;
  * same {@code -Dorg.gradle.daemon.*} arguments are ignored by Gradle 5.
  */
 final class Daemons {
-    /** How long one of the engine's daemons may stay idle. */
+    /** How long one of the engine's daemons may stay idle, unless told otherwise. */
     static final int IDLE_MINUTES = 15;
+
+    /** How long the daemons this engine starts may stay idle, in minutes. */
+    private static volatile int idleMinutes = IDLE_MINUTES;
 
     /** The class every Gradle daemon runs, on its command line. */
     private static final String DAEMON_MAIN = "org.gradle.launcher.daemon.bootstrap.GradleDaemon";
@@ -57,11 +60,20 @@ final class Daemons {
         return cacheDir.resolve("daemons").resolve(hash).toFile();
     }
 
+    /** Sets how long the daemons started from now on may stay idle (at least a minute). */
+    static void idleMinutes(int minutes) {
+        idleMinutes = Math.max(1, minutes);
+    }
+
+    static int idleMinutes() {
+        return idleMinutes;
+    }
+
     /** Makes the connector's builds run on the daemons of {@code registry}, which idle out early. */
     static void configure(GradleConnector connector, File registry) {
         if (connector instanceof DefaultGradleConnector c) {
             c.daemonBaseDir(registry);
-            c.daemonMaxIdleTime(IDLE_MINUTES, TimeUnit.MINUTES);
+            c.daemonMaxIdleTime(idleMinutes, TimeUnit.MINUTES);
         }
     }
 

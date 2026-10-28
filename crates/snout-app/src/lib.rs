@@ -19,6 +19,7 @@ pub mod menus;
 pub mod model;
 pub mod new_project;
 pub mod panels;
+pub mod processes;
 pub mod project_model;
 pub mod project_view;
 pub mod projects;

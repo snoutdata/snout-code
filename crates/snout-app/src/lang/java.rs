@@ -28,8 +28,8 @@ pub fn engine_dist() -> Option<PathBuf> {
 }
 
 /// The command that runs `snout-engine lsp` on `project` with the distribution's own Java,
-/// Gradle running on `jdk`.
-pub fn engine_command(dist: &Path, project: &Path, jdk: &Path) -> Command {
+/// Gradle running on `jdk`, its Gradle daemons stopping after `idle_minutes` without a build.
+pub fn engine_command(dist: &Path, project: &Path, jdk: &Path, idle_minutes: u64) -> Command {
     let mut c = Command::new(dist.join("runtime/bin/java"));
     c.arg("-cp")
         .arg(format!("{}/*", dist.join("lib").display()))
@@ -42,6 +42,8 @@ pub fn engine_command(dist: &Path, project: &Path, jdk: &Path) -> Command {
         // engine's own default, unless HOME points elsewhere).
         .arg("--cache-dir")
         .arg(engine_cache())
+        .arg("--daemon-idle-minutes")
+        .arg(idle_minutes.max(1).to_string())
         .current_dir(project);
     // The JDKs the app downloaded, for builds that want another Java than `jdk`.
     for extra in downloaded_jdks() {

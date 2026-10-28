@@ -513,6 +513,12 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseGradle), cx)),
                 )
         }
+        "Processes" => {
+            row = row.child(
+                tool_button("tool-stop-idle", Icon::Stop, "Stop Idle Processes", &p)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::StopIdleProcesses), cx)),
+            )
+        }
         "Spring" => {
             row = row
                 .child(

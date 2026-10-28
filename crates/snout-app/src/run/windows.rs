@@ -1052,6 +1052,7 @@ impl SessionView {
             debug: s.debug.as_ref().map(super::debug::Debugger::snapshot),
             dropped: s.dropped,
             waiting: s.waiting,
+            pid: s.pid,
         })
     }
 }

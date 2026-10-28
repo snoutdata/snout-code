@@ -86,6 +86,8 @@ actions!(
         CollapseSpring,
         ShowSpring,
         NewProject,
+        ShowProcesses,
+        StopIdleProcesses,
     ]
 );
 
@@ -161,6 +163,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Refresh Gradle Tasks", Box::new(RefreshGradle)),
         ("Spring Beans and Endpoints", Box::new(ShowSpring)),
         ("Read the Spring Model Again", Box::new(RefreshSpring)),
+        ("Show Processes", Box::new(ShowProcesses)),
+        ("Stop Idle Processes", Box::new(StopIdleProcesses)),
         ("Send Selection to Claude", Box::new(e::SendToClaude)),
         ("Accept Claude's Change", Box::new(e::AcceptChanges)),
         ("Reject Claude's Change", Box::new(e::RejectChanges)),
@@ -280,6 +284,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
             MenuItem::action("Actual Size", ZoomReset),
             MenuItem::action("Soft Wrap", crate::editor::ToggleSoftWrap),
             MenuItem::action("Split Editor Right", SplitRight),
+            MenuItem::separator(),
+            MenuItem::action("Processes", ShowProcesses),
             MenuItem::separator(),
             MenuItem::submenu(Menu::new("Appearance").items([
                 check(MenuItem::action(ThemeChoice::System.label(), ThemeSystem), s.theme == ThemeChoice::System),

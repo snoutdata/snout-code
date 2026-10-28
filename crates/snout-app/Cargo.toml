@@ -51,6 +51,10 @@ ron = "0.12"
 tungstenite = "0.29"
 similar.workspace = true
 libc = "0.2"
+# The Processes window: every process's parent, command line, memory and CPU, on each system;
+# and the engine's daemon registry names (SHA-256 of the project folder).
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

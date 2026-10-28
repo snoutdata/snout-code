@@ -60,6 +60,7 @@ A build that fails does not fail the others: its entry in the model carries the 
 | `--no-sources` | Skip the source jar lookup. |
 | `--offline` | Run Gradle offline. |
 | `--verbose` | Show Gradle's output, and a line per build, on stderr. |
+| `--daemon-idle-minutes <n>` | Stop the engine's Gradle daemons after this many minutes without a build (default 15, see [Gradle daemons](#gradle-daemons)). |
 
 The command prints a one line summary on stderr and exits with 1 if a build failed to sync; the model is written all the same.
 
@@ -108,7 +109,7 @@ A build whose sync fails keeps its entry from the last model that synced it, mar
 | `--no-scala-bridge` | Do not compile Scala. |
 | `--max-heap <size>` | jdtls's heap limit, or `auto` (the default): 512 MB, plus 150 MB per thousand Java and Scala source files and 0.5 MB per library, rounded up to 256 MB, from 1 GB to 8 GB (at most a quarter of the memory). The parallel collector, unless a `--jvm-arg` names another. |
 | `--jvm-arg <arg>` | An extra JVM argument for jdtls; repeatable. |
-| `--gradle-user-home`, `--gradle-version`, `--no-sources`, `--offline`, `--verbose` | As for `sync`. |
+| `--gradle-user-home`, `--gradle-version`, `--no-sources`, `--offline`, `--verbose`, `--daemon-idle-minutes` | As for `sync`. |
 
 ### Gradle daemons
 
@@ -116,7 +117,7 @@ The engine runs Gradle on daemons of its own, never on one the user started from
 
 - **Private.** Each folder has a daemon registry of its own (`daemons/<hash>/` under the cache directory, set through the Tooling API's connector), and a Gradle client looks for daemons only in its registry. So `./gradlew` in a terminal never runs on the engine's daemons, nor the engine on the user's, and `./gradlew --stop` leaves the engine's alone. Nothing else about a daemon changes: it runs on the JDK chosen for its build (above), with the build's `org.gradle.jvmargs` and the shared Gradle user home and caches.
 - **Stopped on exit.** When the engine ends (the app shuts it down, closes its input, quits or dies, or a signal), it stops the daemons of its registry: each gets SIGTERM, which a daemon answers in well under a second, and those still running after 3 seconds are killed. The daemons are found by their logs (`<Gradle version>/daemon-<pid>.out.log`), and a process counts only when it runs Gradle's daemon and started before its log was last written (a daemon writes to it as it stops, so a later process that got its pid does not count). `GradleConnector.disconnect()` cannot do this: it reaches only connections still open (the engine closes each after its build), and does nothing on Gradle before 6.8.
-- **Short lived.** The engine's daemons stop after 15 minutes without a build, not Gradle's 3 hours, so they go even when the engine is killed outright.
+- **Short lived.** The engine's daemons stop after 15 minutes without a build (or as many as `--daemon-idle-minutes` says; the app's Settings ▸ Gradle sets it), not Gradle's 3 hours, so they go even when the engine is killed outright. A daemon that dies (killed, or out of memory) is simply replaced: the next build starts a fresh one in the registry.
 
 `snout-engine sync` uses the same registry and idle time, but leaves its daemons running, so that `lsp` on the same folder starts on warm daemons.
 
