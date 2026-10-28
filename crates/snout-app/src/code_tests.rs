@@ -385,3 +385,68 @@ fn the_gutter_marks_lines_changed_since_the_commit(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert!(editor.read(cx).changes.is_empty()));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_command_palette_lists_every_command_with_its_keys_and_runs_one(cx: &mut TestAppContext) {
+    let (repo, _, ws, editor, cx) = open_text("P.java", "class P {}\n", (0, 0), cx);
+    cx.simulate_keystrokes("cmd-shift-p");
+    let palette = cx.update(|_, cx| ws.read(cx).search.clone()).expect("⇧⌘P puts up the palette");
+    cx.update(|_, cx| {
+        let p = palette.read(cx);
+        assert_eq!(p.mode, crate::search::Mode::Commands);
+        assert_eq!(p.items.len(), crate::menus::commands().len(), "every command is listed");
+        let keys = |name: &str| p.items.iter().find(|i| i.path == name).and_then(|i| i.keys.clone());
+        assert_eq!(keys("Toggle Comment").as_deref(), Some("⌘/"), "with the keys it has in the editor");
+        assert_eq!(keys("Go to File…").as_deref(), Some("⌘P"));
+        assert!(keys("Pull").is_none(), "and none where it has none");
+    });
+    cx.simulate_input("duplicate");
+    cx.update(|_, cx| assert_eq!(palette.read(cx).items[0].path, "Duplicate Line"));
+    cx.simulate_keystrokes("enter");
+    cx.update(|_, cx| assert!(ws.read(cx).search.is_none()));
+    assert_eq!(text_of(&editor, cx), "class P {}\nclass P {}\n", "the command ran in the editor");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn split_right_shows_the_file_twice_and_keeps_both_in_step(cx: &mut TestAppContext) {
+    let (repo, _, ws, editor, cx) = open_text("S.java", "class S {}\n", (0, 0), cx);
+    cx.simulate_keystrokes("cmd-\\");
+    let editors = cx.update(|_, cx| ws.read(cx).editors(cx));
+    assert_eq!(editors.len(), 2);
+    let twin = editors.into_iter().find(|e| e.entity_id() != editor.entity_id()).unwrap();
+    cx.update(|_, cx| {
+        let dock = ws.read(cx).dock.read(cx);
+        let tree = dock.layout(gpui_component::dock::DockPlacement::Center).unwrap();
+        let a = tree.find_panel_node(crate::tabs::panel_id(&editor));
+        let b = tree.find_panel_node(crate::tabs::panel_id(&twin));
+        assert!(a.is_some() && b.is_some() && a != b, "the twin has a tab group of its own");
+    });
+    // The split has the keyboard; what is typed there shows in the first view too.
+    cx.simulate_keystrokes("x");
+    assert_eq!(text_of(&twin, cx), "xclass S {}\n");
+    assert_eq!(text_of(&editor, cx), "xclass S {}\n");
+    cx.update(|_, cx| assert!(editor.read(cx).dirty));
+    cx.simulate_keystrokes("cmd-s");
+    cx.update(|_, cx| assert!(!editor.read(cx).dirty && !twin.read(cx).dirty, "saving one saves both"));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_window_opens_on_the_activity_it_showed_last(cx: &mut TestAppContext) {
+    let repo = demo_repo("activity");
+    let (model, ws, vcx) = open(cx, with_repo(&repo));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
+    let saved = vcx.update(|_, cx| model.read(cx).settings.clone());
+    assert_eq!(saved.activity, Some(Activity::Projects));
+    let model2 = cx.update(|cx| gpui::AppContext::new(cx, |cx| crate::model::Model::new(saved.clone(), None, cx)));
+    let mut ws2 = None;
+    let (_, vcx2) = cx.add_window_view(|window, cx| {
+        let view = gpui::AppContext::new(cx, |cx| Workspace::new(model2.clone(), window, cx));
+        ws2 = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    vcx2.run_until_parked();
+    vcx2.update(|_, cx| assert_eq!(ws2.unwrap().read(cx).side.read(cx).activity, Activity::Projects));
+    let _ = std::fs::remove_dir_all(repo);
+}

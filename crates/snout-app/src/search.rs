@@ -108,6 +108,31 @@ pub enum Mode {
     FindInFiles,
     /// Go to a line (and column) of the editor in front: `12` or `12:5`.
     GoToLine,
+    /// The command palette: every command, with its shortcut.
+    Commands,
+}
+
+/// A command the palette offers: its name, what it does, and its shortcut (if any).
+pub struct Command {
+    pub name: SharedString,
+    pub action: Box<dyn gpui::Action>,
+    pub keys: Option<String>,
+}
+
+/// The commands whose name matches `query` fuzzily, best first (all of them, in order,
+/// for an empty query).
+pub fn match_commands(commands: &[Command], query: &str) -> Vec<usize> {
+    if query.trim().is_empty() {
+        return (0..commands.len()).collect();
+    }
+    let matcher = SkimMatcherV2::default().ignore_case();
+    let mut hits: Vec<(i64, usize)> = commands
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| matcher.fuzzy_match(&c.name, query.trim()).map(|s| (s, i)))
+        .collect();
+    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    hits.into_iter().map(|(_, i)| i).collect()
 }
 
 /// The line and column (from 0) that `12` or `12:5` (from 1) names.
@@ -127,11 +152,16 @@ pub struct Item {
     pub path: String,
     pub at: Option<(u32, u32)>,
     pub detail: Option<String>,
+    /// For a command: its index in the palette's list, and its shortcut.
+    pub command: Option<usize>,
+    pub keys: Option<String>,
 }
 
 pub enum SearchEvent {
     Close,
     GoToLine(u32, u32),
+    /// Run a command from the palette.
+    Run(Box<dyn gpui::Action>),
 }
 
 pub struct SearchView {
@@ -142,6 +172,8 @@ pub struct SearchView {
     files: Arc<Vec<String>>,
     pub items: Vec<Item>,
     pub selected: usize,
+    /// The palette's commands.
+    pub commands: Vec<Command>,
     /// The text search running, if any.
     _search: Option<Task<()>>,
     /// The field has been given the keyboard (on the first frame).
@@ -157,6 +189,7 @@ impl SearchView {
             Mode::GoToFile => "Go to file",
             Mode::FindInFiles => "Find in files",
             Mode::GoToLine => "Line, or line:column",
+            Mode::Commands => "Type a command",
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
@@ -165,7 +198,8 @@ impl SearchView {
             _ => {}
         })
         .detach();
-        let files = Arc::new(if mode == Mode::GoToLine { Vec::new() } else { list_files(&root) });
+        let files =
+            Arc::new(if matches!(mode, Mode::GoToLine | Mode::Commands) { Vec::new() } else { list_files(&root) });
         let mut this = Self {
             model,
             root,
@@ -174,6 +208,7 @@ impl SearchView {
             files,
             items: Vec::new(),
             selected: 0,
+            commands: Vec::new(),
             _search: None,
             focused: false,
             focus: cx.focus_handle(),
@@ -184,6 +219,12 @@ impl SearchView {
 
     pub fn focus_input(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |s, cx| s.focus(window, cx));
+    }
+
+    /// Offer `commands` (the palette).
+    pub fn set_commands(&mut self, commands: Vec<Command>, cx: &mut Context<Self>) {
+        self.commands = commands;
+        self.update(cx);
     }
 
     /// Put `text` in the field and search for it.
@@ -198,10 +239,23 @@ impl SearchView {
         self.selected = 0;
         match self.mode {
             Mode::GoToLine => cx.notify(),
+            Mode::Commands => {
+                self.items = match_commands(&self.commands, &query)
+                    .into_iter()
+                    .map(|i| Item {
+                        path: self.commands[i].name.to_string(),
+                        at: None,
+                        detail: None,
+                        command: Some(i),
+                        keys: self.commands[i].keys.clone(),
+                    })
+                    .collect();
+                cx.notify();
+            }
             Mode::GoToFile => {
                 self.items = go_to_file(&self.files, &query)
                     .into_iter()
-                    .map(|(path, _)| Item { path, at: None, detail: None })
+                    .map(|(path, _)| Item { path, at: None, detail: None, command: None, keys: None })
                     .collect();
                 cx.notify();
             }
@@ -219,6 +273,8 @@ impl SearchView {
                                 detail: Some(format!("{}: {}", h.line + 1, h.text.trim())),
                                 at: Some((h.line, h.column)),
                                 path: h.path,
+                                command: None,
+                                keys: None,
                             })
                             .collect();
                         this.selected = 0;
@@ -246,6 +302,11 @@ impl SearchView {
             return;
         }
         let Some(item) = self.items.get(self.selected).cloned() else { return };
+        if let Some(i) = item.command {
+            let action = self.commands[i].action.boxed_clone();
+            cx.emit(SearchEvent::Run(action));
+            return;
+        }
         let action = Action::OpenFile(self.root.join(&item.path), item.at);
         cx.emit(SearchEvent::Close);
         self.model.update(cx, |m, cx| m.handle(action, cx));
@@ -267,6 +328,7 @@ impl Render for SearchView {
             Mode::FindInFiles if self.input.read(cx).value().is_empty() => "Type what to look for".into(),
             Mode::FindInFiles => "Nothing found".into(),
             Mode::GoToLine => SharedString::default(),
+            Mode::Commands => "No command matches".into(),
         };
         if self.mode == Mode::GoToLine {
             let hint = match parse_line(&self.input.read(cx).value()) {
@@ -299,13 +361,15 @@ impl Render for SearchView {
             range
                 .map(|i| {
                     let item = &items[i];
-                    let (dir, name) = match item.path.rsplit_once('/') {
+                    let commands = item.command.is_some();
+                    let (dir, name) = match item.path.rsplit_once('/').filter(|_| !commands) {
                         Some((d, n)) => (d.to_owned(), n.to_owned()),
                         None => (String::new(), item.path.clone()),
                     };
                     let view = view.clone();
                     div()
                         .id(("search-item", i))
+                        .w_full()
                         .h(px(26.))
                         .px(px(8.))
                         .flex()
@@ -316,6 +380,19 @@ impl Render for SearchView {
                         .when(i == selected, |d| d.bg(p.selection()))
                         .child(div().flex_none().whitespace_nowrap().child(name))
                         .child(div().flex_none().whitespace_nowrap().text_color(p.weak()).child(dir))
+                        .when(commands, |d| d.child(div().flex_1()))
+                        .when_some(item.keys.clone(), |d, keys| {
+                            d.child(
+                                div()
+                                    .flex_none()
+                                    .px(px(6.))
+                                    .rounded(px(4.))
+                                    .bg(p.button)
+                                    .text_color(p.fg_dim)
+                                    .text_size(px(12.))
+                                    .child(keys),
+                            )
+                        })
                         .when_some(item.detail.clone(), |d, detail| {
                             d.child(
                                 div()

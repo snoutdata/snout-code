@@ -245,7 +245,11 @@ impl Workspace {
             _subscriptions: subscriptions,
         };
         for editor in restored.1 {
-            this.track_editor(&editor, cx);
+            this.track_editor(&editor, window, cx);
+        }
+        // Open on the activity the window showed last.
+        if let Some(activity) = this.model.read(cx).settings.activity {
+            this.show_activity(activity, window, cx);
         }
         let size = this.model.read(cx).settings.editor_font_size;
         cx.set_global(crate::editor::EditorFont(size.clamp(crate::editor::FONT_MIN, crate::editor::FONT_MAX)));
@@ -339,11 +343,107 @@ impl Workspace {
     }
 
     /// Keep `editor` among the tabs, and follow it when it gets the keyboard.
-    fn track_editor(&mut self, editor: &Entity<EditorPanel>, cx: &mut Context<Self>) {
+    fn track_editor(&mut self, editor: &Entity<EditorPanel>, window: &mut Window, cx: &mut Context<Self>) {
         self.editors.push(editor.downgrade());
-        self._subscriptions.push(cx.subscribe(editor, |this, editor, e: &EditorEvent, cx| match e {
-            EditorEvent::Focused => this.set_active_editor(Some(&editor), cx),
+        self._subscriptions.push(cx.subscribe_in(editor, window, |this, editor, e: &EditorEvent, window, cx| {
+            match e {
+                EditorEvent::Focused => this.set_active_editor(Some(editor), cx),
+                // The other views of the same file (a split) follow.
+                EditorEvent::Changed => {
+                    let twins = this.twins_of(editor, cx);
+                    if !twins.is_empty() {
+                        let text = editor.read(cx).text(cx);
+                        for twin in twins {
+                            twin.update(cx, |t, cx| t.sync_from(&text, window, cx));
+                        }
+                    }
+                }
+                EditorEvent::Saved => {
+                    for twin in this.twins_of(editor, cx) {
+                        twin.update(cx, |t, cx| t.mark_saved(cx));
+                    }
+                }
+            }
         }));
+    }
+
+    /// The other editor tabs showing the same file as `editor`.
+    fn twins_of(&self, editor: &Entity<EditorPanel>, cx: &App) -> Vec<Entity<EditorPanel>> {
+        let path = &editor.read(cx).path;
+        self.editors(cx)
+            .into_iter()
+            .filter(|e| e.entity_id() != editor.entity_id() && &e.read(cx).path == path)
+            .collect()
+    }
+
+    /// Show the editor in front again in a new tab group to its right, as a second view
+    /// of the same file: what is typed in one shows in the other.
+    pub fn split_right(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_component::dock::InsertTarget;
+        let Some(editor) = self.active_editor(window, cx) else { return };
+        let path = editor.read(cx).path.clone();
+        let text = editor.read(cx).text(cx);
+        let twin = cx.new(|cx| EditorPanel::open(path, window, cx));
+        twin.update(cx, |t, cx| t.sync_from(&text, window, cx));
+        self.track_editor(&twin, window, cx);
+        let (from, to) = (PanelId::from(editor.entity_id()), PanelId::from(twin.entity_id()));
+        let view = panel_handle(twin.clone());
+        self.dock.update(cx, |d, cx| {
+            let node = d.layout(DockPlacement::Center).and_then(|t| t.find_panel_node(from));
+            d.add_panel_view(view, DockPlacement::Center, None, window, cx);
+            if let Some(node) = node {
+                let target = InsertTarget::Split { node, placement: gpui_component::Placement::Right, size: None };
+                d.move_panel(to, target, window, cx);
+            }
+            d.select_panel(to, window, cx);
+        });
+        let at = editor.read(cx).state.read(cx).cursor_position();
+        twin.update(cx, |t, cx| t.go_to(at.line, at.character, window, cx));
+        self.set_active_editor(Some(&twin), cx);
+    }
+
+    /// The command palette: every command, with the shortcut it has where the keyboard
+    /// is now. The chosen one runs there.
+    pub fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let before = window.focused(cx);
+        let os = cx.platform_info().os;
+        let commands: Vec<crate::search::Command> = menus::commands()
+            .into_iter()
+            .map(|(name, action)| {
+                let binding = match &before {
+                    Some(f) => window.highest_precedence_binding_for_action_in(&*action, f),
+                    None => window.highest_precedence_binding_for_action(&*action),
+                }
+                .or_else(|| window.highest_precedence_binding_for_action(&*action));
+                let keys = binding
+                    .map(|b| b.keystrokes().iter().map(|k| k.display(os).to_string()).collect::<Vec<_>>().join(" "));
+                crate::search::Command { name: name.into(), action, keys }
+            })
+            .collect();
+        let model = self.model.clone();
+        let view = cx.new(|cx| SearchView::new(model, PathBuf::new(), Mode::Commands, window, cx));
+        view.update(cx, |v, cx| v.set_commands(commands, cx));
+        cx.subscribe_in(&view, window, move |this, _, e: &SearchEvent, window, cx| match e {
+            SearchEvent::Run(action) => {
+                this.search = None;
+                match &before {
+                    Some(f) => window.focus(f, cx),
+                    None => window.focus(&this.focus, cx),
+                }
+                window.dispatch_action(action.boxed_clone(), cx);
+                cx.notify();
+            }
+            _ => {
+                this.search = None;
+                window.focus(&this.focus, cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        let v = view.clone();
+        cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
+        self.search = Some(view);
+        cx.notify();
     }
 
     /// The editor in front changed: the status bar and the file tree follow it.
@@ -390,6 +490,7 @@ impl Workspace {
     /// Show `activity`: the Git view, or the docks with its panel in the left dock (opened
     /// if it is closed).
     pub fn show_activity(&mut self, activity: Activity, window: &mut Window, cx: &mut Context<Self>) {
+        self.remember_activity(activity, cx);
         if activity != Activity::Git && !self.dock.read(cx).is_dock_open(DockPlacement::Left) {
             self.dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Left, window, cx));
         }
@@ -398,6 +499,16 @@ impl Workspace {
             cx.notify();
         });
         cx.notify();
+    }
+
+    /// Save the activity showing, so the next start opens on it.
+    fn remember_activity(&mut self, activity: Activity, cx: &mut Context<Self>) {
+        if self.model.read(cx).settings.activity != Some(activity) {
+            self.model.update(cx, |m, _| {
+                m.settings.activity = Some(activity);
+                m.persist();
+            });
+        }
     }
 
     /// The activity bar: show `activity`, or close the left dock when it already shows it.
@@ -413,6 +524,7 @@ impl Workspace {
             if !open {
                 self.dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Left, window, cx));
             }
+            self.remember_activity(activity, cx);
             self.side.update(cx, |s, cx| {
                 s.activity = activity;
                 cx.notify();
@@ -463,7 +575,7 @@ impl Workspace {
             None => {
                 let editor = cx.new(|cx| EditorPanel::open(path, window, cx));
                 editor.update(cx, |e, _| e.preview = preview);
-                self.track_editor(&editor, cx);
+                self.track_editor(&editor, window, cx);
                 let view = panel_handle(editor.clone());
                 self.dock.update(cx, |d, cx| d.add_panel_view(view, DockPlacement::Center, None, window, cx));
                 editor
@@ -511,6 +623,7 @@ impl Workspace {
                 }
                 cx.notify();
             }
+            SearchEvent::Run(_) => {}
         })
         .detach();
         // Give the field the keyboard once this action is done.
@@ -708,6 +821,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
             .on_action(cx.listener(|this, _: &FindInFiles, w, cx| this.open_search(Mode::FindInFiles, w, cx)))
             .on_action(cx.listener(|this, _: &GoToLine, w, cx| this.open_search(Mode::GoToLine, w, cx)))
+            .on_action(cx.listener(|this, _: &CommandPalette, w, cx| this.open_palette(w, cx)))
+            .on_action(cx.listener(|this, _: &SplitRight, w, cx| this.split_right(w, cx)))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(Some(1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(Some(-1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(None, cx)))

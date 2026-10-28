@@ -169,6 +169,16 @@ mod shots {
                     state.update(cx, |s, cx| s.insert("// edited\n", window, cx));
                 })
                 .unwrap();
+                // The palette shot: the file split in two, and the command palette over it.
+                if name.contains("palette") {
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        ws.update(cx, |ws, cx| ws.split_right(window, cx));
+                        // Drawn once, so the palette finds the editor's own shortcuts.
+                        window.draw(cx).clear(cx);
+                        ws.update(cx, |ws, cx| ws.open_palette(window, cx));
+                    })
+                    .unwrap();
+                }
                 // In the light shot, find and replace in the file is open on a word.
                 if theme == ThemeChoice::Light {
                     cx.update_window(handle.into(), |_, _, cx| {
@@ -222,5 +232,6 @@ mod shots {
         shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
         shot("editor-dark", ThemeChoice::Dark, Activity::Projects, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Projects, Some(Select::Editor));
+        shot("palette-dark", ThemeChoice::Dark, Activity::Projects, Some(Select::Editor));
     }
 }

@@ -200,7 +200,17 @@ fn tab_bar(group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyEle
         .bg(p.panel)
         .border_b_1()
         .border_color(p.border)
-        .child(div().id("editor-tab-strip").flex().items_end().h_full().min_w_0().overflow_x_scroll().children(tabs))
+        .child(
+            div()
+                .id("editor-tab-strip")
+                .flex()
+                .items_end()
+                .h_full()
+                .min_w_0()
+                .flex_shrink(1.)
+                .overflow_x_scroll()
+                .children(tabs),
+        )
         .child(div().id("tab-bar-empty-space").flex_1().h_full().when(droppable, |d| {
             let group = group.clone();
             d.drag_over::<DragPanel>(move |s, _, _, _| s.bg(p.wash(p.accent))).on_drop(
@@ -294,7 +304,9 @@ fn tab(
         .debug_selector(move || format!("editor-tab-{ix}"))
         .group(group_name.clone())
         .relative()
-        .flex_none()
+        // Tabs shrink (their names cut short) before the strip has to scroll.
+        .flex_shrink(1.)
+        .min_w(px(if selected { 96. } else { 64. }))
         .h(px(TAB_H - 5.))
         .mx(px(1.))
         .pl(px(10.))
@@ -309,7 +321,15 @@ fn tab(
         .when(selected, |d| d.bg(p.stripe))
         .when(!selected, |d| d.hover(move |s| s.bg(hover_bg)))
         .when_some(path.as_ref(), |d, path| d.child(crate::icons::file_icon(path, 14., &p)))
-        .child(div().whitespace_nowrap().when(preview, |d| d.italic()).child(name.clone()))
+        .child(
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .whitespace_nowrap()
+                .when(preview, |d| d.italic())
+                .child(name.clone()),
+        )
         .child(trailing)
         // The tab in front is underlined in the accent colour.
         .when(selected, |d| {

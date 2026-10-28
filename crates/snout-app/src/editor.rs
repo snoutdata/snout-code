@@ -133,6 +133,10 @@ impl FileInfo {
 pub enum EditorEvent {
     /// It has the keyboard.
     Focused,
+    /// Its text changed.
+    Changed,
+    /// It wrote its text to the file.
+    Saved,
 }
 
 pub struct EditorPanel {
@@ -190,6 +194,7 @@ impl EditorPanel {
                         this.dirty = dirty;
                     }
                     this.diff_soon(cx);
+                    cx.emit(EditorEvent::Changed);
                     cx.notify();
                 }
                 InputEvent::Focus => cx.emit(EditorEvent::Focused),
@@ -437,6 +442,7 @@ impl EditorPanel {
             Ok(()) => {
                 self.disk = disk_stamp(&self.path);
                 self.conflict = false;
+                cx.emit(EditorEvent::Saved);
                 self.saved = text;
                 self.dirty = false;
                 self.preview = false;
@@ -444,6 +450,46 @@ impl EditorPanel {
             }
             Err(e) => self.error = Some(format!("Could not save {}: {e}", self.path.display())),
         }
+        cx.notify();
+    }
+
+    /// Take `text` from the other view of this file (a split), changing only what
+    /// differs, so this view's caret and scroll stay where they are.
+    pub fn sync_from(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (range, insert) = {
+            let mine = self.state.read(cx).text();
+            if mine.len() == text.len() && *mine == text {
+                return;
+            }
+            let mine = mine.to_string();
+            let (a, b) = (mine.as_bytes(), text.as_bytes());
+            let mut start = a.iter().zip(b).take_while(|(x, y)| x == y).count();
+            while !mine.is_char_boundary(start) || !text.is_char_boundary(start) {
+                start -= 1;
+            }
+            let max_tail = a.len().min(b.len()) - start;
+            let mut tail = a.iter().rev().zip(b.iter().rev()).take(max_tail).take_while(|(x, y)| x == y).count();
+            while !mine.is_char_boundary(a.len() - tail) || !text.is_char_boundary(b.len() - tail) {
+                tail -= 1;
+            }
+            (start..a.len() - tail, text[start..b.len() - tail].to_owned())
+        };
+        self.state.update(cx, |s, cx| {
+            let sel = s.selected_range();
+            let delta = insert.len() as isize - range.len() as isize;
+            let shift = |p: usize| if p >= range.end { (p as isize + delta) as usize } else { p.min(range.start) };
+            s.set_selected_range(range.clone(), cx);
+            s.replace(insert, window, cx);
+            s.set_selected_range(shift(sel.start)..shift(sel.end), cx);
+        });
+    }
+
+    /// The other view of this file saved it: this one is saved too.
+    pub fn mark_saved(&mut self, cx: &mut Context<Self>) {
+        self.saved = self.text(cx);
+        self.disk = disk_stamp(&self.path);
+        self.dirty = false;
+        self.conflict = false;
         cx.notify();
     }
 

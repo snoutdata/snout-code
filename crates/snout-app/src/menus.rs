@@ -56,8 +56,64 @@ actions!(
         ZoomIn,
         ZoomOut,
         ZoomReset,
+        CommandPalette,
+        SplitRight,
     ]
 );
+
+/// Every command, by the name the command palette lists it under.
+pub fn commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
+    use crate::editor as e;
+    use gpui_component::input as i;
+    vec![
+        ("Go to File…", Box::new(GoToFile)),
+        ("Go to Line…", Box::new(GoToLine)),
+        ("Find in Files…", Box::new(FindInFiles)),
+        ("Find in File", Box::new(i::Search)),
+        ("Replace in File", Box::new(i::Replace)),
+        ("Save", Box::new(e::Save)),
+        ("Close Tab", Box::new(CloseTab)),
+        ("Split Editor Right", Box::new(SplitRight)),
+        ("Toggle Comment", Box::new(e::ToggleComment)),
+        ("Duplicate Line", Box::new(e::DuplicateLine)),
+        ("Move Line Up", Box::new(e::MoveLineUp)),
+        ("Move Line Down", Box::new(e::MoveLineDown)),
+        ("Toggle Soft Wrap", Box::new(e::ToggleSoftWrap)),
+        ("Undo", Box::new(Undo)),
+        ("Redo", Box::new(Redo)),
+        ("Zoom In", Box::new(ZoomIn)),
+        ("Zoom Out", Box::new(ZoomOut)),
+        ("Actual Size", Box::new(ZoomReset)),
+        ("Show Projects", Box::new(ShowProjects)),
+        ("Show Git", Box::new(ShowGit)),
+        ("Toggle Claude Code Console", Box::new(ToggleConsole)),
+        ("Open Local Repository…", Box::new(Open)),
+        ("Find Repositories in Folder…", Box::new(FindRepos)),
+        ("Clone from GitHub…", Box::new(CloneRepo)),
+        ("New Group…", Box::new(NewGroup)),
+        ("Refresh", Box::new(Refresh)),
+        ("Pull", Box::new(Pull)),
+        ("Fetch", Box::new(Fetch)),
+        ("Push", Box::new(Push)),
+        ("Commit", Box::new(Commit)),
+        ("Draft Commit Message", Box::new(Draft)),
+        ("Stage", Box::new(Stage)),
+        ("Unstage", Box::new(Unstage)),
+        ("Discard Changes…", Box::new(Discard)),
+        ("Check Out…", Box::new(Checkout)),
+        ("New Branch…", Box::new(NewBranch)),
+        ("Side by Side Diff", Box::new(SideBySide)),
+        ("Unified Diff", Box::new(Unified)),
+        ("Compact Diff", Box::new(Compact)),
+        ("Theme: Match the System", Box::new(ThemeSystem)),
+        ("Theme: Gold (Dark)", Box::new(ThemeDark)),
+        ("Theme: Light", Box::new(ThemeLight)),
+        ("Open on GitHub", Box::new(Github)),
+        ("Reveal in Finder", Box::new(Reveal)),
+        ("About SnoutCode", Box::new(About)),
+        ("Quit SnoutCode", Box::new(Quit)),
+    ]
+}
 
 pub const SOURCE_URL: &str = "https://github.com/snoutdata/snout-code";
 pub const ISSUES_URL: &str = "https://github.com/snoutdata/snout-code/issues";
@@ -89,6 +145,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-f", FindInFiles, Some("EditorPanel > Input")),
         KeyBinding::new("cmd-alt-f", gpui_component::input::Replace, Some("EditorPanel > Input")),
         KeyBinding::new("cmd-l", GoToLine, None),
+        KeyBinding::new("cmd-shift-p", CommandPalette, None),
+        KeyBinding::new("cmd-\\", SplitRight, None),
         KeyBinding::new("cmd-w", CloseTab, Some("Workspace")),
         KeyBinding::new("cmd-=", ZoomIn, None),
         KeyBinding::new("cmd-+", ZoomIn, None),
@@ -127,6 +185,7 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::action("Go to File…", GoToFile),
             MenuItem::action("Find in Files…", FindInFiles),
+            MenuItem::action("Command Palette…", CommandPalette),
             MenuItem::separator(),
             MenuItem::action("Save", crate::editor::Save),
             MenuItem::action("Close Tab", CloseTab),
@@ -162,6 +221,7 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             MenuItem::action("Zoom Out", ZoomOut),
             MenuItem::action("Actual Size", ZoomReset),
             MenuItem::action("Soft Wrap", crate::editor::ToggleSoftWrap),
+            MenuItem::action("Split Editor Right", SplitRight),
             MenuItem::separator(),
             MenuItem::submenu(Menu::new("Appearance").items([
                 check(MenuItem::action(ThemeChoice::System.label(), ThemeSystem), s.theme == ThemeChoice::System),

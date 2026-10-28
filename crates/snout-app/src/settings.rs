@@ -47,6 +47,8 @@ pub struct Settings {
     pub dock: Option<serde_json::Value>,
     /// The editors' font size (⌘+ and ⌘-).
     pub editor_font_size: f32,
+    /// The activity the window showed last, to open on it again.
+    pub activity: Option<crate::panels::Activity>,
 }
 
 impl Default for Settings {
@@ -62,6 +64,7 @@ impl Default for Settings {
             theme: ThemeChoice::default(),
             dock: None,
             editor_font_size: crate::look::MONO_SIZE,
+            activity: None,
         }
     }
 }

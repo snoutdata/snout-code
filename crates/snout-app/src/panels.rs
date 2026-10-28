@@ -53,7 +53,7 @@ macro_rules! panel {
 #[allow(unused_imports)]
 pub(crate) use panel;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Activity {
     Projects,
     Git,
