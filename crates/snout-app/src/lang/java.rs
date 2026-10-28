@@ -179,9 +179,17 @@ pub struct Requirement {
 impl Requirement {
     /// The JDK to download when none fits.
     pub fn wanted(&self) -> u32 {
+        self.wanted_on(cfg!(target_arch = "aarch64"))
+    }
+
+    /// [`Self::wanted`] on a Mac with Apple silicon (`arm`) or not. Temurin publishes no
+    /// Java 8 for Apple silicon: there a Java 8 build gets 11, the oldest it publishes, which
+    /// builds and runs Java 8 code.
+    pub fn wanted_on(&self, arm: bool) -> u32 {
         // A long-term support release: the newest the build's Gradle runs on.
         let lts = |max: u32| [25, 21, 17, 11, 8].into_iter().find(|v| *v <= max.min(21)).unwrap_or(8);
-        self.declared.or(self.gradle_max.map(lts)).unwrap_or(21)
+        let want = self.declared.or(self.gradle_max.map(lts)).unwrap_or(21);
+        if arm && want < 11 && self.gradle_max.is_none_or(|m| m >= 11) { 11 } else { want }
     }
 
     pub fn fits(&self, major: u32) -> bool {
@@ -399,6 +407,10 @@ mod tests {
         let none = Requirement { declared: None, gradle_max: Some(23) };
         assert_eq!(choose(&none, &jdks).unwrap().major, 21);
         assert_eq!(Requirement::default().wanted(), 21);
+        // Java 8 on Apple silicon: 11, which Temurin has for it.
+        let eight = Requirement { declared: Some(8), gradle_max: Some(23) };
+        assert_eq!((eight.wanted_on(false), eight.wanted_on(true)), (8, 11));
+        assert!(eight.fits(11));
     }
 
     #[test]

@@ -73,9 +73,21 @@ impl Lanes {
 /// A menu the gutter put up: Run and Debug for a run icon, a breakpoint's condition, or
 /// a Spring mark's places.
 pub enum GutterMenu {
-    Run { at: Point<Pixels>, target: Target },
-    Condition { at: Point<Pixels>, line: u32, input: Entity<InputState> },
-    Spring { at: Point<Pixels>, items: Vec<super::spring_gutter::SpringItem> },
+    Run {
+        at: Point<Pixels>,
+        target: Target,
+    },
+    Condition {
+        at: Point<Pixels>,
+        line: u32,
+        input: Entity<InputState>,
+    },
+    /// A Spring mark's menu; a long one has a field that narrows it.
+    Spring {
+        at: Point<Pixels>,
+        items: Vec<super::spring_gutter::SpringItem>,
+        filter: Option<Entity<InputState>>,
+    },
 }
 
 /// The visible buffer lines and the top of each, in window coordinates.
@@ -246,7 +258,7 @@ impl EditorPanel {
             return false;
         };
         let line = *line as u32;
-        if e.button == gpui::MouseButton::Left && self.spring_press(e.position, cx) {
+        if e.button == gpui::MouseButton::Left && self.spring_press(e.position, window, cx) {
             return true;
         }
         let in_run_lane = x >= l.run().0 && x < l.run().1;
@@ -352,9 +364,9 @@ impl EditorPanel {
                     .into_any_element();
                 (*at, body)
             }
-            GutterMenu::Spring { at, items } => {
-                let items = items.clone();
-                (*at, self.spring_menu_body(&items, cx))
+            GutterMenu::Spring { at, items, filter } => {
+                let (items, filter) = (items.clone(), filter.clone());
+                (*at, self.spring_menu_body(&items, filter.as_ref(), cx))
             }
             GutterMenu::Condition { at, line, input } => {
                 let line = *line;
@@ -410,6 +422,11 @@ impl EditorPanel {
                         .font_family(crate::look::ui_font(cx))
                         .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                             this.gutter_menu = None;
+                            cx.notify();
+                        }))
+                        .on_action(cx.listener(|this, _: &gpui_component::input::Escape, window, cx| {
+                            this.gutter_menu = None;
+                            this.state.update(cx, |s, cx| s.focus(window, cx));
                             cx.notify();
                         }))
                         .child(body),

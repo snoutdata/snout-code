@@ -85,6 +85,10 @@ pub struct Debugger {
     pub evaluated: Option<(String, Result<Var, String>)>,
     /// What the debugger last said (a reload, an error).
     pub note: Option<String>,
+    /// A connection to the debugger is being made: the start's answer and the engine's
+    /// `snout/debugReady` both offer one, and only the first is taken (a second attach to
+    /// the same JVM is refused, and could leave the session on the refused connection).
+    pub attaching: bool,
     _events: Option<Task<()>>,
 }
 
@@ -108,6 +112,7 @@ impl Debugger {
             watches: self.watches.clone(),
             evaluated: self.evaluated.clone(),
             note: self.note.clone(),
+            attaching: self.attaching,
             _events: None,
         }
     }
@@ -225,12 +230,20 @@ impl Runs {
 
     /// Connect session `id`'s debugger to java-debug on `port`, and attach to the program.
     pub(super) fn attach(&mut self, id: u64, port: u16, attach: Value, cx: &mut Context<Self>) {
+        match self.dbg(id) {
+            Some(d) if d.attaching || d.dap.is_some() || d.ended => return,
+            Some(d) => d.attaching = true,
+            None => return,
+        }
         let connect = cx.background_executor().spawn(async move { Dap::connect("127.0.0.1", port, WAIT) });
         cx.spawn(async move |this, cx| {
             let (dap, events) = match connect.await {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = this.update(cx, |this, cx| {
+                        if let Some(d) = this.dbg(id) {
+                            d.attaching = false;
+                        }
                         if let Some(s) = this.session_mut(id) {
                             s.push(Stream::Err, &format!("Could not connect the debugger: {e}"));
                         }

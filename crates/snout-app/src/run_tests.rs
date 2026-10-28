@@ -518,3 +518,177 @@ fn a_real_project_lists_runs_and_tests(cx: &mut TestAppContext) {
     }
     cx.update(|_, cx| hub.update(cx, |h, _| h.shutdown_all()));
 }
+
+/// The fixture's tests run as a Gradle task (the Build window), as a test configuration, and
+/// under the debugger (stopping in the code they test), as a Gradle task and from the
+/// gutter; with `java8`, the build targets Java 8 and runs on the JDK given, and its main
+/// class is debugged too.
+fn tests_run_and_debug(cx: &mut TestAppContext, jdk: PathBuf, java8: bool) {
+    cx.executor().allow_parking();
+    let _engine = crate::tests::engine_lock();
+    let repo = run_app(if java8 { "run-tests-8" } else { "run-tests" });
+    if java8 {
+        let build = repo.join("app/build.gradle");
+        let text = std::fs::read_to_string(&build).unwrap().replace("VERSION_17", "VERSION_1_8");
+        std::fs::write(&build, text).unwrap();
+        // `readAllBytes` came with Java 9.
+        let main = repo.join("app/src/main/java/demo/app/Main.java");
+        let text = std::fs::read_to_string(&main)
+            .unwrap()
+            .replace("new String(in.readAllBytes(), StandardCharsets.UTF_8).trim()", "\"present\"")
+            .replace(
+                "System.out.println(\"total \" + total);",
+                "System.out.println(\"total \" + total + \" on \" + System.getProperty(\"java.version\"));",
+            );
+        std::fs::write(&main, text).unwrap();
+        git(&repo, &["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qam", "Java 8"]);
+    }
+    let mut settings = with_repo(&repo);
+    settings.project_jdks.insert(repo.clone(), jdk);
+    cx.update(|cx| cx.set_global(crate::lang::hub::LangEnabled(true)));
+    let (model, ws, cx) = open(cx, settings);
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    let runs = runs_of(&ws, cx);
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    let ready = pump_until(cx, 600, |cx| {
+        cx.update(|_, cx| {
+            let r = runs.read(cx);
+            !r.engine_configs.is_empty() && !r.gradle.builds.is_empty()
+        })
+    });
+    assert!(ready, "the configurations and the tasks within ten minutes");
+    let configs = cx.update(|_, cx| runs.read(cx).configurations());
+    let counts = |id: u64, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| runs.read(cx).session(id).and_then(|s| s.tests.as_ref().map(|t| t.counts())))
+    };
+
+    // `:app:test` from the Gradle window: two tests pass, one fails on purpose.
+    let task = cx
+        .update(|_, cx| runs.update(cx, |r, cx| r.start(Launch::Task { build: None, task: ":app:test".into() }, cx)))
+        .unwrap();
+    assert!(pump_until(cx, 300, |cx| finished(&runs, task, cx).is_some()), "the test task ends");
+    assert_eq!(finished(&runs, task, cx), Some(Outcome::Failed), "{}", output(&runs, task, cx));
+    let (passed, failed) = {
+        let c = counts(task, cx).unwrap_or_else(|| panic!("a test tree: {}", output(&runs, task, cx)));
+        (c.0, c.1)
+    };
+    assert_eq!((passed, failed), (2, 1), "{}", output(&runs, task, cx));
+
+    // The build's own test configuration runs the same.
+    let tests = configs.iter().find(|c| c.kind == Kind::Tests).cloned().expect("a test configuration");
+    let run = cx
+        .update(|_, cx| runs.update(cx, |r, cx| r.start(Launch::Config { config: tests.clone(), debug: false }, cx)))
+        .unwrap();
+    assert!(pump_until(cx, 300, |cx| finished(&runs, run, cx).is_some()), "the configuration ends");
+    assert_eq!(counts(run, cx).map(|c| (c.0, c.1)), Some((2, 1)), "{}", output(&runs, run, cx));
+
+    // Debugging the tests stops in the code they call, as a Gradle test task (`:app:test`
+    // under the debugger) and from the test class's gutter icon.
+    let greeter = repo.join("app/src/main/java/demo/app/Greeter.java");
+    let line = std::fs::read_to_string(&greeter).unwrap().lines().position(|l| l.contains("return \"hello \"")).unwrap()
+        as u32;
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&greeter, line, cx)));
+    let gradle_test = configs
+        .iter()
+        .find(|c| c.kind == Kind::Gradle && c.task.as_deref().is_some_and(|t| t.ends_with(":test")))
+        .cloned()
+        .unwrap_or_else(|| crate::run::config::RunConfig {
+            id: "user:test".into(),
+            kind: Kind::Gradle,
+            name: "test".into(),
+            task: Some(":app:test".into()),
+            ..Default::default()
+        });
+    let test = repo.join("app/src/test/java/demo/app/GreeterTest.java");
+    act(&model, cx, Action::OpenFile(test.clone(), None));
+    let editor = cx.update(|_, cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == test).unwrap());
+    assert!(
+        pump_until(cx, 120, |cx| cx.update(|_, cx| editor
+            .read(cx)
+            .runnables
+            .as_ref()
+            .is_some_and(|r| r.module.is_some()))),
+        "the engine finds the file's tests"
+    );
+    let (target, module) = cx.update(|_, cx| {
+        let r = editor.read(cx).runnables.clone().unwrap();
+        let class = r.items.iter().find(|i| matches!(i.target, Target::TestClass { .. })).unwrap().target.clone();
+        (class, r.module.clone())
+    });
+    for how in ["gradle task", "gutter"] {
+        let debug = if how == "gradle task" {
+            cx.update(|_, cx| {
+                runs.update(cx, |r, cx| r.start(Launch::Config { config: gradle_test.clone(), debug: true }, cx))
+            })
+            .unwrap()
+        } else {
+            cx.update(|_, cx| runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), true, cx)));
+            cx.update(|_, cx| runs.read(cx).sessions.last().unwrap().id)
+        };
+        let paused = pump_until(cx, 300, |cx| {
+            cx.update(|_, cx| crate::run::marks(cx).unwrap().read(cx).exec.as_ref().is_some_and(|(f, _)| *f == greeter))
+        });
+        assert!(paused, "debugging the tests ({how}) stops in Greeter: {}", output(&runs, debug, cx));
+        cx.update(|_, cx| {
+            let m = crate::run::marks(cx).unwrap();
+            assert_eq!(m.read(cx).exec, Some((greeter.clone(), line)), "{how}");
+        });
+        cx.update(|_, cx| runs.update(cx, |r, cx| r.step(debug, "continue", cx)));
+        assert!(pump_until(cx, 300, |cx| finished(&runs, debug, cx).is_some()), "the {how} tests end");
+    }
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&greeter, line, cx)));
+
+    if java8 {
+        // The main class, debugged on Java 8: the breakpoint stops it and the values show.
+        let main = configs.iter().find(|c| c.kind == Kind::Main).cloned().expect("a main configuration");
+        let file = repo.join("app/src/main/java/demo/app/Main.java");
+        let line =
+            std::fs::read_to_string(&file).unwrap().lines().position(|l| l.contains("total = add(total, i);")).unwrap()
+                as u32;
+        cx.update(|_, cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&file, line, cx)));
+        let debug = cx
+            .update(|_, cx| runs.update(cx, |r, cx| r.start(Launch::Config { config: main, debug: true }, cx)))
+            .unwrap();
+        let paused = pump_until(cx, 300, |cx| {
+            cx.update(|_, cx| {
+                let m = crate::run::marks(cx).unwrap();
+                m.read(cx).exec.as_ref().is_some_and(|(f, _)| *f == file) && !m.read(cx).locals.is_empty()
+            })
+        });
+        assert!(paused, "the breakpoint is hit on Java 8: {}", output(&runs, debug, cx));
+        cx.update(|_, cx| {
+            let m = crate::run::marks(cx).unwrap();
+            assert!(m.read(cx).locals.contains(&("i".into(), "1".into())), "{:?}", m.read(cx).locals);
+        });
+        cx.update(|_, cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&file, line, cx)));
+        cx.update(|_, cx| runs.update(cx, |r, cx| r.step(debug, "continue", cx)));
+        assert!(pump_until(cx, 120, |cx| finished(&runs, debug, cx).is_some()), "the program ends");
+        let out = output(&runs, debug, cx);
+        assert!(out.contains("total 6 on 1.8.0"), "the program ran on Java 8: {out}");
+    }
+
+    cx.update(|_, cx| hub.update(cx, |h, _| h.shutdown_all()));
+    let _ = std::fs::remove_dir_all(repo.parent().unwrap());
+}
+
+#[gpui::test]
+fn the_fixtures_tests_run_and_debug_as_gradle_tasks(cx: &mut TestAppContext) {
+    let (Some(_), Some(jdk)) = (java::engine_dist(), test_jdk()) else {
+        println!("tests run and debug: skipped; needs an engine distribution and a JDK 17 to 21");
+        return;
+    };
+    tests_run_and_debug(cx, jdk, false);
+}
+
+/// With `SNOUT_TEST_JDK8` naming a JDK 8: the fixture as a Java 8 build, on Java 8.
+#[gpui::test]
+fn a_java_8_build_runs_and_debugs(cx: &mut TestAppContext) {
+    let jdk8 = std::env::var_os("SNOUT_TEST_JDK8").map(PathBuf::from).and_then(|h| {
+        java::jdk_at(&h).or_else(|| java::jdk_at(&h.join("Contents/Home"))).filter(|j| j.major == 8).map(|j| j.home)
+    });
+    let (Some(_), Some(jdk)) = (java::engine_dist(), jdk8) else {
+        println!("Java 8: skipped; set SNOUT_TEST_JDK8 to a JDK 8");
+        return;
+    };
+    tests_run_and_debug(cx, jdk, true);
+}

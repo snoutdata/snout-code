@@ -116,6 +116,8 @@ mod shots {
 
     #[derive(Clone, Copy, PartialEq)]
     pub enum SpringShot {
+        /// The controller with a bean menu of eighty injection sites, filtered.
+        ManySites,
         /// The controller: beans, injections, endpoints, a chooser, `@Value` hints.
         Gutter,
         /// The application class (a run icon beside its bean), and the Beans tab.
@@ -793,7 +795,7 @@ mod shots {
             editor
         };
         match kind {
-            SpringShot::Gutter | SpringShot::Endpoints => {
+            SpringShot::Gutter | SpringShot::Endpoints | SpringShot::ManySites => {
                 let file = java.join("web/GreetingController.java");
                 // An edit since the commit, for the Git marks beside the others.
                 let text = std::fs::read_to_string(&file).unwrap();
@@ -825,10 +827,41 @@ mod shots {
                         editor.update(cx, |e, cx| {
                             let line = e.spring.as_ref().unwrap().line(32).unwrap().clone();
                             let items = snout_app::editor::spring_items(&line);
-                            e.gutter_menu = Some(snout_app::editor::GutterMenu::Spring { at, items });
+                            e.gutter_menu = Some(snout_app::editor::GutterMenu::Spring { at, items, filter: None });
                             cx.notify();
                         })
                     });
+                } else if kind == SpringShot::ManySites {
+                    // A bean injected in eighty places: the list is capped, scrolls, and
+                    // has a field to narrow it.
+                    let at = spring_lane(&editor, "public GreetingController(", cx);
+                    cx.update_window(handle, |_, window, cx| {
+                        editor.update(cx, |e, cx| {
+                            let line = e.spring.as_ref().unwrap().line(32).unwrap().clone();
+                            let target = snout_app::editor::spring_items(&line)
+                                .into_iter()
+                                .find_map(|i| match i {
+                                    snout_app::editor::SpringItem::Go { target, .. } => Some(target),
+                                    _ => None,
+                                })
+                                .unwrap();
+                            let mut items =
+                                vec![snout_app::editor::SpringItem::Heading("Bean 'clock' is injected into".into())];
+                            for i in 0..80 {
+                                items.push(snout_app::editor::SpringItem::Go {
+                                    label: format!("OrderService{i}.clock"),
+                                    detail: format!("OrderService{i}.java:{}", 12 + i),
+                                    target: target.clone(),
+                                });
+                            }
+                            let filter = cx.new(|cx| gpui_component::input::InputState::new(window, cx));
+                            filter.update(cx, |f, cx| f.set_value("service1", window, cx));
+                            e.gutter_menu =
+                                Some(snout_app::editor::GutterMenu::Spring { at, items, filter: Some(filter) });
+                            cx.notify();
+                        })
+                    })
+                    .unwrap();
                 } else {
                     let at = spring_lane(&editor, "public String hello", cx);
                     cx.update(|cx| {
@@ -1248,7 +1281,7 @@ mod shots {
             cx.update(|cx| {
                 service.update(cx, |e, cx| {
                     let items = snout_app::editor::spring_items(&bean);
-                    e.gutter_menu = Some(snout_app::editor::GutterMenu::Spring { at, items });
+                    e.gutter_menu = Some(snout_app::editor::GutterMenu::Spring { at, items, filter: None });
                     cx.notify();
                 })
             });
@@ -1388,6 +1421,7 @@ mod shots {
         real_spring_shot(ThemeChoice::Dark);
         shot("spring-gutter-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));
         shot("spring-gutter-light", ThemeChoice::Light, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));
+        shot("spring-many-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::ManySites)));
         shot("spring-beans-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::Beans)));
         shot(
             "spring-endpoints-dark",
