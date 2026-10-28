@@ -30,6 +30,11 @@ pub struct Palette {
     pub ok: Hsla,
     pub warn: Hsla,
     pub error: Hsla,
+    /// Ink line of the drawings.
+    pub ill_ink: Hsla,
+    pub ill_blob: Hsla,
+    pub ill_paper: Hsla,
+    pub ill_tint: Hsla,
     /// The drawings' one hue: a softer relative of `ok`.
     pub ill_accent: Hsla,
     pub ill_warm: Hsla,
@@ -107,6 +112,7 @@ const LIGHT: Base = Base {
 impl Palette {
     fn derive(b: &Base, dark: bool) -> Self {
         let (fg, card, ok, warn, error) = (hex(b.fg), hex(b.card), hex(b.ok), hex(b.warn), hex(b.error));
+        let panel = hex(b.panel);
         Self {
             dark,
             ground: hex(b.ground),
@@ -125,6 +131,10 @@ impl Palette {
             ok,
             warn,
             error,
+            ill_ink: mix(fg, 0.88, panel),
+            ill_blob: mix(fg, 0.05, panel),
+            ill_paper: mix(fg, 0.06, card),
+            ill_tint: mix(fg, 0.20, card),
             ill_accent: mix(ok, 0.70, card),
             ill_warm: mix(warn, 0.65, card),
             ill_clay: mix(mix(error, 0.5, warn), 0.55, card),
@@ -151,6 +161,11 @@ impl Palette {
     /// A soft wash of `color` for chips and badges.
     pub fn wash(&self, color: Hsla) -> Hsla {
         mix(color, 0.14, self.panel)
+    }
+
+    /// Text of lesser weight: the text colour at 60 %, as egui draws weak text.
+    pub fn weak(&self) -> Hsla {
+        self.fg.opacity(0.6)
     }
 
     pub fn selection(&self) -> Hsla {

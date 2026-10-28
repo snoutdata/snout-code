@@ -31,7 +31,8 @@ mod shots {
         assert!(ok, "git {args:?}");
     }
 
-    /// A repository with a little history, a branch, a tag and changes in several states.
+    /// The egui app's screenshot fixture, file for file: a little history, a tag, a second
+    /// branch, and one file in each interesting state.
     pub fn demo_repo(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("snout-app-shot-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -46,29 +47,51 @@ mod shots {
         ] {
             git(&dir, &["config", k, v]);
         }
+        git(&dir, &["remote", "add", "origin", "git@github.com:demo/demo.git"]);
         let lib = include_str!("../../snout-core/src/status.rs");
         std::fs::write(dir.join("status.rs"), lib).unwrap();
         std::fs::write(dir.join("src/main.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+        std::fs::write(dir.join("README.md"), "# demo\n").unwrap();
         git(&dir, &["add", "-A"]);
         git(&dir, &["commit", "-qm", "Initial import"]);
         git(&dir, &["tag", "-a", "v0.1", "-m", "First release"]);
         git(&dir, &["branch", "feature/diff-view"]);
         git(&dir, &["commit", "-q", "--allow-empty", "-m", "Second commit"]);
-        std::fs::write(dir.join("status.rs"), lib.replace("Human readable state", "Human-readable state")).unwrap();
-        std::fs::write(dir.join("src/main.rs"), "fn main() {\n    println!(\"hello, snout\");\n}\n").unwrap();
+        let edited = lib
+            .replace("Human readable state", "Human-readable state")
+            .replace("\"Conflict\".into()", "\"Conflicted\".into()")
+            .replace("pub fn is_unborn", "/// True before the first commit.\n    pub fn is_unborn");
+        std::fs::write(dir.join("status.rs"), edited).unwrap();
+        std::fs::write(dir.join("src/main.rs"), "fn main() {\n    println!(\"hello, snout\");\n    run();\n}\n")
+            .unwrap();
         git(&dir, &["add", "src/main.rs"]);
         std::fs::write(dir.join("NOTES.md"), "untracked\n").unwrap();
         dir
     }
 
+    /// The egui app's commit-view fixture: a merge, so the graph has a second lane.
+    fn with_merge(dir: &Path) {
+        git(dir, &["stash", "-u", "-q"]);
+        git(dir, &["switch", "-q", "feature/diff-view"]);
+        std::fs::write(dir.join("README.md"), "# demo\n\nNow with a diff view.\n").unwrap();
+        git(dir, &["commit", "-qam", "Describe the diff view"]);
+        git(dir, &["switch", "-q", "main"]);
+        git(dir, &["merge", "-q", "--no-ff", "-m", "Merge feature/diff-view", "feature/diff-view"]);
+        git(dir, &["stash", "pop", "-q"]);
+    }
+
     pub enum Select {
         File(&'static str),
-        Commit(usize),
+        /// A commit (by summary) and one of its files, in a repository with a merge.
+        Commit(&'static str, &'static str),
         Console,
     }
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
         let repo = demo_repo(name);
+        if matches!(select, Some(Select::Commit(..))) {
+            with_merge(&repo);
+        }
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
             Arc::new(gpui_kit_assets::AllAssets),
@@ -97,9 +120,12 @@ mod shots {
         cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
         match select {
             Some(Select::File(path)) => cx.update(|cx| model.update(cx, |m, cx| m.click_file(path, false, false, cx))),
-            Some(Select::Commit(back)) => cx.update(|cx| {
-                let id = model.read(cx).log[back].id.clone();
-                model.update(cx, |m, cx| m.handle(Action::ShowCommit(id), cx))
+            Some(Select::Commit(summary, file)) => cx.update(|cx| {
+                let id = model.read(cx).log.iter().find(|c| c.summary == summary).unwrap().id.clone();
+                model.update(cx, |m, cx| {
+                    m.handle(Action::ShowCommit(id), cx);
+                    m.select_commit_file(file.into(), cx);
+                })
             }),
             Some(Select::Console) => {
                 let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
@@ -137,10 +163,12 @@ mod shots {
     }
 
     pub fn run() {
-        shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
-        shot("diff-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
-        shot("diff-dark", ThemeChoice::Dark, Activity::Git, Some(Select::File("src/main.rs")));
-        shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit(1)));
+        // The Git view, as the egui app's `renders_repo_and_diff` and
+        // `clicking_a_commit_shows_what_it_changed` shots show it.
+        shot("git-dark", ThemeChoice::Dark, Activity::Git, Some(Select::File("status.rs")));
+        shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
+        shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
+        shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
     }
 }

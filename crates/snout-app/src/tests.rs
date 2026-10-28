@@ -83,7 +83,7 @@ fn the_window_opens_on_the_welcome_page_without_a_repository(cx: &mut TestAppCon
     let (model, ws, cx) = open(cx, Settings::default());
     cx.update(|_, cx| {
         assert!(model.read(cx).repo.is_none());
-        assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Projects);
+        assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git, "the Git view comes first");
         assert_eq!(model.read(cx).title(), "SnoutCode");
     });
 }
@@ -132,17 +132,20 @@ fn projects_groups_hold_repositories_and_the_tree_narrows_the_files(cx: &mut Tes
 }
 
 #[gpui::test]
-fn the_activity_bar_switches_and_closes_the_left_dock(cx: &mut TestAppContext) {
+fn the_activity_bar_switches_between_the_git_view_and_the_docks(cx: &mut TestAppContext) {
     let (_, ws, cx) = open(cx, Settings::default());
     let left_open = |cx: &mut VisualTestContext| {
         cx.update(|_, cx| ws.read(cx).dock.read(cx).is_dock_open(gpui_component::dock::DockPlacement::Left))
     };
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Projects, w, cx)));
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Projects));
     assert!(left_open(cx));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Projects, w, cx)));
+    assert!(!left_open(cx), "the active item closes the dock");
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
-    assert!(left_open(cx));
     cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git));
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
-    assert!(!left_open(cx), "the active item closes the dock");
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git, "Git stays"));
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
     assert!(left_open(cx));
 }
@@ -503,7 +506,7 @@ fn the_dock_layout_is_saved_and_restored(cx: &mut TestAppContext) {
         let ws = ws2.read(cx);
         let d = ws.dock.read(cx);
         assert_eq!(d.dock_size(DockPlacement::Left), Some(gpui::px(410.)));
-        let ids = [Some(ws.tabs.welcome), ws.tabs.diff, ws.tabs.journal, ws.tabs.commit, ws.tabs.console];
+        let ids = [Some(ws.tabs.welcome), ws.tabs.console];
         assert!(ids.into_iter().flatten().all(|id| d.panel(id).is_some()), "every panel is placed");
         assert!(crate::console::console_of(ws, cx).is_some());
     });
@@ -523,5 +526,32 @@ fn the_dock_layout_is_saved_and_restored(cx: &mut TestAppContext) {
     vcx3.update(|_, cx| {
         assert_eq!(ws3.read(cx).dock.read(cx).dock_size(DockPlacement::Left), Some(gpui::px(320.)));
     });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_git_view_sorts_switches_tabs_and_resizes_with_the_pointer(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, MouseButton, point, px};
+    let repo = demo_repo("git-view");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let git = cx.update(|_, cx| ws.read(cx).git.clone());
+    // A click on a column header sorts by it; a second click flips the order.
+    let state = cx.debug_bounds("sort-1").expect("the State header is drawn").center();
+    cx.simulate_click(state, Modifiers::none());
+    cx.update(|_, cx| assert_eq!(model.read(cx).sort, (crate::model::SortColumn::State, true)));
+    cx.simulate_click(state, Modifiers::none());
+    cx.update(|_, cx| assert_eq!(model.read(cx).sort, (crate::model::SortColumn::State, false)));
+    // The bottom pane's tabs.
+    let output = cx.debug_bounds("tab-output").expect("the Output tab is drawn").center();
+    cx.simulate_click(output, Modifiers::none());
+    cx.update(|_, cx| assert!(git.read(cx).shows_output()));
+    // Dragging the edge between the files and the commit box widens the box.
+    let before = cx.update(|_, cx| git.read(cx).commit_width());
+    let edge = cx.debug_bounds("split-Commit").expect("the edge is drawn").center();
+    cx.simulate_mouse_down(edge, MouseButton::Left, Modifiers::none());
+    let to = point(edge.x - px(40.), edge.y);
+    cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    cx.update(|_, cx| assert_eq!(git.read(cx).commit_width(), before + 40.));
     let _ = std::fs::remove_dir_all(repo);
 }

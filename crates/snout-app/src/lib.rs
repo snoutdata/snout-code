@@ -1,9 +1,10 @@
 //! SnoutCode on GPUI and GPUI Kit: an activity bar, docks, and the Git Panel.
 
-pub mod center;
+pub mod art;
 pub mod console;
 pub mod dialogs;
-pub mod git_panel;
+pub mod git_view;
+pub mod look;
 pub mod menus;
 pub mod model;
 pub mod panels;
@@ -24,6 +25,10 @@ use crate::settings::{Settings, Store};
 /// Everything the app needs before its first window: the Kit, theme, keys, menus.
 pub fn init(settings: &Settings, cx: &mut App) {
     gpui_component::init(cx);
+    let fonts = [epaint_default_fonts::UBUNTU_LIGHT, epaint_default_fonts::HACK_REGULAR];
+    if let Err(e) = cx.text_system().add_fonts(fonts.map(std::borrow::Cow::Borrowed).to_vec()) {
+        eprintln!("Could not load the fonts: {e}");
+    }
     theme::apply(settings.theme, None, cx);
     menus::bind_keys(cx);
     workspace::app_actions(cx);

@@ -8,33 +8,30 @@ use std::sync::Arc;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Context, Entity, ExternalPaths, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, Styled as _, Subscription, Window, div, px,
+    Render, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px,
 };
 use gpui::{Global, Task};
-use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{
     BasePanelView, DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin, DockToggleEvent, PanelId,
     panel_handle, register_panel,
 };
-use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::spinner::Spinner;
-use gpui_component::{Disableable as _, Selectable as _, Sizable as _, Theme};
+use gpui_component::{Sizable as _, Theme};
 use snout_core::{FileEntry, PullMode, on_disk, stage_paths, unstage_paths};
 
+use crate::art::glyph;
+use crate::git_view::GitView;
 use crate::menus::{self, *};
 use crate::model::{Action, Dialog, Model, ModelEvent};
 use crate::panels::{Activity, OutputPanel, SidePanel, WelcomePanel};
 use crate::projects::ProjectsView;
 use crate::settings::ThemeChoice;
 use crate::theme::{self, palette};
-use crate::ui::{icon, icons};
+use snout_core::art::Glyph;
 
 /// The center and bottom tabs, so events can bring one forward.
 pub struct Tabs {
     pub welcome: PanelId,
-    pub diff: Option<PanelId>,
-    pub journal: Option<PanelId>,
-    pub commit: Option<PanelId>,
     pub console: Option<PanelId>,
 }
 
@@ -42,6 +39,8 @@ pub struct Workspace {
     pub model: Entity<Model>,
     pub dock: Entity<DockArea>,
     pub side: Entity<SidePanel>,
+    /// The Git view: the whole area right of the activity bar while Git is picked.
+    pub git: Entity<GitView>,
     pub tabs: Tabs,
     menu_checks: Option<(bool, bool, bool, ThemeChoice)>,
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
@@ -51,8 +50,11 @@ pub struct Workspace {
     _subscriptions: Vec<Subscription>,
 }
 
+/// The activity bar's width.
+pub const ACTIVITY_W: f32 = 44.;
+
 /// The layout format this build writes; a saved layout of another version is ignored.
-const LAYOUT_VERSION: usize = 1;
+const LAYOUT_VERSION: usize = 2;
 
 /// The panels of the window being restored, by name, for the dock's panel registry.
 struct PanelPool(HashMap<&'static str, Arc<dyn BasePanelView>>);
@@ -127,12 +129,12 @@ fn restore_layout(
 impl Workspace {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
-        let git = crate::git_panel::build(&model, window, cx);
-        let side = cx.new(|cx| SidePanel::new(projects.into(), git, cx));
+        let side = cx.new(|cx| SidePanel::new(projects.clone().into(), cx));
         let welcome = cx.new(|cx| WelcomePanel::new(model.clone(), cx));
         let output = cx.new(|cx| OutputPanel::new(model.clone(), cx));
-        let center = crate::center::build(&model, window, cx);
         let console = crate::console::build(&model, window, cx);
+        let console_view = console.as_ref().map(|c| c.view());
+        let git = cx.new(|cx| GitView::new(model.clone(), projects.into(), console_view, window, cx));
         let (dock, _skin) = DockSkin::dock_area("snout-code", Some(LAYOUT_VERSION), window, cx);
 
         // Every panel, where it goes when the saved layout does not place it.
@@ -140,22 +142,7 @@ impl Workspace {
             (panel_handle(side.clone()), DockPlacement::Left),
             (panel_handle(welcome.clone()), DockPlacement::Center),
         ];
-        let mut tabs = Tabs {
-            welcome: PanelId::from(welcome.entity_id()),
-            diff: None,
-            journal: None,
-            commit: None,
-            console: None,
-        };
-        for (kind, view) in center {
-            let id = view.panel_id(cx);
-            match kind {
-                crate::center::Kind::Diff => tabs.diff = Some(id),
-                crate::center::Kind::Journal => tabs.journal = Some(id),
-                crate::center::Kind::Commit => tabs.commit = Some(id),
-            }
-            panels.push((view, DockPlacement::Center));
-        }
+        let mut tabs = Tabs { welcome: PanelId::from(welcome.entity_id()), console: None };
         if let Some(console) = console {
             tabs.console = Some(console.panel_id(cx));
             panels.push((console, DockPlacement::Bottom));
@@ -205,10 +192,11 @@ impl Workspace {
                 }
             }),
         ];
-        let mut this = Self {
+        let this = Self {
             model,
             dock,
             side,
+            git,
             tabs,
             menu_checks: None,
             focus: cx.focus_handle(),
@@ -216,9 +204,6 @@ impl Workspace {
             _save_layout: None,
             _subscriptions: subscriptions,
         };
-        if !restored {
-            this.show_repo_tabs(window, cx);
-        }
         window.focus(&this.focus, cx);
         this
     }
@@ -241,28 +226,16 @@ impl Workspace {
                     }
                 });
             }
-            ModelEvent::ShowCommit => self.select(self.tabs.commit, window, cx),
-            ModelEvent::ShowDiff => self.select(self.tabs.diff, window, cx),
+            // The commit and the diff show in the Git view.
+            ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
             ModelEvent::Message => {}
         }
     }
 
-    fn select(&self, id: Option<PanelId>, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(id) = id {
-            self.dock.update(cx, |d, cx| d.select_panel(id, window, cx));
-        }
-    }
-
-    /// With a repository open, start on the Journal; without one, on the welcome page.
-    fn show_repo_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let has_repo = self.model.read(cx).repo.is_some();
-        let id = if has_repo { self.tabs.journal.or(self.tabs.diff) } else { Some(self.tabs.welcome) };
-        self.select(id, window, cx);
-    }
-
-    /// Show `activity` in the left dock, opening the dock if it is closed.
+    /// Show `activity`: the Git view, or the docks with its panel in the left dock (opened
+    /// if it is closed).
     pub fn show_activity(&mut self, activity: Activity, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.dock.read(cx).is_dock_open(DockPlacement::Left) {
+        if activity != Activity::Git && !self.dock.read(cx).is_dock_open(DockPlacement::Left) {
             self.dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Left, window, cx));
         }
         self.side.update(cx, |s, cx| {
@@ -272,8 +245,11 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The activity bar: show `activity`, or close the dock when it already shows it.
+    /// The activity bar: show `activity`, or close the left dock when it already shows it.
     pub fn set_activity(&mut self, activity: Activity, window: &mut Window, cx: &mut Context<Self>) {
+        if activity == Activity::Git {
+            return self.show_activity(activity, window, cx);
+        }
         let same = self.side.read(cx).activity == activity;
         let open = self.dock.read(cx).is_dock_open(DockPlacement::Left);
         if same && open {
@@ -335,139 +311,65 @@ impl Workspace {
         }
     }
 
-    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let m = self.model.read(cx);
-        let has_repo = m.repo.is_some();
-        let net = has_repo && m.job.is_none();
-        let entries = m.selected_entries();
-        let in_tree = m.commit_view.is_none();
-        let push = match m.status.branch.ahead {
-            0 => "Push".to_owned(),
-            n => format!("Push ({n})"),
-        };
-        let console = if m.settings.console_open { "Hide Claude" } else { "Claude" };
-        let tool = |id: &'static str, glyph: &'static str, label: String, enabled: bool, action: Action| {
-            Button::new(id)
-                .ghost()
-                .small()
-                .icon(icon(glyph))
-                .label(label)
-                .disabled(!enabled)
-                .on_click(cx.listener(move |this, _, _, cx| this.send(action.clone(), cx)))
-        };
-        let model = self.model.clone();
-        let theme = m.settings.theme;
-        div()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .px(px(8.))
-            .h(px(36.))
-            .child(tool("tb-open", icons::OPEN, "Open".into(), true, Action::PickFolder))
-            .child(tool("tb-pull", icons::PULL, "Pull".into(), net, Action::Pull(PullMode::Default)))
-            .child(tool("tb-fetch", icons::FETCH, "Fetch".into(), net, Action::Fetch))
-            .child(tool("tb-push", icons::PUSH, push, net, Action::Push))
-            .child(tool(
-                "tb-stage",
-                icons::PLUS,
-                "Stage".into(),
-                in_tree && entries.iter().any(FileEntry::has_unstaged),
-                Action::Stage(stage_paths(&entries)),
-            ))
-            .child(tool(
-                "tb-unstage",
-                icons::DISCARD,
-                "Unstage".into(),
-                in_tree && entries.iter().any(FileEntry::has_staged),
-                Action::Unstage(unstage_paths(&entries)),
-            ))
-            .child(tool(
-                "tb-discard",
-                icons::DISCARD,
-                "Discard".into(),
-                in_tree && !entries.is_empty(),
-                Action::AskDiscard(entries.clone()),
-            ))
-            .child(tool(
-                "tb-trash",
-                icons::TRASH,
-                "Delete".into(),
-                in_tree && entries.iter().any(on_disk),
-                Action::AskDeleteFiles(entries.clone()),
-            ))
-            .child(tool("tb-refresh", icons::FETCH, "Refresh".into(), has_repo, Action::Refresh))
-            .child(tool("tb-checkout", icons::SWITCH, "Check Out…".into(), has_repo, Action::ShowCheckout))
-            .child(tool("tb-branch", icons::BRANCH, "New Branch".into(), has_repo, Action::ShowNewBranch(None)))
-            .child(div().flex_1())
-            .child(
-                Button::new("tb-theme")
-                    .ghost()
-                    .small()
-                    .icon(icon("icons/sun-moon.svg"))
-                    .tooltip("Appearance")
-                    .dropdown_menu(move |mut menu, _, _| {
-                        for choice in ThemeChoice::ALL {
-                            let model = model.clone();
-                            menu = menu.item(PopupMenuItem::new(choice.label()).checked(theme == choice).on_click(
-                                move |_, _, cx| model.update(cx, |m, cx| m.handle(Action::SetTheme(choice), cx)),
-                            ));
-                        }
-                        menu
-                    }),
-            )
-            .child(tool("tb-github", icons::WEB, "GitHub".into(), m.github_url.is_some(), Action::OpenGithub))
-            .child(tool("tb-claude", icons::SPARK, console.into(), true, Action::ToggleConsole))
-    }
-
     fn activity_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let current = self.side.read(cx).activity;
-        let open = self.dock.read(cx).is_dock_open(DockPlacement::Left);
+        let open = current == Activity::Git || self.dock.read(cx).is_dock_open(DockPlacement::Left);
         let changed = self.model.read(cx).status.files.len();
-        let item = |id: &'static str, glyph: &'static str, tip: &'static str, a: Activity| {
-            let on = open && current == a;
-            Button::new(id)
-                .ghost()
-                .icon(icon(glyph))
-                .tooltip(tip)
-                .when(on, |b| b.selected(true))
-                .on_click(cx.listener(move |this, _, w, cx| this.set_activity(a, w, cx)))
+        let hover_bg = p.button_hover;
+        let item = |id: &'static str, g: Glyph, tip: &'static str, on: bool| {
+            div()
+                .id(id)
+                .flex_none()
+                .size(px(32.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .cursor_pointer()
+                .when(on, |d| d.bg(p.selection()))
+                .when(!on, |d| d.hover(move |s| s.bg(hover_bg)))
+                .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
+                .child(glyph(g, 20., p.fg))
         };
+        let pick = |a: Activity| cx.listener(move |this, _, w, cx| this.set_activity(a, w, cx));
         div()
             .flex()
             .flex_col()
             .items_center()
             .gap(px(6.))
             .py(px(8.))
-            .w(px(44.))
+            .w(px(ACTIVITY_W))
             .h_full()
             .bg(p.ground)
             .border_r_1()
             .border_color(p.border)
-            .child(item("act-projects", icons::FOLDERS, "Projects (⌘1)", Activity::Projects))
-            .child(div().relative().child(item("act-git", icons::BRANCH, "Git (⌘0)", Activity::Git)).when(
-                changed > 0,
-                |d| {
-                    d.child(
-                        div()
-                            .absolute()
-                            .top(px(-2.))
-                            .right(px(-4.))
-                            .px(px(4.))
-                            .rounded(px(7.))
-                            .bg(p.accent)
-                            .text_color(p.on_accent)
-                            .text_size(px(10.))
-                            .child(changed.to_string()),
-                    )
-                },
-            ))
+            .child(
+                item("act-git", Glyph::Branch, "Git (⌘0)", open && current == Activity::Git)
+                    .relative()
+                    .on_click(pick(Activity::Git))
+                    .when(changed > 0, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .top(px(-2.))
+                                .right(px(-4.))
+                                .px(px(4.))
+                                .rounded(px(7.))
+                                .bg(p.accent)
+                                .text_color(p.on_accent)
+                                .text_size(px(10.))
+                                .child(changed.to_string()),
+                        )
+                    }),
+            )
+            .child(
+                item("act-projects", Glyph::Repo, "Projects (⌘1)", open && current == Activity::Projects)
+                    .on_click(pick(Activity::Projects)),
+            )
             .child(div().flex_1())
             .child(
-                Button::new("act-console")
-                    .ghost()
-                    .icon(icon(icons::TERMINAL))
-                    .tooltip("Claude Code console (⌘J)")
+                item("act-console", Glyph::Spark, "Claude Code console (⌘J)", false)
                     .on_click(cx.listener(|this, _, _, cx| this.send(Action::ToggleConsole, cx))),
             )
     }
@@ -489,7 +391,7 @@ impl Workspace {
             .child(m.message.clone())
             .child(div().flex_1())
             .when_some(m.branch_summary(), |d, s| {
-                d.child(icon(icons::BRANCH).xsmall().text_color(p.fg_dim)).child(div().text_color(p.fg_dim).child(s))
+                d.child(glyph(Glyph::Branch, 14., p.ill_ink)).child(div().text_color(p.weak()).child(s))
             })
     }
 }
@@ -614,16 +516,21 @@ impl Render for Workspace {
             .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(gpui::black().opacity(0.6)).text_color(gpui::white()))
             .child("Drop a folder to open it");
 
-        root.child(self.toolbar(cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .child(self.activity_bar(cx))
-                    .child(div().flex_1().min_w_0().h_full().child(self.dock.clone())),
-            )
-            .child(self.status_bar(cx))
+        let git = self.side.read(cx).activity == Activity::Git;
+        let main = if git {
+            self.git.clone().into_any_element()
+        } else {
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_1().min_h_0().child(self.dock.clone()))
+                .child(self.status_bar(cx))
+                .into_any_element()
+        };
+        root.flex_row()
+            .child(self.activity_bar(cx))
+            .child(div().flex_1().min_w_0().h_full().child(main))
             .child(drop_hint)
     }
 }

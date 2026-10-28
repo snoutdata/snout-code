@@ -7323,6 +7323,7 @@ name = "snout-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "epaint_default_fonts",
  "gpui-component",
  "gpui-kit-assets",
  "gpui-pre",

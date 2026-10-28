@@ -10,16 +10,18 @@ use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::{Sizable as _, scroll::ScrollableElement as _};
+use gpui_component::scroll::ScrollableElement as _;
 use snout_core::Tracking;
 use snout_core::groups::{arrange, dir_name, short};
 
 use crate::model::{Action, Model};
 use crate::theme::{Palette, palette};
-use crate::ui::{chip, icon, icons, pane_title};
+use snout_core::art::Glyph;
+
+use crate::art::glyph;
+use crate::look::{self, Trigger, chip, separator, title};
 
 /// What a repository row carries while it is dragged.
 #[derive(Clone)]
@@ -41,7 +43,7 @@ impl Render for DragPreview {
             .border_1()
             .border_color(p.border)
             .text_color(p.fg)
-            .child(icon(icons::REPO).small())
+            .child(glyph(Glyph::Repo, 16., p.fg))
             .child(self.0.clone())
     }
 }
@@ -144,7 +146,7 @@ impl Render for ProjectsView {
                 let name = g.name.clone();
                 let row = list_row(
                     SharedString::from(key.clone()),
-                    icons::FOLDERS,
+                    Glyph::Folder,
                     &g.name,
                     0,
                     Some(open),
@@ -201,11 +203,7 @@ impl Render for ProjectsView {
             }
         }
 
-        let add = Button::new("add-repo")
-            .icon(icon(icons::PLUS))
-            .ghost()
-            .xsmall()
-            .tooltip("Add a repository or a group")
+        let add = Trigger(look::icon_button("add-repo", Glyph::Plus, "Add a repository or a group", true, &p))
             .dropdown_menu({
                 let model = model.clone();
                 move |menu, _, _| {
@@ -219,10 +217,18 @@ impl Render for ProjectsView {
             .size_full()
             .flex()
             .flex_col()
-            .gap(px(4.))
-            .p(px(8.))
-            .child(div().flex().items_center().justify_between().child(pane_title("Repositories")).child(add))
-            .when(many, |d| d.child(Input::new(&self.filter).small()))
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(20.))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(title("Repositories"))
+                    .child(add),
+            )
+            .child(separator(&p))
+            .when(many, |d| d.child(look::field(&self.filter, false, None, &p)).child(div().h(px(4.))))
             .child(
                 div()
                     .id("projects-list")
@@ -297,10 +303,10 @@ impl ProjectsView {
         let has_dirs = tree.as_ref().is_some_and(|(children, _)| children.contains_key(""));
         let open = has_dirs.then(|| self.is_open(&key, true));
         let selected = current && m.dir_filter.is_none();
-        let glyph = if missing { icons::ALERT } else { icons::REPO };
+        let g = if missing { Glyph::Alert } else { Glyph::Repo };
         let id = SharedString::from(key.clone());
         let path_buf = path.to_owned();
-        let row = list_row(id, glyph, &name, depth, open, selected, missing, &chips, &p)
+        let row = list_row(id, g, &name, depth, open, selected, missing, &chips, &p)
             .on_click(cx.listener({
                 let path = path_buf.clone();
                 move |this, e: &ClickEvent, _, cx| {
@@ -362,7 +368,7 @@ impl ProjectsView {
             let full = root.join(dir);
             let row = list_row(
                 SharedString::from(key.clone()),
-                icons::FOLDER,
+                Glyph::Folder,
                 name,
                 depth,
                 open,
@@ -461,7 +467,7 @@ fn repo_menu(
 #[allow(clippy::too_many_arguments)]
 fn list_row(
     id: SharedString,
-    glyph: &'static str,
+    g: Glyph,
     name: &str,
     depth: u8,
     open: Option<bool>,
@@ -480,17 +486,25 @@ fn list_row(
         .pr(px(3.))
         .flex()
         .items_center()
-        .gap(px(4.))
         .rounded(px(6.))
         .border_1()
         .border_color(gpui::transparent_black())
         .text_color(ink)
         .when(selected, |d| d.bg(p.selection()))
         .when(!selected, |d| d.hover(move |s| s.bg(hover)))
-        .child(div().w(px(14.)).flex_none().when_some(open, |d, open| {
-            d.child(icon(if open { icons::CHEVRON_DOWN } else { icons::CHEVRON_RIGHT }).xsmall().text_color(p.fg_dim))
-        }))
-        .child(icon(glyph).small())
-        .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name.to_owned()))
-        .children(chips.iter().map(|(t, c)| chip(t.clone(), *c, p)))
+        .child(div().w(px(14.)).h_full().flex_none().when_some(open, |d, open| d.child(look::chevron(open, p.fg_dim))))
+        .child(div().w(px(1.)))
+        .child(glyph(g, 16., ink))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .ml(px(7.))
+                .mr(px(4.))
+                .overflow_hidden()
+                .text_ellipsis()
+                .whitespace_nowrap()
+                .child(name.to_owned()),
+        )
+        .child(div().flex().gap(px(4.)).children(chips.iter().map(|(t, c)| chip(t.clone(), *c, p))))
 }

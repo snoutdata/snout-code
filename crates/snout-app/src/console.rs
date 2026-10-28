@@ -12,20 +12,21 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, FocusHandle, Font, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString, Styled as _, TextAlign, TextRun,
-    UnderlineStyle, Window, canvas, div, font, point, px, size,
+    ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString, StatefulInteractiveElement as _, Styled as _,
+    TextAlign, TextRun, UnderlineStyle, Window, canvas, div, font, point, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{BasePanelView, panel_handle};
 use gpui_component::input::{Copy, Paste};
-use gpui_component::{Sizable as _, Theme};
 use snout_core::claude::{ENV_REMOVE, find_claude};
 use snout_core::pty::{self, Launch, Pty, Rgb};
 
+use crate::art::glyph;
+use crate::look;
 use crate::model::{Action, Model};
 use crate::panels::panel;
 use crate::theme::{Palette, mix, palette};
-use crate::ui::{icon, icons};
+use snout_core::art::Glyph;
 
 /// Refresh the Git views once the agent has been quiet this long...
 const QUIET: Duration = Duration::from_millis(800);
@@ -205,31 +206,37 @@ impl Render for ConsolePanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let root = self.root(cx).or_else(|| self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()));
-        let header = |title: String, running: Option<bool>, buttons: Vec<Button>| {
+        let header = |title: String, running: Option<bool>, buttons: Vec<gpui::AnyElement>| {
             let title = title.trim().trim_start_matches(['✳', '✻', '·', '✶', '✢', '*', ' ']).to_owned();
             div()
+                .flex_none()
                 .flex()
-                .items_center()
-                .gap(px(6.))
-                .px(px(8.))
-                .h(px(30.))
-                .child(icon(icons::SPARK).small())
-                .child(div().font_weight(FontWeight::SEMIBOLD).child("Claude Code"))
-                .when_some(running, |d, on| {
-                    d.child(div().size(px(7.)).rounded(px(4.)).bg(if on { p.ok } else { p.fg_dim }))
-                })
-                .when(!title.is_empty() && title != "Claude Code", |d| {
-                    d.child(div().text_color(p.fg_dim).overflow_hidden().whitespace_nowrap().child(title))
-                })
-                .child(div().flex_1())
-                .children(buttons)
+                .flex_col()
+                .child(
+                    div()
+                        .h(px(22.))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(glyph(Glyph::Spark, 16., p.fg))
+                        .child(div().whitespace_nowrap().child("Claude Code"))
+                        .when_some(running, |d, on| {
+                            d.child(div().size(px(7.)).rounded(px(4.)).bg(if on { p.ok } else { p.fg_dim }))
+                        })
+                        .when(!title.is_empty() && title != "Claude Code", |d| {
+                            d.child(
+                                div().min_w_0().text_color(p.fg_dim).overflow_hidden().whitespace_nowrap().child(title),
+                            )
+                        })
+                        .child(div().flex_1())
+                        .child(div().flex().items_center().gap(px(2.)).children(buttons)),
+                )
+                .child(div().h(px(4.)))
+                .child(look::separator(&p))
         };
-        let hide = Button::new("hide")
-            .ghost()
-            .xsmall()
-            .icon(icon(icons::CLOSE))
-            .tooltip("Hide (⌘J); the session keeps running")
-            .on_click(cx.listener(|this, _, _, cx| this.model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx))));
+        let hide = look::icon_button("hide", Glyph::Close, "Hide (⌘J); the session keeps running", true, &p)
+            .on_click(cx.listener(|this, _, _, cx| this.model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx))))
+            .into_any_element();
         let Some(root) = root else {
             return div()
                 .size_full()
@@ -237,7 +244,7 @@ impl Render for ConsolePanel {
                 .flex()
                 .flex_col()
                 .child(header(String::new(), None, vec![hide]))
-                .child(crate::ui::note("", "Open a repository to run Claude Code in it", cx));
+                .child(look::centered_note("Open a repository to run Claude Code in it", &p));
         };
         if self.model.read(cx).settings.console_open && !self.sessions.contains_key(&root) && self.error.is_none() {
             self.start(&root, &[], window, cx);
@@ -247,40 +254,39 @@ impl Render for ConsolePanel {
             None => (String::new(), None),
         };
         let running = self.sessions.contains_key(&root) && exit.is_none();
-        let restart = |id: &'static str,
-                       glyph: &'static str,
-                       label: &'static str,
-                       tip: &'static str,
-                       args: Vec<String>,
-                       root: PathBuf| {
-            Button::new(id)
-                .xsmall()
-                .icon(icon(glyph))
-                .label(label)
-                .tooltip(tip)
-                .on_click(cx.listener(move |this, _, window, cx| this.start(&root, &args, window, cx)))
-        };
-        let mut buttons = Vec::new();
+        let restart =
+            |id: &'static str, g: Glyph, label: &'static str, tip: &'static str, args: Vec<String>, root: PathBuf| {
+                look::chip_button(id, g, label, true, &p)
+                    .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
+                    .on_click(cx.listener(move |this, _, window, cx| this.start(&root, &args, window, cx)))
+                    .into_any_element()
+            };
+        let mut buttons = vec![
+            restart("new", Glyph::Plus, "New", "Restart with a new conversation", Vec::new(), root.clone()),
+            restart(
+                "continue",
+                Glyph::Refresh,
+                "Continue",
+                "Restart with the most recent conversation in this folder (claude --continue)",
+                vec!["--continue".into()],
+                root.clone(),
+            ),
+        ];
         if running {
             let r = root.clone();
-            buttons.push(Button::new("end").xsmall().label("End").tooltip("End this session").on_click(cx.listener(
-                move |this, _, _, cx| {
-                    if let Some(mut s) = this.sessions.remove(&r) {
-                        s.pty.kill();
-                    }
-                    cx.notify();
-                },
-            )));
+            buttons.push(
+                look::chip_button("end", Glyph::Stop, "End", true, &p)
+                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("End this session").build(w, cx))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(mut s) = this.sessions.remove(&r) {
+                            s.pty.kill();
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
         }
-        buttons.push(restart(
-            "continue",
-            icons::FETCH,
-            "Continue",
-            "Restart with the most recent conversation in this folder (claude --continue)",
-            vec!["--continue".into()],
-            root.clone(),
-        ));
-        buttons.push(restart("new", icons::PLUS, "New", "Restart with a new conversation", Vec::new(), root.clone()));
+        buttons.push(div().w(px(4.)).into_any_element());
         buttons.push(hide);
 
         let body = if self.sessions.contains_key(&root) {
@@ -293,7 +299,7 @@ impl Render for ConsolePanel {
                 .flex_col()
                 .gap(px(8.))
                 .child(self.error.clone().unwrap_or_else(|| "Not running".into()))
-                .child(Button::new("start").label("Start").on_click(cx.listener(move |this, _, window, cx| {
+                .child(look::small_button("start", "Start", &p).on_click(cx.listener(move |this, _, window, cx| {
                     this.error = None;
                     this.start(&r, &[], window, cx)
                 })))
@@ -312,7 +318,7 @@ impl ConsolePanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let p = palette(cx);
-        let mono: SharedString = Theme::global(cx).mono_font_family.clone();
+        let mono: SharedString = look::MONO.into();
         let (fg0, bg0) = (rgb(p.fg), rgb(p.panel));
         if let Some(s) = self.sessions.get(root) {
             s.pty.set_colors(fg0, bg0);

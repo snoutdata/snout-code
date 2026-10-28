@@ -21,6 +21,8 @@ gpui-component.workspace = true
 gpui-platform.workspace = true
 # GPUI Kit's icons (Lucide) and other assets.
 gpui-kit-assets = "=0.8.1"
+# The egui app's own typefaces (Ubuntu Light and Hack), so the Git view reads the same.
+epaint_default_fonts = "=0.37.0"
 # Reads the earlier app's eframe storage (RON), never writes it.
 ron = "0.12"
 
