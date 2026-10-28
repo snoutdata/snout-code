@@ -114,6 +114,10 @@ fn runs_processes() {
     let dir = scratch("proc");
     let out = host.run(&Cmd::new("/bin/pwd").cwd(&dir), None).unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), dir.to_string_lossy());
+    let log = dir.join("err.log");
+    let out = host.run(&Cmd::new("/bin/sh").args(["-c", "echo to-file >&2"]).stderr(Stdio::File(log.clone())), None);
+    assert!(out.unwrap().status.success());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "to-file\n");
     let out = host.run(&Cmd::new("/usr/bin/env").env("SNOUT_X", "1").env_remove("HOME"), None).unwrap();
     let env = String::from_utf8_lossy(&out.stdout);
     assert!(env.lines().any(|l| l == "SNOUT_X=1") && !env.lines().any(|l| l.starts_with("HOME=")));

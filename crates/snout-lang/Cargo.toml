@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+snout-host.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

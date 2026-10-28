@@ -730,7 +730,7 @@ impl Runs {
         };
         let hub = self.hub.read(cx);
         let Some(root) = hub.engine_root(&project) else {
-            return if !crate::project_model::has_gradle(&project) {
+            return if !crate::project_model::has_gradle(&*crate::host::host(cx), &project) {
                 EngineState::Unavailable(format!(
                     "{} has no Gradle build: runs, tests and the debugger need one.",
                     Model::dir_name(&project)

@@ -235,7 +235,8 @@ impl Runs {
             Some(d) => d.attaching = true,
             None => return,
         }
-        let connect = cx.background_executor().spawn(async move { Dap::connect("127.0.0.1", port, WAIT) });
+        let host = crate::host::host(cx);
+        let connect = cx.background_executor().spawn(async move { Dap::connect(&*host, port, WAIT) });
         cx.spawn(async move |this, cx| {
             let (dap, events) = match connect.await {
                 Ok(c) => c,

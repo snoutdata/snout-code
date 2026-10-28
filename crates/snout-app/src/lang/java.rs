@@ -1,21 +1,23 @@
 //! What the Java engine needs around it: where its distribution is, which Gradle build a
 //! file belongs to, which JDK that build needs, the JDKs installed, and downloading one
-//! from Adoptium when none fits.
+//! from Adoptium when none fits. All of it on the workspace's [`Host`]: blocking, so off the
+//! UI thread.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The engine distribution: `SNOUT_ENGINE_DIST`, else inside the app bundle
-/// (`Contents/Resources/engine`), else `engine/build/dist` of the workspace the binary was
-/// built in (development).
-pub fn engine_dist() -> Option<PathBuf> {
-    let ok = |d: &Path| d.join("runtime/bin/java").is_file() && d.join("lib").is_dir();
-    if let Some(d) = std::env::var_os("SNOUT_ENGINE_DIST").map(PathBuf::from) {
+use snout_host::{Cmd, Host, Stdio};
+
+/// The engine distribution on `host`: `SNOUT_ENGINE_DIST`, else inside the app bundle
+/// (`Contents/Resources/engine`) or beside the program serving the host, else
+/// `engine/build/dist` of the workspace the binary was built in (development).
+pub fn engine_dist(host: &dyn Host) -> Option<PathBuf> {
+    let ok = |d: &Path| host.is_file(&d.join("runtime/bin/java")) && host.is_dir(&d.join("lib"));
+    if let Some(d) = host.info().var("SNOUT_ENGINE_DIST").map(PathBuf::from) {
         return ok(&d).then_some(d);
     }
-    let exe = std::env::current_exe().ok()?;
+    let exe = host.info().exe.clone()?;
     for dir in exe.ancestors().skip(1) {
         for candidate in [dir.join("Resources/engine"), dir.join("engine/build/dist")] {
             if ok(&candidate) {
@@ -24,14 +26,14 @@ pub fn engine_dist() -> Option<PathBuf> {
         }
     }
     let built = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../engine/build/dist");
-    ok(&built).then(|| built.canonicalize().unwrap_or(built))
+    ok(&built).then(|| host.canonicalize(&built).unwrap_or(built))
 }
 
 /// The command that runs `snout-engine lsp` on `project` with the distribution's own Java,
 /// Gradle running on `jdk`, its Gradle daemons stopping after `idle_minutes` without a build.
-pub fn engine_command(dist: &Path, project: &Path, jdk: &Path, idle_minutes: u64) -> Command {
-    let mut c = Command::new(dist.join("runtime/bin/java"));
-    c.arg("-cp")
+pub fn engine_command(host: &dyn Host, dist: &Path, project: &Path, jdk: &Path, idle_minutes: u64) -> Cmd {
+    let mut c = Cmd::new(dist.join("runtime/bin/java"))
+        .arg("-cp")
         .arg(format!("{}/*", dist.join("lib").display()))
         .arg("com.snoutcode.engine.cli.SnoutEngine")
         .arg("lsp")
@@ -41,48 +43,46 @@ pub fn engine_command(dist: &Path, project: &Path, jdk: &Path, idle_minutes: u64
         // The cache the app looks in for the model the engine writes (the same as the
         // engine's own default, unless HOME points elsewhere).
         .arg("--cache-dir")
-        .arg(engine_cache())
+        .arg(engine_cache(host))
         .arg("--daemon-idle-minutes")
         .arg(idle_minutes.max(1).to_string())
-        .current_dir(project);
+        .cwd(project);
     // The JDKs the app downloaded, for builds that want another Java than `jdk`.
-    for extra in downloaded_jdks() {
+    for extra in downloaded_jdks(host) {
         if extra.home != jdk {
-            c.arg("--jdk").arg(extra.home);
+            c = c.arg("--jdk").arg(extra.home);
         }
     }
     c
 }
 
-/// The JDKs the app downloaded, under the user's home.
-pub fn downloaded_jdks() -> Vec<Jdk> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    jdks_in(&downloads_dir(&home))
+/// The JDKs the app downloaded, under the user's home on `host`.
+pub fn downloaded_jdks(host: &dyn Host) -> Vec<Jdk> {
+    jdks_in(host, &downloads_dir(&host.info().home))
 }
 
-/// SnoutCode's cache folder, where the engine keeps its builds, models and jdtls data.
-pub fn engine_cache() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    crate::project_model::cache_dir(&home)
+/// SnoutCode's cache folder on `host`, where the engine keeps its builds, models and jdtls data.
+pub fn engine_cache(host: &dyn Host) -> PathBuf {
+    crate::project_model::cache_dir(&host.info().home)
 }
 
 const SETTINGS: [&str; 2] = ["settings.gradle", "settings.gradle.kts"];
 const BUILDS: [&str; 2] = ["build.gradle", "build.gradle.kts"];
 
 /// Whether `dir` is the root of a Gradle build (it has a settings or build script).
-pub fn is_gradle_root(dir: &Path) -> bool {
-    SETTINGS.iter().chain(BUILDS.iter()).any(|f| dir.join(f).is_file())
+pub fn is_gradle_root(host: &dyn Host, dir: &Path) -> bool {
+    SETTINGS.iter().chain(BUILDS.iter()).any(|f| host.is_file(&dir.join(f)))
 }
 
 /// The Gradle build `file` belongs to: the nearest folder above it with a settings script,
 /// else the nearest with a build script, looking no higher than `stop`.
-pub fn gradle_root(file: &Path, stop: Option<&Path>) -> Option<PathBuf> {
+pub fn gradle_root(host: &dyn Host, file: &Path, stop: Option<&Path>) -> Option<PathBuf> {
     let mut nearest_build = None;
     for dir in file.ancestors().skip(1) {
-        if SETTINGS.iter().any(|f| dir.join(f).is_file()) {
+        if SETTINGS.iter().any(|f| host.is_file(&dir.join(f))) {
             return Some(dir.to_owned());
         }
-        if nearest_build.is_none() && BUILDS.iter().any(|f| dir.join(f).is_file()) {
+        if nearest_build.is_none() && BUILDS.iter().any(|f| host.is_file(&dir.join(f))) {
             nearest_build = Some(dir.to_owned());
         }
         if stop.is_some_and(|s| dir == s) {
@@ -102,11 +102,11 @@ pub struct Jdk {
 }
 
 /// The JDK at `home`, read from its `release` file.
-pub fn jdk_at(home: &Path) -> Option<Jdk> {
-    if !home.join("bin/java").is_file() {
+pub fn jdk_at(host: &dyn Host, home: &Path) -> Option<Jdk> {
+    if !host.is_file(&home.join("bin/java")) {
         return None;
     }
-    let release = std::fs::read_to_string(home.join("release")).ok()?;
+    let release = host.read_to_string(&home.join("release")).ok()?;
     let version =
         release.lines().find_map(|l| l.strip_prefix("JAVA_VERSION=")).map(|v| v.trim().trim_matches('"').to_owned())?;
     let major = major_of(&version)?;
@@ -121,13 +121,13 @@ pub fn major_of(version: &str) -> Option<u32> {
 }
 
 /// The JDK homes in a folder of JDKs: each entry, or its `Contents/Home` (macOS bundles).
-pub fn jdks_in(dir: &Path) -> Vec<Jdk> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+pub fn jdks_in(host: &dyn Host, dir: &Path) -> Vec<Jdk> {
+    let Ok(entries) = host.read_dir(dir) else { return Vec::new() };
     let mut out = Vec::new();
-    for e in entries.flatten() {
-        let p = e.path();
+    for e in entries {
+        let p = e.path;
         for home in [p.join("Contents/Home"), p.clone()] {
-            if let Some(jdk) = jdk_at(&home) {
+            if let Some(jdk) = jdk_at(host, &home) {
                 out.push(jdk);
                 break;
             }
@@ -141,15 +141,15 @@ pub fn downloads_dir(home: &Path) -> PathBuf {
     home.join("Library/Application Support/SnoutCode/jdks")
 }
 
-/// Every JDK this Mac has where JDKs usually are: what `java_home` lists, the user's and
+/// Every JDK `host` has where JDKs usually are: what `java_home` lists, the user's and
 /// the system's JavaVirtualMachines, SDKMAN, Gradle's toolchains, and SnoutCode's own.
-pub fn discover(home: &Path) -> Vec<Jdk> {
+pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
     let mut found = Vec::new();
-    if let Ok(out) = Command::new("/usr/libexec/java_home").arg("-V").output() {
+    if let Ok(out) = host.run(&Cmd::new("/usr/libexec/java_home").arg("-V"), None) {
         // It lists on stderr: `    17.0.2 (arm64) "Vendor" - "Name" /path/to/home`.
         for line in String::from_utf8_lossy(&out.stderr).lines() {
             if let Some(at) = line.find(" /")
-                && let Some(jdk) = jdk_at(Path::new(line[at + 1..].trim()))
+                && let Some(jdk) = jdk_at(host, Path::new(line[at + 1..].trim()))
             {
                 found.push(jdk);
             }
@@ -162,10 +162,10 @@ pub fn discover(home: &Path) -> Vec<Jdk> {
         home.join(".gradle/jdks"),
         downloads_dir(home),
     ] {
-        found.extend(jdks_in(&dir));
+        found.extend(jdks_in(host, &dir));
     }
     let mut seen = std::collections::HashSet::new();
-    found.retain(|j| seen.insert(j.home.canonicalize().unwrap_or_else(|_| j.home.clone())));
+    found.retain(|j| seen.insert(host.canonicalize(&j.home).unwrap_or_else(|_| j.home.clone())));
     found
 }
 
@@ -256,18 +256,17 @@ pub fn declared_levels(script: &str) -> Vec<u32> {
 
 /// What the build at `root` needs: the levels its scripts declare (its own and its
 /// subprojects', one level down) and its Gradle wrapper's version.
-pub fn requirement(root: &Path) -> Requirement {
+pub fn requirement(host: &dyn Host, root: &Path) -> Requirement {
     let mut scripts: Vec<PathBuf> = SETTINGS.iter().chain(BUILDS.iter()).map(|f| root.join(f)).collect();
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for e in entries.flatten() {
-            if e.path().is_dir() {
-                scripts.extend(BUILDS.iter().map(|f| e.path().join(f)));
+    if let Ok(entries) = host.read_dir(root) {
+        for e in entries {
+            if e.is_dir {
+                scripts.extend(BUILDS.iter().map(|f| e.path.join(f)));
             }
         }
     }
-    let declared =
-        scripts.iter().filter_map(|p| std::fs::read_to_string(p).ok()).flat_map(|s| declared_levels(&s)).max();
-    let wrapper = std::fs::read_to_string(root.join("gradle/wrapper/gradle-wrapper.properties")).unwrap_or_default();
+    let declared = scripts.iter().filter_map(|p| host.read_to_string(p).ok()).flat_map(|s| declared_levels(&s)).max();
+    let wrapper = host.read_to_string(&root.join("gradle/wrapper/gradle-wrapper.properties")).unwrap_or_default();
     let gradle = wrapper
         .lines()
         .find_map(|l| l.strip_prefix("distributionUrl="))
@@ -304,66 +303,70 @@ impl DownloadProgress {
     }
 }
 
-/// Download Eclipse Temurin `major` for this Mac from api.adoptium.net into `dir`, check
+/// Download Eclipse Temurin `major` for `host` from api.adoptium.net into `dir` there, check
 /// its SHA-256, unpack it, and return the new JDK. Blocking; run it off the main thread.
-pub fn download_temurin(major: u32, dir: &Path, progress: &DownloadProgress) -> anyhow::Result<Jdk> {
+pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &DownloadProgress) -> anyhow::Result<Jdk> {
     use anyhow::{Context as _, bail};
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x64" };
+    let arch = if host.info().arch == "aarch64" { "aarch64" } else { "x64" };
+    let os = if host.info().is_mac() { "mac" } else { host.info().os.as_str() };
     let api = format!(
-        "https://api.adoptium.net/v3/assets/latest/{major}/hotspot?architecture={arch}&image_type=jdk&os=mac&vendor=eclipse"
+        "https://api.adoptium.net/v3/assets/latest/{major}/hotspot?architecture={arch}&image_type=jdk&os={os}&vendor=eclipse"
     );
-    let out = Command::new("curl").args(["-fsSL", "--max-time", "60", &api]).output().context("run curl")?;
+    let out = host.run(&Cmd::new("curl").args(["-fsSL", "--max-time", "60", &api]), None).context("run curl")?;
     if !out.status.success() {
         bail!("Adoptium did not answer: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     let assets: serde_json::Value = serde_json::from_slice(&out.stdout).context("read Adoptium's answer")?;
-    let package = assets.get(0).and_then(|a| a.pointer("/binary/package")).context("no JDK for this Mac")?;
+    let package = assets.get(0).and_then(|a| a.pointer("/binary/package")).context("no JDK for this machine")?;
     let link = package.get("link").and_then(|v| v.as_str()).context("no download link")?;
     let sha = package.get("checksum").and_then(|v| v.as_str()).unwrap_or_default().to_owned();
     let size = package.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
     progress.total.store(size, Ordering::Relaxed);
 
-    std::fs::create_dir_all(dir)?;
+    host.create_dir_all(dir)?;
     let part = dir.join(format!(".temurin-{major}.tar.gz.part"));
-    let mut curl = Command::new("curl").args(["-fsSL", "-o"]).arg(&part).arg(link).spawn().context("run curl")?;
+    let mut curl = host
+        .spawn(
+            &Cmd::new("curl").args(["-fsSL", "-o"]).arg(&part).arg(link).stdout(Stdio::Inherit).stderr(Stdio::Inherit),
+        )
+        .context("run curl")?;
     let status = loop {
         if let Some(status) = curl.try_wait()? {
             break status;
         }
-        if let Ok(m) = std::fs::metadata(&part) {
-            progress.done.store(m.len(), Ordering::Relaxed);
+        if let Ok(m) = host.metadata(&part) {
+            progress.done.store(m.len, Ordering::Relaxed);
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     };
     if !status.success() {
-        let _ = std::fs::remove_file(&part);
+        let _ = host.remove_file(&part);
         bail!("the download failed");
     }
     progress.done.store(size, Ordering::Relaxed);
     if !sha.is_empty() {
-        let out = Command::new("shasum").args(["-a", "256"]).arg(&part).output()?;
+        let out = host.run(&Cmd::new("shasum").args(["-a", "256"]).arg(&part), None)?;
         let actual = String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or_default().to_owned();
         if !actual.eq_ignore_ascii_case(&sha) {
-            let _ = std::fs::remove_file(&part);
+            let _ = host.remove_file(&part);
             bail!("the download is damaged (its checksum does not match)");
         }
     }
     let unpack = dir.join(format!(".temurin-{major}.unpack"));
-    let _ = std::fs::remove_dir_all(&unpack);
-    std::fs::create_dir_all(&unpack)?;
-    let ok = Command::new("tar").arg("-xzf").arg(&part).arg("-C").arg(&unpack).status()?.success();
-    let _ = std::fs::remove_file(&part);
+    let _ = host.remove_dir_all(&unpack);
+    host.create_dir_all(&unpack)?;
+    let ok = host.run(&Cmd::new("tar").arg("-xzf").arg(&part).arg("-C").arg(&unpack), None)?.status.success();
+    let _ = host.remove_file(&part);
     if !ok {
         bail!("the download could not be unpacked");
     }
-    let top =
-        std::fs::read_dir(&unpack)?.flatten().map(|e| e.path()).find(|p| p.is_dir()).context("an empty archive")?;
+    let top = host.read_dir(&unpack)?.into_iter().find(|e| e.is_dir).map(|e| e.path).context("an empty archive")?;
     let name = top.file_name().map(|n| n.to_owned()).context("an unnamed folder")?;
     let dest = dir.join(name);
-    let _ = std::fs::remove_dir_all(&dest);
-    std::fs::rename(&top, &dest)?;
-    let _ = std::fs::remove_dir_all(&unpack);
-    [dest.join("Contents/Home"), dest.clone()].iter().find_map(|h| jdk_at(h)).context("the download holds no JDK")
+    let _ = host.remove_dir_all(&dest);
+    host.rename(&top, &dest)?;
+    let _ = host.remove_dir_all(&unpack);
+    [dest.join("Contents/Home"), dest.clone()].iter().find_map(|h| jdk_at(host, h)).context("the download holds no JDK")
 }
 
 #[cfg(test)]
@@ -429,9 +432,9 @@ mod tests {
             "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.1.1-bin.zip\n",
         )
         .unwrap();
-        assert_eq!(gradle_root(&src.join("App.java"), None), Some(dir.clone()));
-        assert_eq!(requirement(&dir), Requirement { declared: Some(17), gradle_max: Some(19) });
-        assert_eq!(gradle_root(&std::env::temp_dir().join("nowhere/X.java"), None), None);
+        assert_eq!(gradle_root(&*snout_host::local(), &src.join("App.java"), None), Some(dir.clone()));
+        assert_eq!(requirement(&*snout_host::local(), &dir), Requirement { declared: Some(17), gradle_max: Some(19) });
+        assert_eq!(gradle_root(&*snout_host::local(), &std::env::temp_dir().join("nowhere/X.java"), None), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

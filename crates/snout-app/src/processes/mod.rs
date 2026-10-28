@@ -501,7 +501,7 @@ impl Processes {
         let model = self.model.read(cx);
         Known {
             app: std::process::id(),
-            cache: crate::lang::java::engine_cache(),
+            cache: crate::lang::java::engine_cache(&*crate::host::host(cx)),
             project: model.project_root(),
             engines,
             sessions,

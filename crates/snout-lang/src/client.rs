@@ -1,4 +1,4 @@
-//! A language server as a child process, spoken to over its stdin and stdout.
+//! A language server as a process on a [`Host`], spoken to over its stdin and stdout.
 //!
 //! Requests return futures any executor can await; what the server sends on its own
 //! (notifications, its requests, its stderr lines, and its exit) arrives on a channel. A
@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{BufRead, BufReader, BufWriter};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -17,6 +16,7 @@ use futures_channel::oneshot;
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use serde_json::{Value, json};
+use snout_host::{Cmd, Host, Process, Stdio};
 
 use crate::rpc::{self, ResponseError};
 
@@ -45,7 +45,7 @@ struct Inner {
     out: Mutex<Option<mpsc::Sender<Value>>>,
     next_id: AtomicI64,
     pending: Pending,
-    child: Mutex<Child>,
+    child: Mutex<Box<dyn Process>>,
     alive: AtomicBool,
     pid: u32,
 }
@@ -61,7 +61,7 @@ impl Inner {
 impl Drop for Inner {
     fn drop(&mut self) {
         if self.alive.load(Ordering::SeqCst) {
-            terminate(self.pid);
+            let _ = self.child.lock().map(|mut c| c.terminate());
         }
     }
 }
@@ -79,28 +79,20 @@ impl std::fmt::Debug for Client {
     }
 }
 
-/// Ask a process to end: SIGTERM, which a JVM answers by running its shutdown hooks.
-fn terminate(pid: u32) {
-    #[cfg(unix)]
-    {
-        let _ =
-            Command::new("kill").arg("-TERM").arg(pid.to_string()).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-    }
-}
-
 impl Client {
-    /// Start `command` and speak LSP to it. Its stdin, stdout and stderr are taken over.
-    pub fn spawn(mut command: Command) -> std::io::Result<(Client, async_channel::Receiver<ServerMessage>)> {
-        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = command.spawn()?;
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
-        let pid = child.id();
+    /// Start `command` on `host` and speak LSP to it. Its stdin, stdout and stderr are taken over.
+    pub fn spawn(host: &dyn Host, command: &Cmd) -> std::io::Result<(Client, async_channel::Receiver<ServerMessage>)> {
+        let command = command.clone().stdin(Stdio::Piped).stdout(Stdio::Piped).stderr(Stdio::Piped);
+        Self::over(host.spawn(&command)?)
+    }
+
+    /// Speak LSP to a process started with its stdin, stdout and stderr piped.
+    pub fn over(mut child: Box<dyn Process>) -> std::io::Result<(Client, async_channel::Receiver<ServerMessage>)> {
+        let missing = || std::io::Error::other("the server's stdio is not piped");
+        let stdin = child.take_stdin().ok_or_else(missing)?;
+        let stdout = child.take_stdout().ok_or_else(missing)?;
+        let stderr = child.take_stderr().ok_or_else(missing)?;
+        let pid = child.pid().unwrap_or(0);
         let (events_tx, events) = async_channel::unbounded();
         let (out_tx, out_rx) = mpsc::channel::<Value>();
         let inner = Arc::new(Inner {
@@ -151,7 +143,7 @@ impl Client {
                 inner.fail_pending();
                 inner.out.lock().unwrap().take();
                 let status = inner.child.lock().unwrap().wait().ok();
-                status.and_then(|s| s.code())
+                status.and_then(|s| s.code)
             });
             let _ = events_tx.send_blocking(ServerMessage::Exited(code));
         })?;
@@ -257,7 +249,7 @@ impl Client {
         if exited(self) {
             return;
         }
-        terminate(self.inner.pid);
+        let _ = self.inner.child.lock().unwrap().terminate();
         let deadline = Instant::now() + grace;
         while Instant::now() < deadline {
             if exited(self) {
@@ -344,7 +336,7 @@ mod tests {
 
     /// A tiny "server" in shell: echoes each request's params back as its result, sends
     /// one notification and one request first, and writes a line on stderr.
-    fn echo_server() -> Command {
+    fn echo_server() -> Cmd {
         let script = r#"
             printf 'starting\n' >&2
             note='{"jsonrpc":"2.0","method":"hello","params":{"n":1}}'
@@ -368,9 +360,7 @@ mod tests {
                 esac
             done
         "#;
-        let mut c = Command::new("bash");
-        c.arg("-c").arg(script);
-        c
+        Cmd::new("bash").arg("-c").arg(script)
     }
 
     #[test]
@@ -398,14 +388,13 @@ mod tests {
     }
 
     fn echo_server_client() -> (Client, async_channel::Receiver<ServerMessage>) {
-        Client::spawn(echo_server()).expect("bash runs")
+        Client::spawn(&*snout_host::local(), &echo_server()).expect("bash runs")
     }
 
     #[test]
     fn a_dead_server_fails_pending_requests_and_says_it_exited() {
-        let mut c = Command::new("sh");
-        c.arg("-c").arg("read x; exit 3");
-        let (client, events) = Client::spawn(c).unwrap();
+        let c = Cmd::new("sh").arg("-c").arg("read x; exit 3");
+        let (client, events) = Client::spawn(&*snout_host::local(), &c).unwrap();
         let pending = client.request_raw("never", Value::Null);
         assert_eq!(block_on(pending).unwrap_err().code, ResponseError::SERVER_GONE);
         let exit = loop {

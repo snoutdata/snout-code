@@ -8,13 +8,13 @@
 //! syncs again when asked.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{App, Context, Entity, Global, Task};
 use serde_json::Value;
+use snout_host::{Cmd, Host, HostRef, Stdio};
 
 use crate::lang::LangHub;
 use crate::model::Model;
@@ -359,15 +359,12 @@ impl ProjectModel {
 /// is cheap. Nested classes (`Outer$Inner`) are left out.
 pub type JarIndex = BTreeMap<String, Vec<String>>;
 
-/// The packages and classes in the jar at `file`, or `None` when it cannot be read.
-pub fn jar_index(file: &Path) -> Option<JarIndex> {
-    let mut f = std::fs::File::open(file).ok()?;
-    let len = f.metadata().ok()?.len();
+/// The packages and classes in the jar at `file` on `host`, or `None` when it cannot be read.
+pub fn jar_index(host: &dyn Host, file: &Path) -> Option<JarIndex> {
+    let len = host.metadata(file).ok()?.len;
     // The end of central directory record: 22 bytes, and a comment of up to 64 KiB.
     let tail = len.min(22 + 65_535);
-    f.seek(SeekFrom::Start(len - tail)).ok()?;
-    let mut buf = vec![0; tail as usize];
-    f.read_exact(&mut buf).ok()?;
+    let buf = host.read_range(file, len - tail, tail).ok().filter(|b| b.len() as u64 == tail)?;
     let at = (0..buf.len().saturating_sub(21)).rev().find(|&i| buf[i..i + 4] == [0x50, 0x4b, 0x05, 0x06])?;
     let u16_at = |b: &[u8], i: usize| u16::from_le_bytes([b[i], b[i + 1]]) as usize;
     let u32_at = |b: &[u8], i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]) as u64;
@@ -376,9 +373,7 @@ pub fn jar_index(file: &Path) -> Option<JarIndex> {
     if offset == 0xFFFF_FFFF || offset + size > len {
         return None;
     }
-    f.seek(SeekFrom::Start(offset)).ok()?;
-    let mut dir = vec![0; size as usize];
-    f.read_exact(&mut dir).ok()?;
+    let dir = host.read_range(file, offset, size).ok().filter(|d| d.len() as u64 == size)?;
     let mut out = JarIndex::new();
     let mut i = 0;
     while i + 46 <= dir.len() && dir[i..i + 4] == [0x50, 0x4b, 0x01, 0x02] {
@@ -424,10 +419,9 @@ pub fn synced_model(home: &Path, root: &Path) -> PathBuf {
 }
 
 /// The `rootDir` a model file names, read from its first lines.
-fn root_dir_of(file: &Path) -> Option<PathBuf> {
-    let mut head = vec![0; 4096];
-    let n = std::fs::File::open(file).ok()?.read(&mut head).ok()?;
-    let text = String::from_utf8_lossy(&head[..n]);
+fn root_dir_of(host: &dyn Host, file: &Path) -> Option<PathBuf> {
+    let head = host.read_range(file, 0, 4096).ok()?;
+    let text = String::from_utf8_lossy(&head);
     let at = text.find("\"rootDir\"")?;
     let rest = text[at + 9..].trim_start().strip_prefix(':')?.trim_start();
     let mut de = serde_json::Deserializer::from_str(rest).into_iter::<String>();
@@ -436,15 +430,15 @@ fn root_dir_of(file: &Path) -> Option<PathBuf> {
 
 /// The model files written for `root`: the Java engine's and the app's own sync, with
 /// when each was written.
-pub fn model_files(home: &Path, root: &Path) -> Vec<(PathBuf, SystemTime)> {
-    let want = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+pub fn model_files(host: &dyn Host, home: &Path, root: &Path) -> Vec<(PathBuf, SystemTime)> {
+    let want = host.canonicalize(root).unwrap_or_else(|_| root.to_owned());
     let mut out = Vec::new();
-    let stamp = |f: &Path| std::fs::metadata(f).and_then(|m| m.modified()).ok();
-    if let Ok(entries) = std::fs::read_dir(cache_dir(home).join("jdtls")) {
-        for e in entries.flatten() {
-            let file = e.path().join("model.json");
-            if let Some(dir) = root_dir_of(&file)
-                && dir.canonicalize().unwrap_or(dir) == want
+    let stamp = |f: &Path| modified(host, f);
+    if let Ok(entries) = host.read_dir(&cache_dir(home).join("jdtls")) {
+        for e in entries {
+            let file = e.path.join("model.json");
+            if let Some(dir) = root_dir_of(host, &file)
+                && (dir == want || host.canonicalize(&dir).is_ok_and(|d| d == want))
                 && let Some(t) = stamp(&file)
             {
                 out.push((file, t));
@@ -460,7 +454,7 @@ pub fn model_files(home: &Path, root: &Path) -> Vec<(PathBuf, SystemTime)> {
 
 /// Whether `dir` holds Gradle builds: it is one, lies in one, or has one below it (a few
 /// levels down, as the engine looks). Remembered for a few seconds, as views ask often.
-pub fn has_gradle(dir: &Path) -> bool {
+pub fn has_gradle(host: &dyn Host, dir: &Path) -> bool {
     thread_local! {
         static SEEN: std::cell::RefCell<HashMap<PathBuf, (Instant, bool)>> = Default::default();
     }
@@ -468,29 +462,25 @@ pub fn has_gradle(dir: &Path) -> bool {
     if let Some(known) = known {
         return known;
     }
-    let found = look_for_gradle(dir);
+    let found = look_for_gradle(host, dir);
     SEEN.with(|s| s.borrow_mut().insert(dir.to_owned(), (Instant::now(), found)));
     found
 }
 
-fn look_for_gradle(dir: &Path) -> bool {
+fn look_for_gradle(host: &dyn Host, dir: &Path) -> bool {
     use crate::lang::java;
-    if java::is_gradle_root(dir) || java::gradle_root(&dir.join("x"), None).is_some() {
+    if java::is_gradle_root(host, dir) || java::gradle_root(host, &dir.join("x"), None).is_some() {
         return true;
     }
-    fn below(dir: &Path, depth: usize) -> bool {
-        let Ok(entries) = std::fs::read_dir(dir) else { return false };
-        entries.flatten().any(|e| {
-            let name = e.file_name();
-            let name = name.to_string_lossy();
+    fn below(host: &dyn Host, dir: &Path, depth: usize) -> bool {
+        let Ok(entries) = host.read_dir(dir) else { return false };
+        entries.into_iter().any(|e| {
+            let name = e.file_name().to_string_lossy();
             let skip = name.starts_with('.') || matches!(name.as_ref(), "build" | "node_modules" | "out" | "target");
-            let path = e.path();
-            !skip
-                && path.is_dir()
-                && (crate::lang::java::is_gradle_root(&path) || (depth > 1 && below(&path, depth - 1)))
+            !skip && e.is_dir && (java::is_gradle_root(host, &e.path) || (depth > 1 && below(host, &e.path, depth - 1)))
         })
     }
-    below(dir, 3)
+    below(host, dir, 3)
 }
 
 // ----- The store --------------------------------------------------------------------------
@@ -516,6 +506,7 @@ pub struct ProjectModels {
     pub auto_sync: bool,
     tried: bool,
     home: PathBuf,
+    host: HostRef,
     _poll: Option<Task<()>>,
     _sync: Option<Task<()>>,
     _engine: Option<gpui::Subscription>,
@@ -534,10 +525,8 @@ pub fn store(cx: &App) -> Option<Entity<ProjectModels>> {
 impl ProjectModels {
     pub fn new(model: Entity<Model>, hub: Option<Entity<LangHub>>, cx: &mut Context<Self>) -> Self {
         let auto_sync = hub.as_ref().is_some_and(|h| h.read(cx).enabled);
-        let home = hub
-            .as_ref()
-            .map(|h| h.read(cx).home.clone())
-            .unwrap_or_else(|| std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default());
+        let host = crate::host::host(cx);
+        let home = hub.as_ref().map(|h| h.read(cx).home.clone()).unwrap_or_else(|| host.info().home.clone());
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 if this.update(cx, |this, cx| this.poll(cx)).is_err() {
@@ -570,6 +559,7 @@ impl ProjectModels {
             auto_sync,
             tried: false,
             home,
+            host,
             _poll: Some(poll),
             _sync: None,
             _engine: engine,
@@ -587,7 +577,7 @@ impl ProjectModels {
     /// Show `model` as the project's (tests, and models read elsewhere).
     pub fn set_model(&mut self, model: ProjectModel, cx: &mut Context<Self>) {
         self.root = Some(model.root.clone());
-        self.stamps = stamps(&model);
+        self.stamps = stamps(&*self.host, &model);
         self.scripts_changed = false;
         self.current = Some(Rc::new(model));
         cx.notify();
@@ -627,7 +617,8 @@ impl ProjectModels {
             cx.notify();
         }
         let Some(root) = root else { return };
-        let newest = model_files(&self.home, &root).into_iter().max_by_key(|(_, t)| *t);
+        let host = self.host.clone();
+        let newest = model_files(&*host, &self.home, &root).into_iter().max_by_key(|(_, t)| *t);
         if let Some((file, when)) = newest {
             if !self.reading && self.source.as_ref().is_none_or(|(f, t)| *f != file || *t != when) {
                 self.read(file, when, root.clone(), cx);
@@ -638,13 +629,13 @@ impl ProjectModels {
             && self.syncing.is_none()
             && !self.hub.as_ref().is_some_and(|h| h.read(cx).paused)
             && !self.engine_runs(&root, cx)
-            && has_gradle(&root)
+            && has_gradle(&*host, &root)
         {
             self.tried = true;
             self.sync(cx);
         }
         if self.current.is_some() && !self.scripts_changed && !self.stamps.is_empty() {
-            let changed = self.stamps.iter().any(|(path, t)| modified(path) != *t);
+            let changed = self.stamps.iter().any(|(path, t)| modified(&*host, path) != *t);
             if changed {
                 self.scripts_changed = true;
                 cx.notify();
@@ -654,13 +645,14 @@ impl ProjectModels {
 
     fn read(&mut self, file: PathBuf, when: SystemTime, root: PathBuf, cx: &mut Context<Self>) {
         self.reading = true;
+        let host = self.host.clone();
         let task = cx.background_executor().spawn({
             let file = file.clone();
             async move {
-                let text = std::fs::read_to_string(&file).ok()?;
+                let text = host.read_to_string(&file).ok()?;
                 let json: Value = serde_json::from_str(&text).ok()?;
                 let model = parse(&json)?;
-                let stamps = stamps(&model);
+                let stamps = stamps(&*host, &model);
                 Some((model, stamps))
             }
         });
@@ -709,7 +701,8 @@ impl ProjectModels {
             cx.notify();
             return;
         }
-        let Some(dist) = crate::lang::java::engine_dist() else {
+        let host = self.host.clone();
+        let Some(dist) = crate::lang::java::engine_dist(&*host) else {
             self.sync_error = Some("The Java engine is not built (run snout.sh)".into());
             cx.notify();
             return;
@@ -719,7 +712,7 @@ impl ProjectModels {
         self.syncing = Some(Instant::now());
         let run = cx.background_executor().spawn({
             let root = root.clone();
-            async move { run_sync(&dist, &root, &out, jdk.as_deref()) }
+            async move { run_sync(&*host, &dist, &root, &out, jdk.as_deref()) }
         });
         self._sync = Some(cx.spawn(async move |this, cx| {
             let result = run.await;
@@ -742,7 +735,7 @@ impl ProjectModels {
     pub fn dismiss_changes(&mut self, cx: &mut Context<Self>) {
         self.scripts_changed = false;
         for (path, t) in &mut self.stamps {
-            *t = modified(path);
+            *t = modified(&*self.host, path);
         }
         cx.notify();
     }
@@ -759,23 +752,23 @@ impl ProjectModels {
     }
 }
 
-fn modified(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+fn modified(host: &dyn Host, path: &Path) -> Option<SystemTime> {
+    host.metadata(path).ok().and_then(|m| m.modified)
 }
 
 /// When each of the model's Gradle scripts was last changed.
-fn stamps(model: &ProjectModel) -> Vec<(PathBuf, Option<SystemTime>)> {
-    model.scripts.iter().map(|s| (s.path.clone(), modified(&s.path))).collect()
+fn stamps(host: &dyn Host, model: &ProjectModel) -> Vec<(PathBuf, Option<SystemTime>)> {
+    model.scripts.iter().map(|s| (s.path.clone(), modified(host, &s.path))).collect()
 }
 
 /// Run `snout-engine sync` on `root`, its model to `out`, Gradle's project caches kept
 /// beside it so nothing is written into the project.
-fn run_sync(dist: &Path, root: &Path, out: &Path, jdk: Option<&Path>) -> Result<(), String> {
+fn run_sync(host: &dyn Host, dist: &Path, root: &Path, out: &Path, jdk: Option<&Path>) -> Result<(), String> {
     let dir = out.parent().ok_or("no folder for the model")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    host.create_dir_all(dir).map_err(|e| e.to_string())?;
     let partial = dir.join("model.json.part");
-    let mut c = std::process::Command::new(dist.join("runtime/bin/java"));
-    c.arg("-cp")
+    let mut c = Cmd::new(dist.join("runtime/bin/java"))
+        .arg("-cp")
         .arg(format!("{}/*", dist.join("lib").display()))
         .arg("com.snoutcode.engine.cli.SnoutEngine")
         .arg("sync")
@@ -784,27 +777,25 @@ fn run_sync(dist: &Path, root: &Path, out: &Path, jdk: Option<&Path>) -> Result<
         .arg(&partial)
         .arg("--project-cache-dir")
         .arg(dir.join("gradle"))
-        .current_dir(dir)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null());
+        .cwd(dir)
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Null);
     // Into a file, not a pipe: the Gradle daemons the sync starts outlive it and would hold
     // a pipe open.
     let log = dir.join("sync.log");
-    if let Ok(file) = std::fs::File::create(&log) {
-        c.stderr(file);
-    }
+    c = c.stderr(Stdio::File(log.clone()));
     if let Some(jdk) = jdk {
-        c.arg("--java-home").arg(jdk);
+        c = c.arg("--java-home").arg(jdk);
     }
-    for extra in crate::lang::java::downloaded_jdks() {
-        c.arg("--jdk").arg(extra.home);
+    for extra in crate::lang::java::downloaded_jdks(host) {
+        c = c.arg("--jdk").arg(extra.home);
     }
-    c.status().map_err(|e| format!("snout-engine did not start: {e}"))?;
+    host.run(&c, None).map_err(|e| format!("snout-engine did not start: {e}"))?;
     // A build that fails does not stop the others: the model is written all the same.
-    if partial.is_file() {
-        return std::fs::rename(&partial, out).map_err(|e| e.to_string());
+    if host.is_file(&partial) {
+        return host.rename(&partial, out).map_err(|e| e.to_string());
     }
-    let err = std::fs::read_to_string(&log).unwrap_or_default();
+    let err = host.read_to_string(&log).unwrap_or_default();
     Err(err.lines().last().unwrap_or("The Gradle sync failed").to_owned())
 }
 
@@ -855,7 +846,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("model.json");
         std::fs::write(&file, "{\n  \"modelVersion\": 2,\n  \"rootDir\": \"/w/a \\\"b\\\"\",\n  \"x\": 1\n}").unwrap();
-        assert_eq!(root_dir_of(&file), Some(PathBuf::from("/w/a \"b\"")));
+        assert_eq!(root_dir_of(&*snout_host::local(), &file), Some(PathBuf::from("/w/a \"b\"")));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -868,10 +859,10 @@ mod tests {
             &jar,
             &["META-INF/MANIFEST.MF", "demo/Greeter.class", "demo/Greeter$1.class", "demo/util/Text.class"],
         );
-        let index = jar_index(&jar).unwrap();
+        let index = jar_index(&*snout_host::local(), &jar).unwrap();
         assert_eq!(index.keys().collect::<Vec<_>>(), ["demo", "demo.util"]);
         assert_eq!(index["demo"], ["Greeter"]);
-        assert!(jar_index(&dir.join("missing.jar")).is_none());
+        assert!(jar_index(&*snout_host::local(), &dir.join("missing.jar")).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 

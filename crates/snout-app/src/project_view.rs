@@ -313,7 +313,8 @@ impl Source for Lister<'_, '_> {
     }
 
     fn jar(&mut self, file: &Path) -> Option<Rc<JarIndex>> {
-        self.jars.entry(file.to_owned()).or_insert_with(|| jar_index(file).map(Rc::new)).clone()
+        let host = crate::host::host(self.cx);
+        self.jars.entry(file.to_owned()).or_insert_with(|| jar_index(&*host, file).map(Rc::new)).clone()
     }
 }
 
@@ -442,7 +443,11 @@ impl Render for ProjectView {
             let store = self.store.read(cx);
             let note = match (&store.sync_error, root.is_some()) {
                 (Some(e), true) => Some(format!("The Gradle model could not be read: {e}")),
-                (None, true) if root.as_deref().is_some_and(crate::project_model::has_gradle) => {
+                (None, true)
+                    if root
+                        .as_deref()
+                        .is_some_and(|r| crate::project_model::has_gradle(&*crate::host::host(cx), r)) =>
+                {
                     Some("Reading Gradle model".to_owned())
                 }
                 _ => None,

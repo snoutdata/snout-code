@@ -1,5 +1,5 @@
-//! A Debug Adapter Protocol client over TCP: java-debug (inside jdtls) listens on a local
-//! port the engine hands out, and speaks DAP there.
+//! A Debug Adapter Protocol client over TCP: java-debug (inside jdtls) listens on a port of
+//! the host the engine hands out, and speaks DAP there; the [`Host`] connects to it.
 //!
 //! The framing is LSP's (`Content-Length`, a blank line, the JSON body). Requests return
 //! futures any executor can await, resolving with the response's `body`; events arrive on a
@@ -9,13 +9,13 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{BufReader, BufWriter};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use futures_channel::oneshot;
 use serde_json::{Value, json};
+use snout_host::{Host, Stream};
 
 use crate::rpc;
 
@@ -55,14 +55,14 @@ struct Inner {
     seq: AtomicI64,
     pending: Pending,
     open: AtomicBool,
-    stream: TcpStream,
+    stream: Box<dyn Stream>,
 }
 
 impl Inner {
     fn close(&self) {
         self.open.store(false, Ordering::SeqCst);
         self.out.lock().unwrap().take();
-        let _ = self.stream.shutdown(Shutdown::Both);
+        let _ = self.stream.shutdown();
         for (_, tx) in self.pending.lock().unwrap().drain() {
             let _ = tx.send(Err(DapError::gone()));
         }
@@ -71,7 +71,7 @@ impl Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        let _ = self.stream.shutdown(Shutdown::Both);
+        let _ = self.stream.shutdown();
     }
 }
 
@@ -88,23 +88,17 @@ impl std::fmt::Debug for Dap {
 }
 
 impl Dap {
-    /// Connect to the adapter at `host:port`, waiting up to `timeout` for it to accept.
+    /// Connect to the adapter at `port` of `host`, waiting up to `timeout` for it to accept.
     pub fn connect(
-        host: &str,
+        host: &dyn Host,
         port: u16,
         timeout: Duration,
     ) -> std::io::Result<(Dap, async_channel::Receiver<DapMessage>)> {
-        let addr = (host, port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| std::io::Error::other(format!("no address for {host}")))?;
-        let stream = TcpStream::connect_timeout(&addr, timeout)?;
-        stream.set_nodelay(true)?;
-        Self::over(stream)
+        Self::over(host.connect_tcp(port, timeout)?)
     }
 
     /// Speak DAP over a connected stream.
-    pub fn over(stream: TcpStream) -> std::io::Result<(Dap, async_channel::Receiver<DapMessage>)> {
+    pub fn over(stream: Box<dyn Stream>) -> std::io::Result<(Dap, async_channel::Receiver<DapMessage>)> {
         let reader = stream.try_clone()?;
         let writer = stream.try_clone()?;
         let (events_tx, events) = async_channel::unbounded();
@@ -281,7 +275,7 @@ mod tests {
     #[test]
     fn requests_resolve_events_arrive_and_reverse_requests_are_refused() {
         let (port, adapter) = fake_adapter();
-        let (dap, events) = Dap::connect("127.0.0.1", port, Duration::from_secs(5)).unwrap();
+        let (dap, events) = Dap::connect(&*snout_host::local(), port, Duration::from_secs(5)).unwrap();
         let caps = block_on(dap.request("initialize", json!({ "adapterID": "java" }))).unwrap();
         assert_eq!(caps["supportsConfigurationDoneRequest"], true);
         assert_eq!(block_on(dap.request("attach", json!({ "port": 5005 }))).unwrap(), Value::Null);

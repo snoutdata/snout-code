@@ -1067,13 +1067,14 @@ impl Workspace {
             return;
         }
         let mut builds: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
-        if let Some(root) = self.model.read(cx).project_root().filter(|r| crate::project_model::has_gradle(r))
+        let host = crate::host::host(cx);
+        if let Some(root) = self.model.read(cx).project_root().filter(|r| crate::project_model::has_gradle(&*host, r))
             && !builds.contains(&root)
         {
             builds.push(root);
         }
         builds.sort();
-        let jdks = crate::lang::java::discover(&self.hub.read(cx).home);
+        let jdks = crate::lang::java::discover(&*host, &self.hub.read(cx).home);
         let model = self.model.clone();
         let sheet = cx.new(|cx| SettingsView::new(model, builds, jdks, window, cx));
         cx.subscribe_in(&sheet, window, |this, _, e: &SettingsEvent, window, cx| {

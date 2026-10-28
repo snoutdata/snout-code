@@ -201,18 +201,23 @@ fn a_build_that_needs_a_jdk_offers_it_once(cx: &mut TestAppContext) {
 /// usually are, or the one snout.sh downloaded to build the engine.
 fn test_jdk() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("SNOUT_TEST_JDK").map(PathBuf::from) {
-        return java::jdk_at(&home).or_else(|| java::jdk_at(&home.join("Contents/Home"))).map(|j| j.home);
+        return java::jdk_at(&*snout_host::local(), &home)
+            .or_else(|| java::jdk_at(&*snout_host::local(), &home.join("Contents/Home")))
+            .map(|j| j.home);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let fits = |j: &java::Jdk| (17..=21).contains(&j.major);
-    if let Some(j) = java::discover(&home).into_iter().find(fits) {
+    if let Some(j) = java::discover(&*snout_host::local(), &home).into_iter().find(fits) {
         return Some(j.home);
     }
     let built = home.join("Library/Caches/SnoutCode/build-jdk");
     std::fs::read_dir(built)
         .ok()?
         .flatten()
-        .filter_map(|e| java::jdk_at(&e.path().join("Contents/Home")).or_else(|| java::jdk_at(&e.path())))
+        .filter_map(|e| {
+            java::jdk_at(&*snout_host::local(), &e.path().join("Contents/Home"))
+                .or_else(|| java::jdk_at(&*snout_host::local(), &e.path()))
+        })
         .find(fits)
         .map(|j| j.home)
 }
@@ -266,7 +271,7 @@ fn a_fixture_app_runs_tests_and_debugs_in_the_app(cx: &mut TestAppContext) {
         let ok = std::process::Command::new(d.join("runtime/bin/java")).arg("-version").output();
         ok.is_ok_and(|o| o.status.success()).then_some(d)
     };
-    let (Some(_), Some(jdk)) = (java::engine_dist().and_then(runs_java), test_jdk()) else {
+    let (Some(_), Some(jdk)) = (java::engine_dist(&*snout_host::local()).and_then(runs_java), test_jdk()) else {
         println!("run and debug: skipped; needs an engine distribution whose Java runs, and a JDK 17 to 21");
         return;
     };
@@ -427,7 +432,8 @@ fn a_fixture_app_runs_tests_and_debugs_in_the_app(cx: &mut TestAppContext) {
 /// and the test class runs from its gutter icon. The project is only read.
 #[gpui::test]
 fn a_real_project_lists_runs_and_tests(cx: &mut TestAppContext) {
-    let (Some(project), Some(_)) = (std::env::var_os("SNOUT_TEST_PROJECT").map(PathBuf::from), java::engine_dist())
+    let (Some(project), Some(_)) =
+        (std::env::var_os("SNOUT_TEST_PROJECT").map(PathBuf::from), java::engine_dist(&*snout_host::local()))
     else {
         println!("real project: skipped; set SNOUT_TEST_PROJECT");
         return;
@@ -673,7 +679,7 @@ fn tests_run_and_debug(cx: &mut TestAppContext, jdk: PathBuf, java8: bool) {
 
 #[gpui::test]
 fn the_fixtures_tests_run_and_debug_as_gradle_tasks(cx: &mut TestAppContext) {
-    let (Some(_), Some(jdk)) = (java::engine_dist(), test_jdk()) else {
+    let (Some(_), Some(jdk)) = (java::engine_dist(&*snout_host::local()), test_jdk()) else {
         println!("tests run and debug: skipped; needs an engine distribution and a JDK 17 to 21");
         return;
     };
@@ -684,9 +690,12 @@ fn the_fixtures_tests_run_and_debug_as_gradle_tasks(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_java_8_build_runs_and_debugs(cx: &mut TestAppContext) {
     let jdk8 = std::env::var_os("SNOUT_TEST_JDK8").map(PathBuf::from).and_then(|h| {
-        java::jdk_at(&h).or_else(|| java::jdk_at(&h.join("Contents/Home"))).filter(|j| j.major == 8).map(|j| j.home)
+        java::jdk_at(&*snout_host::local(), &h)
+            .or_else(|| java::jdk_at(&*snout_host::local(), &h.join("Contents/Home")))
+            .filter(|j| j.major == 8)
+            .map(|j| j.home)
     });
-    let (Some(_), Some(jdk)) = (java::engine_dist(), jdk8) else {
+    let (Some(_), Some(jdk)) = (java::engine_dist(&*snout_host::local()), jdk8) else {
         println!("Java 8: skipped; set SNOUT_TEST_JDK8 to a JDK 8");
         return;
     };

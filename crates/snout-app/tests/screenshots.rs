@@ -538,7 +538,7 @@ mod shots {
                 let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
                 let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
                 let (_server, _) = listener.accept().unwrap();
-                let (dap, _events) = snout_lang::dap::Dap::over(client).unwrap();
+                let (dap, _events) = snout_lang::dap::Dap::over(Box::new(client)).unwrap();
                 cx.update(|cx| {
                     runs.update(cx, |r, cx| {
                         let s = r.session_mut(id).unwrap();

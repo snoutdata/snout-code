@@ -7486,6 +7486,7 @@ dependencies = [
  "lsp-types",
  "serde",
  "serde_json",
+ "snout-host",
 ]
 
 [[package]]

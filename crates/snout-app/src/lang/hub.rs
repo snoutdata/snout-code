@@ -19,6 +19,7 @@ use snout_lang::{Client, ResponseError, ServerMessage};
 use super::java::{self, DownloadProgress, Jdk};
 use super::text;
 use crate::editor::EditorPanel;
+use crate::host::HostRef;
 use crate::model::Model;
 
 /// Where a server is, for the status bar.
@@ -285,6 +286,8 @@ pub struct LangHub {
     dismissed_jdks: Vec<u32>,
     /// The home folder JDKs are looked for and downloaded under.
     pub home: PathBuf,
+    /// The host the engines run on.
+    pub host: HostRef,
     /// Held until the window has painted: the builds asked for meanwhile start then.
     pub paused: bool,
     pending: Vec<PathBuf>,
@@ -330,7 +333,8 @@ fn uri_key(uri: &Uri) -> String {
 impl LangHub {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         let enabled = cx.try_global::<LangEnabled>().is_some_and(|e| e.0) && std::env::var_os("SNOUT_NO_LSP").is_none();
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let host = crate::host::host(cx);
+        let home = host.info().home.clone();
         let quit = cx.on_app_quit(|this, _| {
             this.shutdown_all();
             async {}
@@ -351,6 +355,7 @@ impl LangHub {
             jdk_prompt: None,
             dismissed_jdks: Vec::new(),
             home,
+            host,
             paused: false,
             pending: Vec::new(),
             engine_build: None,
@@ -425,14 +430,15 @@ impl LangHub {
     /// build of the project gets none: engines run for the project shown, and no other.
     pub fn root_for(&self, path: &Path, cx: &App) -> Option<PathBuf> {
         let project = self.model.read(cx).project_root();
-        let Some(project) = &project else { return java::gradle_root(path, None) };
+        let host = &*self.host;
+        let Some(project) = &project else { return java::gradle_root(host, path, None) };
         let listed =
             crate::project_model::store(cx).and_then(|s| s.read(cx).model_for(project)).is_some_and(|m| m.holds(path));
-        let inside = path.starts_with(project) && java::gradle_root(path, Some(project)).is_some();
-        if (inside || listed) && crate::project_model::has_gradle(project) {
+        let inside = path.starts_with(project) && java::gradle_root(host, path, Some(project)).is_some();
+        if (inside || listed) && crate::project_model::has_gradle(host, project) {
             return Some(project.clone());
         }
-        java::gradle_root(path, Some(project)).filter(|r| r.starts_with(project))
+        java::gradle_root(host, path, Some(project)).filter(|r| r.starts_with(project))
     }
 
     /// The engine that serves the folder `project`: its own, else one of a build inside it,
@@ -515,10 +521,11 @@ impl LangHub {
             }
             return;
         }
-        let saved = self.model.read(cx).settings.project_jdks.get(root).and_then(|h| java::jdk_at(h));
-        let req = java::requirement(root);
+        let host = &*self.host;
+        let saved = self.model.read(cx).settings.project_jdks.get(root).and_then(|h| java::jdk_at(host, h));
+        let req = java::requirement(host, root);
         let jdk = saved.filter(|j| req.fits(j.major)).or_else(|| {
-            let all = java::discover(&self.home);
+            let all = java::discover(host, &self.home);
             java::choose(&req, &all).cloned()
         });
         let mut server = Server {
@@ -638,11 +645,13 @@ impl LangHub {
             server.stage = Stage::WaitingForEngine;
             return;
         }
-        let Some(dist) = java::engine_dist() else {
+        let host = self.host.clone();
+        let Some(dist) = java::engine_dist(&*host) else {
             server.stage = Stage::Failed("The Java engine is not built (run snout.sh)".into());
             return;
         };
-        let (client, events) = match Client::spawn(java::engine_command(&dist, root, &jdk.home, idle_minutes)) {
+        let command = java::engine_command(&*host, &dist, root, &jdk.home, idle_minutes);
+        let (client, events) = match Client::spawn(&*host, &command) {
             Ok(c) => c,
             Err(e) => {
                 server.stage = Stage::Failed(format!("The Java engine did not start: {e}"));
@@ -1118,9 +1127,10 @@ impl LangHub {
         prompt.error = None;
         let (major, root, resync) = (prompt.major, prompt.root.clone(), prompt.resync);
         let dir = java::downloads_dir(&self.home);
+        let host = self.host.clone();
         let job = cx.background_executor().spawn({
             let progress = progress.clone();
-            async move { java::download_temurin(major, &dir, &progress) }
+            async move { java::download_temurin(&*host, major, &dir, &progress) }
         });
         cx.spawn(async move |this, cx| {
             // Repaint the bar as the bytes come in, until the download ends.
@@ -1146,7 +1156,7 @@ impl LangHub {
                         let waiting: Vec<PathBuf> = this
                             .servers
                             .values()
-                            .filter(|s| s.jdk.is_none() && java::requirement(&s.root).fits(jdk.major))
+                            .filter(|s| s.jdk.is_none() && java::requirement(&*this.host, &s.root).fits(jdk.major))
                             .map(|s| s.root.clone())
                             .chain(std::iter::once(root.clone()))
                             .collect();
@@ -1191,7 +1201,7 @@ impl LangHub {
         if self.jdk_prompt.is_some() || self.dismissed_jdks.contains(&major) {
             return;
         }
-        if java::downloaded_jdks().iter().any(|j| j.major == major) {
+        if java::downloaded_jdks(&*self.host).iter().any(|j| j.major == major) {
             return;
         }
         eprintln!("[java] a build of {} needs JDK {major}: offering it", root.display());

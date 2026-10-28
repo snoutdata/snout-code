@@ -275,11 +275,12 @@ fn configuration_files_go_to_the_engine_as_spring_boot_files(cx: &mut TestAppCon
 /// The JDK 17 the fixture builds with, if this machine has one.
 fn jdk17() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("SNOUT_TEST_JDK17").map(PathBuf::from) {
-        let jdk = crate::lang::java::jdk_at(&home).or_else(|| crate::lang::java::jdk_at(&home.join("Contents/Home")));
+        let jdk = crate::lang::java::jdk_at(&*snout_host::local(), &home)
+            .or_else(|| crate::lang::java::jdk_at(&*snout_host::local(), &home.join("Contents/Home")));
         return jdk.map(|j| j.home);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    crate::lang::java::discover(&home).into_iter().find(|j| j.major == 17).map(|j| j.home)
+    crate::lang::java::discover(&*snout_host::local(), &home).into_iter().find(|j| j.major == 17).map(|j| j.home)
 }
 
 fn pump_until(cx: &mut VisualTestContext, secs: u64, mut done: impl FnMut(&mut VisualTestContext) -> bool) -> bool {
@@ -297,7 +298,7 @@ fn pump_until(cx: &mut VisualTestContext, secs: u64, mut done: impl FnMut(&mut V
 
 #[gpui::test]
 fn the_engine_feeds_the_gutter_the_window_hints_fixes_and_properties(cx: &mut TestAppContext) {
-    let (Some(_), Some(jdk)) = (crate::lang::java::engine_dist(), jdk17()) else {
+    let (Some(_), Some(jdk)) = (crate::lang::java::engine_dist(&*snout_host::local()), jdk17()) else {
         println!("spring engine: skipped; needs engine/build/dist and a JDK 17 (SNOUT_TEST_JDK17)");
         return;
     };

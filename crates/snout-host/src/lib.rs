@@ -212,12 +212,15 @@ impl Watcher {
 // ----- Processes -------------------------------------------------------------------------
 
 /// What happens to one of a process's standard streams.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Stdio {
     #[default]
     Null,
     Piped,
     Inherit,
+    /// A file of the host, made empty first (output only). Unlike a pipe, nothing is held
+    /// open by processes the program leaves behind.
+    File(PathBuf),
 }
 
 /// A program to start on a host.
@@ -458,13 +461,9 @@ pub trait Host: Send + Sync {
 
     fn spawn(&self, cmd: &Cmd) -> io::Result<Box<dyn Process>>;
 
-    /// Run `cmd` to the end, `input` on its stdin, its output captured.
+    /// Run `cmd` to the end, `input` on its stdin, its piped output captured.
     fn run(&self, cmd: &Cmd, input: Option<&[u8]>) -> io::Result<Output> {
-        let cmd = cmd
-            .clone()
-            .stdin(if input.is_some() { Stdio::Piped } else { Stdio::Null })
-            .stdout(Stdio::Piped)
-            .stderr(Stdio::Piped);
+        let cmd = cmd.clone().stdin(if input.is_some() { Stdio::Piped } else { Stdio::Null });
         let mut child = self.spawn(&cmd)?;
         let collect = |r: Option<Box<dyn Read + Send>>| {
             std::thread::spawn(move || {

@@ -592,7 +592,7 @@ mod tests {
             let props = std::fs::read_to_string(dir.join("gradle/wrapper/gradle-wrapper.properties")).unwrap();
             assert!(props.contains(GRADLE_VERSION));
             // The app reads the Java level the build asks for, to pick a JDK for it.
-            assert_eq!(crate::lang::java::requirement(&dir).declared, Some(21));
+            assert_eq!(crate::lang::java::requirement(&*snout_host::local(), &dir).declared, Some(21));
             let _ = std::fs::remove_dir_all(dir);
         }
     }

@@ -61,7 +61,7 @@ fn metadata_of(m: std::fs::Metadata) -> Metadata {
     Metadata { kind: kind_of(m.file_type()), len: m.len(), modified: m.modified().ok(), mode: m.permissions().mode() }
 }
 
-fn command(cmd: &Cmd) -> std::process::Command {
+fn command(cmd: &Cmd) -> io::Result<std::process::Command> {
     let mut c = std::process::Command::new(&cmd.program);
     c.args(&cmd.args);
     if let Some(dir) = &cmd.cwd {
@@ -73,13 +73,16 @@ fn command(cmd: &Cmd) -> std::process::Command {
             None => c.env_remove(k),
         };
     }
-    let stdio = |s: Stdio| match s {
-        Stdio::Null => std::process::Stdio::null(),
-        Stdio::Piped => std::process::Stdio::piped(),
-        Stdio::Inherit => std::process::Stdio::inherit(),
+    let stdio = |s: &Stdio| -> io::Result<std::process::Stdio> {
+        Ok(match s {
+            Stdio::Null => std::process::Stdio::null(),
+            Stdio::Piped => std::process::Stdio::piped(),
+            Stdio::Inherit => std::process::Stdio::inherit(),
+            Stdio::File(path) => std::fs::File::create(path)?.into(),
+        })
     };
-    c.stdin(stdio(cmd.stdin)).stdout(stdio(cmd.stdout)).stderr(stdio(cmd.stderr));
-    c
+    c.stdin(stdio(&cmd.stdin)?).stdout(stdio(&cmd.stdout)?).stderr(stdio(&cmd.stderr)?);
+    Ok(c)
 }
 
 /// A process this Mac runs.
@@ -385,12 +388,11 @@ impl Host for LocalHost {
     }
 
     fn spawn(&self, cmd: &Cmd) -> io::Result<Box<dyn Process>> {
-        Ok(Box::new(LocalProcess(command(cmd).spawn()?)))
+        Ok(Box::new(LocalProcess(command(cmd)?.spawn()?)))
     }
 
     fn run(&self, cmd: &Cmd, input: Option<&[u8]>) -> io::Result<Output> {
-        let mut c = command(cmd);
-        c.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        let mut c = command(cmd)?;
         let out = match input {
             None => c.stdin(std::process::Stdio::null()).output()?,
             Some(input) => {

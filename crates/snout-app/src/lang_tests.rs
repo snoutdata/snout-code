@@ -18,10 +18,12 @@ use crate::workspace::Workspace;
 /// The JDK 17 the fixture builds with, if this machine has one.
 fn jdk17() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("SNOUT_TEST_JDK17").map(PathBuf::from) {
-        return java::jdk_at(&home).or_else(|| java::jdk_at(&home.join("Contents/Home"))).map(|j| j.home);
+        return java::jdk_at(&*snout_host::local(), &home)
+            .or_else(|| java::jdk_at(&*snout_host::local(), &home.join("Contents/Home")))
+            .map(|j| j.home);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    java::discover(&home).into_iter().find(|j| j.major == 17).map(|j| j.home)
+    java::discover(&*snout_host::local(), &home).into_iter().find(|j| j.major == 17).map(|j| j.home)
 }
 
 /// The fixture as a repository: `java-app/project` is the build, `java-app/shared` a source
@@ -104,7 +106,7 @@ fn caret_at(editor: &Entity<EditorPanel>, find: &str, nth: usize, offset: usize,
 
 #[gpui::test]
 fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
-    let (Some(_), Some(jdk)) = (java::engine_dist(), jdk17()) else {
+    let (Some(_), Some(jdk)) = (java::engine_dist(&*snout_host::local()), jdk17()) else {
         println!("java features: skipped; needs engine/build/dist and a JDK 17 (SNOUT_TEST_JDK17)");
         return;
     };

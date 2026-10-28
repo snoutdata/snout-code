@@ -76,7 +76,7 @@ impl EditorStatus {
 impl StatusBar {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         let watch = vec![cx.observe(&model, |_, _, cx| cx.notify())];
-        let java_missing = crate::lang::java::engine_dist().is_none();
+        let java_missing = crate::lang::java::engine_dist(&*crate::host::host(cx)).is_none();
         Self {
             model,
             editor: None,
@@ -185,11 +185,15 @@ impl StatusBar {
         }
         // An engine build on its way is not missing.
         if self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.is_some()) {
-            return crate::lang::java::engine_dist().is_none()
+            return crate::lang::java::engine_dist(&*crate::host::host(cx)).is_none()
                 && self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.as_ref().is_some_and(|b| b.finished()));
         }
         let java_file = self.editor().is_some_and(|e| crate::editor::language_for(&e.read(cx).path) == "java");
-        let gradle = self.model.read(cx).project_root().is_some_and(|r| crate::lang::java::is_gradle_root(&r));
+        let gradle = self
+            .model
+            .read(cx)
+            .project_root()
+            .is_some_and(|r| crate::lang::java::is_gradle_root(&*crate::host::host(cx), &r));
         java_file || gradle
     }
 
