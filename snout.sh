@@ -5,13 +5,15 @@
 #   ./snout.sh <path>          open a repository (any folder inside it), or a folder to search/init
 #   ./snout.sh --pick          choose an existing repository with a folder dialog
 #   ./snout.sh --fg [...]      stay in the foreground (logs go to the terminal)
+#   ./snout.sh --old [...]     start the earlier Git-only app instead
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN="$ROOT/target/release/snout"
-LOG="${TMPDIR:-/tmp}"; LOG="${LOG%/}/snout.log"
+PKG="snout-app"
+BIN="$ROOT/target/release/snout-code"
+LOG="${TMPDIR:-/tmp}"; LOG="${LOG%/}/snout-code.log"
 
-usage() { sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 foreground=false
 repo=""
@@ -19,6 +21,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --fg) foreground=true ;;
+    --old) PKG="snout-gui"; BIN="$ROOT/target/release/snout"; LOG="${LOG%/*}/snout.log" ;;
     -p|--pick)
       repo="$(osascript -e 'POSIX path of (choose folder with prompt "Open Git repository")' 2>/dev/null)" \
         || { echo "No folder chosen." >&2; exit 1; }
@@ -44,7 +47,7 @@ fi
 command -v cargo >/dev/null 2>&1 || { echo "cargo not found; install Rust from https://rustup.rs" >&2; exit 1; }
 
 # Incremental: a no-op when nothing changed.
-cargo build --release --quiet -p snout-gui --manifest-path "$ROOT/Cargo.toml"
+cargo build --release --quiet -p "$PKG" --manifest-path "$ROOT/Cargo.toml"
 
 args=()
 [[ -n "$repo" ]] && args+=("$repo")
