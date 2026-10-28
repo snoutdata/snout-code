@@ -16,6 +16,8 @@ The JVM side of SnoutCode. Two layers:
 
 Needs JDK 21: jdtls runs on it, and the importer compiles against jdtls. The wrapper downloads Gradle, and the build downloads the pinned jdtls release from download.eclipse.org into `jdtls-importer/build/jdtls` (checked against its SHA-256; never committed).
 
+The end-to-end test also runs the fixture's Gradle on Java 17, so the JDT projects get a JDK other than jdtls's. Gradle finds a local JDK 17 (or one given with `-Porg.gradle.java.installations.paths=<dir>`) and otherwise downloads one through the Foojay toolchain resolver.
+
 ```sh
 cd engine
 ./gradlew build          # compiles, runs the unit, integration and end-to-end tests

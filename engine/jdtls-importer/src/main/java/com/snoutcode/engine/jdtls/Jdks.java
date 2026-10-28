@@ -4,6 +4,8 @@ import org.eclipse.core.runtime.CoreException;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
+import org.eclipse.jdt.launching.AbstractVMInstall;
 import org.eclipse.jdt.launching.IVMInstall;
 import org.eclipse.jdt.launching.IVMInstallType;
 import org.eclipse.jdt.launching.JavaRuntime;
@@ -13,6 +15,7 @@ import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -45,9 +48,22 @@ final class Jdks {
         return JavaRuntime.getDefaultJREContainerEntry();
     }
 
+    /**
+     * Stores the compiler settings as the project's own options. {@code getOptions(false)} returns
+     * JDT's cached map itself, so the options are changed on a copy: changing the cache would make
+     * the comparison below always equal, and the options would never reach the project's
+     * preferences. Parts of JDT read the preferences, not the cache: the search engine would then
+     * resolve the project against the workspace's compliance and {@code --release} (jdtls's own
+     * Java) while the JRE container holds an older JDK, and every match that needs a method
+     * binding would come back inaccurate, so find references on a method returned nothing.
+     */
     static void applyCompilerOptions(IJavaProject project, ImportPlan.JavaSettings java) {
-        Map<String, String> options = project.getOptions(false);
+        Map<String, String> current = project.getOptions(false);
+        Map<String, String> options = new HashMap<>(current);
         String level = level(java);
+        if (level == null) {
+            level = vmLevel(java);
+        }
         if (level != null) {
             JavaCore.setComplianceOptions(level, options);
             if (java.target != null && java.release == null) {
@@ -62,9 +78,18 @@ final class Jdks {
             options.put(JavaCore.COMPILER_PB_REPORT_PREVIEW_FEATURES, JavaCore.IGNORE);
         }
         options.put(JavaCore.CORE_JAVA_BUILD_RESOURCE_COPY_FILTER, RESOURCE_COPY_FILTER);
-        if (!options.equals(project.getOptions(false))) {
+        if (!options.equals(current)) {
             project.setOptions(options);
         }
+    }
+
+    /** The compliance level of the project's JDK, for a model that names no source level. */
+    private static String vmLevel(ImportPlan.JavaSettings java) {
+        IVMInstall vm = java.javaHome == null ? null : findOrAdd(new File(java.javaHome));
+        if (vm instanceof AbstractVMInstall install && install.getJavaVersion() != null) {
+            return CompilerOptions.versionFromJdkLevel(CompilerOptions.versionToJdkLevel(install.getJavaVersion()));
+        }
+        return null;
     }
 
     private static String level(ImportPlan.JavaSettings java) {

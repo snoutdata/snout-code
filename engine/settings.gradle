@@ -1,3 +1,8 @@
+plugins {
+    // Downloads a JDK that a toolchain asks for and the machine lacks (the end-to-end test's Java 17).
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 rootProject.name = 'snout-engine'
 
 include 'sync-plugin'

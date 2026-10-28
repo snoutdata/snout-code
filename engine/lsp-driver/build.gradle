@@ -23,9 +23,16 @@ application {
 evaluationDependsOn(':sync-cli')
 def engine = project(':sync-cli').tasks.named('installDist')
 
+// A Java 17 for the fixture's Gradle in LspEndToEndJdk17Test: a local JDK 17 that Gradle finds
+// (or one named with -Porg.gradle.java.installations.paths=<dir>), else one Gradle downloads.
+def jdk17 = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(17)
+}.map { it.metadata.installationPath.asFile.absolutePath }
+
 tasks.named('test') {
     dependsOn engine
     // jdtls runs on this JVM's Java (21), and the fixture's Gradle on the version building us.
+    jvmArgumentProviders.add({ ["-Dsnout.test.jdk17=${jdk17.get()}".toString()] } as CommandLineArgumentProvider)
     systemProperty 'snout.test.engine', engine.get().destinationDir.toPath().resolve('bin/snout-engine').toString()
     systemProperty 'snout.test.gradleVersion', gradle.gradleVersion
     systemProperty 'snout.test.fixtures', file('src/test/fixtures').absolutePath
