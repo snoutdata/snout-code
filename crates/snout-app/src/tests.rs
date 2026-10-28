@@ -646,3 +646,55 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
     let _ = model;
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[test]
+fn search_lists_matches_fuzzily_and_finds_text() {
+    use crate::search::{find_in_files, go_to_file, list_files};
+    let repo = demo_repo("search-fn");
+    std::fs::write(repo.join(".gitignore"), "target/\n").unwrap();
+    std::fs::create_dir_all(repo.join("target")).unwrap();
+    std::fs::write(repo.join("target/main.rs"), "hello\n").unwrap();
+    let files = list_files(&repo);
+    assert!(files.contains(&"src/main.rs".to_owned()) && !files.iter().any(|f| f.starts_with("target/")), "{files:?}");
+    assert!(!files.iter().any(|f| f.starts_with(".git/")));
+    assert_eq!(go_to_file(&files, "mainrs")[0].0, "src/main.rs");
+    assert_eq!(go_to_file(&files, "stat")[0].0, "status.rs");
+    let hits = find_in_files(&repo, &files, "Hello");
+    assert!(hits.is_empty(), "with a capital, case matters");
+    let hits = find_in_files(&repo, &files, "hello, snout");
+    assert_eq!(hits.len(), 1);
+    assert_eq!((hits[0].path.as_str(), hits[0].line, hits[0].column), ("src/main.rs", 1, 14));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn go_to_file_and_find_in_files_open_the_file(cx: &mut TestAppContext) {
+    let repo = demo_repo("search-ui");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    cx.simulate_keystrokes("cmd-p");
+    cx.update(|_, cx| assert!(ws.read(cx).search.is_some(), "⌘P puts up the box"));
+    let search = cx.update(|_, cx| ws.read(cx).search.clone().unwrap());
+    cx.simulate_input("mainrs");
+    cx.update(|_, cx| assert_eq!(search.read(cx).items[0].path, "src/main.rs", "typing narrows the files"));
+    cx.simulate_keystrokes("enter");
+    cx.update(|_, cx| {
+        let ws = ws.read(cx);
+        assert!(ws.search.is_none(), "↩ closes it");
+        assert!(ws.editors().iter().any(|e| e.read(cx).path == repo.join("src/main.rs")));
+    });
+    cx.simulate_keystrokes("cmd-shift-f");
+    let search = cx.update(|_, cx| ws.read(cx).search.clone().unwrap());
+    cx.update(|w, cx| search.update(cx, |v, cx| v.set_query("e", w, cx)));
+    for _ in 0..20 {
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+    }
+    let search = cx.update(|_, cx| ws.read(cx).search.clone()).expect("⇧⌘F puts up the box");
+    let n = cx.update(|_, cx| search.read(cx).items.len());
+    assert!(n > 2, "many lines hold an e");
+    cx.simulate_keystrokes("down down up");
+    cx.update(|_, cx| assert_eq!(search.read(cx).selected, 1, "the arrows pick"));
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| assert!(ws.read(cx).search.is_none(), "Esc closes it"));
+    let _ = std::fs::remove_dir_all(repo);
+}

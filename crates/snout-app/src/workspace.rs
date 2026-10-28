@@ -27,6 +27,7 @@ use crate::menus::{self, *};
 use crate::model::{Action, Dialog, Model, ModelEvent};
 use crate::panels::{Activity, OutputPanel, SidePanel, WelcomePanel};
 use crate::projects::ProjectsView;
+use crate::search::{Mode, SearchEvent, SearchView};
 use crate::settings::ThemeChoice;
 use crate::theme::{self, palette};
 use snout_core::art::Glyph;
@@ -48,6 +49,8 @@ pub struct Workspace {
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
     focus: gpui::FocusHandle,
     title: String,
+    /// The go-to-file or find-in-files box, while it shows.
+    pub search: Option<Entity<SearchView>>,
     /// The editor tabs, to find the one a file already has.
     editors: Vec<gpui::WeakEntity<EditorPanel>>,
     _save_layout: Option<Task<()>>,
@@ -215,6 +218,7 @@ impl Workspace {
             menu_checks: None,
             focus: cx.focus_handle(),
             title: String::new(),
+            search: None,
             editors: restored.1.iter().map(|e| e.downgrade()).collect(),
             _save_layout: None,
             _subscriptions: subscriptions,
@@ -315,6 +319,26 @@ impl Workspace {
             Some((line, column)) => e.go_to(line, column, window, cx),
             None => e.state.update(cx, |s, cx| s.focus(window, cx)),
         });
+        cx.notify();
+    }
+
+    /// Put up the go-to-file or find-in-files box over the open repository.
+    pub fn open_search(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(root) = self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()) else { return };
+        let model = self.model.clone();
+        let view = cx.new(|cx| SearchView::new(model, root, mode, window, cx));
+        cx.subscribe_in(&view, window, |this, _, e: &SearchEvent, window, cx| match e {
+            SearchEvent::Close => {
+                this.search = None;
+                window.focus(&this.focus, cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        // Give the field the keyboard once this action is done.
+        let v = view.clone();
+        cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
+        self.search = Some(view);
         cx.notify();
     }
 
@@ -519,6 +543,8 @@ impl Render for Workspace {
                     this.send(Action::CloseCommit, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
+            .on_action(cx.listener(|this, _: &FindInFiles, w, cx| this.open_search(Mode::FindInFiles, w, cx)))
             .on_action(cx.listener(|this, _: &PrevCommit, w, cx| this.step_commit(true, w, cx)))
             .on_action(cx.listener(|this, _: &NextCommit, w, cx| this.step_commit(false, w, cx)));
         let root = act!(root, Open, free, |_| Action::PickFolder);
@@ -580,6 +606,11 @@ impl Render for Workspace {
             .child(self.activity_bar(cx))
             .child(div().flex_1().min_w_0().h_full().child(main))
             .child(drop_hint)
+            .children(
+                self.search
+                    .clone()
+                    .map(|view| div().absolute().top(px(60.)).left_0().right_0().flex().justify_center().child(view)),
+            )
     }
 }
 

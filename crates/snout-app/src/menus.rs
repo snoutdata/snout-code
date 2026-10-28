@@ -49,6 +49,8 @@ actions!(
         Back,
         PrevCommit,
         NextCommit,
+        GoToFile,
+        FindInFiles,
     ]
 );
 
@@ -75,6 +77,12 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("down", NextCommit, Some("Workspace")),
         KeyBinding::new("cmd-a", SelectAll, Some("Workspace")),
         KeyBinding::new("cmd-s", crate::editor::Save, Some("EditorPanel")),
+        KeyBinding::new("cmd-p", GoToFile, None),
+        KeyBinding::new("cmd-shift-f", FindInFiles, None),
+        // In the go-to box the arrows pick and Esc closes, ahead of the field's own keys.
+        KeyBinding::new("up", crate::search::SearchUp, Some("SearchBox > Input")),
+        KeyBinding::new("down", crate::search::SearchDown, Some("SearchBox > Input")),
+        KeyBinding::new("escape", crate::search::SearchClose, Some("SearchBox > Input")),
     ]);
 }
 
@@ -95,6 +103,9 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             MenuItem::action("Clone from GitHub…", CloneRepo),
             MenuItem::separator(),
             MenuItem::action("New Group…", NewGroup),
+            MenuItem::separator(),
+            MenuItem::action("Go to File…", GoToFile),
+            MenuItem::action("Find in Files…", FindInFiles),
         ]),
         Menu::new("Edit").items([
             MenuItem::os_action("Undo", Undo, OsAction::Undo),

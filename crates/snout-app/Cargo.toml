@@ -31,6 +31,11 @@ tree-sitter-properties = "0.3"
 # The file tree: walking (honouring .gitignore) and watching the repository.
 ignore = "0.4"
 notify = "8"
+# Find in files and go to file.
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+fuzzy-matcher = "0.3"
 # Reads the earlier app's eframe storage (RON), never writes it.
 ron = "0.12"
 
