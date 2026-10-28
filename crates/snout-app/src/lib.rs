@@ -22,6 +22,7 @@ pub mod settings;
 pub mod status;
 pub mod tabs;
 pub mod theme;
+pub mod tool_windows;
 pub mod ui;
 pub mod workspace;
 

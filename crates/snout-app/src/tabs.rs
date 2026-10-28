@@ -67,6 +67,10 @@ impl DockAreaRenderer for Skin {
     }
 
     fn render_dock(&self, dock: &DockContext, content: AnyElement, window: &mut Window, cx: &mut App) -> AnyElement {
+        // A closed dock is gone: its stripe button brings it back.
+        if !dock.is_open() {
+            return div().into_any_element();
+        }
         self.inner.render_dock(dock, content, window, cx)
     }
 
@@ -105,7 +109,10 @@ impl TabGroupRenderer for Group {
         if is_side(group, cx) {
             return frame.bg(p.ground);
         }
-        frame.bg(p.panel).border_1().border_color(p.border).rounded(px(10.)).overflow_hidden()
+        // Flush, on hairline separators: the editor on its own ground, tool windows on the
+        // chrome's.
+        let bg = if is_editor_group(group, cx) { p.panel } else { p.ground };
+        frame.bg(bg).overflow_hidden()
     }
 
     fn content_frame(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Stateful<Div> {
@@ -115,8 +122,10 @@ impl TabGroupRenderer for Group {
     fn render_tab_bar(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyElement {
         if is_editor_group(group, cx) {
             tab_bar(group, window, cx)
-        } else {
+        } else if is_side(group, cx) {
             self.inner.render_tab_bar(group, window, cx)
+        } else {
+            tool_header(group, cx)
         }
     }
 
@@ -370,6 +379,105 @@ fn tab(
                 .on_drop(move |drag: &DragPanel, window, cx| group.drop_panel(drag.clone(), Some(ix), true, window, cx))
         })
         .into_any_element()
+}
+
+/// Tool windows that show as tabs of one header when either is in front.
+const TABBED: [&str; 2] = ["Problems", "References"];
+
+/// A small icon button of a tool window's header.
+pub fn tool_button(
+    id: &'static str,
+    g: crate::glyphs::Icon,
+    tip: &'static str,
+    p: &crate::theme::Palette,
+) -> Stateful<Div> {
+    let hover = p.button_hover;
+    div()
+        .id(id)
+        .debug_selector(move || id.to_owned())
+        .flex_none()
+        .size(px(22.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover))
+        .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
+        .child(crate::glyphs::icon(g, 14., p.fg_dim))
+}
+
+/// A tool window's header, in place of a tab bar (the stripes open tool windows): its
+/// title, tabs where two windows belong together, and its toolbar.
+fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
+    use crate::glyphs::Icon;
+    let p = palette(cx);
+    let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
+    let right = matches!(active, "Gradle" | "Notifications");
+    let mut row = div()
+        .id(("tool-header", group.node().as_u64()))
+        .debug_selector(|| "tool-header".into())
+        .flex_none()
+        .h(px(32.))
+        .w_full()
+        .pl(px(12.))
+        .pr(px(6.))
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .bg(p.ground)
+        .text_size(px(crate::look::BODY))
+        .text_color(p.fg);
+    if TABBED.contains(&active) {
+        for (ix, panel) in group.panels().iter().enumerate() {
+            let name = panel.panel_name(cx);
+            if !TABBED.contains(&name) {
+                continue;
+            }
+            let on = name == active;
+            let hover = p.button_hover;
+            let group = group.clone();
+            row = row.child(
+                div()
+                    .id(("tool-tab", ix))
+                    .debug_selector(move || format!("tool-tab-{name}"))
+                    .h(px(24.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.))
+                    .cursor_pointer()
+                    .when(on, |d| d.bg(p.button).font_weight(gpui::FontWeight::MEDIUM))
+                    .when(!on, |d| d.text_color(p.fg_dim).hover(move |s| s.bg(hover)))
+                    .child(name)
+                    .on_click(move |_, window, cx| group.select_tab(ix, window, cx)),
+            );
+        }
+    } else {
+        row =
+            row.child(div().font_weight(gpui::FontWeight::MEDIUM).child(crate::tool_windows::title(active).to_owned()));
+    }
+    row = row.child(div().flex_1());
+    match active {
+        "Output" => {
+            row = row.child(
+                tool_button("tool-clear-output", Icon::Close, "Clear", &p)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::ClearOutput), cx)),
+            )
+        }
+        "Gradle" => {
+            row = row.child(
+                tool_button("tool-collapse-gradle", Icon::CollapseAll, "Collapse All", &p)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseGradle), cx)),
+            )
+        }
+        _ => {}
+    }
+    row.child(
+        tool_button("tool-hide", Icon::Minus, "Hide", &p)
+            .on_click(move |_, w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow(right)), cx)),
+    )
+    .into_any_element()
 }
 
 /// The id a panel has in the dock.

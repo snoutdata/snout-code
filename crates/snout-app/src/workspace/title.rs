@@ -2,10 +2,6 @@
 //! the project and branch widgets on the left; the run configuration, Run and Debug,
 //! Search Everywhere and Settings on the right.
 
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::time::{Duration, Instant, SystemTime};
-
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -17,7 +13,6 @@ use gpui_component::tooltip::Tooltip;
 use super::Workspace;
 use crate::branch_popup::{BranchPopup, Dismiss};
 use crate::glyphs::{Icon, icon};
-use crate::gradle::Build;
 use crate::look::Trigger;
 use crate::menus::{self, CloseProject, OpenRecent};
 use crate::model::{Action, Model};
@@ -25,14 +20,6 @@ use crate::theme::{Palette, mix, palette};
 
 /// The title bar's height.
 pub const TITLE_H: f32 = 40.;
-
-/// The engine's model of the project's build, kept while its file stays the same.
-#[derive(Default)]
-pub struct GradleCache {
-    root: Option<PathBuf>,
-    loaded: Option<(SystemTime, Rc<Build>)>,
-    looked: Option<Instant>,
-}
 
 /// Up to two letters standing for a project: the first of its first two words.
 pub fn initials(name: &str) -> String {
@@ -89,36 +76,6 @@ fn icon_button(id: &'static str, g: Icon, tip: &'static str, enabled: bool, p: &
 }
 
 impl Workspace {
-    /// The build the engine imported for the open project, if its model is there.
-    pub fn gradle_build(&mut self, cx: &mut Context<Self>) -> Option<Rc<Build>> {
-        let root = self.gradle_root(cx);
-        if root != self.gradle.root {
-            self.gradle = GradleCache { root: root.clone(), ..Default::default() };
-        }
-        let root = root?;
-        // Look again now and then: the engine writes the model when it imports the build.
-        let due = self.gradle.looked.is_none_or(|t| t.elapsed() > Duration::from_secs(3));
-        if due {
-            self.gradle.looked = Some(Instant::now());
-            let home = self.hub.read(cx).home.clone();
-            if let Some((build, when)) = crate::gradle::load(&home, &root)
-                && self.gradle.loaded.as_ref().is_none_or(|(t, _)| *t != when)
-            {
-                self.gradle.loaded = Some((when, Rc::new(build)));
-            }
-        }
-        self.gradle.loaded.as_ref().map(|(_, b)| b.clone())
-    }
-
-    /// The Gradle build of the open project: one its server runs, or the project itself.
-    fn gradle_root(&self, cx: &Context<Self>) -> Option<PathBuf> {
-        let repo = self.model.read(cx).repo.as_ref()?.root().to_owned();
-        let hub = self.hub.read(cx);
-        let mut roots: Vec<&PathBuf> = hub.servers.keys().filter(|r| r.starts_with(&repo)).collect();
-        roots.sort();
-        roots.first().map(|r| (*r).clone()).or_else(|| crate::lang::java::is_gradle_root(&repo).then_some(repo))
-    }
-
     /// Show or hide the branch popup.
     pub fn toggle_branches(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.branch_popup.take().is_some() {
@@ -144,7 +101,7 @@ impl Workspace {
 
     pub(super) fn title_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        let gradle = self.gradle_build(cx);
+        let gradle = self.gradle.update(cx, |g, cx| g.build(cx));
         let m = self.model.read(cx);
         let name = m.repo.as_ref().map(|r| Model::dir_name(r.root()));
         let branch = m.repo.as_ref().map(|_| m.head_label());

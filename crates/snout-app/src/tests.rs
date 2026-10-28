@@ -785,3 +785,42 @@ fn the_title_bar_shows_the_project_and_its_branches(cx: &mut TestAppContext) {
     });
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_stripes_open_and_close_the_tool_windows(cx: &mut TestAppContext) {
+    use crate::workspace::Tool;
+    use gpui_component::dock::DockPlacement;
+    let repo = demo_repo("stripes");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    cx.run_until_parked();
+    let open = |cx: &mut VisualTestContext, t: Tool| cx.update(|_, cx| ws.read(cx).tool_open(t, cx));
+    let dock_open =
+        |cx: &mut VisualTestContext, place| cx.update(|_, cx| ws.read(cx).dock.read(cx).is_dock_open(place));
+    assert!(!dock_open(cx, DockPlacement::Right), "the right tool windows start hidden");
+    let click = |cx: &mut VisualTestContext, id: &'static str| {
+        let at = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id} is drawn")).center();
+        cx.simulate_click(at, gpui::Modifiers::none());
+        cx.run_until_parked();
+    };
+    click(cx, "stripe-terminal");
+    assert!(open(cx, Tool::Terminal), "the terminal shows");
+    assert!(!open(cx, Tool::Output));
+    click(cx, "stripe-output");
+    assert!(open(cx, Tool::Output) && !open(cx, Tool::Terminal), "Output takes its place");
+    assert!(cx.debug_bounds("tool-header").is_some(), "a tool window has a header, not a tab bar");
+    click(cx, "stripe-output");
+    assert!(!dock_open(cx, DockPlacement::Bottom), "a second click hides it");
+    click(cx, "stripe-gradle");
+    assert!(open(cx, Tool::Gradle) && dock_open(cx, DockPlacement::Right));
+    click(cx, "stripe-notifications");
+    assert!(open(cx, Tool::Notifications) && !open(cx, Tool::Gradle));
+    click(cx, "tool-hide");
+    assert!(!dock_open(cx, DockPlacement::Right), "the header's hide button hides the window");
+    // From the Git view, a bottom tool window brings the project back.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
+    click(cx, "stripe-problems");
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project));
+    assert!(open(cx, Tool::Problems));
+    let _ = std::fs::remove_dir_all(repo);
+}

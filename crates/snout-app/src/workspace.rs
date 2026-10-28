@@ -9,7 +9,7 @@ use std::sync::Arc;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Context, Entity, ExternalPaths, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px,
+    Render, Styled as _, Subscription, Window, div, px,
 };
 use gpui::{Global, Task};
 use gpui_component::Theme;
@@ -19,7 +19,6 @@ use gpui_component::dock::{
 };
 use snout_core::{FileEntry, PullMode, on_disk, stage_paths, unstage_paths};
 
-use crate::art::outline_glyph;
 use crate::editor::{EditorEvent, EditorPanel};
 use crate::git_view::GitView;
 use crate::menus::{self, *};
@@ -32,8 +31,9 @@ use crate::status::StatusBar;
 use crate::theme::{self, palette};
 
 mod lang_ui;
+mod stripes;
 mod title;
-use snout_core::art::Glyph;
+pub use stripes::{STRIPE_W, Tool, active_in};
 pub use title::{TITLE_H, branch_popup, initials};
 
 /// The center and bottom tabs, so events can bring one forward.
@@ -41,6 +41,10 @@ pub struct Tabs {
     pub welcome: PanelId,
     pub console: Option<PanelId>,
     pub terminal: PanelId,
+    pub output: PanelId,
+    pub problems: PanelId,
+    pub gradle: PanelId,
+    pub notifications: PanelId,
 }
 
 pub struct Workspace {
@@ -69,14 +73,15 @@ pub struct Workspace {
     pub references: Entity<crate::lang::panels::ReferencesPanel>,
     /// The title bar's branch popup, while it shows.
     branch_popup: Option<Entity<crate::branch_popup::BranchPopup>>,
-    /// The engine's model of the project's build.
-    gradle: title::GradleCache,
+    /// The right stripe's tool windows.
+    pub gradle: Entity<crate::tool_windows::GradlePanel>,
+    pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
     _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
-/// The activity bar's width.
-pub const ACTIVITY_W: f32 = 44.;
+/// The width the stripes take from the window, both edges together.
+pub const ACTIVITY_W: f32 = 2. * STRIPE_W;
 
 /// The layout format this build writes; a saved layout of another version is ignored.
 const LAYOUT_VERSION: usize = 2;
@@ -99,6 +104,7 @@ fn default_layout(
             (DockPlacement::Left, DockLayout::tabs(), px(320.)),
             (DockPlacement::Center, DockLayout::tabs(), px(0.)),
             (DockPlacement::Bottom, DockLayout::tabs(), px(260.)),
+            (DockPlacement::Right, DockLayout::tabs(), px(300.)),
         ];
         for (view, place) in panels {
             if let Some((_, layout, _)) = regions.iter_mut().find(|(p, _, _)| p == place) {
@@ -112,6 +118,10 @@ fn default_layout(
                 d.set_dock(place, layout, window, cx);
                 d.set_dock_size(place, size, window, cx);
             }
+        }
+        // The right stripe's tool windows start hidden.
+        if d.is_dock_open(DockPlacement::Right) {
+            d.toggle_dock(DockPlacement::Right, window, cx);
         }
     });
 }
@@ -189,8 +199,17 @@ impl Workspace {
             (panel_handle(welcome.clone()), DockPlacement::Center),
         ];
         let terminal = crate::console::build_terminal(&model, cx);
-        let mut tabs =
-            Tabs { welcome: PanelId::from(welcome.entity_id()), console: None, terminal: terminal.panel_id(cx) };
+        let gradle = cx.new(|cx| crate::tool_windows::GradlePanel::new(model.clone(), hub.clone(), cx));
+        let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
+        let mut tabs = Tabs {
+            welcome: PanelId::from(welcome.entity_id()),
+            console: None,
+            terminal: terminal.panel_id(cx),
+            output: PanelId::from(output.entity_id()),
+            problems: PanelId::from(problems.entity_id()),
+            gradle: PanelId::from(gradle.entity_id()),
+            notifications: PanelId::from(notifications.entity_id()),
+        };
         if let Some(console) = console {
             tabs.console = Some(console.panel_id(cx));
             panels.push((console, DockPlacement::Bottom));
@@ -199,6 +218,8 @@ impl Workspace {
         panels.push((panel_handle(output.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(problems.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(references.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
+        panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
 
         let saved = model.read(cx).settings.dock.clone();
         let restored = match saved {
@@ -211,6 +232,7 @@ impl Workspace {
         let open = model.read(cx).settings.console_open;
         dock.update(cx, |d, cx| {
             d.set_dock_collapsible(DockPlacement::Bottom, true, window, cx);
+            d.set_dock_collapsible(DockPlacement::Right, true, window, cx);
             if d.is_dock_open(DockPlacement::Bottom) != open {
                 d.toggle_dock(DockPlacement::Bottom, window, cx);
             }
@@ -277,7 +299,8 @@ impl Workspace {
             problems,
             references,
             branch_popup: None,
-            gradle: Default::default(),
+            gradle,
+            notifications,
             _save_layout: None,
             _subscriptions: subscriptions,
         };
@@ -808,74 +831,6 @@ impl Workspace {
             self.menu_checks = Some(checks);
         }
     }
-
-    fn activity_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
-        let current = self.side.read(cx).activity;
-        let open = current == Activity::Git || self.dock.read(cx).is_dock_open(DockPlacement::Left);
-        let changed = self.model.read(cx).status.files.len();
-        let hover_bg = p.button_hover;
-        // Plain outline glyphs in the quiet ink; the picked one white on an accent square.
-        let item = |id: &'static str, g: Glyph, tip: &'static str, on: bool| {
-            let ink = if on { gpui::white() } else { p.fg_dim };
-            div()
-                .id(id)
-                .debug_selector(move || id.to_owned())
-                .flex_none()
-                .size(px(32.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(8.))
-                .cursor_pointer()
-                .when(on, |d| d.bg(p.accent))
-                .when(!on, |d| d.hover(move |s| s.bg(hover_bg)))
-                .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
-                .child(outline_glyph(g, 20., ink))
-        };
-        let pick = |a: Activity| cx.listener(move |this, _, w, cx| this.set_activity(a, w, cx));
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(6.))
-            .py(px(8.))
-            .w(px(ACTIVITY_W))
-            .h_full()
-            .bg(p.ground)
-            .border_r_1()
-            .border_color(p.border)
-            .child(
-                item("act-project", Glyph::Folder, "Project (⌘1)", open && current == Activity::Project)
-                    .on_click(pick(Activity::Project)),
-            )
-            .child(
-                item("act-git", Glyph::Branch, "Git (⌘2)", open && current == Activity::Git)
-                    .relative()
-                    .on_click(pick(Activity::Git))
-                    .when(changed > 0, |d| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .top(px(-4.))
-                                .right(px(-6.))
-                                .px(px(4.))
-                                .rounded(px(8.))
-                                .border_2()
-                                .border_color(p.ground)
-                                .bg(p.accent)
-                                .text_color(p.on_accent)
-                                .text_size(px(10.))
-                                .child(changed.to_string()),
-                        )
-                    }),
-            )
-            .child(div().flex_1())
-            .child(
-                item("act-console", Glyph::Spark, "Claude Code console (⌘J)", false)
-                    .on_click(cx.listener(|this, _, _, cx| this.send(Action::ToggleConsole, cx))),
-            )
-    }
 }
 
 impl Render for Workspace {
@@ -955,6 +910,32 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
+            .on_action(cx.listener(|this, a: &HideToolWindow, w, cx| {
+                let place = if a.0 { DockPlacement::Right } else { DockPlacement::Bottom };
+                this.hide_dock(place, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &HideSide, w, cx| this.hide_dock(DockPlacement::Left, w, cx)))
+            .on_action(cx.listener(|this, _: &LocateFile, _, cx| {
+                let path = this.status.read(cx).editor().map(|e| e.read(cx).path.clone());
+                let files = this.side.read(cx).files.clone();
+                files.update(cx, |f, cx| f.reveal(path, cx));
+            }))
+            .on_action(cx.listener(|this, _: &CollapseAll, _, cx| {
+                let files = this.side.read(cx).files.clone();
+                files.update(cx, |f, cx| {
+                    f.expanded.clear();
+                    cx.notify();
+                });
+            }))
+            .on_action(cx.listener(|this, _: &CollapseGradle, _, cx| {
+                this.gradle.update(cx, |g, cx| g.collapse_all(cx));
+            }))
+            .on_action(cx.listener(|this, _: &ClearOutput, _, cx| {
+                this.model.update(cx, |m, cx| {
+                    m.output.clear();
+                    cx.notify();
+                })
+            }))
             .on_action(cx.listener(|this, _: &FindInFiles, w, cx| this.open_search(Mode::FindInFiles, w, cx)))
             .on_action(cx.listener(|this, _: &GoToLine, w, cx| this.open_search(Mode::GoToLine, w, cx)))
             .on_action(cx.listener(|this, _: &CommandPalette, w, cx| this.open_palette(w, cx)))
@@ -1028,7 +1009,7 @@ impl Render for Workspace {
                 .flex()
                 .flex_col()
                 .children(self.jdk_bar(cx))
-                .child(div().flex_1().min_h_0().child(self.dock.clone()))
+                .child(self.dock_area(cx))
                 .child(self.status.clone())
                 .into_any_element()
         };
@@ -1039,13 +1020,39 @@ impl Render for Workspace {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .child(self.activity_bar(cx))
-                    .child(div().flex_1().min_w_0().h_full().child(main)),
+                    .child(self.left_stripe(cx))
+                    .child(div().flex_1().min_w_0().h_full().child(main))
+                    .child(self.right_stripe(cx)),
             )
             .child(drop_hint)
             .children(self.search.clone().map(|view| {
                 div().absolute().top(px(TITLE_H + 24.)).left_0().right_0().flex().justify_center().child(view)
             }))
+    }
+}
+
+/// What GPUI Kit's dock keeps of a closed bottom dock (a strip for its tab bar). The
+/// stripes reopen it here, so the strip is cut off below the window's view.
+const CLOSED_BOTTOM_STRIP: f32 = 29.;
+
+impl Workspace {
+    fn dock_area(&self, cx: &App) -> gpui::AnyElement {
+        let closed = !self.dock.read(cx).is_dock_open(DockPlacement::Bottom);
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .overflow_hidden()
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom(px(if closed { -CLOSED_BOTTOM_STRIP } else { 0. }))
+                    .child(self.dock.clone()),
+            )
+            .into_any_element()
     }
 }
 

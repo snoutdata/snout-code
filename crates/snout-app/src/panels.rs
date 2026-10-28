@@ -90,9 +90,41 @@ panel!(
 
 impl Render for SidePanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::glyphs::Icon;
+        use crate::menus::{CollapseAll, HideSide, LocateFile};
+        use crate::tabs::tool_button;
         let p = palette(cx);
-        // One pane on the ground colour, as the Git view's panes are.
-        div().size_full().bg(p.ground).flex().flex_col().child(crate::look::pane(&p).child(self.files.clone()))
+        // The tool window's header: its title and toolbar, then the files.
+        let header = div()
+            .flex_none()
+            .h(px(32.))
+            .pl(px(12.))
+            .pr(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .text_size(px(crate::look::BODY))
+            .child(div().font_weight(FontWeight::MEDIUM).child("Project"))
+            .child(div().flex_1())
+            .child(
+                tool_button("side-locate", Icon::Locate, "Select Opened File", &p)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(LocateFile), cx)),
+            )
+            .child(
+                tool_button("side-collapse", Icon::CollapseAll, "Collapse All", &p)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(CollapseAll), cx)),
+            )
+            .child(
+                tool_button("side-hide", Icon::Minus, "Hide", &p)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(HideSide), cx)),
+            );
+        div()
+            .size_full()
+            .bg(p.ground)
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(div().flex_1().min_h_0().px(px(4.)).child(self.files.clone()))
     }
 }
 
@@ -184,34 +216,20 @@ impl Render for OutputPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let m = self.model.read(cx);
-        let model = self.model.clone();
-        div()
-            .size_full()
-            .bg(p.panel)
-            .flex()
-            .flex_col()
-            .child(div().flex().justify_end().p(px(4.)).child(
-                Button::new("clear-output").ghost().xsmall().label("Clear").on_click(move |_, _, cx| {
-                    model.update(cx, |m, cx| {
-                        m.output.clear();
-                        cx.notify();
-                    })
-                }),
-            ))
-            .child(
-                div()
-                    .id("output")
-                    .flex_1()
-                    .overflow_y_scrollbar()
-                    .px(px(8.))
-                    .font_family(cx.theme_mono())
-                    .text_size(px(12.))
-                    .children(
-                        m.output
-                            .iter()
-                            .map(|l| div().text_color(if l.error { p.error } else { p.fg }).child(l.text.clone())),
-                    ),
-            )
+        div().size_full().bg(p.ground).flex().flex_col().child(
+            div()
+                .id("output")
+                .flex_1()
+                .overflow_y_scrollbar()
+                .px(px(8.))
+                .font_family(cx.theme_mono())
+                .text_size(px(12.))
+                .children(
+                    m.output
+                        .iter()
+                        .map(|l| div().text_color(if l.error { p.error } else { p.fg }).child(l.text.clone())),
+                ),
+        )
     }
 }
 

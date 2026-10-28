@@ -65,8 +65,18 @@ actions!(
         ShowProblems,
         OpenSettings,
         SearchEverywhere,
+        HideSide,
+        LocateFile,
+        CollapseAll,
+        CollapseGradle,
+        ClearOutput,
     ]
 );
+
+/// Hide a tool window's dock: the right one when true, else the bottom one.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct HideToolWindow(pub bool);
 
 /// File ▸ Open Recent: open this project.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
