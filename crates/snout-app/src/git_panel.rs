@@ -21,7 +21,7 @@ use gpui_component::tooltip::Tooltip;
 use gpui_component::{Disableable as _, Sizable as _};
 use snout_core::{Branch, BranchKind, CheckoutTarget, FileEntry, Tag, on_disk, stage_paths, unstage_paths};
 
-use crate::model::{Action, Model, ModelEvent, StartPoint};
+use crate::model::{Action, Model, ModelEvent, SortColumn, StartPoint};
 use crate::theme::{Palette, palette};
 use crate::ui::{chip, icon, icons, pane_title, state_color};
 
@@ -353,6 +353,7 @@ impl GitPanel {
         };
         let rows: Vec<FileEntry> = m.visible_files().into_iter().cloned().collect();
         let selected = m.selected.clone();
+        let sort = m.sort;
         let root = m.repo.as_ref().map(|r| r.root().to_owned());
         let view = cx.entity();
         let model = self.model.clone();
@@ -461,6 +462,7 @@ impl GitPanel {
                 .collect()
         })
         .flex_1();
+        let header = self.file_header(sort, &p, cx);
         div()
             .size_full()
             .flex()
@@ -489,7 +491,39 @@ impl GitPanel {
             )
             .child(Input::new(&self.filter).small())
             .when(clean, |d| d.child(crate::ui::note("The working tree is clean", clean_text, cx)))
-            .when(!clean, |d| d.child(list))
+            .when(!clean, |d| d.child(header).child(list))
+    }
+
+    /// The column headers over the changed files; a click sorts by that column.
+    fn file_header(&self, (by, asc): (SortColumn, bool), p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let fg = p.fg;
+        let column = |id: &'static str, label: &'static str, col: SortColumn, cx: &mut Context<Self>| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .rounded(px(4.))
+                .hover(move |s| s.text_color(fg))
+                .child(label)
+                .when(by == col, |d| d.child(icon(if asc { icons::CHEVRON_UP } else { icons::CHEVRON_DOWN }).xsmall()))
+                .on_click(cx.listener(move |this, _, _, cx| this.model.update(cx, |m, cx| m.sort_by(col, cx))))
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .px(px(6.))
+            .h(px(20.))
+            .text_size(px(12.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(p.fg_dim)
+            .child(column("sort-name", "Name", SortColumn::Name, cx).flex_none().w(px(140.)))
+            .child(column("sort-state", "State", SortColumn::State, cx).flex_none().w(px(118.)))
+            .child(column("sort-dir", "Relative Directory", SortColumn::Directory, cx).flex_1().min_w_0())
+            .into_any_element()
     }
 
     fn commit_box(&mut self, cx: &mut Context<Self>) -> impl IntoElement {

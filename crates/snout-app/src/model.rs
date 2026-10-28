@@ -47,6 +47,14 @@ pub struct StartPoint {
     pub rev: String,
 }
 
+/// The column the Git Panel sorts its changed files by.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SortColumn {
+    Name,
+    State,
+    Directory,
+}
+
 /// How an [`Dialog::Info`] message feels.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mood {
@@ -199,6 +207,8 @@ pub struct Model {
     pub selected: BTreeSet<String>,
     pub anchor: Option<String>,
     pub filter: String,
+    /// The changed files' sort column, and whether it is ascending.
+    pub sort: (SortColumn, bool),
     pub diff: Option<Result<std::rc::Rc<DiffLayout>, String>>,
     diff_key: Option<(String, snout_core::DiffBase, bool)>,
     pub commit_msg: String,
@@ -246,6 +256,7 @@ impl Model {
             selected: BTreeSet::new(),
             anchor: None,
             filter: String::new(),
+            sort: (SortColumn::Name, true),
             diff: None,
             diff_key: None,
             commit_msg: String::new(),
@@ -333,7 +344,7 @@ impl Model {
         }
     }
 
-    /// The changed files the Git Panel lists: filtered by text and directory, by path.
+    /// The changed files the Git Panel lists: filtered by text and directory, then sorted.
     pub fn visible_files(&self) -> Vec<&FileEntry> {
         let needle = self.filter.to_lowercase();
         let mut rows: Vec<&FileEntry> = self
@@ -347,8 +358,22 @@ impl Model {
                     .is_none_or(|d| f.path.strip_prefix(d.as_str()).is_some_and(|rest| rest.starts_with('/')))
             })
             .collect();
-        rows.sort_by(|a, b| a.path.cmp(&b.path));
+        let (col, asc) = self.sort;
+        rows.sort_by(|a, b| {
+            let ord = match col {
+                SortColumn::Name => a.file_name().cmp(b.file_name()).then(a.path.cmp(&b.path)),
+                SortColumn::State => a.state_label().cmp(&b.state_label()).then(a.path.cmp(&b.path)),
+                SortColumn::Directory => a.directory().cmp(b.directory()).then(a.file_name().cmp(b.file_name())),
+            };
+            if asc { ord } else { ord.reverse() }
+        });
         rows
+    }
+
+    /// A click on a column header: sort by it, or flip the order when it already sorts.
+    pub fn sort_by(&mut self, col: SortColumn, cx: &mut Context<Self>) {
+        self.sort = if self.sort.0 == col { (col, !self.sort.1) } else { (col, true) };
+        cx.notify();
     }
 
     /// Indices into `log` of the commits the Journal shows, after its filter.

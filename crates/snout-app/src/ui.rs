@@ -35,6 +35,7 @@ pub mod icons {
     pub const DISCARD: &str = "icons/undo-2.svg";
     pub const CHEVRON_RIGHT: &str = "icons/chevron-right.svg";
     pub const CHEVRON_DOWN: &str = "icons/chevron-down.svg";
+    pub const CHEVRON_UP: &str = "icons/chevron-up.svg";
 }
 
 /// A small rounded label in a soft wash of `color`.

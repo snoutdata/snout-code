@@ -411,3 +411,32 @@ fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
     });
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_changed_files_sort_by_the_clicked_column(cx: &mut TestAppContext) {
+    use crate::model::SortColumn;
+    let repo = demo_repo("sort");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    let order = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| model.read(cx).visible_files().iter().map(|f| f.path.clone()).collect::<Vec<_>>())
+    };
+    assert_eq!(order(cx), ["NOTES.md", "src/main.rs", "status.rs"], "by name at first");
+    cx.update(|_, cx| model.update(cx, |m, cx| m.sort_by(SortColumn::Name, cx)));
+    assert_eq!(order(cx), ["status.rs", "src/main.rs", "NOTES.md"], "a second click flips the order");
+    cx.update(|_, cx| model.update(cx, |m, cx| m.sort_by(SortColumn::Directory, cx)));
+    assert_eq!(order(cx), ["NOTES.md", "status.rs", "src/main.rs"]);
+    cx.update(|_, cx| model.update(cx, |m, cx| m.sort_by(SortColumn::State, cx)));
+    cx.run_until_parked();
+    let states: Vec<String> =
+        cx.update(|_, cx| model.read(cx).visible_files().iter().map(|f| f.state_label()).collect());
+    let mut sorted = states.clone();
+    sorted.sort();
+    assert_eq!(states, sorted);
+    // Shift-click ranges follow the order on screen.
+    cx.update(|_, cx| model.update(cx, |m, cx| m.sort_by(SortColumn::Directory, cx)));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("NOTES.md", false, false, cx)));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("status.rs", true, false, cx)));
+    cx.update(|_, cx| assert_eq!(model.read(cx).selected.len(), 2));
+    let _ = std::fs::remove_dir_all(repo);
+}
