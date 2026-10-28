@@ -30,6 +30,8 @@ use crate::search::{Mode, SearchEvent, SearchView};
 use crate::settings::ThemeChoice;
 use crate::status::StatusBar;
 use crate::theme::{self, palette};
+
+mod lang_ui;
 use snout_core::art::Glyph;
 
 /// The center and bottom tabs, so events can bring one forward.
@@ -58,6 +60,11 @@ pub struct Workspace {
     head: Option<String>,
     /// The status bar under the docks; it follows the editor in front.
     pub status: Entity<StatusBar>,
+    /// The language servers.
+    pub hub: Entity<crate::lang::LangHub>,
+    /// The bottom dock's Problems and References tabs.
+    pub problems: Entity<crate::lang::panels::ProblemsPanel>,
+    pub references: Entity<crate::lang::panels::ReferencesPanel>,
     _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -123,8 +130,17 @@ fn restore_layout(
         register_panel(cx, name, move |_, _, cx| cx.global::<PanelPool>().0[name].clone());
     }
     register_panel(cx, crate::editor::PANEL_NAME, |ctx, window, cx| {
-        let path = crate::editor::saved_path(ctx.state()).unwrap_or_default();
+        let class_file = crate::editor::saved_class_file(ctx.state());
+        let path = if class_file.is_some() {
+            PathBuf::new()
+        } else {
+            crate::editor::saved_path(ctx.state()).unwrap_or_default()
+        };
         let editor = cx.new(|cx| EditorPanel::open(path, window, cx));
+        if let Some((uri, root)) = class_file {
+            let loading = "// Loading the class from the Java server…\n".to_owned();
+            editor.update(cx, |e, cx| e.show_class_file(uri, root, loading, window, cx));
+        }
         cx.global_mut::<PanelPool>().1.push(editor.clone());
         panel_handle(editor)
     });
@@ -146,6 +162,11 @@ fn restore_layout(
 
 impl Workspace {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // The language servers come first: restored editor tabs connect to them.
+        let hub = cx.new(|cx| crate::lang::LangHub::new(model.clone(), cx));
+        cx.set_global(crate::lang::hub::HubHandle(hub.clone()));
+        let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), cx));
+        let references = cx.new(|cx| crate::lang::panels::ReferencesPanel::new(hub.clone(), cx));
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
         let files = cx.new(|cx| crate::files::FileTree::new(model.clone(), cx));
         let side = cx.new(|cx| SidePanel::new(files, cx));
@@ -170,6 +191,8 @@ impl Workspace {
         }
         panels.push((terminal, DockPlacement::Bottom));
         panels.push((panel_handle(output.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(problems.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(references.clone()), DockPlacement::Bottom));
 
         let saved = model.read(cx).settings.dock.clone();
         let restored = match saved {
@@ -197,6 +220,7 @@ impl Workspace {
                         editor.update(cx, |e, cx| e.refresh_head(cx));
                     }
                 }
+                this.ensure_project_server(cx);
                 cx.notify()
             }),
             cx.subscribe(&dock, |this, _, e: &DockEvent, cx| {
@@ -215,6 +239,7 @@ impl Workspace {
                 }
             }),
             cx.subscribe_in(&model, window, Self::on_model_event),
+            cx.subscribe_in(&hub, window, Self::on_hub_event),
             // Coming back to the window, re-read the repository and count again, so
             // changes made elsewhere (terminal, editor, an agent) show up at once.
             cx.observe_window_activation(window, |this, window, cx| {
@@ -228,6 +253,7 @@ impl Workspace {
             }),
         ];
         let status = cx.new(|cx| StatusBar::new(model.clone(), cx));
+        status.update(cx, |s, cx| s.set_hub(hub.clone(), cx));
         let mut this = Self {
             model,
             dock,
@@ -241,11 +267,18 @@ impl Workspace {
             editors: Vec::new(),
             head: None,
             status,
+            hub,
+            problems,
+            references,
             _save_layout: None,
             _subscriptions: subscriptions,
         };
         for editor in restored.1 {
             this.track_editor(&editor, window, cx);
+            // A library class file's tab fills once the server can show it.
+            if let Some((uri, root)) = editor.read(cx).class_file.clone() {
+                this.load_class_file(editor, root, uri, None, window, cx);
+            }
         }
         // Open on the activity the window showed last.
         if let Some(activity) = this.model.read(cx).settings.activity {
@@ -259,6 +292,10 @@ impl Workspace {
             weak.update(cx, |this, cx| this.confirm_unsaved(false, window, cx)).unwrap_or(true)
         });
         window.focus(&this.focus, cx);
+        // A file named on the command line.
+        if let Some((path, at)) = this.model.update(cx, |m, _| m.pending_file.take()) {
+            this.open_file(path, at, false, window, cx);
+        }
         this
     }
 
@@ -548,7 +585,10 @@ impl Workspace {
             ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
             ModelEvent::Message => {}
             ModelEvent::Closed => self.after_close(window, cx),
-            ModelEvent::OpenFile(path, at, preview) => self.open_file(path.clone(), *at, *preview, window, cx),
+            ModelEvent::OpenFile(path, at, preview) => {
+                model.update(cx, |m, _| m.pending_file = None);
+                self.open_file(path.clone(), *at, *preview, window, cx)
+            }
         }
     }
 
@@ -563,6 +603,7 @@ impl Workspace {
             s.activity = activity;
             cx.notify();
         });
+        self.ensure_project_server(cx);
         cx.notify();
     }
 
@@ -688,7 +729,7 @@ impl Workspace {
                 }
                 cx.notify();
             }
-            SearchEvent::Run(_) => {}
+            SearchEvent::Run(_) | SearchEvent::OpenLocation(..) => {}
         })
         .detach();
         // Give the field the keyboard once this action is done.
@@ -895,6 +936,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &CommandPalette, w, cx| this.open_palette(w, cx)))
             .on_action(cx.listener(|this, _: &SplitRight, w, cx| this.split_right(w, cx)))
             .on_action(cx.listener(|this, _: &CloseProject, w, cx| this.close_project(w, cx)))
+            .on_action(cx.listener(|this, _: &GoToSymbol, w, cx| this.open_symbols(false, w, cx)))
+            .on_action(cx.listener(|this, _: &GoToSymbolInFile, w, cx| this.open_symbols(true, w, cx)))
+            .on_action(cx.listener(|this, _: &ShowProblems, w, cx| this.show_problems(w, cx)))
             .on_action(cx.listener(|this, _: &ClearRecent, _, cx| this.send(Action::ClearRecent, cx)))
             .on_action(cx.listener(|this, a: &OpenRecent, _, cx| this.send(Action::OpenRepo(a.0.clone()), cx)))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(Some(1.), cx)))
@@ -959,6 +1003,7 @@ impl Render for Workspace {
                 .size_full()
                 .flex()
                 .flex_col()
+                .children(self.jdk_bar(cx))
                 .child(div().flex_1().min_h_0().child(self.dock.clone()))
                 .child(self.status.clone())
                 .into_any_element()

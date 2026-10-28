@@ -23,6 +23,12 @@ A small, fast desktop Git client in Rust. It focuses on the everyday loop: see w
 
 The view re-reads the repository when the window regains focus, on F5 or ⌘R, and while the console's agent is working.
 
+### Java
+
+Java files of a Gradle build get errors and warnings (squiggles, gutter dots and a Problems tab), hover, completion that adds the imports it needs, parameter hints, go to definition (F12 or ⌘-click, into library classes too, shown read only), find references (⇧F12), rename (F2), quick fixes (⌘.), format document (⇧⌥F), organize imports (⇧⌥O), and symbols of the workspace (⌘T) and of the file (⇧⌘O in an editor). They come from SnoutCode's Java engine (`engine/`), one per Gradle build, started when a Java file of the build or the project opens; the status bar says what it is doing.
+
+The engine runs Gradle on a JDK that suits the build. SnoutCode looks for installed JDKs; when none fits it offers to download Eclipse Temurin into `~/Library/Application Support/SnoutCode/jdks`. The app runs without the engine too, without these features.
+
 ### Claude Code console
 
 ![Claude Code in the console](docs/claude-console.png)
@@ -110,6 +116,11 @@ In the background, logs go to `$TMPDIR/snout.log`.
 | ⌘↩ | Commit (in the message field) |
 | Esc | Leave the commit view |
 | ↑ ↓ | Previous or next commit, in the commit view |
+| F12, ⇧F12, F2 | Go to definition, find references, rename (Java) |
+| ⌘. | Quick fixes (Java) |
+| ⇧⌥F, ⇧⌥O | Format document, organize imports (Java) |
+| ⌘T, ⇧⌘O | Go to a symbol of the workspace, or of the file in an editor (Java) |
+| ⇧⌘M | Show the Problems tab |
 
 On Windows and Linux, use Ctrl in place of ⌘.
 

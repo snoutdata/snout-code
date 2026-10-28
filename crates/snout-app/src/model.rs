@@ -22,6 +22,16 @@ use crate::settings::{Settings, Store, ThemeChoice};
 pub const LOG_LIMIT: usize = 300;
 /// How deep "Find repositories in folder…" searches.
 pub const SCAN_DEPTH: usize = 4;
+/// `path:12` or `path:12:5` as the path and a line and column from 0.
+pub fn split_line_suffix(arg: &str) -> Option<(PathBuf, (u32, u32))> {
+    let (rest, last) = arg.rsplit_once(':')?;
+    let last: u32 = last.parse().ok()?;
+    match rest.rsplit_once(':').and_then(|(p, l)| l.parse::<u32>().ok().map(|l| (p, l))) {
+        Some((path, line)) => Some((PathBuf::from(path), (line.max(1) - 1, last.max(1) - 1))),
+        None => Some((PathBuf::from(rest), (last.max(1) - 1, 0))),
+    }
+}
+
 /// The projects opened lately, most recent first.
 pub fn recent_projects(settings: &crate::settings::Settings) -> Vec<PathBuf> {
     match &settings.recent {
@@ -255,6 +265,8 @@ pub struct Model {
     pub fetch_every: Option<Duration>,
     /// The `claude` to run; looked up when `None`.
     pub claude: Option<PathBuf>,
+    /// A file given on the command line, to open once the window is there.
+    pub pending_file: Option<(PathBuf, Option<(u32, u32)>)>,
 }
 
 impl EventEmitter<ModelEvent> for Model {}
@@ -262,6 +274,7 @@ impl EventEmitter<ModelEvent> for Model {}
 impl Model {
     pub fn new(settings: Settings, store: Option<Store>, cx: &mut Context<Self>) -> Self {
         let mut model = Self {
+            pending_file: None,
             saved: settings.clone(),
             settings,
             store,
@@ -524,10 +537,31 @@ impl Model {
         }
     }
 
+    /// Open `path` as the command line names it: `File.java:12` or `File.java:12:5` puts the
+    /// caret on that line (and column), from 1.
+    pub fn open_arg(&mut self, arg: &Path, cx: &mut Context<Self>) {
+        if !arg.exists()
+            && let Some((path, at)) = split_line_suffix(&arg.to_string_lossy())
+            && path.is_file()
+        {
+            self.open_path(&path, cx);
+            if let Some(pending) = self.pending_file.as_mut() {
+                pending.1 = Some(at);
+            }
+            return;
+        }
+        self.open_path(arg, cx);
+    }
+
     fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         let dir = if path.is_file() { path.parent().unwrap_or(path) } else { path };
         if Repo::open(dir).is_ok() {
             self.open_repo(dir, cx);
+            // A file opens in a tab of its repository (once the window is there).
+            if path.is_file() {
+                self.pending_file = Some((path.to_owned(), None));
+                cx.emit(ModelEvent::OpenFile(path.to_owned(), None, false));
+            }
         } else if dir.is_dir() {
             self.ask(Dialog::InitRepo(dir.to_owned()), cx);
         } else {

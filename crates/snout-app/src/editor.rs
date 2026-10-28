@@ -20,16 +20,36 @@ use gpui::{
 use gpui::{Bounds, Hsla, Pixels, canvas, point, size};
 use gpui_component::dock::{PanelInfo, PanelState};
 use gpui_component::input::{
-    Editor, EditorState, InputEvent, Position, RangeDecoration, RangeDecorationCollection, RangeDecorationStyle,
-    RopeExt as _, TabSize,
+    Editor, EditorState, InputEvent, InputState, Position, RangeDecoration, RangeDecorationCollection,
+    RangeDecorationStyle, RopeExt as _, TabSize,
 };
 use snout_core::gutter::{LineChange, LineChangeKind};
 
 use crate::editing::{self, Edit};
+use crate::lang::providers::DocLink;
+
+mod lang_features;
 use crate::look;
 use crate::theme::{mix, palette};
+pub use lang_features::{class_file_name, is_class_file_path};
 
-actions!(editor, [Save, ToggleComment, DuplicateLine, MoveLineUp, MoveLineDown, ToggleSoftWrap]);
+actions!(
+    editor,
+    [
+        Save,
+        ToggleComment,
+        DuplicateLine,
+        MoveLineUp,
+        MoveLineDown,
+        ToggleSoftWrap,
+        FindReferences,
+        RenameSymbol,
+        FormatDocument,
+        OrganizeImports,
+        ShowSignature,
+        CancelRename,
+    ]
+);
 
 /// The editors' font size, which ⌘+ and ⌘- change for every tab.
 pub struct EditorFont(pub f32);
@@ -79,6 +99,8 @@ pub fn language_for(path: &Path) -> &'static str {
         "groovy" | "gradle" | "gvy" => "groovy",
         "yml" | "yaml" => "yaml",
         "properties" => "properties",
+        // A class file of a library, shown as the source the server gives.
+        "class" => "java",
         _ if name == "Jenkinsfile" => "groovy",
         _ => "text",
     }
@@ -169,6 +191,19 @@ pub struct EditorPanel {
     pub changes: Arc<Vec<LineChange>>,
     /// The gutter marks drawn on the last frame, in window coordinates.
     pub painted: Rc<RefCell<Vec<GutterMark>>>,
+    /// The document as its language server knows it (a Java file of a Gradle build).
+    pub lang: Option<Rc<DocLink>>,
+    /// What the server reports about the file, as it sent it.
+    pub problems: Vec<lsp_types::Diagnostic>,
+    /// The call whose arguments are being typed, and the task asking about it.
+    pub signature: Option<lsp_types::SignatureHelp>,
+    _signature: Option<Task<()>>,
+    /// The line signature help was asked on.
+    signature_line: Option<u32>,
+    /// The new name being typed for the symbol at the caret (F2).
+    pub rename: Option<Entity<InputState>>,
+    /// A class file of a library (`jdt://`), shown read only.
+    pub class_file: Option<(lsp_types::Uri, PathBuf)>,
     _diff: Option<Task<()>>,
     focus: FocusHandle,
     _poll: Task<()>,
@@ -185,6 +220,7 @@ impl EditorPanel {
             cx.subscribe(&state, |this, state, e: &InputEvent, cx| match e {
                 InputEvent::Change => {
                     this.revision += 1;
+                    this.lang_changed(cx);
                     // Compared in place: no copy of a large file on every keystroke.
                     let text = state.read(cx).text();
                     let dirty = text.len() != this.saved.len() || *text != this.saved.as_str();
@@ -202,8 +238,14 @@ impl EditorPanel {
                 InputEvent::Focus => cx.emit(EditorEvent::Focused),
                 _ => {}
             }),
-            // The caret moved or the text changed: find the brackets again.
-            cx.observe(&state, |this, _, cx| this.match_brackets(cx)),
+            // The caret moved or the text changed: find the brackets again, and let the
+            // signature help go once the caret leaves its line.
+            cx.observe(&state, |this, _, cx| {
+                this.match_brackets(cx);
+                this.follow_signature(cx);
+            }),
+            // The server forgets the document with its last tab.
+            cx.on_release(|this, cx| this.detach_lang(cx)),
         ];
         let brackets = state.update(cx, |s, cx| s.create_range_decorations_collection(Vec::new(), cx));
         // Look at the file on disk now and then, for changes made elsewhere.
@@ -234,6 +276,13 @@ impl EditorPanel {
             head: None,
             changes: Arc::new(Vec::new()),
             painted: Rc::new(RefCell::new(Vec::new())),
+            lang: None,
+            problems: Vec::new(),
+            signature: None,
+            _signature: None,
+            signature_line: None,
+            rename: None,
+            class_file: None,
             _diff: None,
             focus: cx.focus_handle(),
             _poll: poll,
@@ -241,6 +290,17 @@ impl EditorPanel {
         };
         this.load(path, window, cx);
         this
+    }
+
+    /// Signature help shows while the caret stays on the line it was asked on.
+    fn follow_signature(&mut self, cx: &mut Context<Self>) {
+        if self.signature.is_some() {
+            let line = self.state.read(cx).cursor_position().line;
+            if self.signature_line.is_some_and(|l| l != line) {
+                self.signature = None;
+                cx.notify();
+            }
+        }
     }
 
     /// Show the file at `path` in this tab instead (a preview tab moving on).
@@ -267,6 +327,7 @@ impl EditorPanel {
         self.head = None;
         self.changes = Arc::new(Vec::new());
         self.refresh_head(cx);
+        self.attach_lang(cx);
         cx.notify();
     }
 
@@ -339,6 +400,9 @@ impl EditorPanel {
     /// If the file changed on disk: take the new text when this tab has no changes, or
     /// say so when it has.
     pub fn check_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.class_file.is_some() {
+            return;
+        }
         let now = disk_stamp(&self.path);
         if now.is_none() || now == self.disk || self.conflict {
             return;
@@ -439,11 +503,20 @@ impl EditorPanel {
 
     /// Write the text to the file.
     pub fn save(&mut self, cx: &mut Context<Self>) {
+        if self.class_file.is_some() {
+            return;
+        }
         let text = self.state.read(cx).value().to_string();
         match std::fs::write(&self.path, &text) {
             Ok(()) => {
                 self.disk = disk_stamp(&self.path);
                 self.conflict = false;
+                if let Some(link) = &self.lang
+                    && let Some(hub) = link.hub.upgrade()
+                {
+                    let uri = link.uri.clone();
+                    hub.update(cx, |h, _| h.saved(&uri));
+                }
                 cx.emit(EditorEvent::Saved);
                 self.saved = text;
                 self.dirty = false;
@@ -700,7 +773,11 @@ impl gpui_component::dock::BasePanel for EditorPanel {
 
     fn dump(&self, _: &App) -> PanelState {
         let mut state = PanelState::new(PANEL_NAME);
-        state.info = PanelInfo::panel(serde_json::json!({ "path": self.path }));
+        let info = match &self.class_file {
+            Some((uri, root)) => serde_json::json!({ "path": self.path, "classFile": uri.as_str(), "root": root }),
+            None => serde_json::json!({ "path": self.path }),
+        };
+        state.info = PanelInfo::panel(info);
         state
     }
 }
@@ -735,6 +812,19 @@ pub fn saved_path(state: &PanelState) -> Option<PathBuf> {
     }
 }
 
+/// The class file (its URI and build) an editor tab in a saved layout showed.
+pub fn saved_class_file(state: &PanelState) -> Option<(lsp_types::Uri, PathBuf)> {
+    use std::str::FromStr as _;
+    match &state.info {
+        PanelInfo::Panel(v) => {
+            let uri = v.get("classFile").and_then(|u| u.as_str()).and_then(|u| lsp_types::Uri::from_str(u).ok())?;
+            let root = v.get("root").and_then(|r| r.as_str()).map(PathBuf::from)?;
+            Some((uri, root))
+        }
+        _ => None,
+    }
+}
+
 impl Render for EditorPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
@@ -751,6 +841,14 @@ impl Render for EditorPanel {
             .on_action(cx.listener(|this, _: &MoveLineUp, w, cx| this.move_lines(true, w, cx)))
             .on_action(cx.listener(|this, _: &MoveLineDown, w, cx| this.move_lines(false, w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSoftWrap, w, cx| this.toggle_soft_wrap(w, cx)))
+            .when(self.lang.is_some(), |d| {
+                d.on_action(cx.listener(|this, _: &FindReferences, _, cx| this.find_references(cx)))
+                    .on_action(cx.listener(|this, _: &RenameSymbol, w, cx| this.start_rename(w, cx)))
+                    .on_action(cx.listener(|this, _: &FormatDocument, _, cx| this.format_document(cx)))
+                    .on_action(cx.listener(|this, _: &OrganizeImports, _, cx| this.organize_imports(cx)))
+                    .on_action(cx.listener(|this, _: &ShowSignature, _, cx| this.ask_signature(cx)))
+                    .on_action(cx.listener(|this, _: &CancelRename, w, cx| this.cancel_rename(w, cx)))
+            })
             .child(self.breadcrumbs(cx))
             .when_some(self.error.clone(), |d, e| d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(e)))
             .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
@@ -761,7 +859,10 @@ impl Render for EditorPanel {
                     .relative()
                     .font_family(look::MONO)
                     .child(Editor::new(&self.state).appearance(false).h_full().text_size(px(font_size(cx))))
-                    .child(self.gutter(cx)),
+                    .child(self.gutter(cx))
+                    .child(self.problem_marks(cx))
+                    .children(self.signature_popup(cx))
+                    .children(self.rename_box(cx)),
             )
     }
 }

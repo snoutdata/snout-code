@@ -110,7 +110,12 @@ pub enum Mode {
     GoToLine,
     /// The command palette: every command, with its shortcut.
     Commands,
+    /// Symbols, from a language server: the workspace's (⌘T) or the file's (⇧⌘O).
+    Symbols,
 }
+
+/// Where the symbol box gets its rows: the query in, the matching symbols out.
+pub type SymbolSource = std::rc::Rc<dyn Fn(String, &mut gpui::App) -> Task<Vec<Item>>>;
 
 /// A command the palette offers: its name, what it does, and its shortcut (if any).
 pub struct Command {
@@ -147,7 +152,7 @@ pub fn parse_line(text: &str) -> Option<(u32, u32)> {
 }
 
 /// A row the box offers.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Item {
     pub path: String,
     pub at: Option<(u32, u32)>,
@@ -155,10 +160,14 @@ pub struct Item {
     /// For a command: its index in the palette's list, and its shortcut.
     pub command: Option<usize>,
     pub keys: Option<String>,
+    /// For a symbol: its build, document and position.
+    pub target: Option<(PathBuf, lsp_types::Uri, lsp_types::Position)>,
 }
 
 pub enum SearchEvent {
     Close,
+    /// Go to a symbol: its build, document and position.
+    OpenLocation(PathBuf, lsp_types::Uri, lsp_types::Position),
     GoToLine(u32, u32),
     /// Run a command from the palette.
     Run(Box<dyn gpui::Action>),
@@ -174,6 +183,8 @@ pub struct SearchView {
     pub selected: usize,
     /// The palette's commands.
     pub commands: Vec<Command>,
+    /// The symbols' source, in the symbol box.
+    pub symbols: Option<SymbolSource>,
     /// The text search running, if any.
     _search: Option<Task<()>>,
     /// The field has been given the keyboard (on the first frame).
@@ -190,6 +201,7 @@ impl SearchView {
             Mode::FindInFiles => "Find in files",
             Mode::GoToLine => "Line, or line:column",
             Mode::Commands => "Type a command",
+            Mode::Symbols => "Go to symbol",
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
@@ -198,8 +210,11 @@ impl SearchView {
             _ => {}
         })
         .detach();
-        let files =
-            Arc::new(if matches!(mode, Mode::GoToLine | Mode::Commands) { Vec::new() } else { list_files(&root) });
+        let files = Arc::new(if matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols) {
+            Vec::new()
+        } else {
+            list_files(&root)
+        });
         let mut this = Self {
             model,
             root,
@@ -209,6 +224,7 @@ impl SearchView {
             items: Vec::new(),
             selected: 0,
             commands: Vec::new(),
+            symbols: None,
             _search: None,
             focused: false,
             focus: cx.focus_handle(),
@@ -219,6 +235,12 @@ impl SearchView {
 
     pub fn focus_input(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |s, cx| s.focus(window, cx));
+    }
+
+    /// Take symbols from `source` (the symbol box).
+    pub fn set_symbols(&mut self, source: SymbolSource, cx: &mut Context<Self>) {
+        self.symbols = Some(source);
+        self.update(cx);
     }
 
     /// Offer `commands` (the palette).
@@ -248,14 +270,28 @@ impl SearchView {
                         detail: None,
                         command: Some(i),
                         keys: self.commands[i].keys.clone(),
+                        target: None,
                     })
                     .collect();
                 cx.notify();
             }
+            Mode::Symbols => {
+                let Some(source) = self.symbols.clone() else { return };
+                self._search = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(120)).await;
+                    let Ok(task) = this.update(cx, |_, cx| source(query, cx)) else { return };
+                    let items = task.await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.items = items;
+                        this.selected = 0;
+                        cx.notify();
+                    });
+                }));
+            }
             Mode::GoToFile => {
                 self.items = go_to_file(&self.files, &query)
                     .into_iter()
-                    .map(|(path, _)| Item { path, at: None, detail: None, command: None, keys: None })
+                    .map(|(path, _)| Item { path, ..Default::default() })
                     .collect();
                 cx.notify();
             }
@@ -273,8 +309,7 @@ impl SearchView {
                                 detail: Some(format!("{}: {}", h.line + 1, h.text.trim())),
                                 at: Some((h.line, h.column)),
                                 path: h.path,
-                                command: None,
-                                keys: None,
+                                ..Default::default()
                             })
                             .collect();
                         this.selected = 0;
@@ -302,6 +337,10 @@ impl SearchView {
             return;
         }
         let Some(item) = self.items.get(self.selected).cloned() else { return };
+        if let Some((root, uri, at)) = item.target {
+            cx.emit(SearchEvent::OpenLocation(root, uri, at));
+            return;
+        }
         if let Some(i) = item.command {
             let action = self.commands[i].action.boxed_clone();
             cx.emit(SearchEvent::Run(action));
@@ -329,6 +368,8 @@ impl Render for SearchView {
             Mode::FindInFiles => "Nothing found".into(),
             Mode::GoToLine => SharedString::default(),
             Mode::Commands => "No command matches".into(),
+            Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),
+            Mode::Symbols => "No symbol matches".into(),
         };
         if self.mode == Mode::GoToLine {
             let hint = match parse_line(&self.input.read(cx).value()) {

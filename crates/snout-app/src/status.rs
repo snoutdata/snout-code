@@ -25,6 +25,9 @@ pub struct StatusBar {
     pub java_missing: bool,
     /// The note saying why is open.
     pub java_note: bool,
+    /// The language servers, for what Java is doing.
+    hub: Option<Entity<crate::lang::LangHub>>,
+    _hub_watch: Option<Subscription>,
     _watch: Vec<Subscription>,
 }
 
@@ -65,7 +68,25 @@ impl StatusBar {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         let watch = vec![cx.observe(&model, |_, _, cx| cx.notify())];
         let java_missing = crate::lang::java::engine_dist().is_none();
-        Self { model, editor: None, java_missing, java_note: false, _watch: watch }
+        Self { model, editor: None, java_missing, java_note: false, hub: None, _hub_watch: None, _watch: watch }
+    }
+
+    /// Show what the language servers are doing.
+    pub fn set_hub(&mut self, hub: Entity<crate::lang::LangHub>, cx: &mut Context<Self>) {
+        self._hub_watch = Some(cx.observe(&hub, |_, _, cx| cx.notify()));
+        self.hub = Some(hub);
+    }
+
+    /// What the Java server of the editor in front (or of the project) is doing, and
+    /// whether it is busy.
+    pub fn java_status(&self, cx: &gpui::App) -> Option<(String, bool)> {
+        let hub = self.hub.as_ref()?.read(cx);
+        let path = self.editor().map(|e| {
+            let e = e.read(cx);
+            e.class_file.as_ref().map(|(_, root)| root.clone()).unwrap_or_else(|| e.path.clone())
+        });
+        let path = path.or_else(|| self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()));
+        hub.server_for(path.as_deref()).map(|s| (s.status(), s.busy()))
     }
 
     /// Follow `editor` (the tab in front), or no editor.
@@ -113,6 +134,7 @@ impl Render for StatusBar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let java_item = self.shows_java_missing(cx).then(|| self.java_missing_item(cx));
+        let java = self.java_status(cx);
         let m = self.model.read(cx);
         let status = self.editor_status(cx);
         let hover_bg = p.button_hover;
@@ -147,6 +169,25 @@ impl Render for StatusBar {
             )
             .child(div().flex_1())
             .children(java_item)
+            .when_some(java, |d, (text, busy)| {
+                d.child(
+                    div()
+                        .id("status-java")
+                        .debug_selector(|| "status-java".into())
+                        .flex_none()
+                        .h(px(20.))
+                        .px(px(6.))
+                        .flex()
+                        .items_center()
+                        .gap(px(5.))
+                        .rounded(px(4.))
+                        .whitespace_nowrap()
+                        .hover(move |s| s.bg(hover_bg))
+                        .when(busy, |d| d.child(Spinner::new().xsmall()))
+                        .child(text)
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ShowProblems), cx)),
+                )
+            })
             .when_some(status, |d, s| {
                 d.child(item("status-position", s.position.into()))
                     .when_some(s.selection, |d, sel| d.child(item("status-selection", sel.into())))

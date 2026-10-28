@@ -7399,6 +7399,7 @@ dependencies = [
  "serde",
  "serde_json",
  "snout-core",
+ "snout-lang",
  "tree-sitter",
  "tree-sitter-properties",
 ]
@@ -7435,6 +7436,18 @@ dependencies = [
  "snout-core",
  "vt100",
  "winit",
+]
+
+[[package]]
+name = "snout-lang"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "futures-channel",
+ "lsp-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

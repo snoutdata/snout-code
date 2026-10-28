@@ -13,6 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 snout-core.workspace = true
+snout-lang.workspace = true
+# The protocol's types, the version GPUI Kit's editor speaks.
+lsp-types = { version = "0.97", features = ["proposed"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -46,8 +49,6 @@ ron = "0.12"
 gpui = { workspace = true, features = ["test-support"] }
 gpui-component = { workspace = true, features = ["test-support"] }
 gpui-platform = { workspace = true, features = ["test-support"] }
-# The LSP types GPUI Kit's editor speaks (its own version).
-lsp-types = { version = "0.97", features = ["proposed"] }
 
 [[test]]
 name = "screenshots"

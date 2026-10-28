@@ -53,6 +53,8 @@ pub struct Settings {
     /// page. Unset until a project opens or the list is cleared: then the repository list
     /// stands in, newest first.
     pub recent: Option<Vec<PathBuf>>,
+    /// The JDK each Gradle build runs on (build root to JDK home), as chosen or downloaded.
+    pub project_jdks: std::collections::BTreeMap<PathBuf, PathBuf>,
 }
 
 impl Default for Settings {
@@ -70,6 +72,7 @@ impl Default for Settings {
             editor_font_size: crate::look::MONO_SIZE,
             activity: None,
             recent: None,
+            project_jdks: Default::default(),
         }
     }
 }

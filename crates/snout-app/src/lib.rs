@@ -25,6 +25,8 @@ pub mod workspace;
 #[cfg(test)]
 mod code_tests;
 #[cfg(test)]
+mod lang_tests;
+#[cfg(test)]
 mod tests;
 
 use gpui::{App, AppContext as _, Bounds, Entity, WindowBounds, WindowOptions, px, size};
@@ -51,7 +53,11 @@ pub fn model(store: Option<Store>, open: Option<std::path::PathBuf>, cx: &mut Ap
     let settings = store.as_ref().map(Store::load).unwrap_or_default();
     let model = cx.new(|cx| Model::new(settings, store, cx));
     if let Some(path) = open {
-        model.update(cx, |m, cx| m.handle(model::Action::OpenPath(path), cx));
+        model.update(cx, |m, cx| {
+            m.open_arg(&path, cx);
+            m.persist();
+            cx.notify();
+        });
     }
     model
 }
@@ -63,8 +69,14 @@ pub fn run() {
         let store = Store::for_user();
         let settings = store.as_ref().map(Store::load).unwrap_or_default();
         init(&settings, cx);
+        // Language servers start in the app (tests opt in).
+        cx.set_global(lang::hub::LangEnabled(true));
         let model = model(store, open, cx);
-        model.update(cx, |m, cx| m.start_background_fetch(snout_core::survey::FETCH_EVERY, cx));
+        // SNOUT_NO_FETCH=1 keeps the app from fetching on its own (a read only look at a
+        // repository).
+        if std::env::var_os("SNOUT_NO_FETCH").is_none() {
+            model.update(cx, |m, cx| m.start_background_fetch(snout_core::survey::FETCH_EVERY, cx));
+        }
         let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
         cx.open_window(
             WindowOptions {

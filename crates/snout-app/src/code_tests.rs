@@ -644,3 +644,11 @@ fn without_the_java_engine_the_status_bar_says_so_quietly_and_explains(cx: &mut 
     assert!(cx.debug_bounds("status-java-missing").is_none(), "with the engine there is nothing to say");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[test]
+fn a_command_line_path_may_name_a_line_and_column() {
+    use crate::model::split_line_suffix;
+    assert_eq!(split_line_suffix("/a/B.java:12"), Some(("/a/B.java".into(), (11, 0))));
+    assert_eq!(split_line_suffix("/a/B.java:12:5"), Some(("/a/B.java".into(), (11, 4))));
+    assert_eq!(split_line_suffix("/a/B.java"), None);
+}

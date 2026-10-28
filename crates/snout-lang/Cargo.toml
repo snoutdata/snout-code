@@ -1,0 +1,17 @@
+[package]
+name = "snout-lang"
+description = "SnoutCode's language server client: JSON-RPC over stdio, LSP sessions, progress and text sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+lsp-types = { version = "0.97", features = ["proposed"] }
+# The server's messages reach the app through a channel any executor can await.
+async-channel = "2"
+futures-channel = "0.3"
