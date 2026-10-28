@@ -18,8 +18,13 @@ impl Terminal {
     pub fn spawn(launch: &Launch<'_>, ctx: &egui::Context) -> anyhow::Result<Self> {
         let visuals = ctx.global_style().visuals.clone();
         let ctx = ctx.clone();
-        let pty =
-            Pty::spawn(launch, rgb(default_fg(&visuals)), rgb(default_bg(&visuals)), move || ctx.request_repaint())?;
+        let pty = Pty::spawn(
+            &*snout_host::local(),
+            launch,
+            rgb(default_fg(&visuals)),
+            rgb(default_bg(&visuals)),
+            move || ctx.request_repaint(),
+        )?;
         Ok(Self { pty, selection: None })
     }
 

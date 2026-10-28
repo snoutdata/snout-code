@@ -13,12 +13,13 @@ path = "src/main.rs"
 
 [dependencies]
 snout-core.workspace = true
+# The legacy app works on this Mac only.
+snout-host.workspace = true
 serde.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
 rfd.workspace = true
-portable-pty.workspace = true
 vt100.workspace = true
 anyhow.workspace = true
 arboard.workspace = true

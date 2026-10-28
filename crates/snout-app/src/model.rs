@@ -273,6 +273,8 @@ pub struct Model {
     fetched_at: Option<Instant>,
     /// How often a survey fetches; `None` in tests.
     pub fetch_every: Option<Duration>,
+    /// The host the projects are on.
+    pub host: snout_core::HostRef,
     /// The `claude` to run; looked up when `None`.
     pub claude: Option<PathBuf>,
     /// A file given on the command line, to open once the window is there.
@@ -287,6 +289,7 @@ impl EventEmitter<ModelEvent> for Model {}
 impl Model {
     pub fn new(settings: Settings, store: Option<Store>, cx: &mut Context<Self>) -> Self {
         let mut model = Self {
+            host: crate::host::host(cx),
             pending_file: None,
             confirm_switch: false,
             saved: settings.clone(),
@@ -543,12 +546,12 @@ impl Model {
     fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
         if self.confirm_switch && self.repo.is_some() {
             let project = path.canonicalize().unwrap_or_else(|_| path.to_owned());
-            if self.project.as_ref() != Some(&project) && Repo::open(path).is_ok() {
+            if self.project.as_ref() != Some(&project) && Repo::open(&self.host, path).is_ok() {
                 cx.emit(ModelEvent::Switch(path.to_owned()));
                 return false;
             }
         }
-        match Repo::open(path) {
+        match Repo::open(&self.host, path) {
             Ok(repo) => {
                 let root = repo.root().to_owned();
                 // The folder as opened, in the form Git gives the root (symbolic links
@@ -607,7 +610,7 @@ impl Model {
 
     fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         let dir = if path.is_file() { path.parent().unwrap_or(path) } else { path };
-        if let Ok(repo) = Repo::open(dir) {
+        if let Ok(repo) = Repo::open(&self.host, dir) {
             // A folder is the project as it is; a file opens in its repository.
             let project = if path.is_file() { repo.root().to_owned() } else { dir.to_owned() };
             let opened = self.open_repo(&project, cx);
@@ -853,7 +856,8 @@ impl Model {
 
     fn start_draft(&mut self, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else { return };
-        let Some(program) = self.claude.clone().or_else(|| self.settings.claude_path.clone()).or_else(find_claude)
+        let Some(program) =
+            self.claude.clone().or_else(|| self.settings.claude_path.clone()).or_else(|| find_claude(&*self.host))
         else {
             return self.fail(
                 "Claude Code was not found. Install it from https://docs.claude.com/en/docs/claude-code.".into(),
@@ -868,7 +872,7 @@ impl Model {
         let recent: Vec<&str> =
             self.log.iter().skip(usize::from(self.amend)).take(12).map(|c| c.summary.as_str()).collect();
         let prompt = draft_prompt(&recent, &self.commit_msg, self.amend);
-        match Draft::start(&program, repo.root(), &prompt, &patch, || {}) {
+        match Draft::start(&**repo.host(), &program, repo.root(), &prompt, &patch, || {}) {
             Ok(draft) => {
                 self.draft = Some(draft);
                 self.message = "Claude is drafting the commit message…".into();
@@ -919,12 +923,13 @@ impl Model {
         }
         self.surveying = true;
         let hold = self.survey_hold.clone();
+        let host = self.host.clone();
         self._survey = Some(cx.spawn(async move |this, cx| {
             for path in repos {
                 let fetch = due && !hold.load(Ordering::Relaxed);
-                let p = path.clone();
+                let (p, host) = (path.clone(), host.clone());
                 let tracking =
-                    cx.background_executor().spawn(async move { snout_core::survey::count(&p, fetch) }).await;
+                    cx.background_executor().spawn(async move { snout_core::survey::count(&host, &p, fetch) }).await;
                 let ok = this.update(cx, |m, cx| {
                     let open = m.repo.as_ref().is_some_and(|r| r.root() == path);
                     m.tracking.insert(path.clone(), tracking);
@@ -965,6 +970,7 @@ impl Model {
 
     fn run(&mut self, action: Action, cx: &mut Context<Self>) {
         let repo = self.repo.clone();
+        let host = self.host.clone();
         let local = |m: &mut Self, label: &str, r: snout_core::Result<()>, cx: &mut Context<Self>| {
             match r {
                 Ok(()) => m.done(label),
@@ -986,7 +992,7 @@ impl Model {
             Action::ShowNewProject => cx.emit(ModelEvent::NewProject),
             Action::PickFolder => self.pick_folder("Open project", Action::OpenPath, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
-            Action::InitRepo(path) => match Repo::init(&path) {
+            Action::InitRepo(path) => match Repo::init(&self.host, &path) {
                 Ok(repo) => {
                     let root = repo.root().to_owned();
                     self.open_repo(&root, cx);
@@ -996,7 +1002,7 @@ impl Model {
             },
             Action::PickScanFolder => self.pick_folder("Find repositories in folder", Action::Scan, cx),
             Action::Scan(root) => self.spawn("Searching for repositories", cx, move || {
-                let repos = snout_core::find_repos(&root, SCAN_DEPTH);
+                let repos = snout_core::find_repos(&*host, &root, SCAN_DEPTH);
                 Ok(Outcome::Found { root, repos })
             }),
             Action::RemoveRepo(path) => {
@@ -1025,7 +1031,7 @@ impl Model {
                 self.ask(Dialog::Clone { parent }, cx);
             }
             Action::Clone { url, dest } => self.spawn("Clone", cx, move || {
-                Repo::clone_from(&url, &dest).map(|(repo, text)| Outcome::Cloned(repo, text))
+                Repo::clone_from(&host, &url, &dest).map(|(repo, text)| Outcome::Cloned(repo, text))
             }),
             Action::SetTheme(choice) => {
                 self.settings.theme = choice;
@@ -1062,7 +1068,7 @@ impl Model {
             }
             Action::DeleteFiles(entries) => {
                 let n = entries.len();
-                let label = if snout_core::can_trash() {
+                let label = if snout_core::can_trash(&*self.host) {
                     format!("Moved {n} file(s) to the Trash")
                 } else {
                     format!("Deleted {n} file(s)")

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use snout_host::{Host, HostRef};
 
 use crate::git::{run, run_in_index, run_raw, run_unattended, run_with_stdin};
 use crate::status::FileEntry;
@@ -16,46 +17,69 @@ pub struct Tracking {
     pub behind: u32,
 }
 
-/// A Git working tree. Cheap to clone and `Send`, so it can be moved to worker threads.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// A Git working tree on a [`Host`]. Cheap to clone and `Send`, so it can be moved to
+/// worker threads. Two are equal when they are the same tree on the same host.
+#[derive(Clone, Serialize)]
 pub struct Repo {
     root: PathBuf,
+    #[serde(skip)]
+    host: HostRef,
 }
 
+impl std::fmt::Debug for Repo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Repo").field("root", &self.root).finish()
+    }
+}
+
+impl PartialEq for Repo {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
+            && std::ptr::addr_eq(std::sync::Arc::as_ptr(&self.host), std::sync::Arc::as_ptr(&other.host))
+    }
+}
+
+impl Eq for Repo {}
+
 impl Repo {
-    /// Open the working tree containing `path`.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+    /// Open the working tree on `host` containing `path`.
+    pub fn open(host: &HostRef, path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        if !path.is_dir() {
+        if !host.is_dir(path) {
             return Err(Error::NotARepo(path.to_owned()));
         }
-        let out = run_raw(path, &["rev-parse", "--show-toplevel"], None)?;
+        let out = run_raw(&**host, path, &["rev-parse", "--show-toplevel"], None)?;
         if !out.success {
             return Err(Error::NotARepo(path.to_owned()));
         }
-        Ok(Self { root: PathBuf::from(out.stdout_str().trim_end()) })
+        Ok(Self { root: PathBuf::from(out.stdout_str().trim_end()), host: host.clone() })
     }
 
-    /// Create a new repository in the existing directory `path`.
-    pub fn init(path: impl AsRef<Path>) -> Result<Self> {
+    /// Create a new repository in the existing directory `path` on `host`.
+    pub fn init(host: &HostRef, path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        if !path.is_dir() {
+        if !host.is_dir(path) {
             return Err(Error::Invalid(format!("{} is not a folder", path.display())));
         }
-        run(path, &["init", "-q"])?;
-        Self::open(path)
+        run(&**host, path, &["init", "-q"])?;
+        Self::open(host, path)
     }
 
-    /// Clone `url` into `dest` (which must not exist or be empty). Network operation.
-    pub fn clone_from(url: &str, dest: &Path) -> Result<(Self, String)> {
+    /// Clone `url` into `dest` on `host` (which must not exist or be empty). Network operation.
+    pub fn clone_from(host: &HostRef, url: &str, dest: &Path) -> Result<(Self, String)> {
         let parent = dest.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let dest_str = dest.to_string_lossy();
-        let out = run(parent, &["clone", "--progress", url, &dest_str])?;
-        Ok((Self::open(dest)?, out.text()))
+        let out = run(&**host, parent, &["clone", "--progress", url, &dest_str])?;
+        Ok((Self::open(host, dest)?, out.text()))
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The host the working tree is on.
+    pub fn host(&self) -> &HostRef {
+        &self.host
     }
 
     pub fn name(&self) -> String {
@@ -63,7 +87,12 @@ impl Repo {
     }
 
     pub(crate) fn git(&self, args: &[&str]) -> Result<crate::git::Output> {
-        run(&self.root, args)
+        run(&*self.host, &self.root, args)
+    }
+
+    /// Run git in the working tree, whatever its exit status.
+    pub(crate) fn git_raw(&self, args: &[&str]) -> Result<crate::git::Output> {
+        run_raw(&*self.host, &self.root, args, None)
     }
 
     // ----- Queries ---------------------------------------------------------------------
@@ -82,7 +111,7 @@ impl Repo {
     /// when it has none (or HEAD is detached or unborn). Cheaper than [`Self::status`],
     /// which also scans the working tree.
     pub fn tracking(&self) -> Result<Option<Tracking>> {
-        let out = run_raw(&self.root, &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], None)?;
+        let out = self.git_raw(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])?;
         if !out.success {
             return Ok(None);
         }
@@ -101,14 +130,14 @@ impl Repo {
     /// children (so a graph can be drawn from the list).
     pub fn log(&self, limit: usize) -> Result<Vec<Commit>> {
         let n = format!("-n{limit}");
-        let out = run_raw(&self.root, &["log", "--date-order", &n, log::FORMAT, log::DATE, "HEAD"], None)?;
+        let out = self.git_raw(&["log", "--date-order", &n, log::FORMAT, log::DATE, "HEAD"])?;
         if !out.success {
             // An unborn branch has no history; that is not an error.
             return if self.has_head()? { Err(git_error("log", &out)) } else { Ok(Vec::new()) };
         }
         let mut commits = log::parse(&out.stdout_str());
 
-        let unpushed = run_raw(&self.root, &["rev-list", "@{upstream}..HEAD"], None)?;
+        let unpushed = self.git_raw(&["rev-list", "@{upstream}..HEAD"])?;
         if unpushed.success {
             let ids = unpushed.stdout_str();
             let ids: std::collections::HashSet<&str> = ids.lines().collect();
@@ -181,20 +210,21 @@ impl Repo {
             return Ok(format!("{stat}\n{}", self.git(&args)?.stdout_str()));
         }
         let index = self.root.join(self.git(&["rev-parse", "--git-path", "index"])?.stdout_str().trim_end());
-        let scratch = std::env::temp_dir().join(format!(
+        let host = &*self.host;
+        let scratch = host.info().temp_dir.join(format!(
             "snout-index-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())
         ));
         let patch = (|| {
-            if index.exists() {
-                std::fs::copy(&index, &scratch)?;
+            if host.exists(&index) {
+                host.copy(&index, &scratch)?;
             }
-            run_in_index(&self.root, &scratch, &with_paths(&["add", "-A"], paths))?;
-            let stat = run_in_index(&self.root, &scratch, &stat_args)?.stdout_str();
-            Ok(format!("{stat}\n{}", run_in_index(&self.root, &scratch, &args)?.stdout_str()))
+            run_in_index(host, &self.root, &scratch, &with_paths(&["add", "-A"], paths))?;
+            let stat = run_in_index(host, &self.root, &scratch, &stat_args)?.stdout_str();
+            Ok(format!("{stat}\n{}", run_in_index(host, &self.root, &scratch, &args)?.stdout_str()))
         })();
-        let _ = std::fs::remove_file(&scratch);
+        let _ = host.remove_file(&scratch);
         patch
     }
 
@@ -241,18 +271,18 @@ impl Repo {
     /// Contents of `path` at `rev` (`""` = index). Missing objects yield empty content.
     fn blob(&self, rev: &str, path: &str) -> Result<Vec<u8>> {
         let spec = format!("{rev}:{path}");
-        let out = run_raw(&self.root, &["cat-file", "blob", &spec], None)?;
+        let out = self.git_raw(&["cat-file", "blob", &spec])?;
         Ok(if out.success { out.stdout } else { Vec::new() })
     }
 
     fn worktree_file(&self, path: &str) -> Result<Vec<u8>> {
         let full = self.root.join(path);
-        match std::fs::metadata(&full) {
-            Ok(m) if m.is_file() && m.len() as usize > diff::MAX_BYTES => {
+        match self.host.metadata(&full) {
+            Ok(m) if m.is_file() && m.len as usize > diff::MAX_BYTES => {
                 // Report as too large without reading it all into memory.
                 Ok(vec![b' '; diff::MAX_BYTES + 1])
             }
-            Ok(m) if m.is_file() => Ok(std::fs::read(full)?),
+            Ok(m) if m.is_file() => Ok(self.host.read(&full)?),
             Ok(_) => Ok(Vec::new()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
             Err(e) => Err(e.into()),
@@ -260,7 +290,7 @@ impl Repo {
     }
 
     pub(crate) fn has_head(&self) -> Result<bool> {
-        Ok(run_raw(&self.root, &["rev-parse", "--verify", "-q", "HEAD"], None)?.success)
+        Ok(self.git_raw(&["rev-parse", "--verify", "-q", "HEAD"])?.success)
     }
 
     // ----- Working tree operations -----------------------------------------------------
@@ -292,7 +322,7 @@ impl Repo {
         let mut unadd = Vec::new();
         for e in entries {
             if e.is_untracked() {
-                std::fs::remove_file(self.root.join(&e.path))?;
+                self.host.remove_file(&self.root.join(&e.path))?;
                 continue;
             }
             match e.index {
@@ -315,30 +345,25 @@ impl Repo {
         Ok(())
     }
 
-    /// Delete files from the working tree: to the Trash when `to_trash` and the system has a
-    /// `trash` command (macOS 15 and later), for good otherwise. Tracked files then show as
+    /// Delete files from the working tree: to the Trash when `to_trash` and the host has one
+    /// ([`can_trash`]), for good otherwise. Tracked files then show as
     /// deleted, ready to stage; files that were only added to the index are un-added too, so
     /// nothing is left staged for a file that is gone.
     pub fn delete_files(&self, entries: &[FileEntry], to_trash: bool) -> Result<()> {
+        let host = &*self.host;
         let paths: Vec<PathBuf> =
-            entries.iter().map(|e| self.root.join(&e.path)).filter(|p| p.symlink_metadata().is_ok()).collect();
+            entries.iter().map(|e| self.root.join(&e.path)).filter(|p| host.symlink_metadata(p).is_ok()).collect();
         if paths.is_empty() {
             return Ok(());
         }
-        if to_trash && can_trash() {
-            let out = std::process::Command::new(TRASH).args(&paths).output()?;
-            if !out.status.success() {
-                return Err(Error::Invalid(format!(
-                    "could not move to the Trash: {}",
-                    String::from_utf8_lossy(&out.stderr).trim()
-                )));
-            }
+        if to_trash && can_trash(host) {
+            host.trash(&paths).map_err(|e| Error::Invalid(format!("could not move to the Trash: {e}")))?;
         } else {
             for p in &paths {
-                if p.symlink_metadata()?.is_dir() {
-                    std::fs::remove_dir_all(p)?;
+                if host.symlink_metadata(p)?.is_dir() {
+                    host.remove_dir_all(p)?;
                 } else {
-                    std::fs::remove_file(p)?;
+                    host.remove_file(p)?;
                 }
             }
         }
@@ -362,7 +387,7 @@ impl Repo {
             args.push("--amend");
         }
         self.stage(paths)?;
-        if let Err(e) = run_with_stdin(&self.root, &args, Some(message.as_bytes())) {
+        if let Err(e) = run_with_stdin(&*self.host, &self.root, &args, Some(message.as_bytes())) {
             let _ = self.unstage(paths);
             return Err(e);
         }
@@ -378,7 +403,7 @@ impl Repo {
     /// [`Self::fetch`] with nobody watching: it never waits on a prompt or a stalled
     /// connection.
     pub fn fetch_unattended(&self) -> Result<()> {
-        run_unattended(&self.root, &["fetch", "--all", "--prune", "--quiet"]).map(drop)
+        run_unattended(&*self.host, &self.root, &["fetch", "--all", "--prune", "--quiet"]).map(drop)
     }
 
     /// Push the current branch, setting the upstream on first push.
@@ -406,12 +431,10 @@ impl Repo {
     }
 }
 
-/// macOS's command that moves files to the Trash.
-const TRASH: &str = "/usr/bin/trash";
-
-/// Whether [`Repo::delete_files`] can move files to the Trash rather than delete them for good.
-pub fn can_trash() -> bool {
-    Path::new(TRASH).exists()
+/// Whether [`Repo::delete_files`] can move files on `host` to the Trash rather than delete
+/// them for good.
+pub fn can_trash(host: &dyn Host) -> bool {
+    host.info().can_trash
 }
 
 fn with_paths<'a>(args: &[&'a str], paths: &'a [String]) -> Vec<&'a str> {
@@ -428,6 +451,7 @@ fn git_error(args: &str, out: &crate::git::Output) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::test_run as run;
     use std::fs;
 
     fn scratch_repo(name: &str) -> Repo {
@@ -438,7 +462,7 @@ mod tests {
         run(&dir, &["config", "user.name", "Test"]).unwrap();
         run(&dir, &["config", "user.email", "test@example.com"]).unwrap();
         run(&dir, &["config", "commit.gpgsign", "false"]).unwrap();
-        Repo::open(&dir).unwrap()
+        Repo::open(&snout_host::local(), &dir).unwrap()
     }
 
     #[test]

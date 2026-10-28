@@ -11,6 +11,7 @@ pub mod editor;
 pub mod files;
 pub mod git_view;
 pub mod glyphs;
+pub mod host;
 pub mod icons;
 pub mod keymap;
 pub mod lang;
@@ -99,6 +100,8 @@ pub fn model(store: Option<Store>, open: Option<std::path::PathBuf>, cx: &mut Ap
 pub fn run() {
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut App| {
+        // The workspace's host, made here: this thread is the UI thread.
+        cx.set_global(host::HostGlobal(snout_host::from_env()));
         let store = Store::for_user();
         let settings = store.as_ref().map(Store::load).unwrap_or_default();
         init(&settings, cx);

@@ -284,6 +284,7 @@ impl NewProjectView {
         let (kind, basics, boot, dir, git) = (self.kind, self.basics(cx), self.boot(), self.target(cx), self.git);
         let offline = offline || self.catalog.as_ref().is_some_and(|c| c.offline);
         let service = self.service.clone();
+        let host = crate::host::host(cx);
         self.creating = true;
         self.error = None;
         self.offer_offline = false;
@@ -295,8 +296,8 @@ impl NewProjectView {
                     Kind::SpringBoot if offline => generate::write_boot_offline(&dir, &basics, &boot),
                     Kind::SpringBoot => generate::download_boot(&service, &dir, &basics, &boot),
                 }?;
-                if git && snout_core::Repo::open(&dir).is_err() {
-                    snout_core::Repo::init(&dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+                if git && snout_core::Repo::open(&host, &dir).is_err() {
+                    snout_core::Repo::init(&host, &dir).map_err(|e| anyhow::anyhow!("{e}"))?;
                 }
                 anyhow::Ok(())
             }

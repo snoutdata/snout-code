@@ -24,10 +24,10 @@ pub struct LineChange {
     pub lines: Range<usize>,
 }
 
-/// The text of `path` (relative to `root`, `/`-separated) as HEAD has it, or `None` when
-/// HEAD does not have the file (or there is no HEAD, or it is not text).
-pub fn head_text(root: &Path, path: &str) -> Option<String> {
-    let out = run_raw(root, &["cat-file", "blob", &format!("HEAD:{path}")], None).ok()?;
+/// The text of `path` (relative to `root` on `host`, `/`-separated) as HEAD has it, or `None`
+/// when HEAD does not have the file (or there is no HEAD, or it is not text).
+pub fn head_text(host: &dyn snout_host::Host, root: &Path, path: &str) -> Option<String> {
+    let out = run_raw(host, root, &["cat-file", "blob", &format!("HEAD:{path}")], None).ok()?;
     if !out.success {
         return None;
     }
@@ -101,7 +101,7 @@ mod tests {
             assert!(std::process::Command::new("git").arg("-C").arg(&dir).args(args).status().unwrap().success())
         };
         git(&["init", "-q"]);
-        assert_eq!(head_text(&dir, "src/a.txt"), None, "no HEAD yet");
+        assert_eq!(head_text(&*snout_host::local(), &dir, "src/a.txt"), None, "no HEAD yet");
         std::fs::write(dir.join("src/a.txt"), "one\n").unwrap();
         git(&["add", "."]);
         git(&[
@@ -116,8 +116,8 @@ mod tests {
             "x",
         ]);
         std::fs::write(dir.join("src/a.txt"), "two\n").unwrap();
-        assert_eq!(head_text(&dir, "src/a.txt").as_deref(), Some("one\n"));
-        assert_eq!(head_text(&dir, "src/b.txt"), None);
+        assert_eq!(head_text(&*snout_host::local(), &dir, "src/a.txt").as_deref(), Some("one\n"));
+        assert_eq!(head_text(&*snout_host::local(), &dir, "src/b.txt"), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

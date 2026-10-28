@@ -22,8 +22,8 @@
 //!   the Mac; a remote host tunnels the port it names in the lock file back to it.
 //! - The engine distribution is looked for next to the program serving the host
 //!   ([`HostInfo::exe`]), and in development in the source tree the app was built from.
-//! - The legacy egui app (`snout-gui`) passes a [`LocalHost`] and draws its terminal on
-//!   `portable-pty` directly.
+//! - The legacy egui app (`snout-gui`) works on this Mac only: it passes a [`LocalHost`]
+//!   and keeps its own `std::fs` and `std::process` calls.
 //! - Tests set up their fixtures with `std::fs` and `std::process`.
 
 use std::collections::BTreeMap;

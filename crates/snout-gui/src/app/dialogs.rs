@@ -551,7 +551,7 @@ impl SnoutApp {
                     });
                 }
                 Dialog::ConfirmDeleteFiles(entries) => {
-                    let trash = snout_core::can_trash();
+                    let trash = snout_core::can_trash(&*snout_host::local());
                     let what = match entries.len() {
                         1 => "This file".to_owned(),
                         n => format!("These {n} files"),

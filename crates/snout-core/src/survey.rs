@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
+use snout_host::HostRef;
+
 use crate::{Repo, Tracking};
 
 /// How often a pass fetches the repositories in the list.
@@ -25,13 +27,13 @@ pub struct Survey {
 impl Survey {
     /// Start a pass; `wake` runs on the pass's thread after each repository, to have the
     /// front end come and [`Survey::poll`].
-    pub fn start(repos: Vec<PathBuf>, fetch: bool, wake: impl Fn() + Send + 'static) -> Self {
+    pub fn start(host: HostRef, repos: Vec<PathBuf>, fetch: bool, wake: impl Fn() + Send + 'static) -> Self {
         let (tx, rx) = mpsc::channel();
         let hold = Arc::new(AtomicBool::new(false));
         let held = hold.clone();
         std::thread::spawn(move || {
             for path in repos {
-                let tracking = count(&path, fetch && !held.load(Ordering::Relaxed));
+                let tracking = count(&host, &path, fetch && !held.load(Ordering::Relaxed));
                 if tx.send((path, tracking)).is_err() {
                     return; // the app let go of the pass
                 }
@@ -58,10 +60,10 @@ impl Survey {
     }
 }
 
-/// How one repository stands against its upstream, fetching first when `fetch`. Blocks;
-/// `None` when it cannot be opened or has no upstream.
-pub fn count(path: &std::path::Path, fetch: bool) -> Option<Tracking> {
-    let repo = Repo::open(path).ok()?;
+/// How one repository on `host` stands against its upstream, fetching first when `fetch`.
+/// Blocks; `None` when it cannot be opened or has no upstream.
+pub fn count(host: &HostRef, path: &std::path::Path, fetch: bool) -> Option<Tracking> {
+    let repo = Repo::open(host, path).ok()?;
     if fetch {
         // Offline, signed out, no remote: the counts from the last fetch stand.
         let _ = repo.fetch_unattended();

@@ -7420,6 +7420,7 @@ dependencies = [
  "sha2 0.10.9",
  "similar 3.2.0",
  "snout-core",
+ "snout-host",
  "snout-lang",
  "sysinfo",
  "tree-sitter",
@@ -7432,10 +7433,10 @@ name = "snout-core"
 version = "1.0.0"
 dependencies = [
  "anyhow",
- "portable-pty",
  "serde",
  "serde_json",
  "similar 3.2.0",
+ "snout-host",
  "thiserror 2.0.21",
  "vt100",
 ]
@@ -7453,10 +7454,10 @@ dependencies = [
  "muda",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
- "portable-pty",
  "rfd",
  "serde",
  "snout-core",
+ "snout-host",
  "vt100",
  "winit",
 ]

@@ -81,7 +81,7 @@ impl Repo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::run;
+    use crate::git::test_run as run;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -101,7 +101,7 @@ mod tests {
         ] {
             run(dir, &args).unwrap();
         }
-        Repo::open(dir).unwrap()
+        Repo::open(&snout_host::local(), dir).unwrap()
     }
 
     fn commit(repo: &Repo, file: &str, text: &str) {
@@ -126,7 +126,7 @@ mod tests {
         let remote = root.join("remote.git");
         run(&root, &["init", "-q", "--bare", "-b", "main", &remote.to_string_lossy()]).unwrap();
         fs::create_dir_all(root.join("a")).unwrap();
-        let a = Repo::init(root.join("a")).unwrap();
+        let a = Repo::init(&snout_host::local(), root.join("a")).unwrap();
         for args in [
             ["config", "user.name", "T"],
             ["config", "user.email", "t@example.com"],
@@ -155,7 +155,7 @@ mod tests {
 
         // The remote is replaced by an unrelated history.
         fs::create_dir_all(root.join("c")).unwrap();
-        let c = Repo::init(root.join("c")).unwrap();
+        let c = Repo::init(&snout_host::local(), root.join("c")).unwrap();
         for args in [
             ["config", "user.name", "T"],
             ["config", "user.email", "t@example.com"],

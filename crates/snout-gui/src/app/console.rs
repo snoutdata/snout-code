@@ -47,7 +47,7 @@ impl Console {
 
     /// The `claude` to run: the override, or the one found on this machine.
     pub fn claude(&self) -> Option<PathBuf> {
-        self.program.clone().or_else(find_claude)
+        self.program.clone().or_else(|| find_claude(&*snout_host::local()))
     }
 
     #[cfg(test)]

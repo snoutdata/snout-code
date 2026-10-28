@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use snout_host::{Cmd, Host, PtyProcess};
 
 const SCROLLBACK: usize = 10_000;
 
@@ -89,39 +89,39 @@ impl vt100::Callbacks for Hooks {
 pub struct Pty {
     parser: Arc<Mutex<vt100::Parser<Hooks>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Box<dyn MasterPty + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    child: Box<dyn PtyProcess>,
     shared: Arc<Shared>,
     size: (u16, u16),
     exit: Option<String>,
 }
 
 impl Pty {
-    /// Start `launch` on a 24×80 terminal with default colours `fg` on `bg`. `wake` runs on
-    /// the reader thread after each chunk of output and when the process ends.
-    pub fn spawn(launch: &Launch<'_>, fg: Rgb, bg: Rgb, wake: impl Fn() + Send + 'static) -> anyhow::Result<Self> {
+    /// Start `launch` on `host` on a 24×80 terminal with default colours `fg` on `bg`. `wake`
+    /// runs on the reader thread after each chunk of output and when the process ends.
+    pub fn spawn(
+        host: &dyn Host,
+        launch: &Launch<'_>,
+        fg: Rgb,
+        bg: Rgb,
+        wake: impl Fn() + Send + 'static,
+    ) -> anyhow::Result<Self> {
         let size = (24, 80);
-        let pair = native_pty_system().openpty(pty_size(size))?;
-        let mut cmd = CommandBuilder::new(launch.program);
-        cmd.args(launch.args);
-        cmd.cwd(launch.cwd);
+        let mut cmd = Cmd::new(launch.program).args(launch.args).cwd(launch.cwd);
         for name in launch.env_remove {
-            cmd.env_remove(name);
+            cmd = cmd.env_remove(name);
         }
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
+        cmd = cmd.env("TERM", "xterm-256color").env("COLORTERM", "truecolor");
         for (k, v) in launch.env {
-            cmd.env(k, v);
+            cmd = cmd.env(k, v);
         }
-        let child = pair.slave.spawn_command(cmd)?;
-        drop(pair.slave);
+        let mut child = host.spawn_pty(&cmd, size.0, size.1)?;
 
         let hooks = Hooks { replies: Vec::new(), title: String::new(), fg, bg };
         let parser = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(size.0, size.1, SCROLLBACK, hooks)));
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let writer = Arc::new(Mutex::new(child.take_writer()?));
         let shared = Arc::new(Shared::default());
 
-        let mut reader = pair.master.try_clone_reader()?;
+        let mut reader = child.take_reader()?;
         let (p, w, s) = (parser.clone(), writer.clone(), shared.clone());
         std::thread::Builder::new().name("terminal-reader".into()).spawn(move || {
             let mut buf = [0u8; 16 * 1024];
@@ -147,7 +147,7 @@ impl Pty {
             wake();
         })?;
 
-        Ok(Self { parser, writer, master: pair.master, child, shared, size, exit: None })
+        Ok(Self { parser, writer, child, shared, size, exit: None })
     }
 
     /// The parser, for painting its screen; hold it briefly, the reader thread waits.
@@ -161,7 +161,7 @@ impl Pty {
             let status = self.child.try_wait().ok().flatten().or_else(|| self.child.wait().ok());
             self.exit = Some(match status {
                 Some(s) if s.success() => "exited".to_owned(),
-                Some(s) => format!("exited with code {}", s.exit_code()),
+                Some(s) => format!("exited with code {}", s.code.unwrap_or(-1)),
                 None => "exited".to_owned(),
             });
         }
@@ -206,7 +206,7 @@ impl Pty {
         }
         self.size = size;
         self.parser().screen_mut().set_size(size.0, size.1);
-        let _ = self.master.resize(pty_size(size));
+        let _ = self.child.resize(size.0, size.1);
         true
     }
 
@@ -290,10 +290,6 @@ pub fn selected_text(screen: &vt100::Screen, (a, b): ((u16, u16), (u16, u16))) -
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-fn pty_size((rows, cols): (u16, u16)) -> PtySize {
-    PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }
 }
 
 // ----- Input ---------------------------------------------------------------------------
@@ -492,7 +488,7 @@ mod tests {
         let script = r#"printf 'hello \033[31mred\033[0m\n'; stty raw -echo; printf '\033[6n'; r=$(dd bs=1 count=6 2>/dev/null); stty sane; printf 'reply:%s\n' "$(printf %s "$r" | tr -d '\033')"; read line; echo "got:$line""#;
         let args = ["-c".to_owned(), script.to_owned()];
         let launch = Launch { program: Path::new("/bin/sh"), args: &args, cwd: &dir, env: &[], env_remove: &[] };
-        let mut term = Pty::spawn(&launch, (255, 255, 255), (0, 0, 0), || {}).unwrap();
+        let mut term = Pty::spawn(&*snout_host::local(), &launch, (255, 255, 255), (0, 0, 0), || {}).unwrap();
         wait_for(&term, "hello red");
         wait_for(&term, "reply:[2;1R");
         {

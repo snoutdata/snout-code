@@ -657,7 +657,7 @@ fn follow_watched(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Work
         }
         let before = before.or_else(|| {
             let rel = path.strip_prefix(&root).ok()?.to_string_lossy().replace('\\', "/");
-            snout_core::gutter::head_text(&root, &rel)
+            snout_core::gutter::head_text(&*crate::host::host(cx), &root, &rel)
         });
         let before = before.unwrap_or_default();
         if before == text {

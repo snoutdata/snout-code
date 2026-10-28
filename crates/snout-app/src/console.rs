@@ -191,7 +191,9 @@ impl ConsolePanel {
         self.sessions.remove(root);
         self.error = None;
         let found = match self.kind {
-            Kind::Claude => self.model.read(cx).settings.claude_path.clone().or_else(find_claude),
+            Kind::Claude => {
+                self.model.read(cx).settings.claude_path.clone().or_else(|| find_claude(&*crate::host::host(cx)))
+            }
             Kind::Shell => Some(std::env::var_os("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from)),
         };
         let shell_args = ["-l".to_owned()];
@@ -212,7 +214,7 @@ impl ConsolePanel {
             Kind::Shell => Vec::new(),
         };
         let launch = Launch { program: &program, args, cwd: root, env: &env, env_remove };
-        match Pty::spawn(&launch, rgb(p.fg), rgb(p.panel), || {}) {
+        match Pty::spawn(&*crate::host::host(cx), &launch, rgb(p.fg), rgb(p.panel), || {}) {
             Ok(pty) => {
                 self.sessions.insert(root.to_owned(), Session { pty, seen_gen: 0, refreshed: Instant::now() });
                 window.focus(&self.focus, cx);

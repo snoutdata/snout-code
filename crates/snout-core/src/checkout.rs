@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::git::run_raw;
 use crate::{Branch, BranchKind, Error, Repo, Result};
 
 /// Something that can be checked out.
@@ -85,7 +84,7 @@ impl Repo {
 
         let mut outcome = CheckoutOutcome { output: out.text(), warning: None };
         if stashed {
-            let pop = run_raw(self.root(), &["stash", "pop"], None)?;
+            let pop = self.git_raw(&["stash", "pop"])?;
             if !pop.success {
                 outcome.warning = Some(format!(
                     "Checked out {}, but re-applying your local changes conflicted.\n\
@@ -125,18 +124,18 @@ impl Repo {
     }
 
     fn stash_top(&self) -> Result<Option<String>> {
-        let out = run_raw(self.root(), &["rev-parse", "-q", "--verify", "refs/stash"], None)?;
+        let out = self.git_raw(&["rev-parse", "-q", "--verify", "refs/stash"])?;
         Ok(out.success.then(|| out.stdout_str().trim().to_owned()))
     }
 
     pub(crate) fn ref_exists(&self, full_ref: &str) -> Result<bool> {
-        Ok(run_raw(self.root(), &["show-ref", "--verify", "-q", full_ref], None)?.success)
+        Ok(self.git_raw(&["show-ref", "--verify", "-q", full_ref])?.success)
     }
 
     /// Full commit id for a commit-ish.
     pub fn resolve_commit(&self, rev: &str) -> Result<String> {
         let spec = format!("{}^{{commit}}", rev.trim());
-        let out = run_raw(self.root(), &["rev-parse", "--verify", "-q", "--end-of-options", &spec], None)?;
+        let out = self.git_raw(&["rev-parse", "--verify", "-q", "--end-of-options", &spec])?;
         if out.success && !rev.trim().is_empty() {
             Ok(out.stdout_str().trim().to_owned())
         } else {
@@ -154,7 +153,7 @@ impl Repo {
     /// from a remote branch sets it as the upstream.
     pub fn create_branch(&self, name: &str, start: Option<&str>, checkout: bool) -> Result<()> {
         let name = name.trim();
-        crate::git::run(self.root(), &["check-ref-format", "--branch", name])
+        self.git(&["check-ref-format", "--branch", name])
             .map_err(|_| Error::Invalid(format!("`{name}` is not a valid branch name")))?;
         let mut args = if checkout { vec!["switch", "-c", name] } else { vec!["branch", name] };
         if let Some(start) = start {
@@ -174,14 +173,14 @@ impl Repo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::run;
+    use crate::git::test_run as run;
     use std::fs;
 
     fn repo_with_branches(name: &str) -> Repo {
         let dir = std::env::temp_dir().join(format!("snout-checkout-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let repo = Repo::init(&dir).unwrap();
+        let repo = Repo::init(&snout_host::local(), &dir).unwrap();
         for args in [
             ["config", "user.name", "Test"],
             ["config", "user.email", "t@example.com"],

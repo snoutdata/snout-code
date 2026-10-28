@@ -8,11 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+snout-host.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 similar.workspace = true
-# The terminal under the Claude Code console (pseudo-terminal and xterm parser).
-portable-pty.workspace = true
+# The terminal under the Claude Code console (xterm parser; the host runs the pseudo-terminal).
 vt100.workspace = true
 anyhow.workspace = true
 

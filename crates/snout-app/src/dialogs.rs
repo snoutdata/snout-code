@@ -58,7 +58,7 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
         Dialog::NewBranch(_) => "New branch".into(),
         Dialog::DeleteBranch { .. } => "Delete branch?".into(),
         Dialog::DeleteRemoteBranch(r) => format!("Delete branch from {}?", r.remote).into(),
-        Dialog::ConfirmDeleteFiles(_) if snout_core::can_trash() => "Move to the Trash?".into(),
+        Dialog::ConfirmDeleteFiles(_) if snout_core::can_trash(&*m.host) => "Move to the Trash?".into(),
         Dialog::ConfirmDeleteFiles(_) => "Delete files?".into(),
         Dialog::PullProblem { problem: PullProblem::Divergent, .. } => "Both sides have new commits".into(),
         Dialog::PullProblem { .. } => "No shared history".into(),
@@ -363,7 +363,7 @@ impl Render for DialogBody {
             Dialog::ConfirmDeleteFiles(entries) => {
                 let what =
                     if entries.len() == 1 { "This file".to_owned() } else { format!("These {} files", entries.len()) };
-                let (text, label) = if snout_core::can_trash() {
+                let (text, label) = if snout_core::can_trash(&*crate::host::host(cx)) {
                     (format!("{what} go to the Trash, where you can still get them back."), "Move to Trash")
                 } else {
                     (format!("{what} are deleted from disk for good."), "Delete")

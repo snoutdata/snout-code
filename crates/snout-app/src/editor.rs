@@ -466,8 +466,10 @@ impl EditorPanel {
         let Some(root) = self.root.clone() else { return };
         let Ok(rel) = self.path.strip_prefix(&root).map(|p| p.to_string_lossy().replace('\\', "/")) else { return };
         let path = self.path.clone();
+        let host = crate::host::host(cx);
         self._diff = Some(cx.spawn(async move |this, cx| {
-            let head = cx.background_executor().spawn(async move { snout_core::gutter::head_text(&root, &rel) }).await;
+            let head =
+                cx.background_executor().spawn(async move { snout_core::gutter::head_text(&*host, &root, &rel) }).await;
             let _ = this.update(cx, |this, cx| {
                 if this.path == path {
                     this.head = head.map(Arc::new);

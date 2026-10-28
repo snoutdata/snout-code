@@ -1,8 +1,8 @@
-//! Thin wrapper around invoking the `git` binary.
+//! Thin wrapper around invoking the `git` binary on a [`Host`].
 
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+
+use snout_host::{Cmd, Host};
 
 use crate::{Error, Result};
 
@@ -32,9 +32,9 @@ impl Output {
     }
 }
 
-fn command(dir: &Path, args: &[&str]) -> Command {
-    let mut cmd = Command::new("git");
-    cmd.arg("-C")
+fn command(dir: &Path, args: &[&str]) -> Cmd {
+    Cmd::new("git")
+        .arg("-C")
         .arg(dir)
         .args(["-c", "core.quotepath=off", "-c", "color.ui=never"])
         .args(args)
@@ -44,55 +44,51 @@ fn command(dir: &Path, args: &[&str]) -> Command {
         // with another process (an editor, an agent) working in the same repository.
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("LC_ALL", "C")
-        .stdin(Stdio::null());
-    cmd
 }
 
-/// Run git and return its output regardless of the exit status.
-pub(crate) fn run_raw(dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Output> {
-    let mut cmd = command(dir, args);
-    let out = match stdin {
-        None => cmd.output()?,
-        Some(input) => {
-            cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-            let mut child = cmd.spawn()?;
-            child.stdin.take().expect("piped stdin").write_all(input)?;
-            child.wait_with_output()?
-        }
-    };
-    Ok(Output { stdout: out.stdout, stderr: out.stderr, success: out.status.success() })
+fn output(out: snout_host::Output) -> Output {
+    Output { stdout: out.stdout, stderr: out.stderr, success: out.status.success() }
+}
+
+/// Run git on `host` and return its output regardless of the exit status.
+pub(crate) fn run_raw(host: &dyn Host, dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Output> {
+    Ok(output(host.run(&command(dir, args), stdin)?))
 }
 
 /// Run git against another index file, leaving the repository's own index alone.
-pub(crate) fn run_in_index(dir: &Path, index: &Path, args: &[&str]) -> Result<Output> {
-    let out = command(dir, args).env("GIT_INDEX_FILE", index).output()?;
-    let out = Output { stdout: out.stdout, stderr: out.stderr, success: out.status.success() };
+pub(crate) fn run_in_index(host: &dyn Host, dir: &Path, index: &Path, args: &[&str]) -> Result<Output> {
+    let out = output(host.run(&command(dir, args).env("GIT_INDEX_FILE", index), None)?);
     if out.success { Ok(out) } else { Err(Error::Git { args: args.join(" "), message: out.text() }) }
 }
 
 /// Run git with nobody watching: SSH never asks anything on the terminal (a host key, a
 /// passphrase) and a stalled connection gives up instead of hanging. The user's own SSH
 /// command, if they set one, is left alone.
-pub(crate) fn run_unattended(dir: &Path, args: &[&str]) -> Result<Output> {
+pub(crate) fn run_unattended(host: &dyn Host, dir: &Path, args: &[&str]) -> Result<Output> {
     let slow = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"];
     let mut cmd = command(dir, &[&slow[..], args].concat());
-    let own_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
-        || std::env::var_os("GIT_SSH").is_some()
-        || run_raw(dir, &["config", "core.sshCommand"], None).is_ok_and(|o| o.success);
+    let own_ssh = host.info().var("GIT_SSH_COMMAND").is_some()
+        || host.info().var("GIT_SSH").is_some()
+        || run_raw(host, dir, &["config", "core.sshCommand"], None).is_ok_and(|o| o.success);
     if !own_ssh {
-        cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=20");
+        cmd = cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=20");
     }
-    let out = cmd.output()?;
-    let out = Output { stdout: out.stdout, stderr: out.stderr, success: out.status.success() };
+    let out = output(host.run(&cmd, None)?);
     if out.success { Ok(out) } else { Err(Error::Git { args: args.join(" "), message: out.text() }) }
 }
 
 /// Run git and turn a non-zero exit status into [`Error::Git`].
-pub(crate) fn run(dir: &Path, args: &[&str]) -> Result<Output> {
-    run_with_stdin(dir, args, None)
+pub(crate) fn run(host: &dyn Host, dir: &Path, args: &[&str]) -> Result<Output> {
+    run_with_stdin(host, dir, args, None)
 }
 
-pub(crate) fn run_with_stdin(dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Output> {
-    let out = run_raw(dir, args, stdin)?;
+pub(crate) fn run_with_stdin(host: &dyn Host, dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Output> {
+    let out = run_raw(host, dir, args, stdin)?;
     if out.success { Ok(out) } else { Err(Error::Git { args: args.join(" "), message: out.text() }) }
+}
+
+/// [`run`] on this Mac, for tests that set up repositories.
+#[cfg(test)]
+pub(crate) fn test_run(dir: &Path, args: &[&str]) -> Result<Output> {
+    run(&*snout_host::local(), dir, args)
 }

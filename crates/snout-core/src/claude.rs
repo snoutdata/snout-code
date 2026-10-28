@@ -4,8 +4,9 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
+
+use snout_host::{Cmd, Host, Process, Stdio};
 
 /// Inherited variables that would make Claude Code think it runs nested inside another
 /// session (the app started from a Claude Code terminal), or misreport the terminal.
@@ -15,50 +16,52 @@ pub const ENV_REMOVE: &[&str] =
 /// Patches longer than this are cut; the stat at their head still names every file.
 const MAX_PATCH: usize = 60_000;
 
-/// `claude` on PATH or in the places its installers put it (an app started from Finder
-/// does not get the shell's PATH).
-pub fn find_claude() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path_dirs = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
-    let extra = [".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin"]
+/// `claude` on the host's PATH or in the places its installers put it (an app started from
+/// Finder does not get the shell's PATH).
+pub fn find_claude(host: &dyn Host) -> Option<PathBuf> {
+    let home = &host.info().home;
+    let extra: Vec<PathBuf> = [".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin"]
         .iter()
-        .filter_map(|d| home.as_ref().map(|h| h.join(d)))
-        .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
-    path_dirs.into_iter().chain(extra).map(|d| d.join("claude")).find(|p| p.is_file())
+        .filter(|_| !home.as_os_str().is_empty())
+        .map(|d| home.join(d))
+        .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from))
+        .collect();
+    snout_host::which(host, &["claude"], &extra)
 }
 
 /// A running draft. Dropping it stops the process.
 pub struct Draft {
-    child: Arc<Mutex<Child>>,
+    child: Arc<Mutex<Box<dyn Process>>>,
     rx: mpsc::Receiver<Result<String, String>>,
 }
 
 impl Draft {
-    /// Start `program -p prompt` in `root` with `patch` on stdin; `wake` runs on a worker
-    /// thread when the result is ready for [`Draft::poll`].
+    /// Start `program -p prompt` on `host` in `root` with `patch` on stdin; `wake` runs on a
+    /// worker thread when the result is ready for [`Draft::poll`].
     pub fn start(
+        host: &dyn Host,
         program: &Path,
         root: &Path,
         prompt: &str,
         patch: &str,
         wake: impl FnOnce() + Send + 'static,
     ) -> Result<Self, String> {
-        let mut cmd = Command::new(program);
-        cmd.args(["-p", prompt, "--output-format", "text", "--no-session-persistence", "--strict-mcp-config"])
+        let mut cmd = Cmd::new(program)
+            .args(["-p", prompt, "--output-format", "text", "--no-session-persistence", "--strict-mcp-config"])
             // Text in, text out: nothing to read or run.
             .args(["--tools", ""])
-            .current_dir(root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .cwd(root)
+            .stdin(Stdio::Piped)
+            .stdout(Stdio::Piped)
+            .stderr(Stdio::Piped);
         for var in ENV_REMOVE {
-            cmd.env_remove(var);
+            cmd = cmd.env_remove(var);
         }
-        let mut child = cmd.spawn().map_err(|e| format!("Could not start {}: {e}", program.display()))?;
+        let mut child = host.spawn(&cmd).map_err(|e| format!("Could not start {}: {e}", program.display()))?;
         let (mut stdin, mut stdout, mut stderr) = (
-            child.stdin.take().expect("piped"),
-            child.stdout.take().expect("piped"),
-            child.stderr.take().expect("piped"),
+            child.take_stdin().expect("piped"),
+            child.take_stdout().expect("piped"),
+            child.take_stderr().expect("piped"),
         );
         let child = Arc::new(Mutex::new(child));
         let patch = cut(patch, MAX_PATCH).to_owned();

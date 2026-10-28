@@ -331,7 +331,7 @@ impl SnoutApp {
     // ----- State ---------------------------------------------------------------------
 
     fn open_repo(&mut self, path: &Path) {
-        match Repo::open(path) {
+        match Repo::open(&snout_host::local(), path) {
             Ok(repo) => {
                 let root = repo.root().to_owned();
                 self.remember(&root);
@@ -357,7 +357,7 @@ impl SnoutApp {
     /// initialize one there or to search it for repositories.
     fn open_path(&mut self, path: &Path) {
         let dir = if path.is_file() { path.parent().unwrap_or(path) } else { path };
-        if Repo::open(dir).is_ok() {
+        if Repo::open(&snout_host::local(), dir).is_ok() {
             self.open_repo(dir);
         } else if dir.is_dir() {
             self.dialog = Some(Dialog::InitRepo(dir.to_owned()));
@@ -543,7 +543,7 @@ impl SnoutApp {
         let recent: Vec<&str> =
             self.log.iter().skip(usize::from(self.amend)).take(12).map(|c| c.summary.as_str()).collect();
         let prompt = draft::prompt(&recent, &self.commit_msg, self.amend);
-        match Draft::start(&program, repo.root(), &prompt, &patch, {
+        match Draft::start(&**repo.host(), &program, repo.root(), &prompt, &patch, {
             let ctx = ctx.clone();
             move || ctx.request_repaint()
         }) {
@@ -598,7 +598,7 @@ impl SnoutApp {
                 }
             }
             Action::OpenPath(path) => self.open_path(&path),
-            Action::InitRepo(path) => match Repo::init(&path) {
+            Action::InitRepo(path) => match Repo::init(&snout_host::local(), &path) {
                 Ok(repo) => {
                     let root = repo.root().to_owned();
                     self.open_repo(&root);
@@ -612,7 +612,7 @@ impl SnoutApp {
                 }
             }
             Action::Scan(root) => self.spawn(ctx, "Searching for repositories", move || {
-                let repos = snout_core::find_repos(&root, SCAN_DEPTH);
+                let repos = snout_core::find_repos(&*snout_host::local(), &root, SCAN_DEPTH);
                 Ok(JobOutcome::Found { root, repos })
             }),
             Action::RemoveRepo(path) => {
@@ -649,7 +649,7 @@ impl SnoutApp {
                 self.dialog = Some(Dialog::Clone { url: String::new(), parent });
             }
             Action::Clone { url, dest } => self.spawn(ctx, "Clone", move || {
-                Repo::clone_from(&url, &dest).map(|(repo, text)| JobOutcome::Cloned(repo, text))
+                Repo::clone_from(&snout_host::local(), &url, &dest).map(|(repo, text)| JobOutcome::Cloned(repo, text))
             }),
             Action::SetTheme(choice) => {
                 self.settings.theme = choice;
@@ -676,7 +676,7 @@ impl SnoutApp {
             }
             Action::DeleteFiles(entries) => {
                 let n = entries.len();
-                let label = if snout_core::can_trash() {
+                let label = if snout_core::can_trash(&*snout_host::local()) {
                     format!("Moved {n} file(s) to the Trash")
                 } else {
                     format!("Deleted {n} file(s)")
@@ -867,9 +867,9 @@ impl SnoutApp {
         };
         if due {
             self.fetched_at = Some(Instant::now());
-            self.survey = Some(Survey::start(repos, true, wake));
+            self.survey = Some(Survey::start(snout_host::local(), repos, true, wake));
         } else if self.recount || repos.iter().any(|p| !self.tracking.contains_key(p)) {
-            self.survey = Some(Survey::start(repos, false, wake));
+            self.survey = Some(Survey::start(snout_host::local(), repos, false, wake));
         }
         self.recount = false;
         if let (Some(every), Some(at)) = (self.fetch_every, self.fetched_at) {
