@@ -34,6 +34,8 @@ pub struct DocLink {
     /// and inserts an accepted completion without asking: so an edit it did not ask about
     /// is no typing, even when it adds a single character (`ArrayLis` to `ArrayList`).
     pub typed: std::cell::Cell<bool>,
+    /// A Spring Boot configuration file (properties or YAML), which the engine serves.
+    pub config: bool,
 }
 
 impl DocLink {
@@ -213,7 +215,9 @@ impl CompletionProvider for JavaProviders {
 
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
         self.0.typed.set(true);
-        new_text == "." || new_text.chars().last().is_some_and(|c| c.is_alphanumeric() || c == '_')
+        // In a configuration file, keys have dashes, and values follow `=` or `: `.
+        let config = self.0.config && (new_text.ends_with(['=', '-', ':']) || new_text == " ");
+        config || new_text == "." || new_text.chars().last().is_some_and(|c| c.is_alphanumeric() || c == '_')
     }
 }
 

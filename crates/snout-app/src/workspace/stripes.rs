@@ -1,7 +1,7 @@
 //! The tool window stripes: thin icon strips down both edges of the window. Left, at the
 //! top: the Project and Git activities; at the bottom: Run, Debug, Build, Output,
-//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Gradle and Notifications, in the
-//! right dock. The item showing is a filled accent square with a white glyph.
+//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Gradle, Spring and Notifications,
+//! in the right dock. The item showing is a filled accent square with a white glyph.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -22,6 +22,9 @@ use crate::theme::{Palette, palette};
 /// A stripe's width.
 pub const STRIPE_W: f32 = 40.;
 
+/// The least width the right dock opens to for the Spring window.
+const SPRING_W: f32 = 460.;
+
 /// A tool window a stripe opens.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tool {
@@ -33,13 +36,14 @@ pub enum Tool {
     Problems,
     Claude,
     Gradle,
+    Spring,
     Notifications,
 }
 
 impl Tool {
     pub fn placement(self) -> DockPlacement {
         match self {
-            Tool::Gradle | Tool::Notifications => DockPlacement::Right,
+            Tool::Gradle | Tool::Spring | Tool::Notifications => DockPlacement::Right,
             _ => DockPlacement::Bottom,
         }
     }
@@ -54,6 +58,7 @@ impl Tool {
             Tool::Problems => Icon::Problems,
             Tool::Claude => Icon::Spark,
             Tool::Gradle => Icon::Build,
+            Tool::Spring => Icon::Leaf,
             Tool::Notifications => Icon::Bell,
         }
     }
@@ -68,6 +73,7 @@ impl Tool {
             Tool::Problems => "Problems (⇧⌘M)",
             Tool::Claude => "Claude Code (⌘J)",
             Tool::Gradle => "Gradle",
+            Tool::Spring => "Spring",
             Tool::Notifications => "Notifications",
         }
     }
@@ -82,6 +88,7 @@ impl Tool {
             Tool::Problems => "stripe-problems",
             Tool::Claude => "stripe-claude",
             Tool::Gradle => "stripe-gradle",
+            Tool::Spring => "stripe-spring",
             Tool::Notifications => "stripe-notifications",
         }
     }
@@ -164,6 +171,7 @@ impl Workspace {
             Tool::Problems => Some(self.tabs.problems),
             Tool::Claude => self.tabs.console,
             Tool::Gradle => Some(self.tabs.gradle),
+            Tool::Spring => Some(self.tabs.spring),
             Tool::Notifications => Some(self.tabs.notifications),
         }
     }
@@ -201,6 +209,10 @@ impl Workspace {
                     d.toggle_dock(place, window, cx);
                 }
                 d.select_panel(id, window, cx);
+                // The Spring window's table wants more room than the dock's first width.
+                if tool == Tool::Spring && d.dock_size(place).is_some_and(|w| w < px(SPRING_W)) {
+                    d.set_dock_size(place, px(SPRING_W), window, cx);
+                }
             }
         });
         cx.notify();
@@ -291,6 +303,7 @@ impl Workspace {
             .border_l_1()
             .border_color(p.border)
             .child(self.tool_item(Tool::Gradle, None, cx))
+            .child(self.tool_item(Tool::Spring, None, cx))
             .child(self.tool_item(Tool::Notifications, Some((notes, p.accent)), cx))
             .into_any_element()
     }

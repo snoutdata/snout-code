@@ -81,6 +81,14 @@ pub enum Icon {
     Variable,
     /// A stack frame: three bars, stacked.
     Frames,
+    /// A Spring bean: a leaf on its stem, with its midrib.
+    Leaf,
+    /// An injection point: an arrow into a socket.
+    Inject,
+    /// An endpoint: a globe.
+    Endpoint,
+    /// Copy: two sheets, one over the other.
+    Copy,
 }
 
 /// One stroke of an icon, in grid units (16 across).
@@ -337,6 +345,28 @@ impl Icon {
                 Line(&[(2.5, 3.5), (13.5, 3.5)], false),
                 Line(&[(2.5, 8.), (13.5, 8.)], false),
                 Line(&[(2.5, 12.5), (13.5, 12.5)], false),
+            ],
+            Icon::Leaf => &[
+                Curve((3., 13.), (3., 3.), (13.5, 2.5)),
+                Curve((13.5, 2.5), (13., 13.), (3., 13.)),
+                Line(&[(3., 13.), (9.5, 6.5)], false),
+                Line(&[(3., 13.), (1.5, 14.5)], false),
+            ],
+            Icon::Inject => &[
+                Line(&[(1.5, 8.), (7.5, 8.)], false),
+                Line(&[(5., 5.5), (7.5, 8.), (5., 10.5)], false),
+                Circle(11.3, 8., 3.2, false),
+                Circle(11.3, 8., 1.2, true),
+            ],
+            Icon::Endpoint => &[
+                Circle(8., 8., 6., false),
+                Curve((8., 2.), (3.6, 8.), (8., 14.)),
+                Curve((8., 2.), (12.4, 8.), (8., 14.)),
+                Line(&[(2., 8.), (14., 8.)], false),
+            ],
+            Icon::Copy => &[
+                Line(&[(5.5, 5.5), (13.5, 5.5), (13.5, 14.), (5.5, 14.)], true),
+                Line(&[(3., 11.), (2.5, 11.), (2.5, 2.5), (10.5, 2.5), (10.5, 3.)], false),
             ],
             Icon::Jdk => &[
                 Line(&[(2.5, 6.5), (2.5, 11.5), (4.5, 14.), (9.5, 14.), (11.5, 11.5), (11.5, 6.5)], true),

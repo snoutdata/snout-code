@@ -108,6 +108,20 @@ mod shots {
         Debug,
         /// The Gradle window's tasks, and a task's run in the Build window.
         Gradle,
+        /// Spring, on the engine's `spring-app` fixture with the answers it recorded.
+        Spring(SpringShot),
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    pub enum SpringShot {
+        /// The controller: beans, injections, endpoints, a chooser, `@Value` hints.
+        Gutter,
+        /// The application class (a run icon beside its bean), and the Beans tab.
+        Beans,
+        /// The Endpoints tab, and an endpoint's tooltip in the gutter.
+        Endpoints,
+        /// `application.properties` with its warnings and completion.
+        Properties,
     }
 
     const MAIN_JAVA: &str = "package demo.app;\n\nimport java.util.List;\n\npublic final class Main {\n    public static void main(String[] args) {\n        List<String> names = List.of(\"ada\", \"grace\");\n        int total = 0;\n        for (int i = 1; i <= 3; i++) {\n            total = add(total, i);\n        }\n        System.out.println(\"total \" + total + \" for \" + names);\n    }\n\n    static int add(int a, int b) {\n        return a + b;\n    }\n}\n";
@@ -124,6 +138,10 @@ mod shots {
     include!("fixtures/project_fixture.rs");
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
+        // `SNOUT_SHOT_ONLY=<part of a name>` takes only the shots it names.
+        if std::env::var("SNOUT_SHOT_ONLY").is_ok_and(|only| !name.contains(&only)) {
+            return;
+        }
         let repo = demo_repo(name);
         if matches!(select, Some(Select::Commit(..))) {
             with_merge(&repo);
@@ -557,6 +575,7 @@ mod shots {
                 .unwrap();
                 std::mem::forget(_server);
             }
+            Some(Select::Spring(kind)) => spring_setup(kind, &repo, &mut cx, handle.into(), &ws, &model),
             Some(Select::Gradle) => {
                 use serde_json::json;
                 let runs = cx.update(|cx| ws.read(cx).runs.clone());
@@ -658,6 +677,201 @@ mod shots {
         }
         let _ = std::fs::remove_dir_all(repo);
         println!("screenshot {name}: ok");
+    }
+
+    /// Completion items given as they are, for a shot of the completion menu.
+    struct FixedCompletions(Vec<lsp_types::CompletionItem>);
+
+    impl gpui_component::input::CompletionProvider for FixedCompletions {
+        fn completions(
+            &self,
+            _: &gpui_component::input::Rope,
+            _: usize,
+            _: lsp_types::CompletionContext,
+            _: &mut gpui::Window,
+            _: &mut gpui::App,
+        ) -> gpui::Task<anyhow::Result<lsp_types::CompletionResponse>> {
+            gpui::Task::ready(Ok(lsp_types::CompletionResponse::Array(self.0.clone())))
+        }
+
+        fn is_completion_trigger(&self, _: usize, _: &str, _: &mut gpui::App) -> bool {
+            false
+        }
+    }
+
+    /// The editor of the file whose path ends with `name`.
+    fn editor_named(
+        ws: &gpui::Entity<Workspace>,
+        name: &str,
+        cx: &mut HeadlessAppContext,
+    ) -> gpui::Entity<snout_app::editor::EditorPanel> {
+        cx.update(|cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path.ends_with(name)).unwrap())
+    }
+
+    /// Draw a few frames, so the editors lay out and the gutter knows its lanes.
+    fn settle(handle: gpui::AnyWindowHandle, cx: &mut HeadlessAppContext) {
+        for _ in 0..3 {
+            cx.advance_clock(Duration::from_millis(300));
+            cx.run_until_parked();
+            cx.update_window(handle, |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        }
+    }
+
+    /// The middle of the Spring lane on the line holding `find`.
+    fn spring_lane(
+        editor: &gpui::Entity<snout_app::editor::EditorPanel>,
+        find: &str,
+        cx: &mut HeadlessAppContext,
+    ) -> gpui::Point<gpui::Pixels> {
+        cx.update(|cx| {
+            let e = editor.read(cx);
+            let (a, z) = e.lanes.get().spring();
+            let s = e.state.read(cx);
+            let off = s.text().to_string().find(find).unwrap();
+            let b = s.range_to_bounds(&(off..off)).unwrap();
+            gpui::point((a + z) / 2., b.center().y)
+        })
+    }
+
+    /// The `spring-app` fixture in `repo`, the model fed what the engine answered, and the
+    /// shot's file open.
+    fn spring_setup(
+        kind: SpringShot,
+        repo: &Path,
+        cx: &mut HeadlessAppContext,
+        handle: gpui::AnyWindowHandle,
+        ws: &gpui::Entity<Workspace>,
+        model: &gpui::Entity<snout_app::model::Model>,
+    ) {
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../engine/lsp-driver/src/test/fixtures/spring-app");
+        for item in ["build.gradle", "settings.gradle", "src"] {
+            assert!(Command::new("cp").arg("-R").arg(from.join(item)).arg(repo).status().unwrap().success());
+        }
+        git(repo, &["add", "-A"]);
+        git(repo, &["commit", "-qm", "The Spring application"]);
+        let text = include_str!("fixtures/spring-app.json").replace("{ROOT}", &repo.to_string_lossy());
+        let f: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let modules = snout_app::spring::parse_beans(&f["beans"]);
+        let endpoints = snout_app::spring::parse_endpoints(&f["endpoints"]);
+        let spring = cx.update(|cx| ws.read(cx).spring.clone());
+        let ends = endpoints.clone();
+        cx.update(|cx| spring.update(cx, |s, cx| s.set_model(modules, ends, cx)));
+        let open = |cx: &mut HeadlessAppContext, path: PathBuf, at: (u32, u32)| {
+            cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(path, Some(at)), cx)))
+        };
+        let java = repo.join("src/main/java/demo");
+        let marks = |name: &str| snout_app::spring::FileSpring::parse(&f["injections"][name], &endpoints);
+        let feed = |cx: &mut HeadlessAppContext, name: &str, marks: snout_app::spring::FileSpring| {
+            let editor = editor_named(ws, name, cx);
+            cx.update(|cx| {
+                editor.update(cx, |e, cx| {
+                    e.spring = Some(std::rc::Rc::new(marks));
+                    cx.notify();
+                })
+            });
+            editor
+        };
+        match kind {
+            SpringShot::Gutter | SpringShot::Endpoints => {
+                let file = java.join("web/GreetingController.java");
+                // An edit since the commit, for the Git marks beside the others.
+                let text = std::fs::read_to_string(&file).unwrap();
+                std::fs::write(
+                    &file,
+                    text.replace(
+                        "        return body;",
+                        "        // Echoed as it came.
+        return body;",
+                    ),
+                )
+                .unwrap();
+                open(cx, file.clone(), (20, 0));
+                let editor = feed(cx, "GreetingController.java", marks("GreetingController"));
+                let hints = snout_app::spring::parse_hints(&f["inlayHints"]);
+                let diags: Vec<lsp_types::Diagnostic> = serde_json::from_value(f["diagnostics"].clone()).unwrap();
+                cx.update(|cx| {
+                    editor.update(cx, |e, cx| {
+                        e.hints = std::rc::Rc::new(hints);
+                        e.set_diagnostics(diags, cx);
+                    })
+                });
+                let runs = cx.update(|cx| ws.read(cx).runs.clone());
+                cx.update(|cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&file, 40, cx)));
+                settle(handle, cx);
+                if kind == SpringShot::Gutter {
+                    let at = spring_lane(&editor, "public GreetingController(", cx);
+                    cx.update(|cx| {
+                        editor.update(cx, |e, cx| {
+                            let line = e.spring.as_ref().unwrap().line(32).unwrap().clone();
+                            let items = snout_app::editor::spring_items(&line);
+                            e.gutter_menu = Some(snout_app::editor::GutterMenu::Spring { at, items });
+                            cx.notify();
+                        })
+                    });
+                } else {
+                    let at = spring_lane(&editor, "public String hello", cx);
+                    cx.update(|cx| {
+                        editor.update(cx, |e, cx| {
+                            let tip = e.spring.as_ref().unwrap().line(39).unwrap().tooltip();
+                            e.gutter_tip = Some((39, at, tip));
+                            cx.notify();
+                        })
+                    });
+                    let win = cx.update(|cx| ws.read(cx).spring_window.clone());
+                    cx.update(|cx| win.update(cx, |w, cx| w.set_tab(snout_app::spring::window::Tab::Endpoints, cx)));
+                    cx.update_window(handle, |_, window, cx| {
+                        ws.update(cx, |ws, cx| ws.toggle_tool(snout_app::workspace::Tool::Spring, window, cx));
+                    })
+                    .unwrap();
+                }
+            }
+            SpringShot::Beans => {
+                open(cx, java.join("config/AppConfig.java"), (0, 0));
+                feed(cx, "AppConfig.java", marks("AppConfig"));
+                open(cx, java.join("DemoApplication.java"), (8, 0));
+                // The application class's bean mark, as the engine marks it.
+                let app = r#"{"uri":"","lines":[{"line":8,"injections":[],"beans":[{"name":"demoApplication","type":"demo.DemoApplication","kind":"configuration","stereotype":"org.springframework.boot.autoconfigure.SpringBootApplication","declaringType":"demo.DemoApplication","language":"java","injectedInto":[]}]}]}"#;
+                let app: serde_json::Value = serde_json::from_str(app).unwrap();
+                feed(cx, "DemoApplication.java", snout_app::spring::FileSpring::parse(&app, &[]));
+                let win = cx.update(|cx| ws.read(cx).spring_window.clone());
+                cx.update(|cx| {
+                    win.update(cx, |w, cx| {
+                        w.toggle("m:spring-app:demo.greeting", cx);
+                        w.toggle("m:spring-app:demo.config", cx);
+                    })
+                });
+                cx.update_window(handle, |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.toggle_tool(snout_app::workspace::Tool::Spring, window, cx));
+                })
+                .unwrap();
+            }
+            SpringShot::Properties => {
+                let file = repo.join("src/main/resources/application.properties");
+                std::fs::write(&file, std::fs::read_to_string(&file).unwrap() + "demo.").unwrap();
+                open(cx, file.clone(), (8, 5));
+                let editor = editor_named(ws, "application.properties", cx);
+                let diags: Vec<lsp_types::Diagnostic> =
+                    serde_json::from_value(f["propertiesDiagnostics"].clone()).unwrap();
+                let items: Vec<lsp_types::CompletionItem> =
+                    serde_json::from_value(f["completion_props"]["items"].clone()).unwrap();
+                cx.update(|cx| editor.update(cx, |e, cx| e.set_diagnostics(diags, cx)));
+                settle(handle, cx);
+                cx.update_window(handle, |_, window, cx| {
+                    editor.update(cx, |e, cx| {
+                        e.state.update(cx, |s, cx| {
+                            s.lsp_mut().completion_provider = Some(std::rc::Rc::new(FixedCompletions(items)));
+                            s.focus(window, cx);
+                            s.show_completions(window, cx);
+                        })
+                    })
+                })
+                .unwrap();
+            }
+        }
     }
 
     /// The Project view of a real folder with a model the engine wrote for it, when
@@ -866,6 +1080,224 @@ mod shots {
         println!("screenshot {name}: ok");
     }
 
+    /// Spring on a real project, for real: the engine reads it, the window shows its beans
+    /// and endpoints, the gutter and the `@Value` hints come from the engine, and
+    /// completion in its `application.properties`. Only with `SNOUT_SHOT_SPRING=<project>`
+    /// and `SNOUT_SHOT_SPRING_JDK=<JDK home for its Gradle>`; `SNOUT_SHOT_SPRING_FILES`
+    /// names, separated by commas, the controller, the `@Value` class and the properties
+    /// file under it (defaults fit a project with one of each). The project is only read:
+    /// nothing is saved.
+    fn real_spring_shot(theme: ThemeChoice) {
+        use gpui_component::input::RopeExt as _;
+        let (Some(folder), Some(jdk)) =
+            (std::env::var_os("SNOUT_SHOT_SPRING"), std::env::var_os("SNOUT_SHOT_SPRING_JDK"))
+        else {
+            return;
+        };
+        let folder = PathBuf::from(folder).canonicalize().unwrap();
+        let files: Vec<PathBuf> = std::env::var("SNOUT_SHOT_SPRING_FILES")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|f| !f.is_empty())
+            .map(|f| folder.join(f))
+            .collect();
+        assert_eq!(files.len(), 3, "SNOUT_SHOT_SPRING_FILES names the controller, a @Value class and the properties");
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let mut settings =
+            Settings { theme, repos: vec![folder.clone()], current: Some(folder.clone()), ..Settings::default() };
+        settings.project_jdks.insert(folder.clone(), PathBuf::from(jdk));
+        cx.update(|cx| snout_app::init(&settings, cx));
+        cx.update(|cx| cx.set_global(snout_app::lang::hub::LangEnabled(true)));
+        let model = cx.update(|cx| {
+            let settings = settings.clone();
+            cx.new(|cx| snout_app::model::Model::new(settings, None, cx))
+        });
+        let mut ws = None;
+        let handle = cx
+            .open_window(size(px(1400.), px(900.)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+                ws = Some(view.clone());
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        let ws = ws.unwrap();
+        let any: gpui::AnyWindowHandle = handle.into();
+        cx.allow_parking();
+        let pump = |cx: &mut HeadlessAppContext, secs: u64, done: &dyn Fn(&mut HeadlessAppContext) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+            while std::time::Instant::now() < deadline {
+                cx.advance_clock(Duration::from_millis(200));
+                cx.run_until_parked();
+                cx.update_window(any, |_, window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                })
+                .unwrap();
+                if done(cx) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            false
+        };
+        let snap = |cx: &mut HeadlessAppContext, name: &str| {
+            let image = cx.capture_screenshot(any).expect("offscreen rendering must be available");
+            if let Some(out) = std::env::var_os("SNOUT_SCREENSHOT") {
+                let out = PathBuf::from(out);
+                std::fs::create_dir_all(&out).unwrap();
+                image.save(out.join(format!("{name}.png"))).unwrap();
+            }
+            println!("screenshot {name}: ok");
+        };
+        cx.update_window(any, |_, window, cx| {
+            ws.update(cx, |w, cx| w.show_activity(Activity::Project, window, cx));
+        })
+        .unwrap();
+        let open = |cx: &mut HeadlessAppContext, path: &Path, at: (u32, u32)| {
+            cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(path.to_owned(), Some(at)), cx)))
+        };
+        // The controller: its beans, injections and endpoints in the gutter.
+        let controller = &files[0];
+        let text = std::fs::read_to_string(controller).unwrap();
+        let first = text.lines().position(|l| l.contains("@Autowired")).unwrap_or(0) as u32;
+        open(&mut cx, controller, (first, 0));
+        let spring = cx.update(|cx| ws.read(cx).spring.clone());
+        let started = std::time::Instant::now();
+        assert!(pump(&mut cx, 1800, &|cx| cx.update(|cx| spring.read(cx).loaded)), "the Spring model is read");
+        let (beans, endpoints) = cx.update(|cx| (spring.read(cx).bean_count(), spring.read(cx).endpoints.len()));
+        println!("spring: {beans} beans, {endpoints} endpoints, after {:.0} s", started.elapsed().as_secs_f32());
+        let editor = editor_named(&ws, controller.file_name().unwrap().to_str().unwrap(), &mut cx);
+        let e2 = editor.clone();
+        assert!(
+            pump(&mut cx, 120, &|cx| cx.update(|cx| e2.read(cx).spring.as_ref().is_some_and(|s| !s.lines.is_empty()))),
+            "the controller's marks"
+        );
+        let marks = cx.update(|cx| {
+            let s = editor.read(cx).spring.clone().unwrap();
+            s.lines.iter().map(|l| format!("{}:{:?}", l.line + 1, l.mark().unwrap())).collect::<Vec<_>>()
+        });
+        println!("spring: {} marks in {}: {}", marks.len(), controller.display(), marks.join(" "));
+        // The Beans tab beside it, and a service's tooltip.
+        cx.update_window(any, |_, window, cx| {
+            ws.update(cx, |ws, cx| ws.toggle_tool(snout_app::workspace::Tool::Spring, window, cx));
+        })
+        .unwrap();
+        pump(&mut cx, 2, &|_| false);
+        let at = spring_lane(&editor, "@Autowired", &mut cx);
+        cx.update(|cx| {
+            editor.update(cx, |e, cx| {
+                let line = e.spring.as_ref().unwrap().line(first).cloned();
+                if let Some(line) = line {
+                    e.gutter_tip = Some((first, at, line.tooltip()));
+                }
+                cx.notify();
+            })
+        });
+        pump(&mut cx, 1, &|_| false);
+        snap(&mut cx, "spring-real-gutter-beans");
+        // An injection's mark goes to its bean; the bean's lists where it is injected.
+        cx.update(|cx| editor.update(cx, |e, _| e.gutter_tip = None));
+        let target = cx.update(|cx| {
+            let s = editor.read(cx).spring.clone().unwrap();
+            s.line(first).and_then(|l| l.injections.first()).and_then(|i| i.beans.first()).map(|b| b.target())
+        });
+        if let Some(target) = target {
+            cx.update(|cx| spring.update(cx, |s, cx| s.open(target.clone(), cx)));
+            let (path, line) = target.file().unwrap();
+            let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+            assert!(
+                pump(&mut cx, 120, &|cx| cx.update(|cx| {
+                    ws.read(cx).editors(cx).iter().any(|e| {
+                        e.read(cx).path == path && e.read(cx).spring.as_ref().is_some_and(|s| s.line(line).is_some())
+                    })
+                })),
+                "the bean's file opens with its marks"
+            );
+            let service = editor_named(&ws, &name, &mut cx);
+            let bean = cx.update(|cx| service.read(cx).spring.as_ref().unwrap().line(line).cloned().unwrap());
+            println!("spring: {name}:{} {}", line + 1, bean.tooltip().replace('\n', "; "));
+            let at = cx.update(|cx| {
+                let e = service.read(cx);
+                let (a, z) = e.lanes.get().spring();
+                let s = e.state.read(cx);
+                let off = s.text().line_start_offset(line as usize);
+                let b = s.range_to_bounds(&(off..off)).unwrap();
+                gpui::point((a + z) / 2., b.center().y)
+            });
+            cx.update(|cx| {
+                service.update(cx, |e, cx| {
+                    let items = snout_app::editor::spring_items(&bean);
+                    e.gutter_menu = Some(snout_app::editor::GutterMenu::Spring { at, items });
+                    cx.notify();
+                })
+            });
+            pump(&mut cx, 1, &|_| false);
+            snap(&mut cx, "spring-real-bean-menu");
+            cx.update(|cx| service.update(cx, |e, _| e.gutter_menu = None));
+        }
+        // The Endpoints tab, searching.
+        let win = cx.update(|cx| ws.read(cx).spring_window.clone());
+        cx.update_window(any, |_, window, cx| {
+            win.update(cx, |w, cx| w.show_endpoints(Some("logistic".into()), window, cx));
+        })
+        .unwrap();
+        let shown = cx.update(|cx| win.read(cx).endpoint_rows(cx).len());
+        println!("spring: {shown} endpoints match 'logistic'");
+        pump(&mut cx, 1, &|_| false);
+        snap(&mut cx, "spring-real-endpoints");
+        // The @Value hints.
+        let values = &files[1];
+        let text = std::fs::read_to_string(values).unwrap();
+        let line = text.lines().position(|l| l.contains("@Value")).unwrap_or(0) as u32;
+        open(&mut cx, values, (line, 0));
+        let editor = editor_named(&ws, values.file_name().unwrap().to_str().unwrap(), &mut cx);
+        let e2 = editor.clone();
+        assert!(pump(&mut cx, 120, &|cx| cx.update(|cx| !e2.read(cx).hints.is_empty())), "the @Value hints");
+        let hints = cx.update(|cx| editor.read(cx).hints.len());
+        println!("spring: {hints} @Value hints in {}", values.display());
+        snap(&mut cx, "spring-real-value-hints");
+        // Completion in application.properties, typed but never saved.
+        let props = &files[2];
+        let lines = std::fs::read_to_string(props).unwrap().lines().count() as u32;
+        open(&mut cx, props, (lines, 0));
+        let editor = editor_named(&ws, props.file_name().unwrap().to_str().unwrap(), &mut cx);
+        let e2 = editor.clone();
+        pump(&mut cx, 60, &|cx| cx.update(|cx| !e2.read(cx).problems.is_empty()));
+        let warnings = cx.update(|cx| editor.read(cx).problems.len());
+        println!("spring: {warnings} warnings in {}", props.display());
+        cx.update_window(any, |_, window, cx| {
+            editor.update(cx, |e, cx| {
+                e.state.update(cx, |s, cx| {
+                    let end = s.text().len();
+                    s.set_selected_range(end..end, cx);
+                    s.focus(window, cx);
+                    s.insert("\nspring.servlet.multipart.", window, cx);
+                })
+            })
+        })
+        .unwrap();
+        pump(&mut cx, 3, &|_| false);
+        cx.update_window(any, |_, window, cx| {
+            editor.update(cx, |e, cx| e.state.update(cx, |s, cx| s.show_completions(window, cx)))
+        })
+        .unwrap();
+        let e2 = editor.clone();
+        let completed = pump(&mut cx, 60, &|cx| {
+            cx.update(|cx| !e2.read(cx).state.read(cx).completion_menu_state().items.is_empty())
+        });
+        let items = cx.update(|cx| editor.read(cx).state.read(cx).completion_menu_state().items.len());
+        println!("spring: completion offers {items} keys ({completed})");
+        snap(&mut cx, "spring-real-properties");
+        // Nothing is saved: the tab is put back as the file is.
+        cx.update_window(any, |_, window, cx| editor.update(cx, |e, cx| e.reload(window, cx))).unwrap();
+        let hub = cx.update(|cx| ws.read(cx).hub.clone());
+        cx.update(|cx| hub.update(cx, |h, _| h.shutdown_all()));
+    }
+
     /// The splash window on its own.
     fn splash_shot(name: &str, theme: ThemeChoice) {
         let mut cx = HeadlessAppContext::with_platform(
@@ -934,5 +1366,27 @@ mod shots {
         shot("debug-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Debug));
         shot("debug-light", ThemeChoice::Light, Activity::Project, Some(Select::Debug));
         shot("gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Gradle));
+        real_spring_shot(ThemeChoice::Dark);
+        shot("spring-gutter-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));
+        shot("spring-gutter-light", ThemeChoice::Light, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));
+        shot("spring-beans-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::Beans)));
+        shot(
+            "spring-endpoints-dark",
+            ThemeChoice::Dark,
+            Activity::Project,
+            Some(Select::Spring(SpringShot::Endpoints)),
+        );
+        shot(
+            "spring-endpoints-light",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::Spring(SpringShot::Endpoints)),
+        );
+        shot(
+            "spring-properties-dark",
+            ThemeChoice::Dark,
+            Activity::Project,
+            Some(Select::Spring(SpringShot::Properties)),
+        );
     }
 }

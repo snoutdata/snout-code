@@ -69,6 +69,13 @@ pub fn open(cx: &mut TestAppContext, settings: Settings) -> (Entity<Model>, Enti
     (model, ws.unwrap(), vcx)
 }
 
+/// Held by each test that runs the real engine: one at a time, so a test's timeouts do not
+/// count the others' Gradle and jdtls.
+pub fn engine_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn with_repo(repo: &Path) -> Settings {
     Settings { repos: vec![repo.to_owned()], current: Some(repo.to_owned()), ..Settings::default() }
 }

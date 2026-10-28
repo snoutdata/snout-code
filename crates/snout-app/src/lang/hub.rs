@@ -116,6 +116,8 @@ struct Doc {
     editors: Vec<WeakEntity<EditorPanel>>,
     /// A class file (`jdt://`): read only, never opened on the server.
     virtual_doc: bool,
+    /// The language the server is told it is: `java`, or a Spring Boot configuration file's.
+    language: &'static str,
 }
 
 /// The bar asking to download a JDK, and how the download goes.
@@ -454,7 +456,7 @@ impl LangHub {
             client.notify_raw(
                 "textDocument/didOpen",
                 json!({ "textDocument": {
-                    "uri": doc.uri.as_str(), "languageId": "java", "version": doc.version,
+                    "uri": doc.uri.as_str(), "languageId": doc.language, "version": doc.version,
                     "text": doc.text.to_string()
                 } }),
             );
@@ -679,8 +681,9 @@ impl LangHub {
 
     // ----- Documents ---------------------------------------------------------------------
 
-    /// An editor shows the Java file `path` with `text`: tell its server (starting it).
-    /// Returns the document's URI and build, for the editor's providers.
+    /// An editor shows the Java file (or Spring Boot configuration file) `path` with
+    /// `text`: tell its server (starting it). Returns the document's URI and build, for the
+    /// editor's providers.
     pub fn open_doc(
         &mut self,
         editor: &WeakEntity<EditorPanel>,
@@ -700,10 +703,11 @@ impl LangHub {
             return Some((uri, doc.root.clone(), diags.unwrap_or_default()));
         }
         self.ensure_server(&root, cx);
+        let language = language_id(path);
         if let Some(client) = self.client(&root) {
             client.notify_raw(
                 "textDocument/didOpen",
-                json!({ "textDocument": { "uri": uri.as_str(), "languageId": "java", "version": 1, "text": text.to_string() } }),
+                json!({ "textDocument": { "uri": uri.as_str(), "languageId": language, "version": 1, "text": text.to_string() } }),
             );
         }
         self.docs.insert(
@@ -715,6 +719,7 @@ impl LangHub {
                 version: 1,
                 editors: vec![editor.clone()],
                 virtual_doc: false,
+                language,
             },
         );
         Some((uri, root, Vec::new()))
@@ -729,6 +734,7 @@ impl LangHub {
             version: 1,
             editors: Vec::new(),
             virtual_doc: true,
+            language: "java",
         });
         if let Some(doc) = self.docs.get_mut(&uri_key(uri)) {
             doc.editors.push(editor.clone());
@@ -796,6 +802,11 @@ impl LangHub {
                 c.notify_raw("workspace/didChangeWatchedFiles", json!({ "changes": changes }));
             }
         }
+    }
+
+    /// The language id a document went to its server with.
+    pub fn language_of(&self, uri: &Uri) -> Option<&'static str> {
+        self.docs.get(&uri_key(uri)).map(|d| d.language)
     }
 
     /// The diagnostics of one document.
@@ -1010,6 +1021,12 @@ impl LangHub {
     }
 }
 
+/// The language id a document goes to the engine with: a Spring Boot configuration file
+/// (`application.properties`, `application-dev.yml`), which the engine serves itself, or Java.
+pub fn language_id(path: &Path) -> &'static str {
+    if crate::spring::is_config_file(path) { crate::spring::config_language_id(path) } else { "java" }
+}
+
 /// `initialize` for jdtls: the editor's capabilities, the folder, and jdtls's settings.
 fn initialize_params(root: &Path) -> Value {
     let uri = snout_lang::uri::from_path(root);
@@ -1026,6 +1043,9 @@ fn initialize_params(root: &Path) -> Value {
                 "autobuild": { "enabled": true },
                 "format": { "enabled": true },
                 "signatureHelp": { "enabled": true },
+                // Inlay hints are the engine's Spring `@Value` values only; the editor draws
+                // them at the end of their lines.
+                "inlayHints": { "parameterNames": { "enabled": "none" } },
                 "completion": { "enabled": true, "guessMethodArguments": false },
                 "configuration": { "updateBuildConfiguration": "disabled" }
             } },
@@ -1040,6 +1060,17 @@ fn initialize_params(root: &Path) -> Value {
 
 #[cfg(test)]
 impl LangHub {
+    /// Stop and forget the server of `root` (a test that wants it started again).
+    pub fn forget_server(&mut self, root: &Path) {
+        self.pending.retain(|r| r != root);
+        if let Some(mut server) = self.servers.remove(root) {
+            server.stopped = true;
+            if let Some(c) = server.client.take() {
+                c.kill(Duration::from_millis(500));
+            }
+        }
+    }
+
     /// Hold `list` as what a server of `root` published for `uri`, without running one
     /// (tests of what reads the diagnostics).
     pub fn insert_published(&mut self, root: &Path, uri: String, list: Vec<Diagnostic>) {

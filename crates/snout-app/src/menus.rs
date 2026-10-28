@@ -80,6 +80,9 @@ actions!(
         Resume,
         SyncGradle,
         RefreshGradle,
+        RefreshSpring,
+        CollapseSpring,
+        ShowSpring,
     ]
 );
 
@@ -150,6 +153,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Resume Program", Box::new(Resume)),
         ("Sync Gradle Project", Box::new(SyncGradle)),
         ("Refresh Gradle Tasks", Box::new(RefreshGradle)),
+        ("Spring Beans and Endpoints", Box::new(ShowSpring)),
+        ("Read the Spring Model Again", Box::new(RefreshSpring)),
         ("Send Selection to Claude", Box::new(e::SendToClaude)),
         ("Accept Claude's Change", Box::new(e::AcceptChanges)),
         ("Reject Claude's Change", Box::new(e::RejectChanges)),

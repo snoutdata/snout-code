@@ -18,34 +18,68 @@ use crate::glyphs::{Icon, icon};
 use crate::run::{FileRunnables, Target};
 use crate::theme::{mix, palette};
 
+/// The gutter left of the line numbers, from the left: a lane for the problem dots, one for
+/// the run icons and one for the Spring marks. A file of no code has only the first.
+pub const PROBLEM_W: f32 = 10.;
+pub const ICON_W: f32 = 14.;
+/// The editor's padding left of the line numbers, for code and for other files.
+pub const CODE_PAD: f32 = PROBLEM_W + 2. * ICON_W + 3.;
+pub const PLAIN_PAD: f32 = PROBLEM_W;
+
+/// The gutter's padding for `path`.
+pub fn gutter_pad(path: &std::path::Path) -> f32 {
+    if debuggable(path) || crate::spring::has_marks(path) { CODE_PAD } else { PLAIN_PAD }
+}
+
 /// Where the gutter's lanes are, from the editor's last layout.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Lanes {
     pub bounds: Bounds<Pixels>,
     /// Where the code starts (unscrolled).
     pub code_x: Pixels,
+    /// The padding left of the line numbers.
+    pub pad: f32,
 }
 
 impl Lanes {
-    /// The run icons' lane, left of the line numbers.
-    fn run(&self) -> (Pixels, Pixels) {
-        (self.bounds.left(), self.bounds.left() + px(13.))
+    pub fn new(bounds: Bounds<Pixels>, code_x: Pixels, pad: f32) -> Self {
+        Self { bounds, code_x, pad }
+    }
+
+    /// The problem dots' lane, at the left edge.
+    pub fn problems(&self) -> (Pixels, Pixels) {
+        (self.bounds.left(), self.bounds.left() + px(PROBLEM_W))
+    }
+
+    /// The run icons' lane, after the problems'.
+    pub fn run(&self) -> (Pixels, Pixels) {
+        let left = self.bounds.left() + px(PROBLEM_W);
+        (left, left + px(ICON_W))
+    }
+
+    /// The Spring marks' lane, after the run icons'.
+    pub fn spring(&self) -> (Pixels, Pixels) {
+        let left = self.bounds.left() + px(PROBLEM_W + ICON_W);
+        (left, left + px(ICON_W))
     }
 
     /// The breakpoints' lane: over the line numbers.
-    fn breakpoints(&self) -> (Pixels, Pixels) {
-        (self.bounds.left() + px(13.), (self.code_x - px(24.)).max(self.bounds.left() + px(26.)))
+    pub fn breakpoints(&self) -> (Pixels, Pixels) {
+        let left = self.bounds.left() + px(self.pad);
+        (left, (self.code_x - px(10.)).max(left + px(16.)))
     }
 }
 
-/// A menu the gutter put up: Run and Debug for a run icon, or a breakpoint's condition.
+/// A menu the gutter put up: Run and Debug for a run icon, a breakpoint's condition, or
+/// a Spring mark's places.
 pub enum GutterMenu {
     Run { at: Point<Pixels>, target: Target },
     Condition { at: Point<Pixels>, line: u32, input: Entity<InputState> },
+    Spring { at: Point<Pixels>, items: Vec<super::spring_gutter::SpringItem> },
 }
 
 /// The visible buffer lines and the top of each, in window coordinates.
-fn visible_lines(state: &EditorState) -> Vec<(usize, Pixels)> {
+pub(super) fn visible_lines(state: &EditorState) -> Vec<(usize, Pixels)> {
     let Some(rows) = state.visible_row_range() else { return Vec::new() };
     let text = state.text();
     let lines = text.lines_len();
@@ -112,12 +146,13 @@ impl EditorPanel {
         let (state, lanes) = (self.state.clone(), self.lanes.clone());
         let mono = crate::look::mono_font(cx);
         let size_pt = font_size(cx);
+        let pad = self.gutter_pad;
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
                 let s = state.read(cx);
                 let Some(code_x) = code_x(s) else { return };
-                let l = Lanes { bounds, code_x };
+                let l = Lanes { bounds, code_x, pad };
                 lanes.set(l);
                 let Some(line_height) = s.line_height() else { return };
                 let visible = visible_lines(s);
@@ -211,7 +246,10 @@ impl EditorPanel {
             return false;
         };
         let line = *line as u32;
-        let in_run_lane = x < l.run().1;
+        if e.button == gpui::MouseButton::Left && self.spring_press(e.position, cx) {
+            return true;
+        }
+        let in_run_lane = x >= l.run().0 && x < l.run().1;
         let runnable =
             self.runnables.as_ref().and_then(|r| r.items.iter().find(|i| i.line == line).map(|i| i.target.clone()));
         if e.button == gpui::MouseButton::Left
@@ -313,6 +351,10 @@ impl EditorPanel {
                     )))
                     .into_any_element();
                 (*at, body)
+            }
+            GutterMenu::Spring { at, items } => {
+                let items = items.clone();
+                (*at, self.spring_menu_body(&items, cx))
             }
             GutterMenu::Condition { at, line, input } => {
                 let line = *line;

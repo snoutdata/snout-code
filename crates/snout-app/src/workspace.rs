@@ -45,6 +45,7 @@ pub struct Tabs {
     pub output: PanelId,
     pub problems: PanelId,
     pub gradle: PanelId,
+    pub spring: PanelId,
     pub notifications: PanelId,
     pub run: PanelId,
     pub debug: PanelId,
@@ -81,6 +82,9 @@ pub struct Workspace {
     pub settings_sheet: Option<Entity<crate::settings_view::SettingsView>>,
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::run::gradle_window::GradleWindow>,
+    pub spring_window: Entity<crate::spring::window::SpringWindow>,
+    /// The project's Spring model, for the Spring window and the editors' gutters.
+    pub spring: Entity<crate::spring::Spring>,
     pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
     /// Runs, tests and the debugger, and their tool windows.
     pub runs: Entity<crate::run::Runs>,
@@ -213,6 +217,8 @@ impl Workspace {
         cx.set_global(crate::run::RunsHandle(runs.clone()));
         let marks = runs.read(cx).marks.clone();
         cx.set_global(crate::run::MarksHandle(marks));
+        let spring = cx.new(|cx| crate::spring::Spring::new(runs.clone(), hub.clone(), cx));
+        cx.set_global(crate::spring::SpringHandle(spring.clone()));
         let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), cx));
         let references = cx.new(|cx| crate::lang::panels::ReferencesPanel::new(hub.clone(), cx));
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
@@ -242,6 +248,7 @@ impl Workspace {
         let debug_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Debug, window, cx));
         let build_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Build, window, cx));
         let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
+        let spring_window = cx.new(|cx| crate::spring::window::SpringWindow::new(spring.clone(), window, cx));
         let mut tabs = Tabs {
             welcome: PanelId::from(welcome.entity_id()),
             console: None,
@@ -249,6 +256,7 @@ impl Workspace {
             output: PanelId::from(output.entity_id()),
             problems: PanelId::from(problems.entity_id()),
             gradle: PanelId::from(gradle.entity_id()),
+            spring: PanelId::from(spring_window.entity_id()),
             notifications: PanelId::from(notifications.entity_id()),
             run: PanelId::from(run_window.entity_id()),
             debug: PanelId::from(debug_window.entity_id()),
@@ -266,6 +274,7 @@ impl Workspace {
         panels.push((panel_handle(debug_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
+        panels.push((panel_handle(spring_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
 
         let saved = model.read(cx).settings.dock.clone();
@@ -316,6 +325,7 @@ impl Workspace {
             cx.subscribe_in(&model, window, Self::on_model_event),
             cx.subscribe_in(&hub, window, Self::on_hub_event),
             cx.subscribe_in(&runs, window, Self::on_runs_event),
+            cx.subscribe_in(&spring, window, Self::on_spring_event),
             cx.subscribe_in(&project, window, |this, _, e: &crate::project_view::ProjectViewEvent, window, cx| {
                 let crate::project_view::ProjectViewEvent::OpenClass { package, class } = e;
                 this.open_library_class(package.clone(), class.clone(), window, cx);
@@ -360,6 +370,8 @@ impl Workspace {
             branch_popup: None,
             settings_sheet: None,
             gradle,
+            spring_window,
+            spring,
             notifications,
             runs,
             run_window,
@@ -1150,6 +1162,17 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &CollapseGradle, _, cx| {
                 this.gradle.update(cx, |g, cx| g.collapse_all(cx));
+            }))
+            .on_action(cx.listener(|this, _: &CollapseSpring, _, cx| {
+                this.spring_window.update(cx, |w, cx| w.collapse_all(cx));
+            }))
+            .on_action(cx.listener(|this, _: &RefreshSpring, _, cx| {
+                this.spring.update(cx, |s, cx| s.reload(cx));
+            }))
+            .on_action(cx.listener(|this, _: &ShowSpring, w, cx| {
+                if !this.tool_open(Tool::Spring, cx) {
+                    this.toggle_tool(Tool::Spring, w, cx);
+                }
             }))
             .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &RunSelected, w, cx| this.run_selected(false, w, cx)))

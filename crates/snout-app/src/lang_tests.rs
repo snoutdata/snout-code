@@ -110,9 +110,12 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     };
     // The server answers from other processes, through reader threads.
     cx.executor().allow_parking();
+    let _engine = crate::tests::engine_lock();
     let repo = fixture("lang-java");
     let build = repo.join("project");
     let mut settings = with_repo(&repo);
+    // One engine serves every build of the opened folder.
+    settings.project_jdks.insert(repo.clone(), jdk.clone());
     settings.project_jdks.insert(build.clone(), jdk);
     cx.update(|cx| cx.set_global(crate::lang::hub::LangEnabled(true)));
     let (model, ws, cx) = open(cx, settings);
@@ -126,7 +129,7 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     // The engine imports the build, and the file gets its (empty) diagnostics.
     let started = Instant::now();
     let ready = pump_until(cx, 240, |cx| {
-        cx.update(|_, cx| hub.read(cx).servers.get(&build).is_some_and(|s| s.first_diagnostics.is_some()))
+        cx.update(|_, cx| hub.read(cx).servers.get(&repo).is_some_and(|s| s.first_diagnostics.is_some()))
     });
     assert!(ready, "the server answers within four minutes");
     println!("java features: first diagnostics after {:.1} s", started.elapsed().as_secs_f32());
@@ -345,16 +348,23 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
 fn a_build_needing_a_missing_jdk_offers_to_download_it(cx: &mut TestAppContext) {
     let repo = fixture("lang-nojdk");
     let empty_home = scratch_dir("lang-nojdk-home");
+    // The window starts the folder's engine on this Mac's JDKs at first; it is stopped below.
+    cx.executor().allow_parking();
+    let _engine = crate::tests::engine_lock();
     cx.update(|cx| cx.set_global(crate::lang::hub::LangEnabled(true)));
-    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let (model, ws, cx) = open(cx, with_repo(&repo));
     let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
-    let build = repo.join("project");
+    // The opened folder's engine, which syncs the build.
+    let build = repo.clone();
     cx.update(|_, cx| {
-        hub.update(cx, |h, cx| {
+        hub.update(cx, |h, _| {
+            // The window may have started it already, with this Mac's JDKs.
+            h.forget_server(&build);
             h.home = empty_home.clone();
-            h.ensure_server(&build, cx);
         })
     });
+    cx.update(|_, cx| model.update(cx, |m, _| m.settings.project_jdks.clear()));
+    cx.update(|_, cx| hub.update(cx, |h, cx| h.ensure_server(&build, cx)));
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
     cx.run_until_parked();
     let prompt = cx.update(|_, cx| hub.read(cx).jdk_prompt.clone()).expect("the bar asks");

@@ -32,11 +32,13 @@ use crate::lang::providers::DocLink;
 mod claude;
 mod lang_features;
 mod run_gutter;
+mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
 pub use claude::{Answer, Outcome, Proposal, Review, STREAM_TICK};
 pub use lang_features::{class_file_name, is_class_file_path};
-pub use run_gutter::{GutterMenu, runnables_of};
+pub use run_gutter::{CODE_PAD, GutterMenu, Lanes, PLAIN_PAD, runnables_of};
+pub use spring_gutter::{SpringItem, spring_items, spring_of};
 
 actions!(
     editor,
@@ -260,6 +262,19 @@ pub struct EditorPanel {
     pub gutter_menu: Option<GutterMenu>,
     /// Where the gutter's lanes were drawn last.
     pub lanes: run_gutter::LanesCell,
+    /// The padding left of the line numbers, for the gutter's lanes.
+    pub gutter_pad: f32,
+    /// The file's Spring marks (beans, injection points, endpoints), by line.
+    pub spring: Option<Rc<crate::spring::FileSpring>>,
+    /// The Spring model's revision the marks were asked for under.
+    spring_seen: u64,
+    _spring: Option<Task<()>>,
+    _spring_settle: Option<Task<()>>,
+    /// The resolved values of `@Value` placeholders, by line.
+    pub hints: Rc<Vec<(u32, String)>>,
+    _hints: Option<Task<()>>,
+    /// The Spring mark under the pointer: its line, where the pointer is, and what it says.
+    pub gutter_tip: Option<(u32, gpui::Point<Pixels>, String)>,
     focus: FocusHandle,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -282,6 +297,7 @@ impl EditorPanel {
                 InputEvent::Change => {
                     this.revision += 1;
                     this.lang_changed(cx);
+                    this.spring_changed(cx);
                     // Compared in place: no copy of a large file on every keystroke.
                     let text = state.read(cx).text();
                     let dirty = text.len() != this.saved.len() || *text != this.saved.as_str();
@@ -319,6 +335,10 @@ impl EditorPanel {
         // Breakpoints and the debugger's line are drawn in the gutter.
         if let Some(marks) = crate::run::marks(cx) {
             subscriptions.push(cx.observe(&marks, |_, _, cx| cx.notify()));
+        }
+        // The Spring model read again: the file's marks may have changed.
+        if let Some(spring) = crate::spring::spring(cx) {
+            subscriptions.push(cx.observe(&spring, |this, _, cx| this.spring_model_changed(cx)));
         }
         let brackets = state.update(cx, |s, cx| s.create_range_decorations_collection(Vec::new(), cx));
         // Look at the file on disk now and then, for changes made elsewhere.
@@ -367,6 +387,14 @@ impl EditorPanel {
             _runnables: None,
             gutter_menu: None,
             lanes: Default::default(),
+            gutter_pad: run_gutter::PLAIN_PAD,
+            spring: None,
+            spring_seen: 0,
+            _spring: None,
+            _spring_settle: None,
+            hints: Rc::new(Vec::new()),
+            _hints: None,
+            gutter_tip: None,
             focus: cx.focus_handle(),
             _poll: poll,
             _subscriptions: subscriptions,
@@ -395,6 +423,7 @@ impl EditorPanel {
         self.info = FileInfo::detect_or(&text, EditorDefaults::now(cx).tab_size);
         let info = self.info;
         let language = language_for(&path);
+        self.gutter_pad = run_gutter::gutter_pad(&path);
         self.state.update(cx, |s, cx| {
             s.set_highlighter(language, cx);
             s.set_tab_size(TabSize { tab_size: info.width, hard_tabs: info.tabs }, cx);
@@ -413,6 +442,9 @@ impl EditorPanel {
         self.attach_lang(cx);
         self.runnables = None;
         self.refresh_runnables(cx);
+        self.spring = None;
+        self.hints = Rc::new(Vec::new());
+        self.refresh_spring(cx);
         cx.notify();
     }
 
@@ -624,6 +656,11 @@ impl EditorPanel {
                 }
                 self.saved = text;
                 self.refresh_runnables(cx);
+                self.refresh_spring(cx);
+                if let Some(spring) = crate::spring::spring(cx) {
+                    let path = self.path.clone();
+                    spring.update(cx, |s, cx| s.file_saved(&path, cx));
+                }
                 self.dirty = false;
                 self.preview = false;
                 self.error = None;
@@ -944,6 +981,15 @@ impl Render for EditorPanel {
                     .min_h_0()
                     .relative()
                     .font_family(look::mono_font(cx))
+                    .id("editor-body")
+                    .on_mouse_move(
+                        cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.gutter_hover(e.position, cx)),
+                    )
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if !*hovered && this.gutter_tip.take().is_some() {
+                            cx.notify();
+                        }
+                    }))
                     .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
                         if this.gutter_press(e, window, cx) || this.command_click(e, window, cx) {
                             window.prevent_default();
@@ -951,8 +997,11 @@ impl Render for EditorPanel {
                         }
                     }))
                     .child(
+                        // The gutter's lanes (problems, run icons, Spring marks) take a
+                        // strip left of the line numbers.
                         Editor::new(&self.state)
                             .appearance(false)
+                            .pl(px(self.gutter_pad))
                             .h_full()
                             .text_size(px(font_size(cx)))
                             .context_menu(move |menu, _, _| context_menu(menu, has_lang)),
@@ -961,6 +1010,8 @@ impl Render for EditorPanel {
                     .child(self.gutter(cx))
                     .child(self.problem_marks(cx))
                     .child(self.run_gutter(cx))
+                    .child(self.spring_gutter(cx))
+                    .children(self.spring_tooltip(cx))
                     .children(self.gutter_popup(cx))
                     .children(self.signature_popup(cx))
                     .children(self.inspections(cx))

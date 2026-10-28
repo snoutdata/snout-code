@@ -271,6 +271,7 @@ fn a_fixture_app_runs_tests_and_debugs_in_the_app(cx: &mut TestAppContext) {
         return;
     };
     cx.executor().allow_parking();
+    let _engine = crate::tests::engine_lock();
     let repo = run_app("run-debug");
     let mut settings = with_repo(&repo);
     settings.project_jdks.insert(repo.clone(), jdk);
@@ -433,6 +434,7 @@ fn a_real_project_lists_runs_and_tests(cx: &mut TestAppContext) {
     };
     let project = project.canonicalize().unwrap();
     cx.executor().allow_parking();
+    let _engine = crate::tests::engine_lock();
     let mut settings = crate::settings::Settings::default();
     if let Some(jdk) = std::env::var_os("SNOUT_TEST_PROJECT_JDK") {
         settings.project_jdks.insert(project.clone(), PathBuf::from(jdk));

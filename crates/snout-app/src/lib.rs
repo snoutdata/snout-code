@@ -25,6 +25,7 @@ pub mod search;
 pub mod settings;
 pub mod settings_view;
 pub mod splash;
+pub mod spring;
 pub mod status;
 pub mod tabs;
 pub mod theme;
@@ -41,6 +42,8 @@ mod lang_tests;
 mod project_tests;
 #[cfg(test)]
 mod run_tests;
+#[cfg(test)]
+mod spring_tests;
 #[cfg(test)]
 mod tests;
 

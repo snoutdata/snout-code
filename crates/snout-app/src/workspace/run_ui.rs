@@ -38,6 +38,43 @@ impl Workspace {
         }
     }
 
+    pub(super) fn on_spring_event(
+        &mut self,
+        _: &Entity<crate::spring::Spring>,
+        e: &crate::spring::SpringEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::spring::SpringEvent;
+        match e {
+            SpringEvent::Open(target) => self.open_spring_target(target.clone(), window, cx),
+            SpringEvent::Show { endpoints } => {
+                if !self.tool_open(super::Tool::Spring, cx) {
+                    self.toggle_tool(super::Tool::Spring, window, cx);
+                }
+                if endpoints.is_some() {
+                    let query = endpoints.clone();
+                    self.spring_window.update(cx, |w, cx| w.show_endpoints(query, window, cx));
+                }
+            }
+        }
+    }
+
+    /// Show a bean, an injection site or a handler: its file, or a library's class.
+    pub fn open_spring_target(&mut self, target: crate::spring::Target, window: &mut Window, cx: &mut Context<Self>) {
+        let root = self.model.read(cx).project_root().unwrap_or_default();
+        if let Some(uri) = target.uri.as_deref().and_then(|u| u.parse::<lsp_types::Uri>().ok()) {
+            let at = target.range.map_or_else(Default::default, |r| r.start);
+            self.open_location(root, uri, at, window, cx);
+        } else if let Some(class) = target.class {
+            let (package, simple) = match class.rfind('.') {
+                Some(i) => (class[..i].to_owned(), class[i + 1..].to_owned()),
+                None => (String::new(), class),
+            };
+            self.open_library_class(package, simple, window, cx);
+        }
+    }
+
     /// Open the place a console line names: a path, or a stack frame's class found under the
     /// project's source folders.
     pub fn open_link(&mut self, link: Link, window: &mut Window, cx: &mut Context<Self>) {

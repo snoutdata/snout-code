@@ -23,12 +23,14 @@ use crate::theme::palette;
 
 impl EditorPanel {
     /// Tell the file's language server about it, if it has one (a Java file of a Gradle
-    /// build), and give the editor its providers.
+    /// build, or a Spring Boot configuration file the engine serves), and give the editor
+    /// its providers.
     pub(super) fn attach_lang(&mut self, cx: &mut Context<Self>) {
         self.detach_lang(cx);
         self.problems.clear();
         self.signature = None;
-        if self.class_file.is_some() || language_for(&self.path) != "java" {
+        let served = language_for(&self.path) == "java" || crate::spring::is_config_file(&self.path);
+        if self.class_file.is_some() || !served {
             return;
         }
         let Some(hub) = crate::lang::hub(cx) else { return };
@@ -43,6 +45,7 @@ impl EditorPanel {
             editor: cx.entity_id(),
             completions: RefCell::new((Vec::new(), Rope::new())),
             typed: std::cell::Cell::new(false),
+            config: crate::spring::is_config_file(&path),
         });
         providers::install(&link, &self.state, cx);
         self.lang = Some(link);
@@ -439,7 +442,7 @@ impl EditorPanel {
                     let at = rope.line_start_offset(line);
                     let Some(b) = s.range_to_bounds(&(at..at)) else { continue };
                     let r = px(3.5);
-                    let center = point(bounds.left() + px(7.), b.top() + line_height / 2.);
+                    let center = point(bounds.left() + px(5.5), b.top() + line_height / 2.);
                     let dot = gpui::Bounds::new(point(center.x - r, center.y - r), size(r * 2., r * 2.));
                     window.paint_quad(gpui::fill(dot, if error { p.error } else { p.warn }).corner_radii(r));
                 }
@@ -570,6 +573,7 @@ impl EditorPanel {
                 editor: cx.entity_id(),
                 completions: RefCell::new((Vec::new(), Rope::new())),
                 typed: std::cell::Cell::new(false),
+                config: false,
             });
             providers::install(&link, &self.state, cx);
             self.lang = Some(link);

@@ -446,7 +446,7 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
     use crate::glyphs::Icon;
     let p = palette(cx);
     let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
-    let right = matches!(active, "Gradle" | "Notifications");
+    let right = matches!(active, "Gradle" | "Spring" | "Notifications");
     let mut row = div()
         .id(("tool-header", group.node().as_u64()))
         .debug_selector(|| "tool-header".into())
@@ -511,6 +511,17 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
                 .child(
                     tool_button("tool-collapse-gradle", Icon::CollapseAll, "Collapse All", &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseGradle), cx)),
+                )
+        }
+        "Spring" => {
+            row = row
+                .child(
+                    tool_button("tool-refresh-spring", Icon::Refresh, "Read the Spring Model Again", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RefreshSpring), cx)),
+                )
+                .child(
+                    tool_button("tool-collapse-spring", Icon::CollapseAll, "Collapse All", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseSpring), cx)),
                 )
         }
         _ => {}
