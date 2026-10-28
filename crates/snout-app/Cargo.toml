@@ -37,13 +37,9 @@ epaint_default_fonts = "=0.37.0"
 tree-sitter = "0.26"
 dekobon-tree-sitter-groovy = "0.3"
 tree-sitter-properties = "0.3"
-# The file tree: walking (honouring .gitignore) and watching the repository.
+# What a project's .gitignore leaves out (the host walks and watches the tree, and finds text).
 ignore = "0.4"
-notify = "8"
-# Find in files and go to file.
-grep-searcher = "0.1"
-grep-regex = "0.1"
-grep-matcher = "0.1"
+# Go to file.
 fuzzy-matcher = "0.3"
 # Reads the earlier app's eframe storage (RON), never writes it.
 ron = "0.12"

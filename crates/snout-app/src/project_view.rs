@@ -309,7 +309,7 @@ struct Lister<'a, 'b> {
 
 impl Source for Lister<'_, '_> {
     fn list(&mut self, dir: &Path) -> Vec<Entry> {
-        self.files.update(self.cx, |t, _| t.children(dir))
+        self.files.update(self.cx, |t, cx| t.children(dir, cx))
     }
 
     fn jar(&mut self, file: &Path) -> Option<Rc<JarIndex>> {
@@ -714,6 +714,7 @@ impl ProjectView {
         let tip: Option<SharedString> = look.tip.map(Into::into);
         let model = self.model.clone();
         let menu_path = look.path.clone();
+        let menu_file = look.file.is_some();
         div()
             .id(("project-row", i))
             .debug_selector(move || selector.clone())
@@ -827,7 +828,7 @@ impl ProjectView {
                         model.update(cx, |m, cx| m.handle(a, cx))
                     }
                 };
-                let menu = if path.is_file() {
+                let menu = if menu_file {
                     menu.item(PopupMenuItem::new("Open").on_click(send(Action::OpenFile(path.clone(), None))))
                         .separator()
                 } else {

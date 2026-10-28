@@ -1,6 +1,6 @@
 //! Go to file (⌘P) and find in files (⇧⌘F) in the open repository: a box over the window
-//! with a field and what matches. Files are listed with `ignore` (so `.gitignore` holds),
-//! names matched fuzzily (`fuzzy-matcher`), and text searched with `grep-searcher`.
+//! with a field and what matches. The host lists the files (so `.gitignore` holds) and
+//! searches their text; names are matched fuzzily (`fuzzy-matcher`).
 //! ↑ ↓ pick, ↩ opens the file (at the line), Esc closes.
 
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ use gpui::{
     px, uniform_list,
 };
 use gpui_component::input::{InputEvent, InputState};
-use grep_matcher::Matcher as _;
+use snout_host::{Host, HostRef, WalkOptions};
 
 use crate::look;
 use crate::model::{Action, Model};
@@ -27,16 +27,20 @@ actions!(search, [SearchUp, SearchDown, SearchClose]);
 /// The most rows either search shows.
 pub const LIMIT: usize = 200;
 
-/// The files of `root` a search looks through, relative to it, sorted.
-pub fn list_files(root: &Path) -> Vec<String> {
-    let mut out: Vec<String> = ignore::WalkBuilder::new(root)
-        .hidden(false)
-        .require_git(false)
-        .filter_entry(|e| e.file_name() != ".git")
-        .build()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-        .filter_map(|e| e.path().strip_prefix(root).ok().map(|p| p.to_string_lossy().into_owned()))
+/// The files of `root` on `host` a search looks through, relative to it, sorted.
+pub fn list_files(host: &dyn Host, root: &Path) -> Vec<String> {
+    let options = WalkOptions {
+        hidden: true,
+        gitignore: true,
+        skip: vec![".git".into()],
+        files_only: true,
+        ..Default::default()
+    };
+    let mut out: Vec<String> = host
+        .walk(root, &options)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|e| e.path.strip_prefix(root).ok().map(|p| p.to_string_lossy().into_owned()))
         .collect();
     out.sort();
     out
@@ -58,48 +62,12 @@ pub fn go_to_file(files: &[String], query: &str) -> Vec<(String, Vec<usize>)> {
 }
 
 /// A line that holds what find in files looked for.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Hit {
-    pub path: String,
-    /// From 0.
-    pub line: u32,
-    /// From 0, in bytes.
-    pub column: u32,
-    pub text: String,
-}
+pub type Hit = snout_host::TextHit;
 
-/// Every line of the files of `root` holding `text` (a plain string; case matters only
-/// when it has capitals), up to [`LIMIT`].
-pub fn find_in_files(root: &Path, files: &[String], text: &str) -> Vec<Hit> {
-    use grep_searcher::{BinaryDetection, SearcherBuilder, sinks::UTF8};
-    if text.is_empty() {
-        return Vec::new();
-    }
-    let Ok(matcher) = grep_regex::RegexMatcherBuilder::new().case_smart(true).fixed_strings(true).build(text) else {
-        return Vec::new();
-    };
-    let mut searcher = SearcherBuilder::new().binary_detection(BinaryDetection::quit(0)).line_number(true).build();
-    let mut hits = Vec::new();
-    for file in files {
-        if hits.len() >= LIMIT {
-            break;
-        }
-        let _ = searcher.search_path(
-            &matcher,
-            root.join(file),
-            UTF8(|line, found| {
-                let column = matcher.find(found.as_bytes()).ok().flatten().map_or(0, |m| m.start());
-                hits.push(Hit {
-                    path: file.clone(),
-                    line: line.saturating_sub(1) as u32,
-                    column: column as u32,
-                    text: found.trim_end().to_owned(),
-                });
-                Ok(hits.len() < LIMIT)
-            }),
-        );
-    }
-    hits
+/// Every line of the files of `root` on `host` holding `text` (a plain string; case matters
+/// only when it has capitals), up to [`LIMIT`].
+pub fn find_in_files(host: &dyn Host, root: &Path, files: &[String], text: &str) -> Vec<Hit> {
+    host.find_text(root, files, text, LIMIT).unwrap_or_default()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -179,6 +147,9 @@ pub struct SearchView {
     pub mode: Mode,
     pub input: Entity<InputState>,
     files: Arc<Vec<String>>,
+    host: HostRef,
+    /// Listing the files, off the UI thread.
+    _listing: Option<Task<()>>,
     pub items: Vec<Item>,
     pub selected: usize,
     /// The palette's commands.
@@ -210,17 +181,28 @@ impl SearchView {
             _ => {}
         })
         .detach();
-        let files = Arc::new(if matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols) {
-            Vec::new()
-        } else {
-            list_files(&root)
+        let host = crate::host::host(cx);
+        let listing = (!matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols)).then(|| {
+            let list = cx.background_executor().spawn({
+                let (host, root) = (host.clone(), root.clone());
+                async move { list_files(&*host, &root) }
+            });
+            cx.spawn(async move |this, cx| {
+                let files = list.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.files = Arc::new(files);
+                    this.update(cx);
+                });
+            })
         });
         let mut this = Self {
             model,
             root,
             mode,
             input,
-            files,
+            files: Arc::new(Vec::new()),
+            host,
+            _listing: listing,
             items: Vec::new(),
             selected: 0,
             commands: Vec::new(),
@@ -309,12 +291,14 @@ impl SearchView {
                 }
             }
             Mode::FindInFiles => {
-                let (root, files) = (self.root.clone(), self.files.clone());
+                let (root, files, host) = (self.root.clone(), self.files.clone(), self.host.clone());
                 self._search = Some(cx.spawn(async move |this, cx| {
                     // Wait for the typing to pause.
                     cx.background_executor().timer(Duration::from_millis(120)).await;
-                    let hits =
-                        cx.background_executor().spawn(async move { find_in_files(&root, &files, &query) }).await;
+                    let hits = cx
+                        .background_executor()
+                        .spawn(async move { find_in_files(&*host, &root, &files, &query) })
+                        .await;
                     let _ = this.update(cx, |this, cx| {
                         this.items = hits
                             .into_iter()

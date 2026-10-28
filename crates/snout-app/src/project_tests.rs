@@ -45,7 +45,7 @@ fn a_folder_inside_a_repository_is_the_project(cx: &mut TestAppContext) {
     });
     // The tree lists the folder, and colours its changed file by Git's paths.
     let tree = cx.update(|_, cx| ws.read(cx).side.read(cx).files.clone());
-    let rows = cx.update(|_, cx| tree.update(cx, |t, _| t.rows()));
+    let rows = cx.update(|_, cx| tree.update(cx, |t, cx| t.rows(cx)));
     let names: Vec<String> =
         rows.iter().map(|(e, _)| e.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
     assert_eq!(names, ["src", "README.md"]);
@@ -105,6 +105,8 @@ fn the_project_view_shows_modules_shared_folders_failed_builds_and_libraries(cx:
     assert!(rows.iter().any(|r| matches!(&r.kind, RowKind::Package { name, .. } if name == "com.google.common.base")));
     // Locate File opens the nodes down to the file.
     cx.update(|_, cx| project.update(cx, |v, cx| v.reveal(&repo.join("core/src/main/java/core/Money.java"), cx)));
+    // The folders are read off the UI thread, each once the one above it is in.
+    cx.run_until_parked();
     let rows = cx.update(|_, cx| project.update(cx, |v, cx| v.rows(cx)));
     assert!(rows.iter().any(|r| matches!(&r.kind, RowKind::File { path, .. } if path.ends_with("Money.java"))));
     // A click on a file opens it.

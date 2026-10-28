@@ -5,12 +5,10 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::time::Duration;
 
 use futures::StreamExt as _;
 use gpui::{App, Context, Entity, Task, WeakEntity, Window};
-use notify::Watcher as _;
 use serde_json::{Value, json};
 
 use super::server::{Call, Event, Reply, Server};
@@ -27,11 +25,14 @@ pub const TICK: Duration = Duration::from_millis(100);
 /// More files than this changing at once (a checkout) are not followed.
 const FOLLOW_MAX: usize = 8;
 
+/// The watch on the project, set up off the UI thread.
 struct Watch {
     root: PathBuf,
-    _watcher: notify::RecommendedWatcher,
-    rx: mpsc::Receiver<PathBuf>,
-    ignore: ignore::gitignore::Gitignore,
+    /// Once it is set up: the watcher, and what the project's `.gitignore` leaves out.
+    on: Option<(snout_host::Watcher, ignore::gitignore::Gitignore)>,
+    _setup: Task<()>,
+    /// Reading the files that changed.
+    reading: Option<Task<()>>,
 }
 
 pub struct Bridge {
@@ -599,53 +600,114 @@ pub fn followed_reload(
     }
 }
 
-fn watch(root: &Path) -> Option<Watch> {
-    let (tx, rx) = mpsc::channel();
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res
-            && !matches!(event.kind, notify::EventKind::Access(_))
-        {
-            for path in event.paths {
-                let _ = tx.send(path);
+/// Watch `root` on the workspace's host, off the UI thread.
+fn watch(root: &Path, cx: &mut Context<Workspace>) -> Watch {
+    let host = crate::host::host(cx);
+    let setup = cx.background_executor().spawn({
+        let root = root.to_owned();
+        async move {
+            let watcher = host.watch(&root).ok()?;
+            let mut ignore = ignore::gitignore::GitignoreBuilder::new(&root);
+            for line in host.read_to_string(&root.join(".gitignore")).unwrap_or_default().lines() {
+                let _ = ignore.add_line(None, line);
             }
+            Some((watcher, ignore.build().unwrap_or_else(|_| ignore::gitignore::Gitignore::empty())))
         }
-    })
-    .ok()?;
-    watcher.watch(root, notify::RecursiveMode::Recursive).ok()?;
-    let (ignore, _) = ignore::gitignore::Gitignore::new(root.join(".gitignore"));
-    Some(Watch { root: root.to_owned(), _watcher: watcher, rx, ignore })
+    });
+    let root_buf = root.to_owned();
+    let task = cx.spawn(async move |ws, cx| {
+        let on = setup.await;
+        let _ = ws.update(cx, |ws, _| {
+            if let Some(w) = ws.claude.as_mut().and_then(|b| b.watch.as_mut()).filter(|w| w.root == root_buf) {
+                w.on = on;
+            }
+        });
+    });
+    Watch { root: root.to_owned(), on: None, _setup: task, reading: None }
 }
 
-/// Files changed on disk that no tab shows: follow Claude into them.
+/// Files changed on disk that no tab shows: follow Claude into them. They are read off the
+/// UI thread; what they held before comes from the last read, else from the last commit.
 fn follow_watched(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     let root = ws.model.read(cx).project_root();
     let Some(b) = ws.claude.as_mut() else { return };
     if b.watch.as_ref().map(|w| &w.root) != root.as_ref() {
-        b.watch = root.as_deref().and_then(watch);
+        b.watch = None;
         b.known.clear();
+        if let Some(root) = &root {
+            b.watch = Some(watch(root, cx));
+        }
     }
-    let Some(w) = b.watch.as_ref() else { return };
+    let Some(b) = ws.claude.as_mut() else { return };
+    let Some(w) = b.watch.as_mut() else { return };
+    if w.reading.is_some() {
+        return;
+    }
+    let Some((watcher, ignore)) = w.on.as_ref() else { return };
     let mut changed: Vec<PathBuf> = Vec::new();
-    while let Ok(path) = w.rx.try_recv() {
-        if !changed.contains(&path) {
-            changed.push(path);
+    for event in watcher.events.try_iter().filter(|e| e.kind != snout_host::WatchKind::Access) {
+        for path in event.paths {
+            if !changed.contains(&path) {
+                changed.push(path);
+            }
         }
     }
     let root = w.root.clone();
-    let wanted = |p: &Path| {
+    changed.retain(|p| {
         p.starts_with(&root)
             && !p.strip_prefix(&root).is_ok_and(|r| r.components().any(|c| c.as_os_str() == ".git"))
-            && !w.ignore.matched_path_or_any_parents(p, false).is_ignore()
-            && p.is_file()
-    };
-    changed.retain(|p| wanted(p));
+            && !ignore.matched_path_or_any_parents(p, false).is_ignore()
+    });
     if changed.is_empty() {
         return;
     }
-    let follow = following(ws, cx) && ws.model.read(cx).settings.follow_claude && changed.len() <= FOLLOW_MAX;
+    let unknown: Vec<bool> = changed.iter().map(|p| !b.known.contains_key(p)).collect();
+    let host = crate::host::host(cx);
+    let read = cx.background_executor().spawn({
+        let root = root.clone();
+        async move {
+            changed
+                .into_iter()
+                .zip(unknown)
+                .filter(|(p, _)| host.is_file(p))
+                .filter_map(|(path, unknown)| {
+                    let text = host.read_to_string(&path).ok()?;
+                    let head = unknown
+                        .then(|| {
+                            let rel = path.strip_prefix(&root).ok()?.to_string_lossy().replace('\\', "/");
+                            snout_core::gutter::head_text(&*host, &root, &rel)
+                        })
+                        .flatten();
+                    Some((path, text, head))
+                })
+                .collect::<Vec<_>>()
+        }
+    });
+    w.reading = Some(cx.spawn_in(window, async move |ws, cx| {
+        let files = read.await;
+        let _ = ws.update_in(cx, |ws, window, cx| {
+            if let Some(w) = ws.claude.as_mut().and_then(|b| b.watch.as_mut()) {
+                w.reading = None;
+            }
+            follow_changed(ws, &root, files, window, cx);
+        });
+    }));
+}
+
+/// Follow Claude into the files read, `(path, text, text at the last commit)`.
+fn follow_changed(
+    ws: &mut Workspace,
+    root: &Path,
+    files: Vec<(PathBuf, String, Option<String>)>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    if ws.model.read(cx).project_root().as_deref() != Some(root) {
+        return;
+    }
+    let follow = following(ws, cx) && ws.model.read(cx).settings.follow_claude && files.len() <= FOLLOW_MAX;
     let open: Vec<PathBuf> = ws.editors(cx).into_iter().map(|e| e.read(cx).path.clone()).collect();
-    for path in changed {
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+    for (path, text, head) in files {
         let Some(b) = ws.claude.as_mut() else { return };
         if b.known.len() > 512 {
             b.known.clear();
@@ -655,11 +717,7 @@ fn follow_watched(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Work
         if !follow || open.contains(&path) {
             continue;
         }
-        let before = before.or_else(|| {
-            let rel = path.strip_prefix(&root).ok()?.to_string_lossy().replace('\\', "/");
-            snout_core::gutter::head_text(&*crate::host::host(cx), &root, &rel)
-        });
-        let before = before.unwrap_or_default();
+        let before = before.or(head).unwrap_or_default();
         if before == text {
             continue;
         }

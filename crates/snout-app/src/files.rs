@@ -2,11 +2,11 @@
 //! a click previews a file in an editor tab and a double click keeps it open. Files carry
 //! their Git state in colour (modified, added, untracked, conflicted), what `.gitignore`
 //! leaves out is listed dimmed, and indent guides show the nesting. The repository is
-//! watched (`notify`), so files made or deleted elsewhere show up at once.
+//! watched (through the host), so files made or deleted elsewhere show up at once. Folders
+//! are read off the UI thread: a folder shows what it held until its new listing is in.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
@@ -16,9 +16,9 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_component::scroll::ScrollableElement as _;
-use notify::Watcher as _;
 use snout_core::FileEntry;
 use snout_core::art::Glyph;
+use snout_host::{Host, HostRef, WalkOptions};
 
 use crate::art::glyph;
 use crate::look::{self, separator, title};
@@ -37,27 +37,16 @@ pub struct Entry {
     pub ignored: bool,
 }
 
-/// The folders and files directly in `dir`, folders first, each sorted by name. What
-/// `.gitignore` leaves out is listed too, marked; the repository's own `.git` is not.
-pub fn list_dir(dir: &Path) -> Vec<Entry> {
-    let kept: HashSet<PathBuf> = ignore::WalkBuilder::new(dir)
-        .max_depth(Some(1))
-        .hidden(false)
-        .require_git(false)
-        .build()
-        .filter_map(Result::ok)
-        .filter(|e| e.depth() == 1)
-        .map(|e| e.into_path())
-        .collect();
-    let Ok(read) = std::fs::read_dir(dir) else { return Vec::new() };
+/// The folders and files directly in `dir` on `host`, folders first, each sorted by name.
+/// What `.gitignore` leaves out is listed too, marked; the repository's own `.git` is not.
+pub fn list_dir(host: &dyn Host, dir: &Path) -> Vec<Entry> {
+    let Ok(read) = host.read_dir(dir) else { return Vec::new() };
+    let options = WalkOptions { max_depth: Some(1), hidden: true, gitignore: true, ..Default::default() };
+    let kept: HashSet<PathBuf> = host.walk(dir, &options).unwrap_or_default().into_iter().map(|e| e.path).collect();
     let mut out: Vec<Entry> = read
-        .filter_map(Result::ok)
+        .into_iter()
         .filter(|e| e.file_name() != ".git")
-        .map(|e| {
-            let path = e.path();
-            let dir = e.file_type().is_ok_and(|t| t.is_dir() || (t.is_symlink() && path.is_dir()));
-            Entry { ignored: !kept.contains(&path), path, dir }
-        })
+        .map(|e| Entry { ignored: !kept.contains(&e.path), path: e.path, dir: e.is_dir })
         .collect();
     out.sort_by(|a, b| {
         b.dir.cmp(&a.dir).then_with(|| {
@@ -141,10 +130,15 @@ pub struct FileTree {
     pub expanded: HashSet<PathBuf>,
     /// The file of the editor tab in front, shown selected.
     pub active: Option<PathBuf>,
-    /// What each folder read holds, until the watcher says it changed.
+    /// What each folder read holds; shown, while it is read again, after the watcher says it
+    /// changed.
     listing: HashMap<PathBuf, Vec<Entry>>,
-    watcher: Option<notify::RecommendedWatcher>,
-    events: Option<mpsc::Receiver<PathBuf>>,
+    /// Folders whose listing is old, and folders being read.
+    stale: HashSet<PathBuf>,
+    reading: HashSet<PathBuf>,
+    watcher: Option<snout_host::Watcher>,
+    host: HostRef,
+    _watch: Option<gpui::Task<()>>,
 }
 
 impl FileTree {
@@ -152,7 +146,7 @@ impl FileTree {
         cx.observe(&model, |this, model, cx| {
             let root = model.read(cx).project_root();
             if root != this.root {
-                this.set_root(root);
+                this.set_root(root, cx);
             }
             cx.notify();
         })
@@ -174,57 +168,67 @@ impl FileTree {
             expanded: HashSet::new(),
             active: None,
             listing: HashMap::new(),
+            stale: HashSet::new(),
+            reading: HashSet::new(),
             watcher: None,
-            events: None,
+            host: crate::host::host(cx),
+            _watch: None,
         };
-        this.set_root(root);
+        this.set_root(root, cx);
         this
     }
 
-    fn set_root(&mut self, root: Option<PathBuf>) {
+    fn set_root(&mut self, root: Option<PathBuf>, cx: &mut Context<Self>) {
         self.listing.clear();
+        self.stale.clear();
+        self.reading.clear();
         self.expanded.clear();
         self.watcher = None;
-        self.events = None;
         self.root = root.clone();
-        let Some(root) = root else { return };
-        let (tx, rx) = mpsc::channel();
-        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res {
-                for path in event.paths {
-                    let _ = tx.send(path);
-                }
-            }
+        let Some(root) = root else {
+            self._watch = None;
+            return;
+        };
+        let host = self.host.clone();
+        let watch = cx.background_executor().spawn({
+            let root = root.clone();
+            async move { host.watch(&root).ok() }
         });
-        if let Ok(mut watcher) = watcher
-            && watcher.watch(&root, notify::RecursiveMode::Recursive).is_ok()
-        {
-            self.watcher = Some(watcher);
-            self.events = Some(rx);
-        }
+        self._watch = Some(cx.spawn(async move |this, cx| {
+            let watcher = watch.await;
+            let _ = this.update(cx, |this, _| {
+                if this.root.as_ref() == Some(&root) {
+                    this.watcher = watcher;
+                }
+            });
+        }));
     }
 
-    /// Forget the listings of the folders the watcher saw change.
+    /// Mark the listings of the folders the watcher saw change as old.
     fn take_events(&mut self, cx: &mut Context<Self>) {
-        let Some(rx) = &self.events else { return };
+        let Some(w) = &self.watcher else { return };
         let mut changed = false;
-        while let Ok(path) = rx.try_recv() {
+        let mut all = false;
+        let paths: Vec<PathBuf> = w.events.try_iter().flat_map(|e| e.paths).collect();
+        for path in paths {
             if path.components().any(|c| c.as_os_str() == ".git") {
                 // A .gitignore or the index changed: what is ignored may have too.
-                changed |= path.ends_with(".git/index") && !self.listing.is_empty();
-                if changed {
-                    self.listing.clear();
-                }
+                all |= path.ends_with(".git/index") && !self.listing.is_empty();
                 continue;
             }
             if path.ends_with(".gitignore") {
-                self.listing.clear();
-                changed = true;
+                all = true;
             }
-            if let Some(parent) = path.parent() {
-                changed |= self.listing.remove(parent).is_some();
+            if let Some(parent) = path.parent().filter(|p| self.listing.contains_key(*p)) {
+                changed |= self.stale.insert(parent.to_owned());
             }
-            changed |= self.listing.remove(&path).is_some();
+            if self.listing.contains_key(&path) {
+                changed |= self.stale.insert(path);
+            }
+        }
+        if all {
+            self.stale.extend(self.listing.keys().cloned());
+            changed = true;
         }
         if changed {
             cx.notify();
@@ -233,13 +237,36 @@ impl FileTree {
 
     /// Read every folder again.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
-        self.listing.clear();
+        self.stale.extend(self.listing.keys().cloned());
         cx.notify();
     }
 
-    /// What `dir` holds, read now if it is not known.
-    pub fn children(&mut self, dir: &Path) -> Vec<Entry> {
-        self.listing.entry(dir.to_owned()).or_insert_with(|| list_dir(dir)).clone()
+    /// What `dir` holds as far as it is known; one not read yet (or old) is read off the UI
+    /// thread, and the tree shows it once it is in.
+    pub fn children(&mut self, dir: &Path, cx: &mut Context<Self>) -> Vec<Entry> {
+        let known = self.listing.get(dir);
+        if (known.is_none() || self.stale.contains(dir)) && self.reading.insert(dir.to_owned()) {
+            self.stale.remove(dir);
+            let (host, root, dir) = (self.host.clone(), self.root.clone(), dir.to_owned());
+            let read = cx.background_executor().spawn({
+                let dir = dir.clone();
+                async move { list_dir(&*host, &dir) }
+            });
+            cx.spawn(async move |this, cx| {
+                let entries = read.await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.root != root || !this.reading.remove(&dir) {
+                        return;
+                    }
+                    if this.listing.get(&dir) != Some(&entries) {
+                        this.listing.insert(dir, entries);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+        known.cloned().unwrap_or_default()
     }
 
     pub fn toggle(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
@@ -267,21 +294,21 @@ impl FileTree {
     }
 
     /// The rows showing: every entry under an open folder, with its depth.
-    pub fn rows(&mut self) -> Vec<(Entry, usize)> {
+    pub fn rows(&mut self, cx: &mut Context<Self>) -> Vec<(Entry, usize)> {
         let Some(root) = self.root.clone() else { return Vec::new() };
         let mut out = Vec::new();
-        self.walk(&root, 0, false, &mut out);
+        self.walk(&root, 0, false, &mut out, cx);
         out
     }
 
-    fn walk(&mut self, dir: &Path, depth: usize, ignored: bool, out: &mut Vec<(Entry, usize)>) {
-        for mut e in self.children(dir) {
+    fn walk(&mut self, dir: &Path, depth: usize, ignored: bool, out: &mut Vec<(Entry, usize)>, cx: &mut Context<Self>) {
+        for mut e in self.children(dir, cx) {
             e.ignored |= ignored;
             let open = e.dir && self.expanded.contains(&e.path);
             let (path, ignored) = (e.path.clone(), e.ignored);
             out.push((e, depth));
             if open {
-                self.walk(&path, depth + 1, ignored, out);
+                self.walk(&path, depth + 1, ignored, out, cx);
             }
         }
     }
@@ -291,7 +318,7 @@ impl Render for FileTree {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let name = self.root.as_ref().map(|r| Model::dir_name(r));
-        let rows = self.rows();
+        let rows = self.rows(cx);
         // Git's paths are relative to the repository, which may be above the project.
         let marks = match self.model.read(cx).repo_root() {
             Some(repo) => git_marks(&repo, &self.model.read(cx).status.files),
@@ -314,6 +341,7 @@ impl Render for FileTree {
                     None => p.fg,
                 };
                 let path = e.path.clone();
+                let is_dir = e.dir;
                 let model = model.clone();
                 let tip: SharedString = e.path.display().to_string().into();
                 let hover_bg = p.button_hover;
@@ -395,6 +423,7 @@ impl Render for FileTree {
                         }
                     }))
                     .context_menu(move |menu, _, _| {
+                        let dir = is_dir;
                         let send = |a: Action| {
                             let model = model.clone();
                             move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {
@@ -402,7 +431,7 @@ impl Render for FileTree {
                                 model.update(cx, |m, cx| m.handle(a, cx))
                             }
                         };
-                        let menu = if path.is_file() {
+                        let menu = if !dir {
                             menu.item(PopupMenuItem::new("Open").on_click(send(Action::OpenFile(path.clone(), None))))
                                 .separator()
                         } else {

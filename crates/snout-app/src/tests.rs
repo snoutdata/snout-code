@@ -631,7 +631,7 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
     let tree = cx.update(|_, cx| ws.read(cx).side.read(cx).files.clone());
     let names = |cx: &mut VisualTestContext| {
         cx.update(|_, cx| {
-            tree.update(cx, |t, _| t.rows())
+            tree.update(cx, |t, cx| t.rows(cx))
                 .into_iter()
                 .map(|(e, depth)| format!("{}{}", "  ".repeat(depth), e.path.file_name().unwrap().to_string_lossy()))
                 .collect::<Vec<_>>()
@@ -641,7 +641,7 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
     assert_eq!(top[..2], ["build", "src"], "folders first: {top:?}");
     assert!(top.contains(&"status.rs".to_owned()) && top.contains(&".gitignore".to_owned()), "{top:?}");
     assert!(!top.iter().any(|n| n == ".git"), ".git stays out: {top:?}");
-    let ignored = cx.update(|_, cx| tree.update(cx, |t, _| t.rows()));
+    let ignored = cx.update(|_, cx| tree.update(cx, |t, cx| t.rows(cx)));
     let build = ignored.iter().find(|(e, _)| e.path.ends_with("build")).expect("ignored folders are listed");
     assert!(build.0.ignored, "and marked, to be dimmed");
     assert!(ignored.iter().filter(|(e, _)| !e.path.ends_with("build")).all(|(e, _)| !e.ignored));
@@ -674,14 +674,15 @@ fn search_lists_matches_fuzzily_and_finds_text() {
     std::fs::write(repo.join(".gitignore"), "target/\n").unwrap();
     std::fs::create_dir_all(repo.join("target")).unwrap();
     std::fs::write(repo.join("target/main.rs"), "hello\n").unwrap();
-    let files = list_files(&repo);
+    let host = snout_host::local();
+    let files = list_files(&*host, &repo);
     assert!(files.contains(&"src/main.rs".to_owned()) && !files.iter().any(|f| f.starts_with("target/")), "{files:?}");
     assert!(!files.iter().any(|f| f.starts_with(".git/")));
     assert_eq!(go_to_file(&files, "mainrs")[0].0, "src/main.rs");
     assert_eq!(go_to_file(&files, "stat")[0].0, "status.rs");
-    let hits = find_in_files(&repo, &files, "Hello");
+    let hits = find_in_files(&*host, &repo, &files, "Hello");
     assert!(hits.is_empty(), "with a capital, case matters");
-    let hits = find_in_files(&repo, &files, "hello, snout");
+    let hits = find_in_files(&*host, &repo, &files, "hello, snout");
     assert_eq!(hits.len(), 1);
     assert_eq!((hits[0].path.as_str(), hits[0].line, hits[0].column), ("src/main.rs", 1, 14));
     let _ = std::fs::remove_dir_all(repo);
