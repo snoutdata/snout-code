@@ -88,6 +88,7 @@ actions!(
         NewProject,
         ShowProcesses,
         StopIdleProcesses,
+        RestartJava,
     ]
 );
 
@@ -165,6 +166,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Read the Spring Model Again", Box::new(RefreshSpring)),
         ("Show Processes", Box::new(ShowProcesses)),
         ("Stop Idle Processes", Box::new(StopIdleProcesses)),
+        ("Restart the Java Engine", Box::new(RestartJava)),
         ("Send Selection to Claude", Box::new(e::SendToClaude)),
         ("Accept Claude's Change", Box::new(e::AcceptChanges)),
         ("Reject Claude's Change", Box::new(e::RejectChanges)),

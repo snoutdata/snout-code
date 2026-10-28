@@ -903,6 +903,40 @@ fn background_tasks_show_in_the_status_bar_and_its_popover(cx: &mut TestAppConte
 }
 
 #[gpui::test]
+fn a_java_engine_that_stopped_says_it_starts_again_then_offers_restart(cx: &mut TestAppContext) {
+    let repo = demo_repo("recovering");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    cx.update(|_, cx| {
+        hub.update(cx, |h, cx| {
+            h.insert_published(&repo, "file:///x".into(), Vec::new());
+            let s = h.servers.get_mut(&repo).unwrap();
+            s.stage = crate::lang::hub::Stage::Restarting;
+            s.recovering = Some(2);
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    let tasks = cx.update(|_, cx| ws.read(cx).status.read(cx).tasks(cx));
+    let java = tasks.iter().find(|t| t.title.starts_with("Java")).expect("the restart shows as a task");
+    assert!(java.stage.starts_with("The Java engine stopped unexpectedly and is starting again (attempt 2 of 5)"));
+    assert_eq!(java.compact.as_deref(), Some("Java stopped, starting again"));
+    // Given up on: the status bar says so, with Restart.
+    cx.update(|_, cx| {
+        hub.update(cx, |h, cx| {
+            let s = h.servers.get_mut(&repo).unwrap();
+            s.stage = crate::lang::hub::Stage::Failed("The Java engine keeps stopping".into());
+            s.recovering = None;
+            s.jdk = Some(crate::lang::java::Jdk { home: repo.clone(), version: "21".into(), major: 21 });
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("status-java-restart").is_some(), "Restart is offered");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
 fn the_keymap_page_rebinds_a_command_by_its_keys(cx: &mut TestAppContext) {
     let repo = demo_repo("keymap");
     let (model, ws, cx) = open(cx, with_repo(&repo));

@@ -4,10 +4,10 @@
 //! anything an earlier session left behind. [`Processes`] looks every few seconds; the
 //! Processes tool window shows it, and its actions stop and restart them.
 //!
-//! What an earlier SnoutCode left running shows too (engines and language servers whose owner
-//! is gone, and the Gradle daemons of the engine's registries that no running engine owns),
-//! for Stop Idle Processes. Processes SnoutCode did not start (a Gradle daemon started from a
-//! terminal, another app's engines) never show.
+//! At startup it stops what an earlier SnoutCode left running when it crashed: engines and
+//! language servers whose owner is gone, and the Gradle daemons of the engine's registries that
+//! no running engine owns. Processes SnoutCode did not start (a Gradle daemon started from a
+//! terminal, another app's engines) are never touched.
 
 pub mod scan;
 pub mod window;
@@ -456,6 +456,7 @@ impl Processes {
             _loop: None,
         };
         if enabled {
+            this.stop_leftovers(cx);
             this._loop = Some(cx.spawn(async move |this, cx| {
                 loop {
                     if this.update(cx, |this, cx| this.look(cx)).is_err() {
@@ -531,6 +532,33 @@ impl Processes {
             });
         })
         .detach();
+    }
+
+    /// Stop what earlier sessions left running (once, as the app starts).
+    fn stop_leftovers(&mut self, cx: &mut Context<Self>) {
+        let mut known = self.known(cx);
+        // Nothing is the app's own yet: what runs of this cache with an owner is another
+        // window's, and is left alone.
+        known.engines.clear();
+        cx.background_executor()
+            .spawn(async move {
+                let snap = scan::Scanner::new().quick_snapshot(&known.cache);
+                let targets: Vec<(u32, u64, String)> = rows(&snap, &known)
+                    .into_iter()
+                    .filter(|r| r.kind == Kind::Leftover)
+                    .filter_map(|r| r.pid.map(|p| (p, r.start, r.purpose)))
+                    .collect();
+                if targets.is_empty() {
+                    return;
+                }
+                for (pid, _, what) in &targets {
+                    eprintln!("[processes] stopping pid {pid}: {what}");
+                }
+                let pids: Vec<(u32, u64)> = targets.iter().map(|(p, s, _)| (*p, *s)).collect();
+                let n = scan::stop(&pids, Duration::from_secs(3));
+                eprintln!("[processes] stopped {n} process(es) an earlier session left");
+            })
+            .detach();
     }
 
     /// Stop or restart the process of `row`.

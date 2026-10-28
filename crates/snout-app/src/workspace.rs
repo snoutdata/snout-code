@@ -1361,6 +1361,7 @@ impl Render for Workspace {
                     p.stop_idle(cx);
                 });
             }))
+            .on_action(cx.listener(|this, _: &RestartJava, _, cx| this.restart_java(cx)))
             .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &RunSelected, w, cx| this.run_selected(false, w, cx)))
             .on_action(cx.listener(|this, _: &DebugSelected, w, cx| this.run_selected(true, w, cx)))

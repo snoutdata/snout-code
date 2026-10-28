@@ -1053,6 +1053,7 @@ impl SessionView {
             dropped: s.dropped,
             waiting: s.waiting,
             pid: s.pid,
+            engine: s.engine,
         })
     }
 }

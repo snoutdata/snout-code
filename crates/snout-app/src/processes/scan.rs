@@ -147,6 +147,11 @@ impl Scanner {
         self.take(cache, true)
     }
 
+    /// The same, without waiting to measure the CPU use (it reads 0).
+    pub fn quick_snapshot(&mut self, cache: &Path) -> Snapshot {
+        self.take(cache, false)
+    }
+
     fn take(&mut self, cache: &Path, cpu: bool) -> Snapshot {
         // CPU use is measured between two refreshes: the first one sets a baseline.
         let first = self.last.is_none_or(|t| t.elapsed() > Duration::from_secs(60));

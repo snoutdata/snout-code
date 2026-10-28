@@ -181,6 +181,9 @@ pub struct Server {
     pub diagnostics: BTreeMap<String, Vec<Diagnostic>>,
     /// Crashes in a row, for the restart backoff.
     crashes: u32,
+    /// Starting again after the engine stopped unexpectedly (or its language server did): the
+    /// how many-th time in a row. Cleared once it is ready.
+    pub recovering: Option<u32>,
     started: Instant,
     /// From start to the first diagnostics for an open file.
     pub first_diagnostics: Option<Duration>,
@@ -222,6 +225,11 @@ impl Server {
     /// The engine's process, while it runs.
     pub fn pid(&self) -> Option<u32> {
         self.client.as_ref().filter(|c| c.is_alive()).map(Client::pid)
+    }
+
+    /// It can be started again by hand: stopped, or given up on after crashing again and again.
+    pub fn restartable(&self) -> bool {
+        matches!(self.stage, Stage::Stopped | Stage::Failed(_)) && self.jdk.is_some()
     }
 }
 
@@ -522,6 +530,7 @@ impl LangHub {
             initialized: false,
             diagnostics: BTreeMap::new(),
             crashes: 0,
+            recovering: None,
             started: Instant::now(),
             first_diagnostics: None,
             generation: 0,
@@ -569,6 +578,7 @@ impl LangHub {
         // Messages of the process going away are those of an earlier generation.
         server.generation = next_generation();
         server.crashes = 0;
+        server.recovering = None;
         server.stopped = false;
         server.initialized = false;
         server.progress.clear();
@@ -593,6 +603,7 @@ impl LangHub {
         // What the process says until it ends is of an earlier generation.
         server.generation = next_generation();
         server.initialized = false;
+        server.recovering = None;
         server.progress.clear();
         server.stage = Stage::Stopped;
         if let Some(client) = server.client.take() {
@@ -778,6 +789,9 @@ impl LangHub {
                 match kind {
                     "ServiceReady" => {
                         server.stage = Stage::Ready;
+                        if server.recovering.take().is_some() {
+                            eprintln!("[java] the engine for {} is back", root.display());
+                        }
                         // Build once, so the search index covers the imported projects.
                         if let Some(c) = server.client.clone() {
                             let build = c.request_raw("java/buildWorkspace", json!(false));
@@ -889,11 +903,21 @@ impl LangHub {
         server.crashes += 1;
         self.clear_diagnostics(root, cx);
         let server = self.servers.get_mut(root).expect("still there");
+        // It stopped unexpectedly (killed, crashed, or its language server did): start it again
+        // at once, then after longer and longer waits, and give up after five times in a row
+        // (the status bar then offers Restart). The documents open go to the new one.
         if server.crashes > 5 {
-            server.stage = Stage::Failed("The Java server keeps stopping".into());
+            server.recovering = None;
+            server.stage = Stage::Failed("The Java engine keeps stopping".into());
+            eprintln!("[java] the engine for {} keeps stopping; not starting it again", root.display());
         } else {
             server.stage = Stage::Restarting;
-            let delay = Duration::from_secs(1 << (server.crashes - 1).min(5)).min(Duration::from_secs(30));
+            server.recovering = Some(server.crashes);
+            let delay = if server.crashes == 1 {
+                Duration::from_millis(200)
+            } else {
+                Duration::from_secs(1 << (server.crashes - 1).min(5)).min(Duration::from_secs(30))
+            };
             let root = root.to_owned();
             server._tasks.push(cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(delay).await;
@@ -1336,6 +1360,7 @@ impl LangHub {
             initialized: false,
             diagnostics: BTreeMap::new(),
             crashes: 0,
+            recovering: None,
             started: Instant::now(),
             first_diagnostics: None,
             generation: 0,

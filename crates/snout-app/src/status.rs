@@ -98,6 +98,13 @@ impl StatusBar {
         self._processes_watch = crate::processes::processes(cx).map(|p| cx.observe(&p, |_, _, cx| cx.notify()));
     }
 
+    /// The Java engine the status bar speaks of was stopped, or kept stopping: Restart starts it.
+    pub fn java_restartable(&self, cx: &gpui::App) -> bool {
+        let Some(hub) = self.hub.as_ref() else { return false };
+        let path = self.model.read(cx).project_root();
+        hub.read(cx).server_for(path.as_deref()).is_some_and(|s| s.restartable())
+    }
+
     /// The processes item: how much memory SnoutCode's processes take; a click shows them.
     fn processes_item(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let processes = crate::processes::processes(cx)?;
@@ -422,6 +429,7 @@ impl Render for StatusBar {
         let p = palette(cx);
         let java_item = self.shows_java_missing(cx).then(|| self.java_missing_item(cx));
         let java = self.java_status(cx);
+        let restartable = self.java_restartable(cx);
         let processes = self.processes_item(cx);
         let crumbs = if self.git { None } else { self.breadcrumbs(cx) };
         let status = if self.git { None } else { self.editor_status(cx) };
@@ -503,6 +511,25 @@ impl Render for StatusBar {
                         .child(text)
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ShowProblems), cx)),
                 )
+                .when(restartable, |d| {
+                    d.child(
+                        div()
+                            .id("status-java-restart")
+                            .debug_selector(|| "status-java-restart".into())
+                            .flex_none()
+                            .h(px(20.))
+                            .px(px(6.))
+                            .flex()
+                            .items_center()
+                            .rounded(px(4.))
+                            .whitespace_nowrap()
+                            .cursor_pointer()
+                            .text_color(p.accent)
+                            .hover(move |s| s.bg(hover_bg))
+                            .child("Restart")
+                            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::RestartJava), cx)),
+                    )
+                })
             })
             .children(processes)
             .when(self.editor_status(cx).is_some_and(|s| s.read_only) && !self.git, |d| {

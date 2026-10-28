@@ -77,6 +77,22 @@ impl Workspace {
         }
     }
 
+    /// Start the open project's Java engine again (Restart, when it was stopped or kept
+    /// stopping); any engine when no project is open.
+    pub fn restart_java(&mut self, cx: &mut Context<Self>) {
+        let project = self.model.read(cx).project_root();
+        let hub = self.hub.read(cx);
+        let root = project.as_deref().and_then(|p| hub.engine_root(p)).or_else(|| {
+            let mut stopped: Vec<_> =
+                hub.servers.values().filter(|s| s.restartable()).map(|s| s.root.clone()).collect();
+            stopped.sort();
+            stopped.into_iter().next()
+        });
+        if let Some(root) = root {
+            self.hub.update(cx, |h, cx| h.restart(&root, cx));
+        }
+    }
+
     /// Show a place a server pointed to: a file in its tab, or a library class file in a
     /// read only tab.
     pub fn open_location(

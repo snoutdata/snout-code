@@ -244,6 +244,9 @@ final class Lsp {
         command.add("-data");
         command.add(home.resolve("workspace").toString());
 
+        // A jdtls left on this workspace by an engine that is gone (killed, or crashed with the
+        // app) would hold its lock, and the new one could not start.
+        Leftovers.stopJdtls(home.resolve("workspace"), log);
         log.println("snout-engine: starting jdtls (" + command.stream().filter(a -> a.startsWith("-Xmx")).reduce((a, b) -> b).orElse("")
             + ")");
         Process process = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.INHERIT).start();

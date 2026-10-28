@@ -157,6 +157,8 @@ pub struct Session {
     pub waiting: bool,
     /// The program's process, when the engine started it itself (a main class).
     pub pid: Option<u32>,
+    /// The engine it was sent to: should that one stop, the run ends with it.
+    pub engine: Option<u32>,
 }
 
 impl Session {
@@ -530,8 +532,39 @@ impl Runs {
         });
     }
 
+    /// The runs sent to an engine that is gone (it stopped, or was stopped) end: nothing will
+    /// say how they went any more.
+    fn end_orphaned(&mut self, cx: &mut Context<Self>) {
+        let now = self.engine(cx).map(|(_, pid)| pid);
+        let hub = self.hub.read(cx);
+        let alive: Vec<u32> = hub.servers.values().filter_map(|s| s.pid()).collect();
+        let mut ended = false;
+        for s in self.sessions.iter_mut().filter(|s| s.running() && !s.waiting) {
+            let Some(engine) = s.engine else { continue };
+            if Some(engine) == now || alive.contains(&engine) {
+                continue;
+            }
+            let text = "The Java engine stopped, and this run with it.";
+            s.push(Stream::Err, text);
+            if let Some(d) = s.debug.as_mut() {
+                d.disconnect();
+            }
+            s.ended = Some(Ended {
+                outcome: Outcome::Failed,
+                elapsed: s.started.elapsed(),
+                exit_code: None,
+                error: Some(text.into()),
+            });
+            ended = true;
+        }
+        if ended {
+            cx.notify();
+        }
+    }
+
     /// The engine started or changed: read its configurations and tasks once per process.
     fn engine_changed(&mut self, cx: &mut Context<Self>) {
+        self.end_orphaned(cx);
         self.start_waiting(cx);
         let Some((_, pid)) = self.engine(cx) else { return };
         if !self.engine_ready(cx) {
@@ -756,6 +789,7 @@ impl Runs {
             dropped: 0,
             waiting: false,
             pid: None,
+            engine: None,
         };
         let what = match &launch {
             Launch::Config { config, .. } => match (config.kind, &config.main_class, &config.task) {
@@ -804,8 +838,10 @@ impl Runs {
 
     /// Send session `id`'s launch to the engine.
     fn dispatch(&mut self, id: u64, cx: &mut Context<Self>) {
+        let engine = self.engine(cx).map(|(_, pid)| pid);
         let Some(s) = self.session_mut(id) else { return };
         s.waiting = false;
+        s.engine = engine;
         let (method, params) = match &s.launch {
             Launch::Config { config, debug } => {
                 let mut c = config.to_engine();
@@ -902,6 +938,7 @@ impl Runs {
             dropped: 0,
             waiting: false,
             pid: None,
+            engine: None,
         };
         s.lines.push(ConsoleLine::system(format!("Running {}", launch.title())));
         if matches!(launch, Launch::Tests { .. }) {

@@ -129,6 +129,8 @@ What a sync may give differently with the same inputs is synced again in the bac
 
 jdtls's workspace (`jdtls/<hash>/workspace`) persists too, with its search indexes: a start reads them, and writes none again unless their libraries or sources changed.
 
+Only one jdtls can hold a workspace. When an engine dies outright (killed, or crashed with the app), its jdtls can outlive it with the workspace's lock, so the next engine of the folder stops it before it starts its own: a jdtls on the same workspace (`-data` on its command line) whose engine is gone, or whose engine the same app is replacing (after five seconds for it to end by itself). One that another app's engine runs is left alone. When jdtls dies, the engine ends too (with jdtls's exit code), and the app starts it again.
+
 ### Shared Scala, compiled once
 
 Independent builds often compile one folder of Java and Scala into each of them (services that list a `core/src/main/java` in their Scala source sets). JDT needs one copy of its classes, owned by the one JDT project the importer makes for the folder (see [Source folders that several projects compile](#source-folders-that-several-projects-compile)), so the bridge compiles it once, as a **unit**:

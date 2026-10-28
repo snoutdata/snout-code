@@ -92,6 +92,23 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
         servers.sort_by(|a, b| a.root.cmp(&b.root));
         for s in servers {
             let title = format!("Java: {}", crate::model::Model::dir_name(&s.root));
+            // Starting again by itself, after it stopped unexpectedly.
+            if let Some(n) = s.recovering {
+                let work = s.progress.current();
+                let doing = match (&s.stage, work) {
+                    (Stage::Indexing | Stage::Ready, Some(w)) => w.label(),
+                    (stage, _) => stage_text(stage),
+                };
+                let again = if n > 1 { format!(" (attempt {n} of 5)") } else { String::new() };
+                out.push(BgTask {
+                    title,
+                    stage: format!("The Java engine stopped unexpectedly and is starting again{again}: {doing}"),
+                    percent: work.and_then(|w| w.percentage),
+                    compact: Some("Java stopped, starting again".into()),
+                    parts: Vec::new(),
+                });
+                continue;
+            }
             // The engine says how far the project and each module are.
             if matches!(s.stage, Stage::Indexing | Stage::Ready)
                 && let Some(project) = s.readiness.project.as_ref().filter(|_| s.readiness.pending())
