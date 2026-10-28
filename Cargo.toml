@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/snout-core", "crates/snout-gui", "crates/snout-app", "crates/snout-lang"]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"

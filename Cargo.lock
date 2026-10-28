@@ -7395,7 +7395,7 @@ dependencies = [
 
 [[package]]
 name = "snout-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "dekobon-tree-sitter-groovy",
@@ -7427,7 +7427,7 @@ dependencies = [
 
 [[package]]
 name = "snout-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "portable-pty",
@@ -7440,7 +7440,7 @@ dependencies = [
 
 [[package]]
 name = "snout-gui"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -7461,7 +7461,7 @@ dependencies = [
 
 [[package]]
 name = "snout-lang"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-channel",
