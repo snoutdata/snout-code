@@ -7418,7 +7418,6 @@ dependencies = [
  "snout-core",
  "snout-host",
  "snout-lang",
- "sysinfo",
  "tree-sitter",
  "tree-sitter-properties",
  "tungstenite",

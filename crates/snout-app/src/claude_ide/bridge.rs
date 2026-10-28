@@ -65,7 +65,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
     let root = ws.model.read(cx).project_root();
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
     let folders: Vec<PathBuf> = root.iter().cloned().collect();
-    let server = match Server::start(&config.lock_dir, &folders, move |e| {
+    let server = match Server::start(crate::host::host(cx), &config.lock_dir, &folders, move |e| {
         let _ = tx.unbounded_send(e);
     }) {
         Ok(server) => server,
@@ -91,12 +91,14 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             }
         }
     });
-    // The lock file goes when the app quits.
-    let quit = cx.on_app_quit(|ws, _| {
-        if let Some(b) = ws.claude.as_mut() {
-            b.server.stop();
-        }
-        async {}
+    // The lock file goes when the app quits (the quit waits a moment for it).
+    let quit = cx.on_app_quit(|ws, cx| {
+        let gone = ws.claude.as_mut().map(|b| b.server.stop());
+        cx.background_executor().spawn(async move {
+            if let Some(gone) = gone {
+                let _ = gone.recv_timeout(Duration::from_secs(2));
+            }
+        })
     });
     ws.claude = Some(Bridge {
         server,

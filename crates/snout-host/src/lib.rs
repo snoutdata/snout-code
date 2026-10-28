@@ -75,6 +75,8 @@ pub struct HostInfo {
     pub env: BTreeMap<String, String>,
     /// The program serving the host: the app on this Mac, the server on a remote one.
     pub exe: Option<PathBuf>,
+    /// That program's process id.
+    pub pid: u32,
     /// Whether [`Host::trash`] moves files to a Trash (otherwise there is none).
     pub can_trash: bool,
 }

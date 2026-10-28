@@ -187,40 +187,62 @@ impl ConsolePanel {
         }
     }
 
+    /// Start the console's program in `root`, on the workspace's host: found and started off
+    /// the UI thread, the session shows once it runs.
     pub fn start(&mut self, root: &Path, args: &[String], window: &mut Window, cx: &mut Context<Self>) {
         self.sessions.remove(root);
         self.error = None;
-        let found = match self.kind {
-            Kind::Claude => {
-                self.model.read(cx).settings.claude_path.clone().or_else(|| find_claude(&*crate::host::host(cx)))
-            }
-            Kind::Shell => Some(std::env::var_os("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from)),
-        };
+        let host = crate::host::host(cx);
+        let kind = self.kind;
+        let configured = self.model.read(cx).settings.claude_path.clone();
+        let program = self.program.clone();
         let shell_args = ["-l".to_owned()];
-        let args = if self.kind == Kind::Shell && args.is_empty() { &shell_args[..] } else { args };
-        let Some(program) = self.program.clone().or(found) else {
-            self.error = Some(
-                "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, /opt/homebrew/bin, \
-                 /usr/local/bin.\nInstall it from https://docs.claude.com/en/docs/claude-code and press Start."
-                    .into(),
-            );
-            return;
-        };
+        let args = if kind == Kind::Shell && args.is_empty() { &shell_args[..] } else { args }.to_vec();
         let p = palette(cx);
-        let env_remove: &[&str] = if self.kind == Kind::Claude { ENV_REMOVE } else { &[] };
+        let (fg, bg) = (rgb(p.fg), rgb(p.panel));
         // Claude Code connects to this window's IDE server.
-        let env = match self.kind {
+        let env = match kind {
             Kind::Claude => cx.try_global::<crate::claude_ide::IdeEnv>().map(|e| e.0.clone()).unwrap_or_default(),
             Kind::Shell => Vec::new(),
         };
-        let launch = Launch { program: &program, args, cwd: root, env: &env, env_remove };
-        match Pty::spawn(&*crate::host::host(cx), &launch, rgb(p.fg), rgb(p.panel), || {}) {
-            Ok(pty) => {
-                self.sessions.insert(root.to_owned(), Session { pty, seen_gen: 0, refreshed: Instant::now() });
-                window.focus(&self.focus, cx);
+        let root = root.to_owned();
+        let started = cx.background_executor().spawn({
+            let root = root.clone();
+            async move {
+                let found = match kind {
+                    Kind::Claude => configured.or_else(|| find_claude(&*host)),
+                    Kind::Shell => {
+                        Some(host.info().var("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from))
+                    }
+                };
+                let program = program.or(found).ok_or(None)?;
+                let env_remove: &[&str] = if kind == Kind::Claude { ENV_REMOVE } else { &[] };
+                let launch = Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove };
+                Pty::spawn(&*host, &launch, fg, bg, || {})
+                    .map_err(|e| Some(format!("Could not start {}: {e}", program.display())))
             }
-            Err(e) => self.error = Some(format!("Could not start {}: {e}", program.display())),
-        }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = started.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(pty) => {
+                        this.sessions.insert(root, Session { pty, seen_gen: 0, refreshed: Instant::now() });
+                        window.focus(&this.focus, cx);
+                    }
+                    Err(None) => {
+                        this.error = Some(
+                            "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, /opt/homebrew/bin, \
+                             /usr/local/bin.\nInstall it from https://docs.claude.com/en/docs/claude-code and press Start."
+                                .into(),
+                        )
+                    }
+                    Err(Some(e)) => this.error = Some(e),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 

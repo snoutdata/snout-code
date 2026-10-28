@@ -112,7 +112,7 @@ pub fn run() {
         // Language servers start in the app (tests opt in).
         cx.set_global(lang::hub::LangEnabled(true));
         // So does the server Claude Code connects to (tests use a scratch folder).
-        if let Some(lock_dir) = claude_ide::lockfile::default_dir() {
+        if let Some(lock_dir) = claude_ide::lockfile::default_dir(&*host::host(cx)) {
             cx.set_global(claude_ide::IdeConfig { lock_dir });
         }
         // The splash covers the moment until the window can paint; it goes on its first frame.

@@ -158,7 +158,7 @@ const SHELLS: [&str; 9] = ["zsh", "bash", "fish", "sh", "nu", "tcsh", "csh", "ks
 /// The window's lines, from a snapshot and what the app knows: SnoutCode, under it its engines
 /// (each with its language server, its programs and its Gradle daemons with what they started),
 /// the other processes it started, then what earlier sessions left.
-pub fn rows(snap: &Snapshot, known: &Known) -> Vec<Row> {
+pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<Row> {
     let mut out = Vec::new();
     let row = |p: &Proc, depth: usize, kind: Kind, purpose: String, project: Option<String>| Row {
         pid: Some(p.pid),
@@ -190,13 +190,13 @@ pub fn rows(snap: &Snapshot, known: &Known) -> Vec<Row> {
     };
     // The registries of the app's engines, and of any other engine of this cache that runs.
     let mut owners: Vec<(String, Option<&KnownEngine>, Option<&Proc>)> =
-        known.engines.iter().map(|e| (scan::registry_hash(&e.root), Some(e), None)).collect();
+        known.engines.iter().map(|e| (scan::registry_hash(host, &e.root), Some(e), None)).collect();
     for p in snap.procs.values().filter(|p| p.is_engine() && ours(p)) {
         if known.engines.iter().any(|e| e.pid == Some(p.pid)) {
             continue;
         }
         if let Some(folder) = p.engine_folder() {
-            owners.push((scan::registry_hash(Path::new(folder)), None, Some(p)));
+            owners.push((scan::registry_hash(host, Path::new(folder)), None, Some(p)));
         }
     }
     let idle_text = |since: Option<u64>| {
@@ -271,7 +271,7 @@ pub fn rows(snap: &Snapshot, known: &Known) -> Vec<Row> {
                 out.push(r);
             }
         }
-        let hash = scan::registry_hash(&engine.root);
+        let hash = scan::registry_hash(host, &engine.root);
         for d in snap.daemons.iter().filter(|d| d.registry == hash) {
             let Some(dp) = snap.get(d.pid) else { continue };
             shown.push(d.pid);
@@ -451,7 +451,7 @@ impl Processes {
             runs,
             rows: Vec::new(),
             notice: None,
-            scanner: Arc::new(Mutex::new(scan::Scanner::new())),
+            scanner: Arc::new(Mutex::new(scan::Scanner::new(crate::host::host(cx)))),
             looking: false,
             _loop: None,
         };
@@ -500,7 +500,7 @@ impl Processes {
             .collect();
         let model = self.model.read(cx);
         Known {
-            app: std::process::id(),
+            app: crate::host::host(cx).info().pid,
             cache: crate::lang::java::engine_cache(&*crate::host::host(cx)),
             project: model.project_root(),
             engines,
@@ -517,9 +517,10 @@ impl Processes {
         self.looking = true;
         let known = self.known(cx);
         let scanner = self.scanner.clone();
+        let host = crate::host::host(cx);
         let job = cx.background_executor().spawn(async move {
             let snap = scanner.lock().map(|mut s| s.snapshot(&known.cache)).unwrap_or_default();
-            rows(&snap, &known)
+            rows(&*host, &snap, &known)
         });
         cx.spawn(async move |this, cx| {
             let rows = job.await;
@@ -540,10 +541,11 @@ impl Processes {
         // Nothing is the app's own yet: what runs of this cache with an owner is another
         // window's, and is left alone.
         known.engines.clear();
+        let host = crate::host::host(cx);
         cx.background_executor()
             .spawn(async move {
-                let snap = scan::Scanner::new().quick_snapshot(&known.cache);
-                let targets: Vec<(u32, u64, String)> = rows(&snap, &known)
+                let snap = scan::Scanner::new(host.clone()).quick_snapshot(&known.cache);
+                let targets: Vec<(u32, u64, String)> = rows(&*host, &snap, &known)
                     .into_iter()
                     .filter(|r| r.kind == Kind::Leftover)
                     .filter_map(|r| r.pid.map(|p| (p, r.start, r.purpose)))
@@ -555,7 +557,7 @@ impl Processes {
                     eprintln!("[processes] stopping pid {pid}: {what}");
                 }
                 let pids: Vec<(u32, u64)> = targets.iter().map(|(p, s, _)| (*p, *s)).collect();
-                let n = scan::stop(&pids, Duration::from_secs(3));
+                let n = scan::stop(&*host, &pids, Duration::from_secs(3));
                 eprintln!("[processes] stopped {n} process(es) an earlier session left");
             })
             .detach();
@@ -625,7 +627,8 @@ impl Processes {
         if targets.is_empty() {
             return;
         }
-        let job = cx.background_executor().spawn(async move { scan::stop(&targets, Duration::from_secs(3)) });
+        let host = crate::host::host(cx);
+        let job = cx.background_executor().spawn(async move { scan::stop(&*host, &targets, Duration::from_secs(3)) });
         cx.spawn(async move |this, cx| {
             job.await;
             let _ = this.update(cx, |this, cx| this.look(cx));
@@ -670,7 +673,7 @@ mod tests {
         let cache = root.parent().unwrap().join("cache");
         let cache_s = cache.to_string_lossy().into_owned();
         let root_s = root.to_string_lossy().into_owned();
-        let hash = scan::registry_hash(&root);
+        let hash = scan::registry_hash(&*snout_host::local(), &root);
         let model = format!("-Dsnout.model={cache_s}/jdtls/x/model.json");
         let mut procs = vec![
             proc(10, 1, "snout-code", &["snout-code"]),
@@ -721,7 +724,7 @@ mod tests {
             ],
             idle_minutes: 15,
         };
-        let rows = rows(&snap, &known);
+        let rows = rows(&*snout_host::local(), &snap, &known);
         let said: Vec<(usize, &str)> = rows.iter().map(|r| (r.depth, r.purpose.as_str())).collect();
         assert_eq!(
             said,

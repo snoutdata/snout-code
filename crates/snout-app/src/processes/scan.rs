@@ -1,13 +1,12 @@
-//! What the system says about the processes: one snapshot of every process of the user
+//! What the host says about its processes: one snapshot of every process of the user
 //! (parent, command line, memory, CPU, age), the engine's Gradle daemons as their logs show
 //! them (busy or idle, since when), and stopping a process the snapshot saw.
 
 use std::collections::HashMap;
-use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};
+use snout_host::{Host, HostRef};
 
 /// The class every Gradle daemon runs, on its command line.
 pub const DAEMON_MAIN: &str = "org.gradle.launcher.daemon.bootstrap.GradleDaemon";
@@ -124,22 +123,16 @@ struct LogState {
     since: Option<u64>,
 }
 
-/// Takes snapshots; it keeps what the one before saw, for the CPU use and the daemon logs.
+/// Takes snapshots of a host; it keeps what the one before saw of the daemon logs (the host
+/// keeps what it needs to measure the CPU use).
 pub struct Scanner {
-    system: System,
+    host: HostRef,
     logs: HashMap<PathBuf, LogState>,
-    last: Option<Instant>,
-}
-
-impl Default for Scanner {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Scanner {
-    pub fn new() -> Self {
-        Self { system: System::new(), logs: HashMap::new(), last: None }
+    pub fn new(host: HostRef) -> Self {
+        Self { host, logs: HashMap::new() }
     }
 
     /// Every process now, with the daemons of the registries under `cache`.
@@ -153,41 +146,26 @@ impl Scanner {
     }
 
     fn take(&mut self, cache: &Path, cpu: bool) -> Snapshot {
-        // CPU use is measured between two refreshes: the first one sets a baseline.
-        let first = self.last.is_none_or(|t| t.elapsed() > Duration::from_secs(60));
-        self.refresh();
-        if first && cpu {
-            std::thread::sleep(Duration::from_millis(250));
-            self.refresh();
-        }
-        self.last = Some(Instant::now());
         let procs: HashMap<u32, Proc> = self
-            .system
-            .processes()
-            .iter()
-            .map(|(pid, p)| {
-                let pid = pid.as_u32();
+            .host
+            .processes(cpu)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| {
                 let proc = Proc {
-                    pid,
-                    parent: p.parent().map(Pid::as_u32),
-                    name: p.name().to_string_lossy().into_owned(),
-                    cmd: p.cmd().iter().map(|a| a.to_string_lossy().into_owned()).collect(),
-                    memory: p.memory(),
-                    cpu: p.cpu_usage(),
-                    start: p.start_time(),
+                    pid: p.pid,
+                    parent: p.parent,
+                    name: p.name,
+                    cmd: p.cmd,
+                    memory: p.memory,
+                    cpu: p.cpu,
+                    start: p.start,
                 };
-                (pid, proc)
+                (p.pid, proc)
             })
             .collect();
         let daemons = self.daemons(cache, &procs);
         Snapshot { procs, daemons, now: now_secs() }
-    }
-
-    fn refresh(&mut self) {
-        self.system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            ProcessRefreshKind::new().with_cpu().with_memory().with_cmd(UpdateKind::OnlyIfNotSet),
-        );
     }
 
     /// The daemons of every registry under `cache`: each log `<registry>/<Gradle version>/
@@ -195,13 +173,15 @@ impl Scanner {
     /// was last written (a later process that got the pid of a daemon gone since does not
     /// count: a daemon writes its log as it stops).
     fn daemons(&mut self, cache: &Path, procs: &HashMap<u32, Proc>) -> Vec<DaemonSeen> {
+        let host = self.host.clone();
+        let host = &*host;
         let mut out = Vec::new();
         let mut seen = Vec::new();
-        for registry in dirs(&cache.join("daemons")) {
+        for registry in dirs(host, &cache.join("daemons")) {
             let hash = file_name(&registry);
-            for version in dirs(&registry) {
-                let Ok(files) = std::fs::read_dir(&version) else { continue };
-                for file in files.flatten().map(|e| e.path()) {
+            for version in dirs(host, &registry) {
+                let Ok(files) = host.read_dir(&version) else { continue };
+                for file in files.into_iter().map(|e| e.path) {
                     let name = file_name(&file);
                     let Some(pid) = name
                         .strip_prefix("daemon-")
@@ -211,16 +191,17 @@ impl Scanner {
                         continue;
                     };
                     let Some(proc) = procs.get(&pid).filter(|p| p.is_daemon()) else { continue };
-                    let written = std::fs::metadata(&file)
-                        .and_then(|m| m.modified())
-                        .ok()
+                    let stat = host.metadata(&file).ok();
+                    let written = stat
+                        .as_ref()
+                        .and_then(|m| m.modified)
                         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                         .map_or(0, |d| d.as_secs());
                     if proc.start > written + 1 {
                         continue;
                     }
                     let state = self.logs.entry(file.clone()).or_default();
-                    read_log(&file, state);
+                    read_log(host, &file, stat.map_or(0, |m| m.len), state);
                     seen.push(file.clone());
                     out.push(DaemonSeen {
                         pid,
@@ -238,21 +219,16 @@ impl Scanner {
     }
 }
 
-/// Read what the log gained since `state.offset`: the last time the daemon was marked busy
-/// or idle wins.
-fn read_log(file: &Path, state: &mut LogState) {
-    let Ok(mut f) = std::fs::File::open(file) else { return };
-    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+/// Read what the log (now `len` bytes long) gained since `state.offset`: the last time the
+/// daemon was marked busy or idle wins.
+fn read_log(host: &dyn Host, file: &Path, len: u64, state: &mut LogState) {
     if len < state.offset {
         *state = LogState::default();
     }
-    if len == state.offset || f.seek(SeekFrom::Start(state.offset)).is_err() {
+    if len == state.offset {
         return;
     }
-    let mut bytes = Vec::new();
-    if f.read_to_end(&mut bytes).is_err() {
-        return;
-    }
+    let Ok(bytes) = host.read_range(file, state.offset, len - state.offset) else { return };
     // Only whole lines: the rest waits for the next read.
     let Some(end) = bytes.iter().rposition(|b| *b == b'\n') else { return };
     state.offset += end as u64 + 1;
@@ -303,9 +279,9 @@ pub fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-fn dirs(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
-    let mut out: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+fn dirs(host: &dyn Host, dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = host.read_dir(dir) else { return Vec::new() };
+    let mut out: Vec<PathBuf> = entries.into_iter().filter(|e| e.is_dir).map(|e| e.path).collect();
     out.sort();
     out
 }
@@ -314,66 +290,20 @@ fn file_name(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// The name of the engine's daemon registry for a project folder: the first 16 hex digits of
-/// the SHA-256 of its canonical path, as the engine names it.
-pub fn registry_hash(folder: &Path) -> String {
+/// The name of the engine's daemon registry for a project folder on `host`: the first 16 hex
+/// digits of the SHA-256 of its canonical path, as the engine names it.
+pub fn registry_hash(host: &dyn Host, folder: &Path) -> String {
     use sha2::Digest as _;
-    let path = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_owned());
+    let path = host.canonicalize(folder).unwrap_or_else(|_| folder.to_owned());
     let digest = sha2::Sha256::digest(path.to_string_lossy().as_bytes());
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
-/// Stop the processes `(pid, start)`: ask each to end (SIGTERM), and kill those still there
-/// after `grace`. A process whose start time is not the one given (its pid was taken by
-/// another since) is left alone. Blocks for up to `grace`; returns how many it stopped.
-pub fn stop(targets: &[(u32, u64)], grace: Duration) -> usize {
-    if targets.is_empty() {
-        return 0;
-    }
-    let mut system = System::new();
-    let pids: Vec<Pid> = targets.iter().map(|(p, _)| Pid::from_u32(*p)).collect();
-    system.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), ProcessRefreshKind::new());
-    fn same(system: &System, (pid, start): (u32, u64)) -> Option<&sysinfo::Process> {
-        system.process(Pid::from_u32(pid)).filter(|p| p.start_time() == start && p.status_alive())
-    }
-    let mut asked = Vec::new();
-    for &t in targets {
-        if let Some(p) = same(&system, t) {
-            if p.kill_with(Signal::Term).is_none() {
-                p.kill();
-            }
-            asked.push(t);
-        }
-    }
-    let deadline = Instant::now() + grace;
-    loop {
-        system.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), ProcessRefreshKind::new());
-        let left: Vec<(u32, u64)> = asked.iter().copied().filter(|t| same(&system, *t).is_some()).collect();
-        if left.is_empty() {
-            break;
-        }
-        if Instant::now() >= deadline {
-            for t in left {
-                if let Some(p) = same(&system, t) {
-                    p.kill();
-                }
-            }
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    asked.len()
-}
-
-/// Whether a process is still there (not a zombie).
-trait Alive {
-    fn status_alive(&self) -> bool;
-}
-
-impl Alive for sysinfo::Process {
-    fn status_alive(&self) -> bool {
-        !matches!(self.status(), sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead)
-    }
+/// Stop the processes `(pid, start)` of `host`: ask each to end (SIGTERM), and kill those
+/// still there after `grace`. A process whose start time is not the one given (its pid was
+/// taken by another since) is left alone. Blocks for up to `grace`; returns how many it stopped.
+pub fn stop(host: &dyn Host, targets: &[(u32, u64)], grace: Duration) -> usize {
+    host.stop_processes(targets, grace)
 }
 
 #[cfg(test)]
@@ -398,12 +328,14 @@ mod tests {
         let idle = "2026-10-28T16:16:57.446-0400 [INFO] [org.gradle.launcher.daemon.server.DaemonRegistryUpdater] Marking the daemon as idle, address: x\n";
         std::fs::write(&log, busy).unwrap();
         let mut state = LogState::default();
-        read_log(&log, &mut state);
+        let host = snout_host::local();
+        let len = |log: &Path| std::fs::metadata(log).unwrap().len();
+        read_log(&*host, &log, len(&log), &mut state);
         assert!(state.busy);
         assert_eq!(state.since, Some(1_793_218_615));
         // Only what it gained is read; half a line waits.
         std::fs::write(&log, format!("{busy}{idle}2026-10-28T16:17")).unwrap();
-        read_log(&log, &mut state);
+        read_log(&*host, &log, len(&log), &mut state);
         assert!(!state.busy);
         assert_eq!(state.since, Some(1_793_218_617));
         assert_eq!(state.offset as usize, busy.len() + idle.len());
@@ -413,7 +345,7 @@ mod tests {
     #[test]
     fn the_registry_is_named_as_the_engine_names_it() {
         // sha256("/") starts 8a5edab282632443.
-        assert_eq!(registry_hash(Path::new("/")), "8a5edab282632443");
+        assert_eq!(registry_hash(&*snout_host::local(), Path::new("/")), "8a5edab282632443");
     }
 
     #[test]

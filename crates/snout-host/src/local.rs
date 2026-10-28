@@ -38,6 +38,7 @@ impl LocalHost {
                 .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
                 .collect(),
             exe: std::env::current_exe().ok(),
+            pid: std::process::id(),
             can_trash: Path::new(TRASH).exists(),
         };
         Self { info, system: Mutex::new((sysinfo::System::new(), None)) }

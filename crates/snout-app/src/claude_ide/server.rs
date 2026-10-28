@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use snout_host::HostRef;
 use tungstenite::Message;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 
@@ -98,17 +99,25 @@ struct Shared {
     emit: Emit,
 }
 
+/// What the lock file's worker does, in order, off the UI thread.
+type LockJob = Box<dyn FnOnce() + Send>;
+
 /// A running server. Dropping it stops it and removes its lock file.
 pub struct Server {
     port: u16,
     dir: PathBuf,
     lock: Option<PathBuf>,
     shared: Arc<Shared>,
+    host: HostRef,
+    /// The lock file's worker: it writes and removes the file on the host, in order.
+    locks: mpsc::Sender<LockJob>,
 }
 
 impl Server {
-    /// Listen on 127.0.0.1, clear away stale lock files in `dir`, and write ours there.
+    /// Listen on 127.0.0.1, clear away stale lock files in `dir` on `host`, and write ours
+    /// there (on a worker; [`Server::sync_lock`] waits for it).
     pub fn start(
+        host: HostRef,
         dir: &Path,
         folders: &[PathBuf],
         emit: impl Fn(Event) + Send + Sync + 'static,
@@ -117,8 +126,20 @@ impl Server {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
-        lockfile::clean_stale(dir);
-        let lock = lockfile::write(dir, port, folders, &token)?;
+        let (locks, jobs) = mpsc::channel::<LockJob>();
+        std::thread::Builder::new().name("claude-ide-lock".into()).spawn(move || {
+            for job in jobs {
+                job();
+            }
+        })?;
+        let (h, d, f, t) = (host.clone(), dir.to_owned(), folders.to_vec(), token.clone());
+        let _ = locks.send(Box::new(move || {
+            lockfile::clean_stale(&*h, &d);
+            if let Err(e) = lockfile::write(&*h, &d, port, &f, &t) {
+                eprintln!("Claude Code integration: could not write the lock file: {e}");
+            }
+        }));
+        let lock = lockfile::path(dir, port);
         let shared = Arc::new(Shared {
             clients: Mutex::new(HashMap::new()),
             stop: AtomicBool::new(false),
@@ -128,7 +149,16 @@ impl Server {
         });
         let s = shared.clone();
         std::thread::Builder::new().name("claude-ide-listen".into()).spawn(move || listen(listener, s))?;
-        Ok(Self { port, dir: dir.to_owned(), lock: Some(lock), shared })
+        Ok(Self { port, dir: dir.to_owned(), lock: Some(lock), shared, host, locks })
+    }
+
+    /// Wait until the lock file's worker has done what it was given; false if it is gone.
+    pub fn sync_lock(&self) -> bool {
+        let (tx, rx) = mpsc::channel();
+        let _ = self.locks.send(Box::new(move || {
+            let _ = tx.send(());
+        }));
+        rx.recv_timeout(Duration::from_secs(10)).is_ok()
     }
 
     pub fn port(&self) -> u16 {
@@ -150,9 +180,14 @@ impl Server {
 
     /// Write the lock file again with other workspace folders.
     pub fn set_folders(&mut self, folders: &[PathBuf]) {
-        if let Ok(lock) = lockfile::write(&self.dir, self.port, folders, &self.shared.token) {
-            self.lock = Some(lock);
+        if self.lock.is_none() {
+            return;
         }
+        let (h, d, f, t, port) =
+            (self.host.clone(), self.dir.clone(), folders.to_vec(), self.shared.token.clone(), self.port);
+        let _ = self.locks.send(Box::new(move || {
+            let _ = lockfile::write(&*h, &d, port, &f, &t);
+        }));
     }
 
     /// The clients connected now.
@@ -170,18 +205,27 @@ impl Server {
         }
     }
 
-    /// Stop listening, close the connections and remove the lock file.
-    pub fn stop(&mut self) {
+    /// Stop listening, close the connections and remove the lock file (on the worker; the
+    /// receiver hears when it is gone).
+    pub fn stop(&mut self) -> mpsc::Receiver<()> {
         self.shared.stop.store(true, Ordering::SeqCst);
+        let (tx, rx) = mpsc::channel();
         if let Some(lock) = self.lock.take() {
-            let _ = std::fs::remove_file(lock);
+            let host = self.host.clone();
+            let _ = self.locks.send(Box::new(move || {
+                let _ = host.remove_file(&lock);
+                let _ = tx.send(());
+            }));
+        } else {
+            let _ = tx.send(());
         }
+        rx
     }
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
-        self.stop();
+        let _ = self.stop();
     }
 }
 
@@ -368,7 +412,7 @@ pub mod tests {
         let dir = scratch("auth");
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
-        let mut server = Server::start(&dir, std::slice::from_ref(&dir), move |e| {
+        let mut server = Server::start(snout_host::local(), &dir, std::slice::from_ref(&dir), move |e| {
             let e = match e {
                 Event::Connected(id) => format!("connected {id}"),
                 Event::Disconnected(id) => format!("disconnected {id}"),
@@ -381,6 +425,7 @@ pub mod tests {
             let _ = tx.lock().unwrap().send(e);
         })
         .unwrap();
+        assert!(server.sync_lock());
         let lock: Value = serde_json::from_str(&std::fs::read_to_string(server.lock_path().unwrap()).unwrap()).unwrap();
         assert_eq!(lock["authToken"], server.token());
         assert_eq!(server.lock_path().unwrap(), lockfile::path(&dir, server.port()));
@@ -418,7 +463,7 @@ pub mod tests {
         assert_eq!(resp.headers().get("sec-websocket-protocol").unwrap(), "mcp");
 
         let lock_path = server.lock_path().unwrap().to_owned();
-        server.stop();
+        server.stop().recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(!lock_path.exists(), "the lock file goes with the server");
         let _ = std::fs::remove_dir_all(dir);
     }

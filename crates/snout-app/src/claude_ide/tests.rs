@@ -43,7 +43,10 @@ fn open_with_ide<'a>(
         gpui_component::Root::new(view, window, cx)
     });
     vcx.run_until_parked();
-    (model, ws.unwrap(), vcx)
+    let ws = ws.unwrap();
+    // The lock file is written on a worker of the server's.
+    vcx.update(|_, cx| assert!(ws.read(cx).claude.as_ref().is_some_and(|b| b.server.sync_lock())));
+    (model, ws, vcx)
 }
 
 /// The one lock file in `dir`.
@@ -442,6 +445,10 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     let lock_path = cx.update(|_, cx| ws.read(cx).claude.as_ref().unwrap().server.lock_path().unwrap().to_owned());
     assert!(lock_path.exists());
     cx.update(|_, cx| ws.update(cx, |ws, _| ws.claude = None));
+    let gone = std::time::Instant::now() + Duration::from_secs(5);
+    while lock_path.exists() && std::time::Instant::now() < gone {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert!(!lock_path.exists());
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
