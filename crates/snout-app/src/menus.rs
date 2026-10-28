@@ -63,6 +63,8 @@ actions!(
         GoToSymbol,
         GoToSymbolInFile,
         ShowProblems,
+        OpenSettings,
+        SearchEverywhere,
     ]
 );
 
@@ -92,6 +94,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Open Project…", Box::new(Open)),
         ("Close Project", Box::new(CloseProject)),
         ("Clear Recent Projects", Box::new(ClearRecent)),
+        ("Search Everywhere…", Box::new(SearchEverywhere)),
+        ("Settings…", Box::new(OpenSettings)),
         ("Go to File…", Box::new(GoToFile)),
         ("Go to Line…", Box::new(GoToLine)),
         ("Find in Files…", Box::new(FindInFiles)),
@@ -175,6 +179,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-a", SelectAll, Some("Workspace")),
         KeyBinding::new("cmd-s", crate::editor::Save, Some("EditorPanel")),
         KeyBinding::new("cmd-p", GoToFile, None),
+        KeyBinding::new("cmd-shift-a", SearchEverywhere, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
+        KeyBinding::new("escape", crate::search::SearchClose, Some("BranchPopup")),
         KeyBinding::new("cmd-shift-f", FindInFiles, None),
         // GPUI Kit's editor takes ⇧⌘F for replace; here it stays find in files, and
         // replace is ⌥⌘F. ⌘F finds in the file.
@@ -233,6 +240,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
         Menu::new("SnoutCode").items([
             MenuItem::action("About SnoutCode", About),
             MenuItem::separator(),
+            MenuItem::action("Settings…", OpenSettings),
+            MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),
             MenuItem::action("Quit SnoutCode", Quit),
@@ -247,6 +256,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::action("New Group…", NewGroup),
             MenuItem::separator(),
+            MenuItem::action("Search Everywhere…", SearchEverywhere),
             MenuItem::action("Go to File…", GoToFile),
             MenuItem::action("Find in Files…", FindInFiles),
             MenuItem::action("Command Palette…", CommandPalette),

@@ -752,3 +752,36 @@ fn the_terminal_tab_runs_a_shell_in_the_repository(cx: &mut TestAppContext) {
     wait(cx, repo.file_name().unwrap().to_str().unwrap());
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_title_bar_shows_the_project_and_its_branches(cx: &mut TestAppContext) {
+    let repo = demo_repo("title-bar");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("title-project").is_some(), "the project widget is drawn");
+    let branch = cx.debug_bounds("title-branch").expect("the branch widget is drawn").center();
+    cx.simulate_click(branch, gpui::Modifiers::none());
+    cx.run_until_parked();
+    let popup = cx.update(|_, cx| crate::workspace::branch_popup(ws.read(cx))).expect("the popup opens");
+    cx.update(|_, cx| {
+        let (local, remote) = popup.read(cx).branches(cx);
+        assert_eq!(local[0], ("main".to_owned(), true), "the current branch comes first");
+        assert!(local.iter().any(|(b, _)| b == "feature/diff-view"));
+        assert!(remote.is_empty());
+    });
+    cx.simulate_input("diff");
+    cx.update(|_, cx| {
+        let (local, _) = popup.read(cx).branches(cx);
+        assert_eq!(local, [("feature/diff-view".to_owned(), false)], "the search narrows the list");
+    });
+    let row = cx.debug_bounds("branch-local-0").expect("the branch row is drawn").center();
+    cx.simulate_click(row, gpui::Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(crate::workspace::branch_popup(ws.read(cx)).is_none(), "a choice closes the popup");
+        let m = model.read(cx);
+        let asked = matches!(&m.dialog, Some(crate::model::Dialog::ConfirmCheckout(snout_core::CheckoutTarget::Branch(b))) if b == "feature/diff-view");
+        assert!(asked || m.head_label() == "feature/diff-view", "the branch is checked out (or asked about)");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}

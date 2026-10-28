@@ -294,6 +294,19 @@ impl SearchView {
                     .map(|(path, _)| Item { path, ..Default::default() })
                     .collect();
                 cx.notify();
+                // Search Everywhere: the symbols that match follow the files.
+                if let Some(source) = self.symbols.clone().filter(|_| !query.trim().is_empty()) {
+                    self._search = Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(Duration::from_millis(120)).await;
+                        let Ok(task) = this.update(cx, |_, cx| source(query, cx)) else { return };
+                        let symbols = task.await;
+                        let _ = this.update(cx, |this, cx| {
+                            this.items.retain(|i| i.target.is_none());
+                            this.items.extend(symbols.into_iter().take(50));
+                            cx.notify();
+                        });
+                    }));
+                }
             }
             Mode::FindInFiles => {
                 let (root, files) = (self.root.clone(), self.files.clone());

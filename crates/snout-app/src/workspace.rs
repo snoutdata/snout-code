@@ -32,7 +32,9 @@ use crate::status::StatusBar;
 use crate::theme::{self, palette};
 
 mod lang_ui;
+mod title;
 use snout_core::art::Glyph;
+pub use title::{TITLE_H, branch_popup, initials};
 
 /// The center and bottom tabs, so events can bring one forward.
 pub struct Tabs {
@@ -65,6 +67,10 @@ pub struct Workspace {
     /// The bottom dock's Problems and References tabs.
     pub problems: Entity<crate::lang::panels::ProblemsPanel>,
     pub references: Entity<crate::lang::panels::ReferencesPanel>,
+    /// The title bar's branch popup, while it shows.
+    branch_popup: Option<Entity<crate::branch_popup::BranchPopup>>,
+    /// The engine's model of the project's build.
+    gradle: title::GradleCache,
     _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -270,6 +276,8 @@ impl Workspace {
             hub,
             problems,
             references,
+            branch_popup: None,
+            gradle: Default::default(),
             _save_layout: None,
             _subscriptions: subscriptions,
         };
@@ -729,7 +737,12 @@ impl Workspace {
                 }
                 cx.notify();
             }
-            SearchEvent::Run(_) | SearchEvent::OpenLocation(..) => {}
+            SearchEvent::OpenLocation(root, uri, at) => {
+                this.search = None;
+                this.open_location(root.clone(), uri.clone(), *at, window, cx);
+                cx.notify();
+            }
+            SearchEvent::Run(_) => {}
         })
         .detach();
         // Give the field the keyboard once this action is done.
@@ -737,6 +750,16 @@ impl Workspace {
         cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
         self.search = Some(view);
         cx.notify();
+    }
+
+    /// Search Everywhere: the files of the project, and the symbols of its Java server
+    /// when one runs, in one box.
+    pub fn search_everywhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_search(Mode::GoToFile, window, cx);
+        let source = self.workspace_symbols(cx);
+        if let (Some(view), Some(source)) = (self.search.clone(), source) {
+            view.update(cx, |v, cx| v.set_symbols(source, cx));
+        }
     }
 
     /// The editor tabs open now.
@@ -931,6 +954,7 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
+            .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &FindInFiles, w, cx| this.open_search(Mode::FindInFiles, w, cx)))
             .on_action(cx.listener(|this, _: &GoToLine, w, cx| this.open_search(Mode::GoToLine, w, cx)))
             .on_action(cx.listener(|this, _: &CommandPalette, w, cx| this.open_palette(w, cx)))
@@ -1008,15 +1032,20 @@ impl Render for Workspace {
                 .child(self.status.clone())
                 .into_any_element()
         };
-        root.flex_row()
-            .child(self.activity_bar(cx))
-            .child(div().flex_1().min_w_0().h_full().child(main))
-            .child(drop_hint)
-            .children(
-                self.search
-                    .clone()
-                    .map(|view| div().absolute().top(px(60.)).left_0().right_0().flex().justify_center().child(view)),
+        let title = self.title_bar(cx);
+        root.child(title)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .child(self.activity_bar(cx))
+                    .child(div().flex_1().min_w_0().h_full().child(main)),
             )
+            .child(drop_hint)
+            .children(self.search.clone().map(|view| {
+                div().absolute().top(px(TITLE_H + 24.)).left_0().right_0().flex().justify_center().child(view)
+            }))
     }
 }
 

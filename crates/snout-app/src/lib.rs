@@ -1,12 +1,15 @@
 //! SnoutCode on GPUI and GPUI Kit: an activity bar, docks, and the Git Panel.
 
 pub mod art;
+pub mod branch_popup;
 pub mod console;
 pub mod dialogs;
 pub mod editing;
 pub mod editor;
 pub mod files;
 pub mod git_view;
+pub mod glyphs;
+pub mod gradle;
 pub mod icons;
 pub mod lang;
 pub mod look;
@@ -91,7 +94,12 @@ pub fn run() {
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(800.), px(500.))),
-                ..Default::default()
+                // The app draws the title bar; the window buttons sit in it, centred.
+                titlebar: Some(gpui::TitlebarOptions {
+                    traffic_light_position: Some(gpui::point(px(13.), px(13.))),
+                    ..gpui_component::TitleBar::title_bar_options()
+                }),
+                ..gpui_component::TitleBar::window_options()
             },
             |window, cx| {
                 let view = cx.new(|cx| workspace::Workspace::new(model, window, cx));

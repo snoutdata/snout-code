@@ -1,0 +1,257 @@
+//! The window's line icons, drawn here: one thin stroke on a 16 point grid, so the title
+//! bar, the tool window stripes and the tool windows' toolbars read as one set.
+
+use gpui::{Hsla, IntoElement, PathBuilder, Pixels, Point, Styled as _, Window, canvas, point, px};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Icon {
+    Folder,
+    Branch,
+    ChevronDown,
+    ChevronRight,
+    ChevronUp,
+    Play,
+    Bug,
+    Search,
+    Gear,
+    Bell,
+    Terminal,
+    Problems,
+    Output,
+    Spark,
+    Build,
+    CollapseAll,
+    Locate,
+    Close,
+    Lock,
+    Warning,
+    Check,
+    Minus,
+    More,
+    Refresh,
+    Fetch,
+    Pull,
+    Push,
+    Plus,
+    Commit,
+    Keyboard,
+    Brush,
+    Code,
+    Tools,
+}
+
+/// One stroke of an icon, in grid units (16 across).
+enum Part {
+    /// A polyline; closed when the flag says so.
+    Line(&'static [(f32, f32)], bool),
+    /// A circle: centre and radius; filled when the flag says so.
+    Circle(f32, f32, f32, bool),
+    /// A filled polygon.
+    Fill(&'static [(f32, f32)]),
+    /// A quadratic curve: from, control, to.
+    Curve((f32, f32), (f32, f32), (f32, f32)),
+}
+
+use Part::*;
+
+impl Icon {
+    fn parts(self) -> &'static [Part] {
+        match self {
+            Icon::Folder => &[Line(&[(1.5, 13.), (1.5, 3.5), (6., 3.5), (7.5, 5.5), (14.5, 5.5), (14.5, 13.)], true)],
+            Icon::Branch => &[
+                Circle(4.5, 3.5, 1.6, false),
+                Circle(4.5, 12.5, 1.6, false),
+                Circle(11.5, 4.5, 1.6, false),
+                Line(&[(4.5, 5.1), (4.5, 10.9)], false),
+                Curve((11.5, 6.1), (11.5, 9.), (5.4, 10.9)),
+            ],
+            Icon::ChevronDown => &[Line(&[(4.5, 6.5), (8., 10.), (11.5, 6.5)], false)],
+            Icon::ChevronRight => &[Line(&[(6.5, 4.5), (10., 8.), (6.5, 11.5)], false)],
+            Icon::ChevronUp => &[Line(&[(4.5, 9.5), (8., 6.), (11.5, 9.5)], false)],
+            Icon::Play => &[Fill(&[(4.5, 3.), (13., 8.), (4.5, 13.)])],
+            Icon::Bug => &[
+                Circle(8., 9.5, 3.6, false),
+                Circle(8., 4.4, 1.7, false),
+                Line(&[(8., 6.6), (8., 13.)], false),
+                Line(&[(4.6, 8.), (2., 7.)], false),
+                Line(&[(4.5, 11.), (2., 12.5)], false),
+                Line(&[(11.4, 8.), (14., 7.)], false),
+                Line(&[(11.5, 11.), (14., 12.5)], false),
+            ],
+            Icon::Search => &[Circle(7., 7., 4.5, false), Line(&[(10.3, 10.3), (14., 14.)], false)],
+            Icon::Gear => &[
+                Circle(8., 8., 2.2, false),
+                Circle(8., 8., 4.9, false),
+                Line(&[(8., 1.3), (8., 3.1)], false),
+                Line(&[(8., 12.9), (8., 14.7)], false),
+                Line(&[(1.3, 8.), (3.1, 8.)], false),
+                Line(&[(12.9, 8.), (14.7, 8.)], false),
+                Line(&[(3.3, 3.3), (4.5, 4.5)], false),
+                Line(&[(11.5, 11.5), (12.7, 12.7)], false),
+                Line(&[(3.3, 12.7), (4.5, 11.5)], false),
+                Line(&[(11.5, 4.5), (12.7, 3.3)], false),
+            ],
+            Icon::Bell => &[
+                Line(&[(2.5, 12.), (13.5, 12.)], false),
+                Line(&[(4.2, 12.), (4.2, 7.5)], false),
+                Line(&[(11.8, 12.), (11.8, 7.5)], false),
+                Curve((4.2, 7.5), (4.2, 2.8), (8., 2.8)),
+                Curve((8., 2.8), (11.8, 2.8), (11.8, 7.5)),
+                Line(&[(6.5, 14.), (9.5, 14.)], false),
+            ],
+            Icon::Terminal => &[
+                Line(&[(1.5, 2.5), (14.5, 2.5), (14.5, 13.5), (1.5, 13.5)], true),
+                Line(&[(4.5, 6.), (7., 8.), (4.5, 10.)], false),
+                Line(&[(8.5, 10.5), (11.5, 10.5)], false),
+            ],
+            Icon::Problems => {
+                &[Circle(8., 8., 6., false), Line(&[(8., 4.8), (8., 8.8)], false), Circle(8., 11.2, 0.8, true)]
+            }
+            Icon::Output => &[
+                Line(&[(2.5, 4.), (13.5, 4.)], false),
+                Line(&[(2.5, 8.), (13.5, 8.)], false),
+                Line(&[(2.5, 12.), (9.5, 12.)], false),
+            ],
+            Icon::Spark => &[
+                Curve((8., 1.5), (8.6, 7.4), (14.5, 8.)),
+                Curve((14.5, 8.), (8.6, 8.6), (8., 14.5)),
+                Curve((8., 14.5), (7.4, 8.6), (1.5, 8.)),
+                Curve((1.5, 8.), (7.4, 7.4), (8., 1.5)),
+            ],
+            Icon::Build => &[
+                Line(&[(8., 1.5), (14., 4.8), (14., 11.2), (8., 14.5), (2., 11.2), (2., 4.8)], true),
+                Line(&[(2., 4.8), (8., 8.), (14., 4.8)], false),
+                Line(&[(8., 8.), (8., 14.5)], false),
+            ],
+            Icon::CollapseAll => {
+                &[Line(&[(4., 7.), (8., 3.5), (12., 7.)], false), Line(&[(4., 12.5), (8., 9.), (12., 12.5)], false)]
+            }
+            Icon::Locate => &[
+                Circle(8., 8., 4.5, false),
+                Circle(8., 8., 1.1, true),
+                Line(&[(8., 1.), (8., 3.5)], false),
+                Line(&[(8., 12.5), (8., 15.)], false),
+                Line(&[(1., 8.), (3.5, 8.)], false),
+                Line(&[(12.5, 8.), (15., 8.)], false),
+            ],
+            Icon::Close => &[Line(&[(4.5, 4.5), (11.5, 11.5)], false), Line(&[(11.5, 4.5), (4.5, 11.5)], false)],
+            Icon::Lock => &[
+                Line(&[(3.5, 7.), (12.5, 7.), (12.5, 14.), (3.5, 14.)], true),
+                Line(&[(5.5, 7.), (5.5, 5.)], false),
+                Line(&[(10.5, 7.), (10.5, 5.)], false),
+                Curve((5.5, 5.), (5.5, 2.5), (8., 2.5)),
+                Curve((8., 2.5), (10.5, 2.5), (10.5, 5.)),
+            ],
+            Icon::Warning => &[
+                Line(&[(8., 2.), (14.5, 13.5), (1.5, 13.5)], true),
+                Line(&[(8., 6.), (8., 9.5)], false),
+                Circle(8., 11.5, 0.75, true),
+            ],
+            Icon::Check => &[Line(&[(3.5, 8.5), (6.5, 11.5), (12.5, 4.5)], false)],
+            Icon::Minus => &[Line(&[(3.5, 8.), (12.5, 8.)], false)],
+            Icon::More => &[Circle(8., 3.5, 1., true), Circle(8., 8., 1., true), Circle(8., 12.5, 1., true)],
+            Icon::Refresh => &[
+                Curve((13., 8.), (13., 13.), (8., 13.)),
+                Curve((8., 13.), (3., 13.), (3., 8.)),
+                Curve((3., 8.), (3., 3.), (8., 3.)),
+                Line(&[(6.5, 1.2), (8.5, 3.), (6.5, 4.8)], false),
+            ],
+            Icon::Fetch => &[
+                Line(&[(8., 2.), (8., 11.)], false),
+                Line(&[(4.5, 7.5), (8., 11.), (11.5, 7.5)], false),
+                Line(&[(3., 14.), (13., 14.)], false),
+            ],
+            Icon::Pull => &[
+                Line(&[(8., 1.5), (8., 10.5)], false),
+                Line(&[(4.5, 7.), (8., 10.5), (11.5, 7.)], false),
+                Line(&[(2.5, 11.), (2.5, 14.), (13.5, 14.), (13.5, 11.)], false),
+            ],
+            Icon::Push => &[
+                Line(&[(8., 10.5), (8., 1.5)], false),
+                Line(&[(4.5, 5.), (8., 1.5), (11.5, 5.)], false),
+                Line(&[(2.5, 11.), (2.5, 14.), (13.5, 14.), (13.5, 11.)], false),
+            ],
+            Icon::Plus => &[Line(&[(8., 3.), (8., 13.)], false), Line(&[(3., 8.), (13., 8.)], false)],
+            Icon::Commit => {
+                &[Circle(8., 8., 3., false), Line(&[(1., 8.), (5., 8.)], false), Line(&[(11., 8.), (15., 8.)], false)]
+            }
+            Icon::Keyboard => &[
+                Line(&[(1.5, 4.), (14.5, 4.), (14.5, 12.), (1.5, 12.)], true),
+                Line(&[(4.5, 9.5), (11.5, 9.5)], false),
+                Circle(4.5, 6.6, 0.6, true),
+                Circle(8., 6.6, 0.6, true),
+                Circle(11.5, 6.6, 0.6, true),
+            ],
+            Icon::Brush => &[
+                Circle(8., 8., 6., false),
+                Circle(5.5, 6.5, 1., true),
+                Circle(9.5, 5., 1., true),
+                Circle(11., 9., 1., true),
+            ],
+            Icon::Code => {
+                &[Line(&[(5.5, 4.), (1.5, 8.), (5.5, 12.)], false), Line(&[(10.5, 4.), (14.5, 8.), (10.5, 12.)], false)]
+            }
+            Icon::Tools => &[
+                Line(&[(2.5, 13.5), (9., 7.)], false),
+                Circle(11., 5., 2.8, false),
+                Line(&[(2., 3.), (5., 3.), (5., 6.), (2., 6.)], true),
+            ],
+        }
+    }
+}
+
+/// Paint `icon` in `bounds` (fitted, centred) with lines of `ink`.
+pub fn paint(icon: Icon, bounds: gpui::Bounds<Pixels>, ink: Hsla, window: &mut Window) {
+    let side = f32::from(bounds.size.width.min(bounds.size.height));
+    let scale = side / 16.;
+    let c = bounds.center();
+    let at = |(x, y): (f32, f32)| -> Point<Pixels> { point(c.x + px((x - 8.) * scale), c.y + px((y - 8.) * scale)) };
+    let width = px((1.25 * scale).max(1.));
+    for part in icon.parts() {
+        let path = match part {
+            Line(pts, closed) => {
+                let mut b = PathBuilder::stroke(width);
+                for (i, &q) in pts.iter().enumerate() {
+                    if i == 0 { b.move_to(at(q)) } else { b.line_to(at(q)) }
+                }
+                if *closed {
+                    b.close();
+                }
+                b.build()
+            }
+            Circle(x, y, r, filled) => {
+                let mut b = if *filled { PathBuilder::fill() } else { PathBuilder::stroke(width) };
+                let r = *r * scale;
+                let radii = point(px(r), px(r));
+                let (left, right) = (at((*x, *y)) - point(px(r), px(0.)), at((*x, *y)) + point(px(r), px(0.)));
+                b.move_to(left);
+                b.arc_to(radii, px(0.), false, true, right);
+                b.arc_to(radii, px(0.), false, true, left);
+                b.close();
+                b.build()
+            }
+            Fill(pts) => {
+                let mut b = PathBuilder::fill();
+                for (i, &q) in pts.iter().enumerate() {
+                    if i == 0 { b.move_to(at(q)) } else { b.line_to(at(q)) }
+                }
+                b.close();
+                b.build()
+            }
+            Curve(from, ctrl, to) => {
+                let mut b = PathBuilder::stroke(width);
+                b.move_to(at(*from));
+                b.curve_to(at(*to), at(*ctrl));
+                b.build()
+            }
+        };
+        if let Ok(path) = path {
+            window.paint_path(path, ink);
+        }
+    }
+}
+
+/// `icon` as an element `size` points square.
+pub fn icon(icon: Icon, size: f32, ink: Hsla) -> impl IntoElement {
+    canvas(|_, _, _| {}, move |b, _, window, _| paint(icon, b, ink, window)).flex_none().size(px(size))
+}

@@ -236,17 +236,7 @@ impl Workspace {
                 })
             })
         } else {
-            Rc::new(move |query: String, cx: &mut App| {
-                if query.trim().is_empty() {
-                    return Task::ready(Vec::new());
-                }
-                let call = hub.read(cx).request(&root, "workspace/symbol", json!({ "query": query }));
-                let root = root.clone();
-                cx.background_executor().spawn(async move {
-                    let v = call.await.unwrap_or_default();
-                    workspace_symbols(&v, &root)
-                })
-            })
+            symbols_of(hub, root)
         };
         let model = self.model.clone();
         let view = cx.new(|cx| SearchView::new(model, PathBuf::new(), Mode::Symbols, window, cx));
@@ -266,6 +256,13 @@ impl Workspace {
         cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
         self.search = Some(view);
         cx.notify();
+    }
+
+    /// The workspace's symbols, from the Java server of the open project, if one runs.
+    pub fn workspace_symbols(&self, cx: &App) -> Option<crate::search::SymbolSource> {
+        let repo = self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned())?;
+        let root = self.hub.read(cx).servers.keys().find(|r| r.starts_with(&repo) || repo.starts_with(r)).cloned()?;
+        Some(symbols_of(self.hub.clone(), root))
     }
 
     /// The bar offering a JDK when the build needs one this Mac lacks.
@@ -404,6 +401,21 @@ fn filter_symbols(items: Vec<Item>, query: &str) -> Vec<Item> {
         .collect();
     hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     hits.into_iter().map(|(_, _, it)| it).collect()
+}
+
+/// The symbols of the build at `root` that match a query, from its server.
+fn symbols_of(hub: Entity<crate::lang::LangHub>, root: PathBuf) -> crate::search::SymbolSource {
+    Rc::new(move |query: String, cx: &mut App| {
+        if query.trim().is_empty() {
+            return Task::ready(Vec::new());
+        }
+        let call = hub.read(cx).request(&root, "workspace/symbol", json!({ "query": query }));
+        let root = root.clone();
+        cx.background_executor().spawn(async move {
+            let v = call.await.unwrap_or_default();
+            workspace_symbols(&v, &root)
+        })
+    })
 }
 
 #[cfg(test)]
