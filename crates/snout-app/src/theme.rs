@@ -239,6 +239,7 @@ pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
         t.status_bar_border = p.border;
         t.link = if dark { p.accent } else { p.fg };
         t.window_border = p.border;
+        t.font_size = gpui::px(14.);
         t.radius = gpui::px(6.);
         t.radius_lg = gpui::px(12.);
     });

@@ -146,3 +146,100 @@ fn the_activity_bar_switches_and_closes_the_left_dock(cx: &mut TestAppContext) {
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
     assert!(left_open(cx));
 }
+
+/// What `git show` says the last commit holds.
+fn last_commit_files(repo: &Path) -> String {
+    let out =
+        Command::new("git").arg("-C").arg(repo).args(["show", "--name-only", "--format=%s", "HEAD"]).output().unwrap();
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[gpui::test]
+fn git_panel_branches_check_out_create_and_delete(cx: &mut TestAppContext) {
+    use snout_core::{CheckoutTarget, LocalChanges};
+    let repo = demo_repo("branches");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        let names: Vec<&str> = m.branches.iter().map(|b| b.name.as_str()).collect();
+        assert!(names.contains(&"main") && names.contains(&"feature/diff-view"), "{names:?}");
+        assert_eq!(m.tags.len(), 1);
+    });
+
+    // With tracked changes, a checkout asks what to do with them first.
+    let feature = CheckoutTarget::Branch("feature/diff-view".into());
+    act(&model, cx, Action::RequestCheckout(feature.clone()));
+    cx.update(|_, cx| assert!(matches!(model.read(cx).dialog, Some(crate::model::Dialog::ConfirmCheckout(_)))));
+    act(&model, cx, Action::Checkout(feature, LocalChanges::Stash));
+    cx.update(|_, cx| assert_eq!(model.read(cx).status.branch.head.as_deref(), Some("feature/diff-view")));
+
+    act(&model, cx, Action::CreateBranch { name: "topic".into(), start: None, checkout: false });
+    cx.update(|_, cx| assert!(model.read(cx).branches.iter().any(|b| b.name == "topic")));
+    act(&model, cx, Action::DeleteBranch { name: "topic".into(), force: false, upstream: None });
+    cx.update(|_, cx| assert!(!model.read(cx).branches.iter().any(|b| b.name == "topic")));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn git_panel_commits_without_staging_what_is_selected(cx: &mut TestAppContext) {
+    let repo = demo_repo("commit");
+    let (model, _, cx) = open(cx, with_repo(&repo));
+    // Something is staged: Commit records only that.
+    cx.update(|_, cx| assert_eq!(model.read(cx).commit_scope(), snout_core::Scope::Staged(1)));
+    act(&model, cx, Action::Unstage(vec!["src/main.rs".into()]));
+    // Nothing staged and one file selected: Commit adds and records that file alone.
+    cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("NOTES.md", false, false, cx)));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.commit_scope().label(), "1 selected");
+        assert!(m.diff.is_some(), "the selected file's diff is ready for its tab");
+        assert!(!m.can_commit(), "no message yet");
+    });
+    cx.update(|_, cx| model.update(cx, |m, _| m.commit_msg = "Add notes".into()));
+    act(&model, cx, Action::Commit);
+    let last = last_commit_files(&repo);
+    assert!(last.contains("NOTES.md") && !last.contains("main.rs"), "{last}");
+    // Nothing selected: Commit takes every changed file.
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(m.commit_msg.is_empty(), "the message is cleared after committing");
+        assert_eq!(m.commit_scope().label(), "all 2 changed");
+    });
+    cx.update(|_, cx| model.update(cx, |m, _| m.commit_msg = "The rest".into()));
+    act(&model, cx, Action::Commit);
+    cx.update(|_, cx| assert!(model.read(cx).status.files.is_empty()));
+    // Amend fills in the last message.
+    cx.update(|_, cx| model.update(cx, |m, cx| m.set_amend(true, cx)));
+    cx.update(|_, cx| assert_eq!(model.read(cx).commit_msg.trim(), "The rest"));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn claude_drafts_the_commit_message_from_the_patch(cx: &mut TestAppContext) {
+    let repo = demo_repo("draft");
+    let bin = scratch_dir("draft-bin");
+    // A stand-in for `claude -p`: it reads the patch and answers with a message naming a
+    // file in it.
+    let fake = bin.join("claude");
+    let script = "#!/bin/sh\nif grep -q 'src/main.rs' ; then echo 'Greet snout'; else echo 'Wrong patch'; fi\n";
+    std::fs::write(&fake, script).unwrap();
+    Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let (model, _, cx) = open(cx, with_repo(&repo));
+    cx.update(|_, cx| model.update(cx, |m, _| m.claude = Some(fake.clone())));
+    act(&model, cx, Action::DraftMessage);
+    cx.update(|_, cx| assert!(model.read(cx).draft.is_some()));
+    for _ in 0..100 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        if cx.update(|_, cx| model.read(cx).draft.is_none()) {
+            break;
+        }
+    }
+    cx.update(|_, cx| assert_eq!(model.read(cx).commit_msg, "Greet snout"));
+    for dir in [repo, bin] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
