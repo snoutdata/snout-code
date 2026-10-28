@@ -46,6 +46,7 @@ actions!(
         Zoom,
         ShowProjects,
         ShowGit,
+        Back,
     ]
 );
 
@@ -63,6 +64,11 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-o", Checkout, None),
         KeyBinding::new("cmd-1", ShowProjects, None),
         KeyBinding::new("cmd-0", ShowGit, None),
+        // Outside text fields, which take these keys first: ⌘⌫ moves the selected files to
+        // the Trash, as in Finder, and Esc leaves the commit view.
+        KeyBinding::new("cmd-backspace", Trash, Some("Workspace")),
+        KeyBinding::new("escape", Back, Some("Workspace")),
+        KeyBinding::new("cmd-a", SelectAll, Some("Workspace")),
     ]);
 }
 

@@ -37,6 +37,8 @@ pub struct Workspace {
     pub side: Entity<SidePanel>,
     pub tabs: Tabs,
     menu_checks: Option<(bool, bool, bool, ThemeChoice)>,
+    /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
+    focus: gpui::FocusHandle,
     title: String,
     _subscriptions: Vec<Subscription>,
 }
@@ -99,9 +101,18 @@ impl Workspace {
                 }
             }),
         ];
-        let mut this =
-            Self { model, dock, side, tabs, menu_checks: None, title: String::new(), _subscriptions: subscriptions };
+        let mut this = Self {
+            model,
+            dock,
+            side,
+            tabs,
+            menu_checks: None,
+            focus: cx.focus_handle(),
+            title: String::new(),
+            _subscriptions: subscriptions,
+        };
         this.show_repo_tabs(window, cx);
+        window.focus(&this.focus, cx);
         this
     }
 
@@ -382,6 +393,7 @@ impl Render for Workspace {
         let root = div()
             .id("workspace")
             .key_context("Workspace")
+            .track_focus(&self.focus)
             .size_full()
             .flex()
             .flex_col()
@@ -411,7 +423,16 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ThemeDark, _, cx| this.send(Action::SetTheme(ThemeChoice::Dark), cx)))
             .on_action(cx.listener(|this, _: &ThemeLight, _, cx| this.send(Action::SetTheme(ThemeChoice::Light), cx)))
             .on_action(cx.listener(|_, _: &Minimize, w, _| w.minimize_window()))
-            .on_action(cx.listener(|_, _: &Zoom, w, _| w.zoom_window()));
+            .on_action(cx.listener(|_, _: &Zoom, w, _| w.zoom_window()))
+            // ⌘A outside a text field selects every listed file.
+            .on_action(cx.listener(|this, _: &gpui_component::input::SelectAll, _, cx| {
+                this.model.update(cx, |m, cx| m.select_all_files(cx))
+            }))
+            .on_action(cx.listener(|this, _: &Back, _, cx| {
+                if this.model.read(cx).commit_view.is_some() {
+                    this.send(Action::CloseCommit, cx);
+                }
+            }));
         let root = act!(root, Open, free, |_| Action::PickFolder);
         let root = act!(root, FindRepos, free, |_| Action::PickScanFolder);
         let root = act!(root, CloneRepo, free, |_| Action::ShowClone);

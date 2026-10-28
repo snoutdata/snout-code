@@ -391,3 +391,23 @@ fn claude_console_runs_in_the_repo_and_refreshes_git(cx: &mut TestAppContext) {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[gpui::test]
+fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
+    let repo = demo_repo("keys");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.simulate_keystrokes("cmd-0");
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git));
+    cx.simulate_keystrokes("cmd-a");
+    cx.update(|_, cx| assert_eq!(model.read(cx).selected.len(), 3, "⌘A selects every listed file"));
+    let first = cx.update(|_, cx| model.read(cx).log[1].id.clone());
+    act(&model, cx, Action::ShowCommit(first));
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| assert!(model.read(cx).commit_view.is_none(), "Esc leaves the commit view"));
+    cx.simulate_keystrokes("cmd-backspace");
+    cx.update(|_, cx| {
+        let dialog = &model.read(cx).dialog;
+        assert!(matches!(dialog, Some(crate::model::Dialog::ConfirmDeleteFiles(f)) if f.len() == 3), "{dialog:?}");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
