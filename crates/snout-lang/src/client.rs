@@ -39,6 +39,9 @@ pub enum ServerMessage {
     Exited(Option<i32>),
 }
 
+/// What a server sends on its own, as it arrives.
+pub type Messages = async_channel::Receiver<ServerMessage>;
+
 type Pending = Mutex<HashMap<i64, oneshot::Sender<Result<Value, ResponseError>>>>;
 
 struct Inner {

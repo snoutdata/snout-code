@@ -56,6 +56,8 @@ pub struct ProjectsView {
     filter: Entity<InputState>,
     /// Groups and directories folded or unfolded against their default.
     toggled: HashSet<String>,
+    /// Which listed repositories are still there, as the host says.
+    present: crate::host::Facts<bool>,
 }
 
 impl ProjectsView {
@@ -72,7 +74,7 @@ impl ProjectsView {
         })
         .detach();
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
-        Self { model, filter, toggled: HashSet::new() }
+        Self { model, filter, toggled: HashSet::new(), present: Default::default() }
     }
 
     fn is_open(&self, key: &str, default: bool) -> bool {
@@ -272,12 +274,13 @@ impl ProjectsView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Unknown yet counts as there.
+        let missing = !self.present.get(path, cx, |v| &mut v.present, |h, p| h.is_dir(p)).unwrap_or(true);
         let p = palette(cx);
         let m = self.model.read(cx);
         let model = self.model.clone();
         let name = dir_name(path);
         let current = m.repo.as_ref().is_some_and(|r| r.root() == path);
-        let missing = !crate::host::host(cx).is_dir(path);
         let mut chips = Vec::new();
         if missing {
             chips.push(("missing".to_owned(), p.error));

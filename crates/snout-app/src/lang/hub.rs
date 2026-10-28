@@ -435,7 +435,7 @@ impl LangHub {
         let listed =
             crate::project_model::store(cx).and_then(|s| s.read(cx).model_for(project)).is_some_and(|m| m.holds(path));
         let inside = path.starts_with(project) && java::gradle_root(host, path, Some(project)).is_some();
-        if (inside || listed) && crate::project_model::has_gradle(host, project) {
+        if (inside || listed) && crate::project_model::project_has_gradle(project, cx) {
             return Some(project.clone());
         }
         java::gradle_root(host, path, Some(project)).filter(|r| r.starts_with(project))
@@ -521,18 +521,23 @@ impl LangHub {
             }
             return;
         }
-        let host = &*self.host;
-        let saved = self.model.read(cx).settings.project_jdks.get(root).and_then(|h| java::jdk_at(host, h));
-        let req = java::requirement(host, root);
-        let jdk = saved.filter(|j| req.fits(j.major)).or_else(|| {
-            let all = java::discover(host, &self.home);
-            java::choose(&req, &all).cloned()
+        // What the build needs and which JDK fits are asked of the host off the UI thread.
+        let saved = self.model.read(cx).settings.project_jdks.get(root).cloned();
+        let (host, home, root_buf) = (self.host.clone(), self.home.clone(), root.to_owned());
+        let look = cx.background_executor().spawn(async move {
+            let saved = saved.and_then(|h| java::jdk_at(&*host, &h));
+            let req = java::requirement(&*host, &root_buf);
+            let jdk = saved.filter(|j| req.fits(j.major)).or_else(|| {
+                let all = java::discover(&*host, &home);
+                java::choose(&req, &all).cloned()
+            });
+            (req, jdk)
         });
-        let mut server = Server {
+        let server = Server {
             root: root.to_owned(),
-            jdk: jdk.clone(),
+            jdk: None,
             client: None,
-            stage: Stage::NeedsJdk(req.wanted()),
+            stage: Stage::Starting,
             progress: Progress::default(),
             initialized: false,
             diagnostics: BTreeMap::new(),
@@ -540,20 +545,46 @@ impl LangHub {
             recovering: None,
             started: Instant::now(),
             first_diagnostics: None,
-            generation: 0,
+            generation: next_generation(),
             stopped: false,
             readiness: Readiness::default(),
             _tasks: Vec::new(),
         };
+        let generation = server.generation;
+        self.servers.insert(root.to_owned(), server);
+        let root_buf = root.to_owned();
+        cx.spawn(async move |this, cx| {
+            let (req, jdk) = look.await;
+            let _ = this.update(cx, |this, cx| this.jdk_found(&root_buf, generation, req, jdk, cx));
+        })
+        .detach();
+        cx.emit(HubEvent::Changed);
+        cx.notify();
+    }
+
+    /// The JDK for the build at `root` is found (or none fits `req`): start its engine, or
+    /// offer the JDK it needs.
+    fn jdk_found(
+        &mut self,
+        root: &Path,
+        generation: u64,
+        req: java::Requirement,
+        jdk: Option<Jdk>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(server) =
+            self.servers.get_mut(root).filter(|s| s.generation == generation && s.client.is_none() && !s.stopped)
+        else {
+            return;
+        };
         match jdk {
             Some(jdk) => {
+                server.jdk = Some(jdk.clone());
                 self.remember_jdk(root, &jdk, cx);
-                server.jdk = Some(jdk);
-                self.servers.insert(root.to_owned(), server);
                 self.spawn(root, cx);
             }
             None => {
-                self.servers.insert(root.to_owned(), server);
+                server.stage = Stage::NeedsJdk(req.wanted());
                 if self.jdk_prompt.is_none() {
                     eprintln!("[java] no JDK fits {}: offering JDK {}", root.display(), req.wanted());
                     self.jdk_prompt = Some(JdkPrompt {
@@ -645,22 +676,53 @@ impl LangHub {
             server.stage = Stage::WaitingForEngine;
             return;
         }
+        // The engine is found and started on the host off the UI thread.
         let host = self.host.clone();
-        let Some(dist) = java::engine_dist(&*host) else {
-            server.stage = Stage::Failed("The Java engine is not built (run snout.sh)".into());
+        server.generation = next_generation();
+        server.stage = Stage::Importing;
+        let generation = server.generation;
+        let root_buf = root.to_owned();
+        let start = cx.background_executor().spawn(async move {
+            let dist =
+                java::engine_dist(&*host).ok_or_else(|| "The Java engine is not built (run snout.sh)".to_owned())?;
+            let command = java::engine_command(&*host, &dist, &root_buf, &jdk.home, idle_minutes);
+            let started = Client::spawn(&*host, &command).map_err(|e| format!("The Java engine did not start: {e}"))?;
+            Ok((started, jdk))
+        });
+        let root_buf = root.to_owned();
+        cx.spawn(async move |this, cx| {
+            let started = start.await;
+            let _ = this.update(cx, |this, cx| {
+                this.started(&root_buf, generation, started, cx);
+                cx.emit(HubEvent::Changed);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The engine of `root` started (or did not) for the generation `generation`.
+    fn started(
+        &mut self,
+        root: &Path,
+        generation: u64,
+        started: Result<((Client, snout_lang::Messages), Jdk), String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(server) =
+            self.servers.get_mut(root).filter(|s| s.generation == generation && s.client.is_none() && !s.stopped)
+        else {
+            // Stopped or restarted meanwhile: this process is not wanted (dropping it stops it).
             return;
         };
-        let command = java::engine_command(&*host, &dist, root, &jdk.home, idle_minutes);
-        let (client, events) = match Client::spawn(&*host, &command) {
-            Ok(c) => c,
+        let ((client, events), jdk) = match started {
+            Ok(s) => s,
             Err(e) => {
-                server.stage = Stage::Failed(format!("The Java engine did not start: {e}"));
+                server.stage = Stage::Failed(e);
                 return;
             }
         };
         eprintln!("[java] started the engine for {} on JDK {} (pid {})", root.display(), jdk.version, client.pid());
-        server.generation = next_generation();
-        let generation = server.generation;
         server.client = Some(client.clone());
         server.stage = Stage::Importing;
         server.progress.clear();

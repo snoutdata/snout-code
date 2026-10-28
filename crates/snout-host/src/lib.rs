@@ -8,7 +8,8 @@
 //! JDKs, Gradle and project caches, run, debug and test processes, terminals and the Claude
 //! console, Claude Code's IDE lock file, New Project, and the Trash. What belongs to the
 //! app itself stays on the Mac and uses `std::fs` directly: the app's settings, layout and
-//! session, recent projects, keymaps, fonts, art and logs.
+//! session, recent projects, keymaps, fonts, art and logs, and the run configurations and
+//! breakpoints it keeps per project in its own folder (`run::config::ProjectSettings`).
 //!
 //! Paths are [`PathBuf`]s in the host's own terms (both sides are Unix). A path from the
 //! host is never assumed to exist on the Mac.
@@ -24,7 +25,21 @@
 //!   ([`HostInfo::exe`]), and in development in the source tree the app was built from.
 //! - The legacy egui app (`snout-gui`) works on this Mac only: it passes a [`LocalHost`]
 //!   and keeps its own `std::fs` and `std::process` calls.
+//! - The start.spring.io catalog New Project offers is fetched on the Mac (`curl`) and kept
+//!   in the app's folder (`new_project::initializr`); the project itself is made on the host.
+//! - The token in the IDE lock file comes from the Mac's `/dev/urandom`.
+//! - snout.sh's engine build status file (`background::EngineBuild`, development only) is
+//!   read on the Mac.
+//! - The folder pickers (Open, Find repositories, New Project's location) are the Mac's
+//!   file dialogs; a remote host needs a picker of its own.
 //! - Tests set up their fixtures with `std::fs` and `std::process`.
+//!
+//! Calls still made on the UI thread (found with [`LatencyHost`]; to move off it): the
+//! editor's load, disk check and save, which Gradle build an opened file belongs to
+//! (`LangHub::root_for`), language server edits applied to files no tab shows, restoring the
+//! session's editor tabs, the reference lines of Find References, console links, and the
+//! IDE tools' file checks. Opening a project, the Git Panel, the file tree, search, the
+//! Processes window, the terminals, starting the engine and its JDK lookup are off it.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};

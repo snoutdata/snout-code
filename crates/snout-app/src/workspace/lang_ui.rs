@@ -72,7 +72,7 @@ impl Workspace {
         if self.hub.read(cx).servers.contains_key(&root) || !self.hub.read(cx).enabled {
             return;
         }
-        if crate::project_model::has_gradle(&*crate::host::host(cx), &root) {
+        if crate::project_model::project_has_gradle(&root, cx) {
             self.hub.update(cx, |h, cx| h.ensure_server(&root, cx));
         }
     }

@@ -24,6 +24,8 @@ pub struct StatusBar {
     editor: Option<WeakEntity<EditorPanel>>,
     /// The Java engine is not there: Java files get no language features.
     pub java_missing: bool,
+    /// The host is being asked whether the engine is there.
+    looking: bool,
     /// The note saying why is open.
     pub java_note: bool,
     /// The background tasks' popover is open.
@@ -76,11 +78,14 @@ impl EditorStatus {
 impl StatusBar {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         let watch = vec![cx.observe(&model, |_, _, cx| cx.notify())];
-        let java_missing = crate::lang::java::engine_dist(&*crate::host::host(cx)).is_none();
+        // Whether the engine is there is asked of the host off the UI thread.
+        Self::look_for_engine(cx);
+        let java_missing = false;
         Self {
             model,
             editor: None,
             java_missing,
+            looking: true,
             java_note: false,
             hub: None,
             git: false,
@@ -91,9 +96,34 @@ impl StatusBar {
         }
     }
 
+    /// Ask the host, off the UI thread, whether the engine distribution is there.
+    fn look_for_engine(cx: &mut Context<Self>) {
+        let host = crate::host::host(cx);
+        let look = cx.background_executor().spawn(async move { crate::lang::java::engine_dist(&*host).is_none() });
+        cx.spawn(async move |this, cx| {
+            let missing = look.await;
+            let _ = this.update(cx, |this, cx| {
+                this.looking = false;
+                if this.java_missing != missing {
+                    this.java_missing = missing;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Show what the language servers are doing.
     pub fn set_hub(&mut self, hub: Entity<crate::lang::LangHub>, cx: &mut Context<Self>) {
-        self._hub_watch = Some(cx.observe(&hub, |_, _, cx| cx.notify()));
+        self._hub_watch = Some(cx.observe(&hub, |this, hub, cx| {
+            // An engine build that ended: look for the engine again.
+            let built = hub.read(cx).engine_build.as_ref().is_some_and(|b| b.finished());
+            if built && this.java_missing && !this.looking {
+                this.looking = true;
+                Self::look_for_engine(cx);
+            }
+            cx.notify()
+        }));
         self.hub = Some(hub);
         self._processes_watch = crate::processes::processes(cx).map(|p| cx.observe(&p, |_, _, cx| cx.notify()));
     }
@@ -185,15 +215,11 @@ impl StatusBar {
         }
         // An engine build on its way is not missing.
         if self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.is_some()) {
-            return crate::lang::java::engine_dist(&*crate::host::host(cx)).is_none()
-                && self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.as_ref().is_some_and(|b| b.finished()));
+            return self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.as_ref().is_some_and(|b| b.finished()));
         }
         let java_file = self.editor().is_some_and(|e| crate::editor::language_for(&e.read(cx).path) == "java");
-        let gradle = self
-            .model
-            .read(cx)
-            .project_root()
-            .is_some_and(|r| crate::lang::java::is_gradle_root(&*crate::host::host(cx), &r));
+        let gradle =
+            self.model.read(cx).project_root().is_some_and(|r| crate::project_model::project_is_gradle_root(&r, cx));
         java_file || gradle
     }
 

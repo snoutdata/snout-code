@@ -22,11 +22,23 @@ pub struct WelcomePanel {
     model: Entity<Model>,
     pub search: Entity<InputState>,
     focus: FocusHandle,
+    /// The branch of each recent project, read from the host; asked again when the open
+    /// project's head moves.
+    branches: crate::host::Facts<Option<String>>,
+    head: Option<String>,
 }
 
 impl WelcomePanel {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        cx.observe(&model, |_, _, cx| cx.notify()).detach();
+        cx.observe(&model, |this: &mut Self, model, cx| {
+            let head = model.read(cx).branch_summary();
+            if head != this.head {
+                this.head = head;
+                this.branches.clear();
+            }
+            cx.notify()
+        })
+        .detach();
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search recent projects"));
         cx.subscribe(&search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -34,7 +46,7 @@ impl WelcomePanel {
             }
         })
         .detach();
-        Self { model, search, focus: cx.focus_handle() }
+        Self { model, search, focus: cx.focus_handle(), branches: Default::default(), head: None }
     }
 
     /// The recent projects the search box lets through.
@@ -100,6 +112,13 @@ impl Render for WelcomePanel {
         let p = palette(cx);
         let model = self.model.clone();
         let recent = self.shown(cx);
+        let branches: std::collections::HashMap<PathBuf, Option<String>> = recent
+            .iter()
+            .filter_map(|p| {
+                let b = self.branches.get(p, cx, |v| &mut v.branches, |h, p| branch_of(h, p))?;
+                Some((p.clone(), b))
+            })
+            .collect();
         let any_recent = !self.model.read(cx).recent_projects().is_empty();
         let opened = self.model.read(cx).settings.opened.clone();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -192,7 +211,7 @@ impl Render for WelcomePanel {
             .enumerate()
             .map(|(i, path)| {
                 let name = Model::dir_name(path);
-                let branch = branch_of(&*host, path);
+                let branch = branches.get(path).cloned().flatten();
                 let when = opened.get(path).map(|t| ago(*t, now));
                 let model = model.clone();
                 let target = path.clone();

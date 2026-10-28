@@ -442,11 +442,7 @@ impl Render for ProjectView {
             let store = self.store.read(cx);
             let note = match (&store.sync_error, root.is_some()) {
                 (Some(e), true) => Some(format!("The Gradle model could not be read: {e}")),
-                (None, true)
-                    if root
-                        .as_deref()
-                        .is_some_and(|r| crate::project_model::has_gradle(&*crate::host::host(cx), r)) =>
-                {
+                (None, true) if root.as_deref().is_some_and(|r| crate::project_model::project_has_gradle(r, cx)) => {
                     Some("Reading Gradle model".to_owned())
                 }
                 _ => None,

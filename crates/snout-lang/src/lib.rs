@@ -10,7 +10,7 @@ pub mod rpc;
 pub mod text;
 pub mod uri;
 
-pub use client::{Client, ServerMessage, block_on};
+pub use client::{Client, Messages, ServerMessage, block_on};
 pub use lsp_types;
 pub use rpc::ResponseError;
 

@@ -452,6 +452,24 @@ pub fn model_files(host: &dyn Host, home: &Path, root: &Path) -> Vec<(PathBuf, S
     out
 }
 
+/// Whether the open project `dir` holds Gradle builds, for the views: as the project models
+/// last saw on the host (none until they have), so the UI thread never waits on the host.
+/// Without the project models (no window), the host is asked.
+pub fn project_has_gradle(dir: &Path, cx: &App) -> bool {
+    match store(cx) {
+        Some(s) => s.read(cx).gradle_of(dir).is_some_and(|(g, _)| g),
+        None => has_gradle(&*crate::host::host(cx), dir),
+    }
+}
+
+/// Whether the open project `dir` is a Gradle build itself, as [`project_has_gradle`] knows it.
+pub fn project_is_gradle_root(dir: &Path, cx: &App) -> bool {
+    match store(cx) {
+        Some(s) => s.read(cx).gradle_of(dir).is_some_and(|(_, r)| r),
+        None => crate::lang::java::is_gradle_root(&*crate::host::host(cx), dir),
+    }
+}
+
 /// Whether `dir` holds Gradle builds: it is one, lies in one, or has one below it (a few
 /// levels down, as the engine looks). Remembered for a few seconds, as views ask often.
 pub fn has_gradle(host: &dyn Host, dir: &Path) -> bool {
@@ -495,6 +513,10 @@ pub struct ProjectModels {
     /// The file it was read from, and when that was written.
     source: Option<(PathBuf, SystemTime)>,
     reading: bool,
+    /// A look at the host for [`Self::poll`] is under way.
+    polling: bool,
+    /// Whether the project holds Gradle builds, and is one itself, as the last look saw.
+    gradle: Option<(PathBuf, bool, bool)>,
     /// The app's own `snout-engine sync` is running, since then.
     pub syncing: Option<Instant>,
     pub sync_error: Option<String>,
@@ -552,6 +574,8 @@ impl ProjectModels {
             current: None,
             source: None,
             reading: false,
+            polling: false,
+            gradle: None,
             syncing: None,
             sync_error: None,
             stamps: Vec::new(),
@@ -617,8 +641,48 @@ impl ProjectModels {
             cx.notify();
         }
         let Some(root) = root else { return };
-        let host = self.host.clone();
-        let newest = model_files(&*host, &self.home, &root).into_iter().max_by_key(|(_, t)| *t);
+        if self.polling {
+            return;
+        }
+        // What the host holds is looked at off the UI thread.
+        self.polling = true;
+        let (host, home) = (self.host.clone(), self.home.clone());
+        let stamps = if self.current.is_some() && !self.scripts_changed { self.stamps.clone() } else { Vec::new() };
+        let look = cx.background_executor().spawn({
+            let root = root.clone();
+            async move {
+                let newest = model_files(&*host, &home, &root).into_iter().max_by_key(|(_, t)| *t);
+                let gradle = (has_gradle(&*host, &root), crate::lang::java::is_gradle_root(&*host, &root));
+                let changed = stamps.iter().any(|(path, t)| modified(&*host, path) != *t);
+                (newest, gradle, changed)
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let (newest, gradle, changed) = look.await;
+            let _ = this.update(cx, |this, cx| {
+                this.polling = false;
+                if this.root.as_ref() == Some(&root) {
+                    this.looked(root, newest, gradle, changed, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// What a look at the host saw: the newest model file, whether the project is a Gradle
+    /// build, and whether its scripts changed.
+    fn looked(
+        &mut self,
+        root: PathBuf,
+        newest: Option<(PathBuf, SystemTime)>,
+        (gradle, gradle_root): (bool, bool),
+        changed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.gradle.as_ref() != Some(&(root.clone(), gradle, gradle_root)) {
+            self.gradle = Some((root.clone(), gradle, gradle_root));
+            cx.notify();
+        }
         if let Some((file, when)) = newest {
             if !self.reading && self.source.as_ref().is_none_or(|(f, t)| *f != file || *t != when) {
                 self.read(file, when, root.clone(), cx);
@@ -629,18 +693,21 @@ impl ProjectModels {
             && self.syncing.is_none()
             && !self.hub.as_ref().is_some_and(|h| h.read(cx).paused)
             && !self.engine_runs(&root, cx)
-            && has_gradle(&*host, &root)
+            && gradle
         {
             self.tried = true;
             self.sync(cx);
         }
-        if self.current.is_some() && !self.scripts_changed && !self.stamps.is_empty() {
-            let changed = self.stamps.iter().any(|(path, t)| modified(&*host, path) != *t);
-            if changed {
-                self.scripts_changed = true;
-                cx.notify();
-            }
+        if changed && self.current.is_some() && !self.scripts_changed && !self.stamps.is_empty() {
+            self.scripts_changed = true;
+            cx.notify();
         }
+    }
+
+    /// Whether `dir` (the open project) holds Gradle builds, and whether it is one, as the
+    /// last look at the host saw; `None` until one has.
+    pub fn gradle_of(&self, dir: &Path) -> Option<(bool, bool)> {
+        self.gradle.as_ref().filter(|(r, _, _)| r == dir).map(|(_, g, r)| (*g, *r))
     }
 
     fn read(&mut self, file: PathBuf, when: SystemTime, root: PathBuf, cx: &mut Context<Self>) {
@@ -702,17 +769,16 @@ impl ProjectModels {
             return;
         }
         let host = self.host.clone();
-        let Some(dist) = crate::lang::java::engine_dist(&*host) else {
-            self.sync_error = Some("The Java engine is not built (run snout.sh)".into());
-            cx.notify();
-            return;
-        };
         let out = synced_model(&self.home, &root);
         let jdk = self.model.read(cx).settings.project_jdks.get(&root).cloned();
         self.syncing = Some(Instant::now());
         let run = cx.background_executor().spawn({
             let root = root.clone();
-            async move { run_sync(&*host, &dist, &root, &out, jdk.as_deref()) }
+            async move {
+                let dist = crate::lang::java::engine_dist(&*host)
+                    .ok_or_else(|| "The Java engine is not built (run snout.sh)".to_owned())?;
+                run_sync(&*host, &dist, &root, &out, jdk.as_deref())
+            }
         });
         self._sync = Some(cx.spawn(async move |this, cx| {
             let result = run.await;
