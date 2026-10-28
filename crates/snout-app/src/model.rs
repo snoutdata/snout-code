@@ -785,7 +785,8 @@ impl Model {
 
     fn start_draft(&mut self, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else { return };
-        let Some(program) = self.claude.clone().or_else(find_claude) else {
+        let Some(program) = self.claude.clone().or_else(|| self.settings.claude_path.clone()).or_else(find_claude)
+        else {
             return self.fail(
                 "Claude Code was not found. Install it from https://docs.claude.com/en/docs/claude-code.".into(),
                 cx,

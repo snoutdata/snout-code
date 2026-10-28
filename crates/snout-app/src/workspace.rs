@@ -73,6 +73,8 @@ pub struct Workspace {
     pub references: Entity<crate::lang::panels::ReferencesPanel>,
     /// The title bar's branch popup, while it shows.
     branch_popup: Option<Entity<crate::branch_popup::BranchPopup>>,
+    /// The Settings sheet, while it shows.
+    pub settings_sheet: Option<Entity<crate::settings_view::SettingsView>>,
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::tool_windows::GradlePanel>,
     pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
@@ -178,6 +180,9 @@ fn restore_layout(
 
 impl Workspace {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Restored editor tabs start with the settings' defaults.
+        let defaults = crate::editor::EditorDefaults::of(&model.read(cx).settings);
+        cx.set_global(defaults);
         // The language servers come first: restored editor tabs connect to them.
         let hub = cx.new(|cx| crate::lang::LangHub::new(model.clone(), cx));
         cx.set_global(crate::lang::hub::HubHandle(hub.clone()));
@@ -299,6 +304,7 @@ impl Workspace {
             problems,
             references,
             branch_popup: None,
+            settings_sheet: None,
             gradle,
             notifications,
             _save_layout: None,
@@ -785,6 +791,83 @@ impl Workspace {
         }
     }
 
+    /// Put up the Settings sheet.
+    pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::settings_view::{SettingsEvent, SettingsView};
+        if self.settings_sheet.is_some() {
+            return;
+        }
+        let os = cx.platform_info().os;
+        let recent = self.model.read(cx).recent_projects();
+        let keys: Vec<(gpui::SharedString, String)> = menus::commands(&recent)
+            .into_iter()
+            .filter_map(|(name, action)| {
+                let b = window.highest_precedence_binding_for_action(&*action)?;
+                let keys = b.keystrokes().iter().map(|k| k.display(os).to_string()).collect::<Vec<_>>().join(" ");
+                Some((name, keys))
+            })
+            .collect();
+        let mut builds: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
+        if let Some(root) = self.gradle.read(cx).root(cx)
+            && !builds.contains(&root)
+        {
+            builds.push(root);
+        }
+        builds.sort();
+        let jdks = crate::lang::java::discover(&self.hub.read(cx).home);
+        let model = self.model.clone();
+        let sheet = cx.new(|cx| SettingsView::new(model, builds, jdks, keys, window, cx));
+        cx.subscribe_in(&sheet, window, |this, _, e: &SettingsEvent, window, cx| {
+            let close = match e {
+                SettingsEvent::Apply(next, close) => {
+                    this.apply_settings((**next).clone(), window, cx);
+                    *close
+                }
+                SettingsEvent::Cancel => true,
+            };
+            if close {
+                this.settings_sheet = None;
+                window.focus(&this.focus, cx);
+            }
+            cx.notify();
+        })
+        .detach();
+        let focus = gpui::Focusable::focus_handle(sheet.read(cx), cx);
+        window.focus(&focus, cx);
+        self.settings_sheet = Some(sheet);
+        cx.notify();
+    }
+
+    /// Put `next` in place, save it, and make the window follow it.
+    pub fn apply_settings(&mut self, next: crate::settings::Settings, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.model.read(cx).settings.clone();
+        self.model.update(cx, |m, cx| {
+            m.settings = next.clone();
+            if m.fetch_every.is_some() {
+                m.fetch_every = Some(std::time::Duration::from_secs(next.fetch_minutes.max(1) * 60));
+            }
+            m.persist();
+            cx.notify();
+        });
+        theme::set_fonts(&next, cx);
+        theme::apply(next.theme, Some(window), cx);
+        cx.set_global(crate::editor::EditorFont(
+            next.editor_font_size.clamp(crate::editor::FONT_MIN, crate::editor::FONT_MAX),
+        ));
+        let defaults = crate::editor::EditorDefaults::of(&next);
+        cx.set_global(defaults);
+        let wrap_changed = (before.soft_wrap, before.show_whitespace) != (next.soft_wrap, next.show_whitespace);
+        for editor in self.editors(cx) {
+            editor.update(cx, |e, cx| {
+                if wrap_changed {
+                    e.apply_defaults(defaults, window, cx);
+                }
+                cx.notify();
+            });
+        }
+        window.refresh();
+    }
+
     /// The editor tabs open now.
     pub fn editors(&self, cx: &App) -> Vec<Entity<EditorPanel>> {
         let dock = self.dock.read(cx);
@@ -873,6 +956,7 @@ impl Render for Workspace {
             .bg(p.ground)
             .text_color(p.fg)
             .font_family(Theme::global(cx).font_family.clone())
+            .text_size(px(crate::look::ui_size(cx)))
             .on_action(cx.listener(|this, _: &ShowProject, w, cx| this.show_activity(Activity::Project, w, cx)))
             .on_action(cx.listener(|this, _: &ShowGit, w, cx| this.show_activity(Activity::Git, w, cx)))
             .on_action(cx.listener(|this, _: &ToggleConsole, _, cx| this.send(Action::ToggleConsole, cx)))
@@ -910,6 +994,7 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
+            .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
             .on_action(cx.listener(|this, a: &HideToolWindow, w, cx| {
                 let place = if a.0 { DockPlacement::Right } else { DockPlacement::Bottom };
                 this.hide_dock(place, w, cx)
@@ -1025,6 +1110,18 @@ impl Render for Workspace {
             )
             .child(self.status.clone())
             .child(drop_hint)
+            .children(self.settings_sheet.clone().map(|sheet| {
+                div()
+                    .id("settings-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui::black().opacity(0.4))
+                    .occlude()
+                    .child(sheet)
+            }))
             .children(self.search.clone().map(|view| {
                 div().absolute().top(px(TITLE_H + 24.)).left_0().right_0().flex().justify_center().child(view)
             }))

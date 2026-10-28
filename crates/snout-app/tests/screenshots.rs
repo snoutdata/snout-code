@@ -92,6 +92,8 @@ mod shots {
         Nothing,
         /// A Java file in an editor tab.
         Editor,
+        /// The Settings sheet on a page.
+        Settings(snout_app::settings_view::Page),
     }
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
@@ -220,6 +222,17 @@ mod shots {
                     .unwrap();
                 }
             }
+            Some(Select::Settings(page)) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.open_settings(window, cx));
+                    let sheet = ws.read(cx).settings_sheet.clone().unwrap();
+                    sheet.update(cx, |s, cx| {
+                        s.page = page;
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -258,5 +271,8 @@ mod shots {
         shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
         shot("palette-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
+        use snout_app::settings_view::Page;
+        shot("settings-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Appearance)));
+        shot("settings-light", ThemeChoice::Light, Activity::Project, Some(Select::Settings(Page::Editor)));
     }
 }

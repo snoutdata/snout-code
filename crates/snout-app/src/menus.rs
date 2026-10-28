@@ -192,6 +192,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-a", SearchEverywhere, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("escape", crate::search::SearchClose, Some("BranchPopup")),
+        KeyBinding::new("escape", crate::search::SearchClose, Some("Settings")),
         KeyBinding::new("cmd-shift-f", FindInFiles, None),
         // GPUI Kit's editor takes ⇧⌘F for replace; here it stays find in files, and
         // replace is ⌥⌘F. ⌘F finds in the file.

@@ -59,6 +59,27 @@ impl Global for EditorFont {}
 pub const FONT_MIN: f32 = 8.;
 pub const FONT_MAX: f32 = 32.;
 
+/// What new editor tabs start with, from the settings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EditorDefaults {
+    /// The indentation of a file whose text shows none.
+    pub tab_size: usize,
+    pub soft_wrap: bool,
+    pub show_whitespace: bool,
+}
+
+impl Global for EditorDefaults {}
+
+impl EditorDefaults {
+    pub fn of(s: &crate::settings::Settings) -> Self {
+        Self { tab_size: s.tab_size.clamp(1, 8), soft_wrap: s.soft_wrap, show_whitespace: s.show_whitespace }
+    }
+
+    pub fn now(cx: &App) -> Self {
+        cx.try_global::<Self>().copied().unwrap_or(Self { tab_size: 4, soft_wrap: false, show_whitespace: false })
+    }
+}
+
 /// The editors' font size now.
 pub fn font_size(cx: &App) -> f32 {
     cx.try_global::<EditorFont>().map_or(look::MONO_SIZE, |f| f.0)
@@ -119,6 +140,11 @@ pub struct FileInfo {
 impl FileInfo {
     /// Guess from the text: the step most lines indent by, and the line ending it uses.
     pub fn detect(text: &str) -> Self {
+        Self::detect_or(text, 4)
+    }
+
+    /// As [`Self::detect`], with `width` for a text that shows no indentation.
+    pub fn detect_or(text: &str, width: usize) -> Self {
         let mut tab_lines = 0;
         let mut space_lines = 0;
         let mut steps = [0usize; 9];
@@ -141,7 +167,8 @@ impl FileInfo {
             }
             last = indent;
         }
-        let width = [4, 2, 8, 3].into_iter().max_by_key(|&w| (steps[w], w == 4)).filter(|&w| steps[w] > 0).unwrap_or(4);
+        let width =
+            [4, 2, 8, 3].into_iter().max_by_key(|&w| (steps[w], w == 4)).filter(|&w| steps[w] > 0).unwrap_or(width);
         Self { tabs: tab_lines > space_lines, width, crlf: text.contains("\r\n") }
     }
 
@@ -215,7 +242,13 @@ impl EventEmitter<EditorEvent> for EditorPanel {}
 impl EditorPanel {
     /// Open `path` in a new editor.
     pub fn open(path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let state = cx.new(|cx| EditorState::new(window, cx).line_number(true).soft_wrap(false));
+        let defaults = EditorDefaults::now(cx);
+        let state = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .line_number(true)
+                .soft_wrap(defaults.soft_wrap)
+                .show_whitespaces(defaults.show_whitespace)
+        });
         let subscriptions = vec![
             cx.subscribe(&state, |this, state, e: &InputEvent, cx| match e {
                 InputEvent::Change => {
@@ -266,7 +299,7 @@ impl EditorPanel {
             info: FileInfo::detect(""),
             root: None,
             error: None,
-            soft_wrap: false,
+            soft_wrap: defaults.soft_wrap,
             conflict: false,
             disk: None,
             brackets: Some(brackets),
@@ -309,7 +342,7 @@ impl EditorPanel {
             Ok(text) => (text, None),
             Err(e) => (String::new(), Some(format!("Could not read {}: {e}", path.display()))),
         };
-        self.info = FileInfo::detect(&text);
+        self.info = FileInfo::detect_or(&text, EditorDefaults::now(cx).tab_size);
         let info = self.info;
         let language = language_for(&path);
         self.state.update(cx, |s, cx| {
@@ -487,6 +520,16 @@ impl EditorPanel {
         if let Some(edit) = editing::move_lines(&text, sel, up) {
             self.apply(edit, window, cx);
         }
+    }
+
+    /// Take the settings' soft wrap and whitespace.
+    pub fn apply_defaults(&mut self, d: EditorDefaults, window: &mut Window, cx: &mut Context<Self>) {
+        self.soft_wrap = d.soft_wrap;
+        self.state.update(cx, |s, cx| {
+            s.set_soft_wrap(d.soft_wrap, window, cx);
+            s.set_show_whitespaces(d.show_whitespace, window, cx);
+        });
+        cx.notify();
     }
 
     pub fn toggle_soft_wrap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -829,7 +872,7 @@ impl Render for EditorPanel {
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .font_family(look::MONO)
+                    .font_family(look::mono_font(cx))
                     .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
                         if this.command_click(e, window, cx) {
                             window.prevent_default();

@@ -824,3 +824,45 @@ fn the_stripes_open_and_close_the_tool_windows(cx: &mut TestAppContext) {
     assert!(open(cx, Tool::Problems));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_settings_sheet_edits_a_copy_until_apply_or_ok(cx: &mut TestAppContext) {
+    use crate::settings::ThemeChoice;
+    let repo = demo_repo("settings-sheet");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.dispatch_action(crate::menus::OpenSettings);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("settings").is_some(), "⌘, opens the sheet");
+    let click = |cx: &mut VisualTestContext, id: &'static str| {
+        let at = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id} is drawn")).center();
+        cx.simulate_click(at, gpui::Modifiers::none());
+        cx.run_until_parked();
+    };
+    click(cx, "settings-theme-light");
+    cx.update(|_, cx| assert_ne!(model.read(cx).settings.theme, ThemeChoice::Light, "only the copy changes"));
+    click(cx, "settings-apply");
+    cx.update(|_, cx| {
+        assert_eq!(model.read(cx).settings.theme, ThemeChoice::Light, "Apply puts it in place");
+        assert!(!crate::theme::palette(cx).dark, "and the window follows");
+        assert!(ws.read(cx).settings_sheet.is_some(), "Apply leaves the sheet open");
+    });
+    click(cx, "settings-page-editor");
+    click(cx, "settings-tab-size-up");
+    click(cx, "settings-soft-wrap");
+    click(cx, "settings-cancel");
+    cx.update(|_, cx| {
+        let s = &model.read(cx).settings;
+        assert_eq!((s.tab_size, s.soft_wrap), (4, false), "Cancel drops the copy");
+        assert!(ws.read(cx).settings_sheet.is_none());
+    });
+    cx.dispatch_action(crate::menus::OpenSettings);
+    cx.run_until_parked();
+    click(cx, "settings-page-editor");
+    click(cx, "settings-tab-size-down");
+    click(cx, "settings-ok");
+    cx.update(|_, cx| {
+        assert_eq!(model.read(cx).settings.tab_size, 3, "OK puts it in place");
+        assert!(ws.read(cx).settings_sheet.is_none(), "and closes the sheet");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}

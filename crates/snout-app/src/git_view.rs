@@ -28,7 +28,7 @@ use snout_core::{
 };
 
 use crate::art::{drawing, glyph};
-use crate::look::{self, BODY, FONT, MONO, MONO_SIZE, Trigger, pane, separator, title, weak};
+use crate::look::{self, BODY, MONO, MONO_SIZE, Trigger, pane, separator, title, weak};
 use crate::model::{Action, Model, ModelEvent, SortColumn, StartPoint};
 use crate::settings::ThemeChoice;
 use crate::theme::{Palette, mix, palette};
@@ -1458,7 +1458,7 @@ impl Render for GitView {
             .flex_col()
             .bg(p.ground)
             .text_color(p.fg)
-            .font_family(FONT)
+            .font_family(look::ui_font(cx))
             .text_size(px(BODY))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
                 if this.dragging.is_some() {

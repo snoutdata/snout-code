@@ -19,6 +19,7 @@ pub mod panels;
 pub mod projects;
 pub mod search;
 pub mod settings;
+pub mod settings_view;
 pub mod status;
 pub mod tabs;
 pub mod theme;
@@ -54,6 +55,7 @@ pub fn init(settings: &Settings, cx: &mut App) {
     if let Err(e) = cx.text_system().add_fonts(FONTS.map(std::borrow::Cow::Borrowed).to_vec()) {
         eprintln!("Could not load the fonts: {e}");
     }
+    theme::set_fonts(settings, cx);
     theme::apply(settings.theme, None, cx);
     menus::bind_keys(cx);
     editor::register_languages();
@@ -88,7 +90,8 @@ pub fn run() {
         // SNOUT_NO_FETCH=1 keeps the app from fetching on its own (a read only look at a
         // repository).
         if std::env::var_os("SNOUT_NO_FETCH").is_none() {
-            model.update(cx, |m, cx| m.start_background_fetch(snout_core::survey::FETCH_EVERY, cx));
+            let every = std::time::Duration::from_secs(model.read(cx).settings.fetch_minutes.max(1) * 60);
+            model.update(cx, |m, cx| m.start_background_fetch(every, cx));
         }
         let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
         cx.open_window(

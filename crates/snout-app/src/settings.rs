@@ -55,6 +55,21 @@ pub struct Settings {
     pub recent: Option<Vec<PathBuf>>,
     /// The JDK each Gradle build runs on (build root to JDK home), as chosen or downloaded.
     pub project_jdks: std::collections::BTreeMap<PathBuf, PathBuf>,
+    /// The interface's typeface and size.
+    pub ui_font: String,
+    pub ui_font_size: f32,
+    /// The editors' typeface (their size is `editor_font_size`).
+    pub editor_font: String,
+    /// The indentation a file gets when its own text does not show one.
+    pub tab_size: usize,
+    /// New editor tabs wrap long lines.
+    pub soft_wrap: bool,
+    /// Editors show spaces and tabs.
+    pub show_whitespace: bool,
+    /// How often the projects are fetched in the background, in minutes.
+    pub fetch_minutes: u64,
+    /// The `claude` program to run; looked up on the usual paths when unset.
+    pub claude_path: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -73,6 +88,14 @@ impl Default for Settings {
             activity: None,
             recent: None,
             project_jdks: Default::default(),
+            ui_font: crate::look::FONT.into(),
+            ui_font_size: crate::look::BODY,
+            editor_font: crate::look::MONO.into(),
+            tab_size: 4,
+            soft_wrap: false,
+            show_whitespace: false,
+            fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,
+            claude_path: None,
         }
     }
 }

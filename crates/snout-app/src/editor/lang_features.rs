@@ -260,7 +260,7 @@ impl EditorPanel {
                 .bg(p.panel)
                 .text_size(px(11.5))
                 .text_color(p.fg_dim)
-                .font_family(look::FONT)
+                .font_family(look::ui_font(cx))
                 .when(errors + warnings == 0, |d| d.child(icon(Icon::Check, 13., p.ok)))
                 .when(errors > 0, |d| d.child(count(Icon::Problems, errors, p.error)))
                 .when(warnings > 0, |d| d.child(count(Icon::Warning, warnings, p.warn)))

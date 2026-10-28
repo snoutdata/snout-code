@@ -21,6 +21,30 @@ pub const MONO: &str = "Hack";
 pub const BODY: f32 = 13.0;
 pub const MONO_SIZE: f32 = 13.0;
 pub const SMALL: f32 = 9.0;
+/// The typefaces in use, as the settings choose them.
+pub struct Fonts {
+    pub ui: SharedString,
+    pub ui_size: f32,
+    pub mono: SharedString,
+}
+
+impl gpui::Global for Fonts {}
+
+/// The interface's typeface now.
+pub fn ui_font(cx: &App) -> SharedString {
+    cx.try_global::<Fonts>().map_or_else(|| FONT.into(), |f| f.ui.clone())
+}
+
+/// The interface's text size now.
+pub fn ui_size(cx: &App) -> f32 {
+    cx.try_global::<Fonts>().map_or(BODY, |f| f.ui_size)
+}
+
+/// The editors' typeface now.
+pub fn mono_font(cx: &App) -> SharedString {
+    cx.try_global::<Fonts>().map_or_else(|| MONO.into(), |f| f.mono.clone())
+}
+
 /// The height egui gives a widget row.
 pub const INTERACT: f32 = 20.0;
 /// A line of body text.

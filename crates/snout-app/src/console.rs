@@ -187,7 +187,7 @@ impl ConsolePanel {
         self.sessions.remove(root);
         self.error = None;
         let found = match self.kind {
-            Kind::Claude => find_claude(),
+            Kind::Claude => self.model.read(cx).settings.claude_path.clone().or_else(find_claude),
             Kind::Shell => Some(std::env::var_os("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from)),
         };
         let shell_args = ["-l".to_owned()];

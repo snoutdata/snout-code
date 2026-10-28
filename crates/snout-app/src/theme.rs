@@ -201,12 +201,23 @@ pub fn is_dark(choice: ThemeChoice, cx: &App) -> bool {
     }
 }
 
+/// Take the typefaces and sizes the settings choose.
+pub fn set_fonts(settings: &crate::settings::Settings, cx: &mut App) {
+    let size = settings.ui_font_size.clamp(10., 20.);
+    cx.set_global(crate::look::Fonts {
+        ui: settings.ui_font.clone().into(),
+        ui_size: size,
+        mono: settings.editor_font.clone().into(),
+    });
+}
+
 /// Follow `choice`: pick the palette and lay it onto GPUI Kit's theme.
 pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
     let dark = is_dark(choice, cx);
     let p = if dark { Palette::dark() } else { Palette::light() };
     cx.set_global(Current(p));
     Theme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, window, cx);
+    let (ui, mono, size) = (crate::look::ui_font(cx), crate::look::mono_font(cx), crate::look::ui_size(cx));
     Theme::update(cx, |t| {
         t.background = p.panel;
         t.foreground = p.fg;
@@ -257,9 +268,9 @@ pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
         t.status_bar_border = p.border;
         t.link = p.accent;
         t.window_border = p.border;
-        t.font_family = crate::look::FONT.into();
-        t.mono_font_family = crate::look::MONO.into();
-        t.font_size = gpui::px(crate::look::BODY);
+        t.font_family = ui;
+        t.mono_font_family = mono;
+        t.font_size = gpui::px(size);
         t.radius = gpui::px(5.);
         t.radius_lg = gpui::px(8.);
         t.highlight_theme = std::sync::Arc::new(syntax(&p));
