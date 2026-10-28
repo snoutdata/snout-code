@@ -19,6 +19,10 @@ anyhow.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-platform.workspace = true
+# GPUI Kit's icons (Lucide) and other assets.
+gpui-kit-assets = "=0.8.1"
+# Reads the earlier app's eframe storage (RON), never writes it.
+ron = "0.12"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
@@ -26,3 +30,8 @@ gpui-component = { workspace = true, features = ["test-support"] }
 gpui-platform = { workspace = true, features = ["test-support"] }
 # The LSP types GPUI Kit's editor speaks (its own version).
 lsp-types = { version = "0.97", features = ["proposed"] }
+
+[[test]]
+name = "screenshots"
+path = "tests/screenshots.rs"
+harness = false

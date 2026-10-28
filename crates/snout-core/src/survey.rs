@@ -31,13 +31,7 @@ impl Survey {
         let held = hold.clone();
         std::thread::spawn(move || {
             for path in repos {
-                let tracking = Repo::open(&path).ok().and_then(|repo| {
-                    if fetch && !held.load(Ordering::Relaxed) {
-                        // Offline, signed out, no remote: the counts from the last fetch stand.
-                        let _ = repo.fetch_unattended();
-                    }
-                    repo.tracking().ok().flatten()
-                });
+                let tracking = count(&path, fetch && !held.load(Ordering::Relaxed));
                 if tx.send((path, tracking)).is_err() {
                     return; // the app let go of the pass
                 }
@@ -62,6 +56,17 @@ impl Survey {
             }
         }
     }
+}
+
+/// How one repository stands against its upstream, fetching first when `fetch`. Blocks;
+/// `None` when it cannot be opened or has no upstream.
+pub fn count(path: &std::path::Path, fetch: bool) -> Option<Tracking> {
+    let repo = Repo::open(path).ok()?;
+    if fetch {
+        // Offline, signed out, no remote: the counts from the last fetch stand.
+        let _ = repo.fetch_unattended();
+    }
+    repo.tracking().ok().flatten()
 }
 
 /// The chip text for a repository row ("↓3", "↑1 ↓3") and the matching hover line, when

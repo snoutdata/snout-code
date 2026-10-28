@@ -7324,9 +7324,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpui-component",
+ "gpui-kit-assets",
  "gpui-pre",
  "gpui-pre-platform",
  "lsp-types",
+ "ron",
  "serde",
  "serde_json",
  "snout-core",
