@@ -1048,6 +1048,7 @@ impl Runs {
                 title: "Scala".into(),
                 stage: "Compiling the changed Scala".into(),
                 percent: None,
+                ..Default::default()
             });
         }
         if self.gradle.loading {
@@ -1055,6 +1056,7 @@ impl Runs {
                 title: "Gradle".into(),
                 stage: "Reading the tasks".into(),
                 percent: None,
+                ..Default::default()
             });
         }
         for s in self.sessions.iter().filter(|s| s.running() && s.place() == Place::Build) {
@@ -1064,7 +1066,12 @@ impl Runs {
                 .rev()
                 .find(|t| t.outcome.is_none())
                 .map_or_else(|| "Running".to_owned(), |t| t.path.clone());
-            out.push(crate::background::BgTask { title: format!("Gradle: {}", s.title), stage, percent: None });
+            out.push(crate::background::BgTask {
+                title: format!("Gradle: {}", s.title),
+                stage,
+                percent: None,
+                ..Default::default()
+            });
         }
         out
     }

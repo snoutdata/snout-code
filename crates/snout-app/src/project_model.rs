@@ -333,6 +333,17 @@ impl ProjectModel {
     }
 
     /// Whether `path` lies in a source folder of the model (a module's or a shared one).
+    /// The module (or shared folder) whose source root holds `path`: the innermost one.
+    pub fn module_of(&self, path: &Path) -> Option<String> {
+        let modules = self.modules.iter().flat_map(|m| m.roots.iter().map(move |r| (&r.dir, &m.id)));
+        let shared = self.shared.iter().flat_map(|s| s.roots.iter().map(move |r| (&r.dir, &s.name)));
+        modules
+            .chain(shared)
+            .filter(|(dir, _)| path.starts_with(dir))
+            .max_by_key(|(dir, _)| dir.as_os_str().len())
+            .map(|(_, id)| id.clone())
+    }
+
     pub fn holds(&self, path: &Path) -> bool {
         self.modules
             .iter()
@@ -507,6 +518,7 @@ pub struct ProjectModels {
     home: PathBuf,
     _poll: Option<Task<()>>,
     _sync: Option<Task<()>>,
+    _engine: Option<gpui::Subscription>,
 }
 
 /// The window's project models, for the views that show them.
@@ -534,6 +546,16 @@ impl ProjectModels {
                 cx.background_executor().timer(Duration::from_millis(1500)).await;
             }
         });
+        // A background sync changed the model the engine wrote: read it again now.
+        let engine = hub.as_ref().map(|h| {
+            cx.subscribe(h, |this, _, e: &crate::lang::HubEvent, cx| {
+                if let crate::lang::HubEvent::Engine { method, .. } = e
+                    && method == "snout/modelChanged"
+                {
+                    this.model_changed(cx);
+                }
+            })
+        });
         Self {
             model,
             hub,
@@ -550,7 +572,16 @@ impl ProjectModels {
             home,
             _poll: Some(poll),
             _sync: None,
+            _engine: engine,
         }
+    }
+
+    /// The engine says the model changed: read the newest model file again, keeping the
+    /// one shown until the new one is read, so the Project view never empties.
+    pub fn model_changed(&mut self, cx: &mut Context<Self>) {
+        eprintln!("[project] the engine changed the Gradle model");
+        self.source = None;
+        self.poll(cx);
     }
 
     /// Show `model` as the project's (tests, and models read elsewhere).
@@ -723,6 +754,7 @@ impl ProjectModels {
             title: format!("Gradle: {}", Model::dir_name(root)),
             stage: "Syncing the Gradle model".into(),
             percent: None,
+            ..Default::default()
         })
     }
 }

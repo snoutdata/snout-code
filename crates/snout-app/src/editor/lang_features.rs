@@ -222,12 +222,53 @@ impl EditorPanel {
         }
     }
 
+    /// How far the engine is with the file's module, while it is not ready: its stage and
+    /// percent, from the engine's `snout/readiness`.
+    pub fn module_readiness(&self, cx: &App) -> Option<crate::lang::hub::Ready> {
+        let link = self.lang.as_ref()?;
+        let hub = link.hub.upgrade()?;
+        let hub = hub.read(cx);
+        let server = hub.servers.get(&link.root)?;
+        let model = crate::project_model::store(cx)?.read(cx).current.clone()?;
+        let module = model.module_of(&self.path)?;
+        server.module_pending(&module).cloned()
+    }
+
     /// The inspections widget at the editor's top right: the file's errors and warnings,
-    /// and arrows to step through them (or a tick when there are none).
+    /// and arrows to step through them (or a tick when there are none). Until the engine
+    /// has the file's module ready, how far it is instead.
     pub(super) fn inspections(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::glyphs::{Icon, icon};
         self.lang.as_ref()?;
         let p = palette(cx);
+        if let Some(ready) = self.module_readiness(cx) {
+            let text = match ready.percent {
+                Some(pc) => format!("{} {pc}%", ready.label()),
+                None => ready.label().to_owned(),
+            };
+            return Some(
+                div()
+                    .id("inspections")
+                    .debug_selector(|| "inspections-pending".into())
+                    .absolute()
+                    .top(px(4.))
+                    .right(px(18.))
+                    .h(px(22.))
+                    .px(px(6.))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .rounded(px(4.))
+                    .bg(p.panel)
+                    .text_size(px(11.5))
+                    .text_color(p.fg_dim)
+                    .font_family(look::ui_font(cx))
+                    .child(icon(Icon::Refresh, 12., p.accent))
+                    .child(text)
+                    .child(crate::status::progress_bar(ready.percent, 48., &p))
+                    .into_any_element(),
+            );
+        }
         let (errors, warnings) = self.problem_counts();
         let hover = p.button_hover;
         let arrow = |id: &'static str, g: Icon, forward: bool, cx: &mut Context<Self>| {

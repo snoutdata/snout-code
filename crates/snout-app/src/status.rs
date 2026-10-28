@@ -223,6 +223,39 @@ pub fn progress_bar(percent: Option<u32>, width: f32, p: &crate::theme::Palette)
     .into_any_element()
 }
 
+/// The parts of a background task (a Java project's modules), each with its stage: the
+/// first ones, with how many more there are.
+fn task_parts(parts: &[(String, String, Option<u32>)], p: &crate::theme::Palette) -> gpui::AnyElement {
+    const SHOWN: usize = 12;
+    let rows = parts.iter().take(SHOWN).enumerate().map(|(i, (name, stage, percent))| {
+        let ready = stage == "Ready";
+        div()
+            .debug_selector(move || format!("task-part-{i}"))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .text_size(px(11.5))
+            .child(div().flex_none().size(px(6.)).rounded(px(3.)).bg(if ready { p.ok } else { p.accent }))
+            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name.clone()))
+            .child(div().flex_none().text_color(p.fg_dim).whitespace_nowrap().child(match percent {
+                Some(pc) => format!("{stage} {pc}%"),
+                None => stage.clone(),
+            }))
+    });
+    div()
+        .id("task-parts")
+        .debug_selector(|| "task-parts".into())
+        .pt(px(2.))
+        .flex()
+        .flex_col()
+        .gap(px(3.))
+        .children(rows)
+        .when(parts.len() > SHOWN, |d| {
+            d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(format!("and {} more", parts.len() - SHOWN)))
+        })
+        .into_any_element()
+}
+
 /// When the app started, for the sliding progress bars.
 pub fn started() -> std::time::Instant {
     static START: std::sync::LazyLock<std::time::Instant> = std::sync::LazyLock::new(std::time::Instant::now);
@@ -246,7 +279,8 @@ impl StatusBar {
         let p = palette(cx);
         let hover_bg = p.button_hover;
         let more = tasks.len() - 1;
-        let label = if more > 0 { format!("{} (+{more})", first.stage) } else { first.stage.clone() };
+        let front = first.compact.clone().unwrap_or_else(|| first.stage.clone());
+        let label = if more > 0 { format!("{front} (+{more})") } else { front };
         Some(
             div()
                 .relative()
@@ -328,6 +362,7 @@ impl StatusBar {
                                             )
                                             .child(div().text_color(p.fg_dim).child(t.stage))
                                             .child(progress_bar(t.percent, 316., &p))
+                                            .when(!t.parts.is_empty(), |d| d.child(task_parts(&t.parts, &p)))
                                     }))
                                     .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                                         this.tasks_open = false;

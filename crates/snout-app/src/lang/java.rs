@@ -179,7 +179,9 @@ pub struct Requirement {
 impl Requirement {
     /// The JDK to download when none fits.
     pub fn wanted(&self) -> u32 {
-        self.declared.or(self.gradle_max.map(|m| m.min(21))).unwrap_or(21)
+        // A long-term support release: the newest the build's Gradle runs on.
+        let lts = |max: u32| [25, 21, 17, 11, 8].into_iter().find(|v| *v <= max.min(21)).unwrap_or(8);
+        self.declared.or(self.gradle_max.map(lts)).unwrap_or(21)
     }
 
     pub fn fits(&self, major: u32) -> bool {

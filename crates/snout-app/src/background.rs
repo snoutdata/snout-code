@@ -51,11 +51,15 @@ impl EngineBuild {
 
 /// A task running in the background: what it is, what it does now, and how far along it is
 /// when that is known.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct BgTask {
     pub title: String,
     pub stage: String,
     pub percent: Option<u32>,
+    /// What the status bar says while the task is in front, when not its stage.
+    pub compact: Option<String>,
+    /// Its parts and how far each is (the modules of a Java project): name, stage, percent.
+    pub parts: Vec<(String, String, Option<u32>)>,
 }
 
 /// A Java server's stage, as the background tasks name it.
@@ -77,21 +81,49 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
     if let Some(hub) = hub {
         let hub = hub.read(cx);
         if let Some(b) = hub.engine_build.as_ref().filter(|b| !b.finished()) {
-            out.push(BgTask { title: "Building snout-engine".into(), stage: b.stage.clone(), percent: None });
+            out.push(BgTask {
+                title: "Building snout-engine".into(),
+                stage: b.stage.clone(),
+                percent: None,
+                ..Default::default()
+            });
         }
         let mut servers: Vec<_> = hub.servers.values().filter(|s| s.busy()).collect();
         servers.sort_by(|a, b| a.root.cmp(&b.root));
         for s in servers {
+            let title = format!("Java: {}", crate::model::Model::dir_name(&s.root));
+            // The engine says how far the project and each module are.
+            if matches!(s.stage, Stage::Indexing | Stage::Ready)
+                && let Some(project) = s.readiness.project.as_ref().filter(|_| s.readiness.pending())
+            {
+                let summary = s.readiness.summary();
+                let mut parts: Vec<(String, String, Option<u32>)> = s
+                    .readiness
+                    .modules
+                    .iter()
+                    .map(|(name, r)| (name.clone(), r.label().to_owned(), r.percent.filter(|_| !r.is_ready())))
+                    .collect();
+                // The ones still on their way first.
+                parts.sort_by_key(|(name, stage, _)| (stage == "Ready", name.clone()));
+                out.push(BgTask {
+                    title,
+                    stage: if s.readiness.total > 0 {
+                        format!("{}: {summary}", project.label())
+                    } else {
+                        summary.clone()
+                    },
+                    percent: project.percent,
+                    compact: Some(format!("Java: {summary}")),
+                    parts,
+                });
+                continue;
+            }
             let work = s.progress.current();
             let stage = match (&s.stage, work) {
                 (Stage::Indexing | Stage::Ready, Some(w)) => w.label(),
                 (stage, _) => stage_text(stage),
             };
-            out.push(BgTask {
-                title: format!("Java: {}", crate::model::Model::dir_name(&s.root)),
-                stage,
-                percent: work.and_then(|w| w.percentage),
-            });
+            out.push(BgTask { title, stage, percent: work.and_then(|w| w.percentage), ..Default::default() });
         }
     }
     if let Some(task) = crate::project_model::store(cx).and_then(|s| s.read(cx).task()) {
@@ -101,7 +133,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
         out.extend(runs.read(cx).tasks());
     }
     if let Some(job) = &model.job {
-        out.push(BgTask { title: "Git".into(), stage: job.clone(), percent: None });
+        out.push(BgTask { title: "Git".into(), stage: job.clone(), percent: None, ..Default::default() });
     }
     out
 }

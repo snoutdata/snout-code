@@ -348,23 +348,18 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
 fn a_build_needing_a_missing_jdk_offers_to_download_it(cx: &mut TestAppContext) {
     let repo = fixture("lang-nojdk");
     let empty_home = scratch_dir("lang-nojdk-home");
-    // The window starts the folder's engine on this Mac's JDKs at first; it is stopped below.
-    cx.executor().allow_parking();
-    let _engine = crate::tests::engine_lock();
-    cx.update(|cx| cx.set_global(crate::lang::hub::LangEnabled(true)));
-    let (model, ws, cx) = open(cx, with_repo(&repo));
+    // Servers stay off until the hub looks for JDKs in an empty home.
+    let (_, ws, cx) = open(cx, with_repo(&repo));
     let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
     // The opened folder's engine, which syncs the build.
     let build = repo.clone();
     cx.update(|_, cx| {
-        hub.update(cx, |h, _| {
-            // The window may have started it already, with this Mac's JDKs.
-            h.forget_server(&build);
+        hub.update(cx, |h, cx| {
             h.home = empty_home.clone();
+            h.enabled = true;
+            h.ensure_server(&build, cx);
         })
     });
-    cx.update(|_, cx| model.update(cx, |m, _| m.settings.project_jdks.clear()));
-    cx.update(|_, cx| hub.update(cx, |h, cx| h.ensure_server(&build, cx)));
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
     cx.run_until_parked();
     let prompt = cx.update(|_, cx| hub.read(cx).jdk_prompt.clone()).expect("the bar asks");
@@ -379,4 +374,110 @@ fn a_build_needing_a_missing_jdk_offers_to_download_it(cx: &mut TestAppContext) 
     assert!(cx.update(|_, cx| hub.read(cx).jdk_prompt.is_none()));
     let _ = std::fs::remove_dir_all(repo.parent().unwrap());
     let _ = std::fs::remove_dir_all(empty_home);
+}
+
+/// The engine's `snout/readiness`, without an engine: the status bar's background task and
+/// its list of modules, the open file's module in the inspections widget until it is ready,
+/// and `snout/modelChanged` keeping the Project view's model while it reads the new one.
+#[gpui::test]
+fn readiness_shows_in_the_status_bar_and_the_editor(cx: &mut TestAppContext) {
+    use crate::project_model::{Module, ProjectModel, RootKind, SourceRoot};
+    use serde_json::json;
+    let repo = crate::tests::demo_repo("readiness");
+    let src = repo.join("app/src/main/java/demo");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(repo.join("settings.gradle"), "include 'app'\n").unwrap();
+    std::fs::write(repo.join("app/build.gradle"), "plugins { id 'java' }\n").unwrap();
+    let file = src.join("App.java");
+    std::fs::write(&file, "package demo;\n\nclass App {}\n").unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    let module = |id: &str, dir: &str| Module {
+        id: id.into(),
+        name: id.rsplit(':').next().unwrap().into(),
+        build: "readiness".into(),
+        gradle_path: format!(":{}", id.rsplit(':').next().unwrap()),
+        content_root: repo.join(dir),
+        roots: vec![SourceRoot { dir: repo.join(dir).join("src/main/java"), kind: RootKind::Main, exists: true }],
+        excluded: Vec::new(),
+        uses: Vec::new(),
+        jdk: None,
+        stale: None,
+    };
+    let project = ProjectModel {
+        root: repo.clone(),
+        name: "readiness".into(),
+        modules: vec![module("readiness:app", "app"), module("readiness:lib", "lib")],
+        ..Default::default()
+    };
+    let store = cx.update(|_, cx| crate::project_model::store(cx)).unwrap();
+    cx.update(|_, cx| store.update(cx, |s, cx| s.set_model(project, cx)));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    cx.update(|_, cx| hub.update(cx, |h, _| h.insert_published(&repo, String::new(), Vec::new())));
+    act(&model, cx, Action::OpenFile(file.clone(), Some((0, 0))));
+    let editor = editor_of(&ws, &file, cx).unwrap();
+    let say = |params: serde_json::Value, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| hub.update(cx, |h, cx| h.engine_says(&repo, "snout/readiness", params, cx)));
+        cx.run_until_parked();
+    };
+    say(json!({ "module": "readiness:app", "stage": "compilingScala", "percent": 40, "millis": 900 }), cx);
+    say(json!({ "module": "readiness:lib", "stage": "ready", "percent": 100, "millis": 900 }), cx);
+    say(
+        json!({ "module": null, "stage": "compilingScala", "percent": 70, "modules": 2, "ready": 1, "millis": 900 }),
+        cx,
+    );
+    // The status bar: the project's stage and percent, and each module's in the list.
+    let tasks = cx.update(|_, cx| ws.read(cx).status.read(cx).tasks(cx));
+    let java = tasks.iter().find(|t| t.title.starts_with("Java: ")).expect("the engine's task");
+    assert_eq!(java.compact.as_deref(), Some("Java: 1 of 2 modules ready"));
+    assert_eq!(java.stage, "Compiling Scala: 1 of 2 modules ready");
+    assert_eq!(java.percent, Some(70));
+    assert_eq!(
+        java.parts,
+        [
+            ("readiness:app".to_owned(), "Compiling Scala".to_owned(), Some(40)),
+            ("readiness:lib".to_owned(), "Ready".to_owned(), None)
+        ]
+    );
+    let status = cx.update(|_, cx| ws.read(cx).status.read(cx).java_status(cx)).unwrap();
+    assert_eq!(status.0, "Java: 1 of 2 modules ready");
+    let status_bar = cx.update(|_, cx| ws.read(cx).status.clone());
+    cx.update(|_, cx| status_bar.update(cx, |s, _| s.tasks_open = true));
+    cx.update(|_, cx| ws.update(cx, |_, cx| cx.notify()));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("task-parts").is_some(), "the popover lists the modules");
+    // The open file's module, in the inspections widget, until it is ready.
+    let pending = cx.update(|_, cx| editor.read(cx).module_readiness(cx)).expect("the module is not ready");
+    assert_eq!((pending.label(), pending.percent), ("Compiling Scala", Some(40)));
+    assert!(cx.debug_bounds("inspections-pending").is_some());
+    say(json!({ "module": "readiness:app", "stage": "ready", "percent": 100, "millis": 2000 }), cx);
+    say(json!({ "module": null, "stage": "ready", "percent": 100, "modules": 2, "ready": 2, "millis": 2000 }), cx);
+    assert!(cx.update(|_, cx| editor.read(cx).module_readiness(cx)).is_none());
+    assert!(cx.debug_bounds("inspections-pending").is_none(), "the problems again");
+    assert!(cx.update(|_, cx| !ws.read(cx).status.read(cx).tasks(cx).iter().any(|t| t.title.starts_with("Java: "))));
+    // A background sync changed the model: the one shown stays until the new one is read.
+    cx.update(|_, cx| hub.update(cx, |h, cx| h.engine_says(&repo, "snout/modelChanged", json!({}), cx)));
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| store.read(cx).current.is_some()), "the Project view keeps its model");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn readiness_reads_the_answer_and_the_notifications() {
+    use crate::lang::hub::Readiness;
+    use serde_json::json;
+    let r = Readiness::from_answer(&json!({ "stage": "importing", "percent": 50.4, "modules": [
+        { "module": "a", "stage": "ready", "percent": 100 },
+        { "module": "core", "stage": "importing", "percent": 20, "shared": true } ] }));
+    assert_eq!((r.total, r.ready), (2, 1));
+    assert!(r.pending());
+    assert_eq!(r.project.as_ref().unwrap().percent, Some(50));
+    assert!(r.modules["core"].shared);
+    assert_eq!(r.summary(), "1 of 2 modules ready");
+    let mut r = Readiness::default();
+    assert!(r.apply(&json!({ "module": null, "stage": "syncing", "percent": 0, "modules": 0, "ready": 0 })));
+    assert_eq!(r.summary(), "Syncing the Gradle model");
+    assert!(!r.apply(&json!({ "module": null, "stage": "syncing", "percent": 0, "modules": 0, "ready": 0 })));
+    assert_eq!(crate::lang::java::Requirement { declared: None, gradle_max: Some(19) }.wanted(), 17);
+    assert_eq!(crate::lang::java::Requirement { declared: None, gradle_max: Some(16) }.wanted(), 11);
 }

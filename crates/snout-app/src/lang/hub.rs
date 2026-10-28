@@ -65,6 +65,107 @@ impl Stage {
     }
 }
 
+/// How far a module, or the whole project, is (`snout/readiness`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ready {
+    /// `syncing`, `compilingScala`, `importing` or `ready`.
+    pub stage: String,
+    pub percent: Option<u32>,
+    /// A shared source folder rather than a module.
+    pub shared: bool,
+}
+
+impl Ready {
+    pub fn is_ready(&self) -> bool {
+        self.stage == "ready"
+    }
+
+    /// "Compiling Scala" and the like.
+    pub fn label(&self) -> &'static str {
+        readiness_label(&self.stage)
+    }
+}
+
+/// The readable name of a readiness stage.
+pub fn readiness_label(stage: &str) -> &'static str {
+    match stage {
+        "syncing" => "Syncing the Gradle model",
+        "compilingScala" => "Compiling Scala",
+        "importing" => "Importing",
+        "ready" => "Ready",
+        _ => "Starting",
+    }
+}
+
+/// What the engine said last about how far the project and each module are.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Readiness {
+    pub project: Option<Ready>,
+    /// How many modules there are, and how many are ready.
+    pub total: usize,
+    pub ready: usize,
+    pub modules: BTreeMap<String, Ready>,
+}
+
+impl Readiness {
+    /// Take a `snout/readiness` notification: one module's, or (`module: null`) the
+    /// project's. True when something changed.
+    pub fn apply(&mut self, v: &Value) -> bool {
+        let before = self.clone();
+        let ready = Ready {
+            stage: v.get("stage").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            percent: v.get("percent").and_then(Value::as_f64).map(|p| p.round().clamp(0., 100.) as u32),
+            shared: v.get("shared").and_then(Value::as_bool).unwrap_or(false),
+        };
+        match v.get("module").and_then(Value::as_str) {
+            Some(module) => {
+                self.modules.insert(module.to_owned(), ready);
+            }
+            None => {
+                if let Some(n) = v.get("modules").and_then(Value::as_u64) {
+                    self.total = n as usize;
+                }
+                if let Some(n) = v.get("ready").and_then(Value::as_u64) {
+                    self.ready = n as usize;
+                }
+                self.project = Some(ready);
+            }
+        }
+        *self != before
+    }
+
+    /// From the answer to the `snout/readiness` request.
+    pub fn from_answer(v: &Value) -> Self {
+        let mut out = Self::default();
+        for m in v.get("modules").and_then(Value::as_array).into_iter().flatten() {
+            out.apply(m);
+        }
+        let mut project = v.clone();
+        if let Some(o) = project.as_object_mut() {
+            o.remove("modules");
+            o.insert("module".into(), Value::Null);
+        }
+        out.apply(&project);
+        out.total = out.modules.len();
+        out.ready = out.modules.values().filter(|m| m.is_ready()).count();
+        out
+    }
+
+    /// The project is not ready yet.
+    pub fn pending(&self) -> bool {
+        self.project.as_ref().is_some_and(|p| !p.is_ready())
+    }
+
+    /// "7 of 12 modules ready", or the project's stage while the modules are not known.
+    pub fn summary(&self) -> String {
+        match (&self.project, self.total) {
+            (_, n) if n > 0 => format!("{} of {n} modules ready", self.ready),
+            (Some(p), _) => p.label().to_owned(),
+            (None, _) => "Starting".to_owned(),
+        }
+    }
+}
+
 /// One Java engine.
 pub struct Server {
     pub root: PathBuf,
@@ -84,12 +185,17 @@ pub struct Server {
     generation: u64,
     /// Stopped on purpose (the app is quitting): no restart.
     stopped: bool,
+    /// How far the project and its modules are, as the engine says.
+    pub readiness: Readiness,
     _tasks: Vec<Task<()>>,
 }
 
 impl Server {
-    /// "Java: Indexing (40%)" and the like.
+    /// "Java: Indexing (40%)", "Java: 7 of 12 modules ready" and the like.
     pub fn status(&self) -> String {
+        if matches!(self.stage, Stage::Indexing | Stage::Ready) && self.readiness.pending() {
+            return format!("Java: {}", self.readiness.summary());
+        }
         let what = match (&self.stage, self.progress.current()) {
             (Stage::Ready | Stage::Indexing, Some(work)) => work.label(),
             (stage, _) => stage.label(),
@@ -98,7 +204,12 @@ impl Server {
     }
 
     pub fn busy(&self) -> bool {
-        self.stage.busy() || (self.stage == Stage::Ready && self.progress.is_busy())
+        self.stage.busy() || (self.stage == Stage::Ready && self.progress.is_busy()) || self.readiness.pending()
+    }
+
+    /// How far the module `module` is, when the engine said and it is not ready yet.
+    pub fn module_pending(&self, module: &str) -> Option<&Ready> {
+        self.readiness.modules.get(module).filter(|r| !r.is_ready())
     }
 
     pub fn ready(&self) -> bool {
@@ -329,6 +440,7 @@ impl LangHub {
             first_diagnostics: None,
             generation: 0,
             stopped: false,
+            readiness: Readiness::default(),
             _tasks: Vec::new(),
         };
         match jdk {
@@ -341,6 +453,7 @@ impl LangHub {
             None => {
                 self.servers.insert(root.to_owned(), server);
                 if self.jdk_prompt.is_none() {
+                    eprintln!("[java] no JDK fits {}: offering JDK {}", root.display(), req.wanted());
                     self.jdk_prompt = Some(JdkPrompt {
                         root: root.to_owned(),
                         major: req.wanted(),
@@ -414,6 +527,7 @@ impl LangHub {
         server.initialized = false;
         server.started = Instant::now();
         server.diagnostics.clear();
+        server.readiness = Readiness::default();
         let root_buf = root.to_owned();
         let listen = cx.spawn(async move |this, cx| {
             while let Ok(message) = events.recv().await {
@@ -447,6 +561,20 @@ impl LangHub {
         }
         client.notify_raw("initialized", json!({}));
         server.initialized = true;
+        // How far the project is now; notifications tell the rest.
+        let ask = client.request_raw("snout/readiness", json!({}));
+        let root_buf = root.to_owned();
+        server._tasks.push(cx.spawn(async move |this, cx| {
+            let Ok(v) = ask.await else { return };
+            let _ = this.update(cx, |this, cx| {
+                let Some(s) = this.servers.get_mut(&root_buf).filter(|s| s.generation == generation) else { return };
+                if s.readiness.project.is_none() {
+                    s.readiness = Readiness::from_answer(&v);
+                    cx.emit(HubEvent::Changed);
+                    cx.notify();
+                }
+            });
+        }));
         if matches!(server.stage, Stage::Importing | Stage::CompilingScala | Stage::Starting) {
             server.stage = Stage::Indexing;
         }
@@ -559,6 +687,23 @@ impl LangHub {
                         m.message = format!("Java: {text}");
                         cx.notify();
                     });
+                }
+            }
+            "snout/readiness" => {
+                if server.readiness.apply(&params) {
+                    if params.get("module").is_none_or(Value::is_null)
+                        && let Some(p) = &server.readiness.project
+                    {
+                        eprintln!("[java] readiness: {}, {}", p.label(), server.readiness.summary());
+                    }
+                    // The editors of the build show their module's state.
+                    for doc in self.docs.values().filter(|d| d.root == root) {
+                        for editor in doc.editors.iter().filter_map(|e| e.upgrade()) {
+                            editor.update(cx, |_, cx| cx.notify());
+                        }
+                    }
+                    cx.emit(HubEvent::Changed);
+                    cx.notify();
                 }
             }
             m if m.starts_with("snout/") => {
@@ -912,6 +1057,7 @@ impl LangHub {
         if java::downloaded_jdks().iter().any(|j| j.major == major) {
             return;
         }
+        eprintln!("[java] a build of {} needs JDK {major}: offering it", root.display());
         self.jdk_prompt = Some(JdkPrompt { root: root.to_owned(), major, resync: true, progress: None, error: None });
         cx.emit(HubEvent::Changed);
         cx.notify();
@@ -1060,15 +1206,9 @@ fn initialize_params(root: &Path) -> Value {
 
 #[cfg(test)]
 impl LangHub {
-    /// Stop and forget the server of `root` (a test that wants it started again).
-    pub fn forget_server(&mut self, root: &Path) {
-        self.pending.retain(|r| r != root);
-        if let Some(mut server) = self.servers.remove(root) {
-            server.stopped = true;
-            if let Some(c) = server.client.take() {
-                c.kill(Duration::from_millis(500));
-            }
-        }
+    /// Take a notification as if the server of `root` had sent it.
+    pub fn engine_says(&mut self, root: &Path, method: &str, params: Value, cx: &mut Context<Self>) {
+        self.on_notification(root, method, params, cx);
     }
 
     /// Hold `list` as what a server of `root` published for `uri`, without running one
@@ -1087,6 +1227,7 @@ impl LangHub {
             first_diagnostics: None,
             generation: 0,
             stopped: true,
+            readiness: Readiness::default(),
             _tasks: Vec::new(),
         });
         server.diagnostics.insert(uri, list);
