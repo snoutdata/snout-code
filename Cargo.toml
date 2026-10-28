@@ -1,6 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/snout-core", "crates/snout-gui", "crates/snout-app", "crates/snout-lang", "crates/snout-host"]
+members = [
+    "crates/snout-core",
+    "crates/snout-gui",
+    "crates/snout-app",
+    "crates/snout-lang",
+    "crates/snout-remote-proto",
+    "crates/snout-remote",
+    "crates/snout-server",
+    "crates/snout-host",
+]
 
 [workspace.package]
 version = "1.0.0"
@@ -13,6 +22,8 @@ repository = "https://github.com/snoutdata/snout-code"
 snout-core = { path = "crates/snout-core" }
 snout-lang = { path = "crates/snout-lang" }
 snout-host = { path = "crates/snout-host" }
+snout-remote-proto = { path = "crates/snout-remote-proto" }
+snout-remote = { path = "crates/snout-remote" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -24,6 +35,11 @@ egui_extras = "0.37"
 portable-pty = "0.9"
 vt100 = "0.16"
 anyhow = "1"
+# snout-server: file watching, signals and process groups, and the checksum of its binary.
+notify = "8"
+libc = "0.2"
+sha2 = "0.10"
+tempfile = "3"
 rfd = "0.17"
 # The native macOS menu bar.
 muda = { version = "0.21", default-features = false }

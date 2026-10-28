@@ -1,0 +1,26 @@
+[package]
+name = "snout-server"
+description = "The remote side of SnoutCode's Remote SSH mode: files, git, watching, processes and ptys on the remote machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "snout-server"
+path = "src/main.rs"
+
+[dependencies]
+snout-remote-proto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notify.workspace = true
+portable-pty.workspace = true
+anyhow.workspace = true
+libc.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+snout-remote.workspace = true
+tempfile.workspace = true

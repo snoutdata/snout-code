@@ -7485,6 +7485,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "snout-remote"
+version = "1.0.0"
+dependencies = [
+ "sha2 0.10.9",
+ "snout-remote-proto",
+]
+
+[[package]]
+name = "snout-remote-proto"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "snout-server"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "notify",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "snout-remote",
+ "snout-remote-proto",
+ "tempfile",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
