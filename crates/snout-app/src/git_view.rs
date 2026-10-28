@@ -878,7 +878,14 @@ impl GitView {
         } else {
             div().flex_none().h(px(32.)).px(px(8.)).flex().items_center().gap(px(8.)).child(amend_box).child(commit)
         };
-        pane(&p).child(header).child(separator(&p)).child(message).child(actions).into_any_element()
+        pane(&p)
+            .child(header)
+            .child(separator(&p))
+            .child(message)
+            // egui draws a hairline over the panel holding the checkbox and the button.
+            .child(div().flex_none().h(px(1.)).bg(p.border))
+            .child(actions)
+            .into_any_element()
     }
 
     fn changes(&mut self, cx: &mut Context<Self>) -> AnyElement {
