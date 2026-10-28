@@ -85,6 +85,7 @@ fn the_window_opens_on_the_welcome_page_without_a_repository(cx: &mut TestAppCon
         assert!(model.read(cx).repo.is_none());
         assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project, "the project comes first");
         assert_eq!(model.read(cx).title(), "SnoutCode");
+        assert!(!ws.read(cx).hub.read(cx).paused, "the Java servers may start once the window has painted");
     });
 }
 
@@ -864,5 +865,32 @@ fn the_settings_sheet_edits_a_copy_until_apply_or_ok(cx: &mut TestAppContext) {
         assert_eq!(model.read(cx).settings.tab_size, 3, "OK puts it in place");
         assert!(ws.read(cx).settings_sheet.is_none(), "and closes the sheet");
     });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn background_tasks_show_in_the_status_bar_and_its_popover(cx: &mut TestAppContext) {
+    let repo = demo_repo("bg-tasks");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("status-tasks").is_none(), "nothing runs");
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    cx.update(|_, cx| {
+        hub.update(cx, |h, cx| {
+            h.engine_build = Some(crate::background::EngineBuild::parse("stage Building snout-engine\n"));
+            cx.notify();
+        });
+        model.update(cx, |m, cx| {
+            m.job = Some("Fetching".into());
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    let tasks = cx.update(|_, cx| ws.read(cx).status.read(cx).tasks(cx));
+    assert_eq!(tasks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["Building snout-engine", "Git"]);
+    let item = cx.debug_bounds("status-tasks").expect("the status bar shows them").center();
+    cx.simulate_click(item, gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("tasks-popover").is_some(), "a click lists them");
     let _ = std::fs::remove_dir_all(repo);
 }

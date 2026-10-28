@@ -94,6 +94,8 @@ mod shots {
         Editor,
         /// The Settings sheet on a page.
         Settings(snout_app::settings_view::Page),
+        /// The background tasks' popover: the engine build and a Git job running.
+        Tasks,
     }
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
@@ -233,6 +235,21 @@ mod shots {
                 })
                 .unwrap();
             }
+            Some(Select::Tasks) => {
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let ws = ws.read(cx);
+                    let (hub, status) = (ws.hub.clone(), ws.status.clone());
+                    hub.update(cx, |h, _| {
+                        h.engine_build = Some(snout_app::background::EngineBuild {
+                            stage: "Downloading JDK 21 to build snout-engine".into(),
+                            ..Default::default()
+                        })
+                    });
+                    model.update(cx, |m, _| m.job = Some("Fetching".into()));
+                    status.update(cx, |s, _| s.tasks_open = true);
+                })
+                .unwrap();
+            }
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -259,7 +276,44 @@ mod shots {
         println!("screenshot {name}: ok");
     }
 
+    /// The splash window on its own.
+    fn splash_shot(name: &str, theme: ThemeChoice) {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let settings = Settings { theme, ..Settings::default() };
+        cx.update(|cx| snout_app::init(&settings, cx));
+        let handle = cx
+            .open_window(size(px(snout_app::splash::SPLASH_W), px(snout_app::splash::SPLASH_H)), |_, cx| {
+                cx.new(|_| snout_app::splash::Splash)
+            })
+            .unwrap();
+        cx.allow_parking();
+        for _ in 0..3 {
+            cx.advance_clock(Duration::from_millis(300));
+            cx.run_until_parked();
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        }
+        let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
+        let first = image.get_pixel(0, 0);
+        assert!(image.pixels().any(|p| p != first), "{name}: the splash is blank");
+        if let Some(dir) = std::env::var_os("SNOUT_SCREENSHOT") {
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(dir.join(format!("{name}.png"))).unwrap();
+        }
+        println!("screenshot {name}: ok");
+    }
+
     pub fn run() {
+        splash_shot("splash-dark", ThemeChoice::Dark);
+        splash_shot("splash-light", ThemeChoice::Light);
         // The Git view, as the egui app's `renders_repo_and_diff` and
         // `clicking_a_commit_shows_what_it_changed` shots show it.
         shot("git-dark", ThemeChoice::Dark, Activity::Git, Some(Select::File("status.rs")));
@@ -274,5 +328,7 @@ mod shots {
         use snout_app::settings_view::Page;
         shot("settings-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Appearance)));
         shot("settings-light", ThemeChoice::Light, Activity::Project, Some(Select::Settings(Page::Editor)));
+        shot("tasks-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Tasks));
+        shot("tasks-light", ThemeChoice::Light, Activity::Project, Some(Select::Tasks));
     }
 }

@@ -32,6 +32,8 @@ pub enum Stage {
     Indexing,
     Ready,
     Restarting,
+    /// The engine is being built (snout.sh, in development): it starts once it is.
+    WaitingForEngine,
     Failed(String),
 }
 
@@ -45,12 +47,21 @@ impl Stage {
             Stage::Indexing => "Indexing".into(),
             Stage::Ready => "Ready".into(),
             Stage::Restarting => "Restarting".into(),
+            Stage::WaitingForEngine => "Waiting for snout-engine".into(),
             Stage::Failed(why) => why.clone(),
         }
     }
 
     pub fn busy(&self) -> bool {
-        matches!(self, Stage::Importing | Stage::CompilingScala | Stage::Starting | Stage::Indexing | Stage::Restarting)
+        matches!(
+            self,
+            Stage::Importing
+                | Stage::CompilingScala
+                | Stage::Starting
+                | Stage::Indexing
+                | Stage::Restarting
+                | Stage::WaitingForEngine
+        )
     }
 }
 
@@ -138,6 +149,12 @@ pub struct LangHub {
     pub jdk_prompt: Option<JdkPrompt>,
     /// The home folder JDKs are looked for and downloaded under.
     pub home: PathBuf,
+    /// Held until the window has painted: the builds asked for meanwhile start then.
+    pub paused: bool,
+    pending: Vec<PathBuf>,
+    /// The engine build snout.sh runs beside the app, in development.
+    pub engine_build: Option<crate::background::EngineBuild>,
+    _engine_watch: Option<Task<()>>,
     _quit: gpui::Subscription,
 }
 
@@ -170,7 +187,76 @@ impl LangHub {
             this.shutdown_all();
             async {}
         });
-        Self { model, enabled, servers: HashMap::new(), docs: HashMap::new(), jdk_prompt: None, home, _quit: quit }
+        let mut this = Self {
+            model,
+            enabled,
+            servers: HashMap::new(),
+            docs: HashMap::new(),
+            jdk_prompt: None,
+            home,
+            paused: false,
+            pending: Vec::new(),
+            engine_build: None,
+            _engine_watch: None,
+            _quit: quit,
+        };
+        if let Some(file) = std::env::var_os(crate::background::STATUS_ENV).filter(|_| enabled) {
+            this.watch_engine_build(PathBuf::from(file), cx);
+        }
+        this
+    }
+
+    /// Follow snout.sh's engine build through its status file; when it ends, start the
+    /// servers that waited for it.
+    pub fn watch_engine_build(&mut self, file: PathBuf, cx: &mut Context<Self>) {
+        self.engine_build = Some(crate::background::EngineBuild::read(&file));
+        self._engine_watch = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(400)).await;
+                let now = crate::background::EngineBuild::read(&file);
+                let Ok(finished) = this.update(cx, |this, cx| {
+                    let changed = this.engine_build.as_ref() != Some(&now);
+                    let finished = now.finished();
+                    this.engine_build = Some(now);
+                    if changed {
+                        cx.emit(HubEvent::Changed);
+                        cx.notify();
+                    }
+                    if finished {
+                        this.engine_ready(cx);
+                    }
+                    finished
+                }) else {
+                    return;
+                };
+                if finished {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// The engine build ended: start the servers that waited.
+    fn engine_ready(&mut self, cx: &mut Context<Self>) {
+        let waiting: Vec<PathBuf> = self
+            .servers
+            .iter()
+            .filter(|(_, s)| s.stage == Stage::WaitingForEngine)
+            .map(|(root, _)| root.clone())
+            .collect();
+        for root in waiting {
+            self.spawn(&root, cx);
+        }
+        cx.emit(HubEvent::Changed);
+        cx.notify();
+    }
+
+    /// The window has painted: start the servers asked for meanwhile.
+    pub fn resume(&mut self, cx: &mut Context<Self>) {
+        self.paused = false;
+        for root in std::mem::take(&mut self.pending) {
+            self.ensure_server(&root, cx);
+        }
     }
 
     /// The Gradle build `path` belongs to, inside the open repository.
@@ -192,6 +278,12 @@ impl LangHub {
     /// Start the server of the build at `root` unless it runs.
     pub fn ensure_server(&mut self, root: &Path, cx: &mut Context<Self>) {
         if !self.enabled || self.servers.contains_key(root) {
+            return;
+        }
+        if self.paused {
+            if !self.pending.iter().any(|r| r == root) {
+                self.pending.push(root.to_owned());
+            }
             return;
         }
         let saved = self.model.read(cx).settings.project_jdks.get(root).and_then(|h| java::jdk_at(h));
@@ -247,6 +339,10 @@ impl LangHub {
     fn spawn(&mut self, root: &Path, cx: &mut Context<Self>) {
         let Some(server) = self.servers.get_mut(root) else { return };
         let Some(jdk) = server.jdk.clone() else { return };
+        if self.engine_build.as_ref().is_some_and(|b| !b.finished()) {
+            server.stage = Stage::WaitingForEngine;
+            return;
+        }
         let Some(dist) = java::engine_dist() else {
             server.stage = Stage::Failed("The Java engine is not built (run snout.sh)".into());
             return;

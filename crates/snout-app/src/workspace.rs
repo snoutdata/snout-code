@@ -169,10 +169,16 @@ fn restore_layout(
         return (false, Vec::new());
     }
     dock.update(cx, |d, cx| {
+        // A layout saved before the right stripe's tool windows has no right dock: they
+        // join one that starts hidden.
+        let had_right = d.has_dock(DockPlacement::Right);
         for (view, place) in panels {
             if d.panel(view.panel_id(cx)).is_none() {
                 d.add_panel_view(view.clone(), *place, None, window, cx);
             }
+        }
+        if !had_right && d.is_dock_open(DockPlacement::Right) {
+            d.toggle_dock(DockPlacement::Right, window, cx);
         }
     });
     (true, editors)
@@ -186,6 +192,8 @@ impl Workspace {
         // The language servers come first: restored editor tabs connect to them.
         let hub = cx.new(|cx| crate::lang::LangHub::new(model.clone(), cx));
         cx.set_global(crate::lang::hub::HubHandle(hub.clone()));
+        // The window first: the Java servers start once it has drawn (see `render`).
+        hub.update(cx, |h, _| h.paused = true);
         let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), cx));
         let references = cx.new(|cx| crate::lang::panels::ReferencesPanel::new(hub.clone(), cx));
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
@@ -919,6 +927,13 @@ impl Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_window(window, cx);
+        // The first frame is drawn: the heavy work may start.
+        if self.hub.read(cx).paused {
+            cx.defer_in(window, |this, _, cx| {
+                this.hub.update(cx, |h, cx| h.resume(cx));
+                this.ensure_project_server(cx);
+            });
+        }
         let p = palette(cx);
         let m = self.model.read(cx);
         let free = m.dialog.is_none();

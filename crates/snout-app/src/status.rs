@@ -26,6 +26,8 @@ pub struct StatusBar {
     pub java_missing: bool,
     /// The note saying why is open.
     pub java_note: bool,
+    /// The background tasks' popover is open.
+    pub tasks_open: bool,
     /// The language servers, for what Java is doing.
     hub: Option<Entity<crate::lang::LangHub>>,
     /// The Git view shows: the branch takes the breadcrumbs' place.
@@ -81,6 +83,7 @@ impl StatusBar {
             java_note: false,
             hub: None,
             git: false,
+            tasks_open: false,
             _hub_watch: None,
             _watch: watch,
         }
@@ -134,6 +137,11 @@ impl StatusBar {
         if !self.java_missing {
             return false;
         }
+        // An engine build on its way is not missing.
+        if self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.is_some()) {
+            return crate::lang::java::engine_dist().is_none()
+                && self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.as_ref().is_some_and(|b| b.finished()));
+        }
         let java_file = self.editor().is_some_and(|e| crate::editor::language_for(&e.read(cx).path) == "java");
         let gradle = self.model.read(cx).repo.as_ref().is_some_and(|r| crate::lang::java::is_gradle_root(r.root()));
         java_file || gradle
@@ -174,6 +182,162 @@ impl StatusBar {
                         .child(name)
                         .when(i < last, |d| d.child(icon(Icon::ChevronRight, 10., p.fg_dim)))
                 }))
+                .into_any_element(),
+        )
+    }
+}
+
+/// A thin progress bar: filled to `percent`, or a segment sliding along while how far is
+/// not known.
+pub fn progress_bar(percent: Option<u32>, width: f32, p: &crate::theme::Palette) -> gpui::AnyElement {
+    let (track, fill) = (crate::theme::mix(p.fg, 0.15, p.ground), p.accent);
+    gpui::canvas(
+        |_, _, _| {},
+        move |b, _, window, cx| {
+            window.paint_quad(gpui::fill(b, track).corner_radii(px(1.5)));
+            let w = b.size.width;
+            let (x, len) = match percent {
+                Some(pc) => (px(0.), w * (pc.min(100) as f32 / 100.)),
+                None => {
+                    let len = w * 0.3;
+                    let t = if cx.reduce_motion() {
+                        0.35
+                    } else {
+                        window.request_animation_frame();
+                        (crate::status::started().elapsed().as_secs_f32() / 1.4).fract()
+                    };
+                    ((w + len) * t - len, len)
+                }
+            };
+            let left = (b.origin.x + x).max(b.origin.x);
+            let right = (b.origin.x + x + len).min(b.right());
+            if right > left {
+                let seg = gpui::Bounds::new(gpui::point(left, b.origin.y), gpui::size(right - left, b.size.height));
+                window.paint_quad(gpui::fill(seg, fill).corner_radii(px(1.5)));
+            }
+        },
+    )
+    .flex_none()
+    .w(px(width))
+    .h(px(3.))
+    .into_any_element()
+}
+
+/// When the app started, for the sliding progress bars.
+pub fn started() -> std::time::Instant {
+    static START: std::sync::LazyLock<std::time::Instant> = std::sync::LazyLock::new(std::time::Instant::now);
+    *START
+}
+
+impl StatusBar {
+    /// Everything running in the background now.
+    pub fn tasks(&self, cx: &gpui::App) -> Vec<crate::background::BgTask> {
+        crate::background::tasks(self.hub.as_ref(), self.model.read(cx), cx)
+    }
+
+    /// The compact item of the background tasks: the one in front, its stage and a thin
+    /// bar; a click lists them all.
+    fn tasks_item(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let tasks = self.tasks(cx);
+        let Some(first) = tasks.first().cloned() else {
+            self.tasks_open = false;
+            return None;
+        };
+        let p = palette(cx);
+        let hover_bg = p.button_hover;
+        let more = tasks.len() - 1;
+        let label = if more > 0 { format!("{} (+{more})", first.stage) } else { first.stage.clone() };
+        Some(
+            div()
+                .relative()
+                .flex_none()
+                .child(
+                    div()
+                        .id("status-tasks")
+                        .debug_selector(|| "status-tasks".into())
+                        .h(px(20.))
+                        .px(px(6.))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .rounded(px(4.))
+                        .cursor_pointer()
+                        .whitespace_nowrap()
+                        .hover(move |s| s.bg(hover_bg))
+                        .child(label)
+                        .child(progress_bar(first.percent, 64., &p))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.tasks_open = !this.tasks_open;
+                            cx.notify();
+                        })),
+                )
+                .when(self.tasks_open, |d| {
+                    d.child(
+                        gpui::deferred(
+                            gpui::anchored().anchor(gpui::Anchor::BottomRight).child(
+                                div()
+                                    .id("tasks-popover")
+                                    .debug_selector(|| "tasks-popover".into())
+                                    .mb(px(30.))
+                                    .w(px(340.))
+                                    .p(px(12.))
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(10.))
+                                    .rounded(px(8.))
+                                    .bg(p.card)
+                                    .border_1()
+                                    .border_color(p.border)
+                                    .shadow_lg()
+                                    .text_size(px(12.5))
+                                    .text_color(p.fg)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(10.))
+                                            .child(crate::art::drawing(snout_core::art::building(), 84., 56., None))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .child(
+                                                        div()
+                                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                            .child("In the background"),
+                                                    )
+                                                    .child(
+                                                        div().text_color(p.fg_dim).child("The editor works meanwhile."),
+                                                    ),
+                                            ),
+                                    )
+                                    .children(tasks.into_iter().map(|t| {
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(4.))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .justify_between()
+                                                    .gap(px(8.))
+                                                    .child(div().font_weight(gpui::FontWeight::MEDIUM).child(t.title))
+                                                    .when_some(t.percent, |d, pc| {
+                                                        d.child(div().text_color(p.fg_dim).child(format!("{pc}%")))
+                                                    }),
+                                            )
+                                            .child(div().text_color(p.fg_dim).child(t.stage))
+                                            .child(progress_bar(t.percent, 316., &p))
+                                    }))
+                                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                        this.tasks_open = false;
+                                        cx.notify();
+                                    })),
+                            ),
+                        )
+                        .with_priority(1),
+                    )
+                })
                 .into_any_element(),
         )
     }
@@ -245,7 +409,8 @@ impl Render for StatusBar {
                     .child(item("status-indent", s.indent.into()))
             })
             .children(java_item)
-            .when_some(java, |d, (text, busy)| {
+            .children(self.tasks_item(cx))
+            .when_some(java.filter(|(_, busy)| !busy), |d, (text, busy)| {
                 d.child(
                     div()
                         .id("status-java")

@@ -1,6 +1,7 @@
 //! SnoutCode on GPUI and GPUI Kit: an activity bar, docks, and the Git Panel.
 
 pub mod art;
+pub mod background;
 pub mod branch_popup;
 pub mod console;
 pub mod dialogs;
@@ -20,6 +21,7 @@ pub mod projects;
 pub mod search;
 pub mod settings;
 pub mod settings_view;
+pub mod splash;
 pub mod status;
 pub mod tabs;
 pub mod theme;
@@ -86,31 +88,59 @@ pub fn run() {
         init(&settings, cx);
         // Language servers start in the app (tests opt in).
         cx.set_global(lang::hub::LangEnabled(true));
-        let model = model(store, open, cx);
-        // SNOUT_NO_FETCH=1 keeps the app from fetching on its own (a read only look at a
-        // repository).
-        if std::env::var_os("SNOUT_NO_FETCH").is_none() {
-            let every = std::time::Duration::from_secs(model.read(cx).settings.fetch_minutes.max(1) * 60);
-            model.update(cx, |m, cx| m.start_background_fetch(every, cx));
-        }
-        let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(px(800.), px(500.))),
-                // The app draws the title bar; the window buttons sit in it, centred.
-                titlebar: Some(gpui::TitlebarOptions {
-                    traffic_light_position: Some(gpui::point(px(13.), px(13.))),
-                    ..gpui_component::TitleBar::title_bar_options()
-                }),
-                ..gpui_component::TitleBar::window_options()
-            },
-            |window, cx| {
-                let view = cx.new(|cx| workspace::Workspace::new(model, window, cx));
-                cx.new(|cx| gpui_component::Root::new(view, window, cx))
-            },
-        )
-        .expect("open the window");
-        cx.activate(true);
+        // The splash covers the moment until the window can paint; it goes on its first frame.
+        let splash = splash::open(cx);
+        cx.spawn(async move |cx| {
+            // Let the splash paint before the work of opening the project.
+            cx.background_executor().timer(std::time::Duration::from_millis(16)).await;
+            cx.update(|cx| open_main(store, open, splash, cx));
+        })
+        .detach();
     });
+}
+
+/// The main window, on the project last open; the splash closes, and the heavy work starts,
+/// once it has painted.
+fn open_main(
+    store: Option<Store>,
+    open: Option<std::path::PathBuf>,
+    splash: Option<gpui::WindowHandle<splash::Splash>>,
+    cx: &mut App,
+) {
+    let model = model(store, open, cx);
+    let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
+    let opened = cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_min_size: Some(size(px(800.), px(500.))),
+            // The app draws the title bar; the window buttons sit in it, centred.
+            titlebar: Some(gpui::TitlebarOptions {
+                traffic_light_position: Some(gpui::point(px(13.), px(13.))),
+                ..gpui_component::TitleBar::title_bar_options()
+            }),
+            ..gpui_component::TitleBar::window_options()
+        },
+        |window, cx| {
+            let started = model.clone();
+            window.on_next_frame(move |_, cx| {
+                if let Some(splash) = splash {
+                    let _ = splash.update(cx, |_, window, _| window.remove_window());
+                }
+                // SNOUT_NO_FETCH=1 keeps the app from fetching on its own (a read only look
+                // at a repository).
+                if std::env::var_os("SNOUT_NO_FETCH").is_none() {
+                    let every = std::time::Duration::from_secs(started.read(cx).settings.fetch_minutes.max(1) * 60);
+                    started.update(cx, |m, cx| m.start_background_fetch(every, cx));
+                }
+            });
+            let view = cx.new(|cx| workspace::Workspace::new(model, window, cx));
+            cx.new(|cx| gpui_component::Root::new(view, window, cx))
+        },
+    );
+    if let Err(e) = opened {
+        eprintln!("Could not open the window: {e}");
+        cx.quit();
+        return;
+    }
+    cx.activate(true);
 }

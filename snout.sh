@@ -7,10 +7,11 @@
 #   ./snout.sh --fg [...]      stay in the foreground (logs go to the terminal)
 #   ./snout.sh --old [...]     start the earlier Git-only app instead
 #
-# The Java engine (engine/build/dist) is built first when it is missing or older than its
-# sources, with JDK 21: SNOUT_JDK21=<path>, else JAVA_HOME if it is 21, else one that
-# /usr/libexec/java_home finds, else Temurin 21 downloaded to ~/Library/Caches/SnoutCode.
-# If that fails the app starts anyway, without Java support.
+# The Java engine (engine/build/dist) is built when it is missing or older than its sources,
+# beside the app, which starts first and shows the build's progress; with JDK 21:
+# SNOUT_JDK21=<path>, else JAVA_HOME if it is 21, else one that /usr/libexec/java_home finds,
+# else Temurin 21 downloaded to ~/Library/Caches/SnoutCode. If that fails the app runs on the
+# previous build, or without Java support.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -96,27 +97,42 @@ build_engine() {
   local jdk
   if ! jdk="$(find_jdk21)"; then
     [[ -n "${SNOUT_JDK21:-}" ]] && return 1
-    echo "Downloading JDK 21 (Eclipse Temurin) to build the Java engine…"
+    echo "stage Downloading JDK 21 to build snout-engine"
     download_jdk21 && jdk="$(find_jdk21)" || return 1
   fi
-  echo "Building the Java engine…"
+  echo "stage Building snout-engine"
   (cd "$ENGINE" && JAVA_HOME="$jdk" ./gradlew --no-daemon --quiet :sync-cli:snoutDist) >&2
 }
+# The engine builds beside the app, which starts first: the build writes a line per step to a
+# status file (`stage …`, then `done` or `failed …`), which the app shows as a background task;
+# its Java servers start once the build is done.
+STATUS=""
 if [[ "$PKG" == "snout-app" ]] && engine_stale; then
-  if ! build_engine; then
-    if [[ -x "$DIST/runtime/bin/java" ]]; then
-      echo "Warning: the Java engine could not be rebuilt; starting with the previous build." >&2
-    else
-      echo "Warning: the Java engine could not be built; starting without Java support." >&2
-    fi
-  fi
+  STATUS="${TMPDIR:-/tmp}"; STATUS="${STATUS%/}/snout-engine-build.$$.status"
+  echo "stage Building snout-engine" >"$STATUS"
 fi
+build_in_background() {
+  local log="${STATUS%.status}.log"
+  {
+    if build_engine 2>"$log"; then
+      echo "done"
+    elif [[ -x "$DIST/runtime/bin/java" ]]; then
+      echo "failed The engine could not be rebuilt (see $log); the previous build runs."
+    else
+      echo "failed The engine could not be built (see $log); Java support is off."
+    fi
+  } >>"$STATUS"
+}
 
 # Incremental: a no-op when nothing changed.
 cargo build --release --quiet -p "$PKG" --manifest-path "$ROOT/Cargo.toml"
 
 args=()
 [[ -n "$repo" ]] && args+=("$repo")
+if [[ -n "$STATUS" ]]; then
+  export SNOUT_ENGINE_BUILD_STATUS="$STATUS"
+  build_in_background &
+fi
 
 if $foreground; then
   exec "$BIN" "${args[@]+"${args[@]}"}"
