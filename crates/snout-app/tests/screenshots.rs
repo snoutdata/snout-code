@@ -80,6 +80,9 @@ mod shots {
         git(dir, &["stash", "pop", "-q"]);
     }
 
+    const GREETER_V1: &str = "package demo;\n\nimport java.util.List;\n\n/** Says hello. */\npublic class Greeter {\n    private final String name;\n\n    public Greeter(String name) {\n        this.name = name;\n    }\n\n    // The greeting.\n    public String greet() {\n        return \"Hello, \" + name + \"!\";\n    }\n\n    public List<String> greetAll(List<String> names) {\n        return names.stream().map(n -> \"Hello, \" + n).toList();\n    }\n}\n";
+    const GREETER_V2: &str = "package demo;\n\nimport java.util.List;\nimport java.util.Objects;\n\n/** Says hello. */\npublic class Greeter {\n    private final String name;\n\n    public Greeter(String name) {\n        this.name = Objects.requireNonNull(name);\n    }\n\n    // The greeting, with the name.\n    public String greet() {\n        return \"Hello, \" + name + \"!\";\n    }\n\n    @Override\n    public String toString() {\n        return \"Greeter[\" + name + \"]\";\n    }\n}\n";
+
     pub enum Select {
         File(&'static str),
         /// A commit (by summary) and one of its files, in a repository with a merge.
@@ -143,10 +146,29 @@ mod shots {
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
             }
             Some(Select::Editor) => {
-                let file = repo.join("src/Greeter.java");
-                let java = "package demo;\n\n/** Says hello. */\npublic class Greeter {\n    private final String name;\n\n    public Greeter(String name) {\n        this.name = name;\n    }\n\n    // The greeting.\n    public String greet() {\n        return \"Hello, \" + name + \"!\";\n    }\n}\n";
-                std::fs::write(&file, java).unwrap();
-                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file, None), cx)));
+                // A Java file with history, then edited: lines added, changed and removed.
+                std::fs::create_dir_all(repo.join("src/main/java/demo")).unwrap();
+                let file = repo.join("src/main/java/demo/Greeter.java");
+                std::fs::write(&file, GREETER_V1).unwrap();
+                git(&repo, &["add", "src/main/java/demo/Greeter.java"]);
+                git(&repo, &["commit", "-qm", "Add the greeter"]);
+                std::fs::write(&file, GREETER_V2).unwrap();
+                std::fs::write(repo.join("build.gradle.kts"), "plugins {\n    java\n}\n").unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+                let open =
+                    |cx: &mut HeadlessAppContext, a: Action| cx.update(|cx| model.update(cx, |m, cx| m.handle(a, cx)));
+                open(&mut cx, Action::OpenFile(repo.join("build.gradle.kts"), None));
+                open(&mut cx, Action::OpenFile(repo.join("src/main.rs"), None));
+                open(&mut cx, Action::PreviewFile(repo.join("README.md")));
+                open(&mut cx, Action::OpenFile(file, Some((14, 23))));
+                // An unsaved change in another tab, for its dot.
+                cx.update_window(handle.into(), |_, window, cx| {
+                    let ws = ws.read(cx);
+                    let main = ws.editors().into_iter().find(|e| e.read(cx).path.ends_with("src/main.rs")).unwrap();
+                    let state = main.read(cx).state.clone();
+                    state.update(cx, |s, cx| s.insert("// edited\n", window, cx));
+                })
+                .unwrap();
             }
             Some(Select::Nothing) | None => {}
         }
@@ -184,5 +206,6 @@ mod shots {
         shot("welcome-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
         shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
         shot("editor-dark", ThemeChoice::Dark, Activity::Projects, Some(Select::Editor));
+        shot("editor-light", ThemeChoice::Light, Activity::Projects, Some(Select::Editor));
     }
 }

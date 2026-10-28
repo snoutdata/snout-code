@@ -146,6 +146,8 @@ pub enum Action {
     FilterDir(Option<String>),
     /// Open a file in an editor tab, the caret on a line and column (from 0) if given.
     OpenFile(PathBuf, Option<(u32, u32)>),
+    /// Show a file in the preview tab, which the next preview replaces until it is kept.
+    PreviewFile(PathBuf),
 }
 
 /// What the workspace should do in response to the model.
@@ -161,8 +163,8 @@ pub enum ModelEvent {
     Theme,
     /// The commit message changed from outside its text field.
     Message,
-    /// Open a file in an editor tab.
-    OpenFile(PathBuf, Option<(u32, u32)>),
+    /// Open a file in an editor tab (the preview tab when the flag says so).
+    OpenFile(PathBuf, Option<(u32, u32)>, bool),
 }
 
 pub struct OutputLine {
@@ -888,7 +890,8 @@ impl Model {
             }
             Action::Copy(text) => cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)),
             Action::Reveal(path) => cx.reveal_path(&path),
-            Action::OpenFile(path, at) => cx.emit(ModelEvent::OpenFile(path, at)),
+            Action::OpenFile(path, at) => cx.emit(ModelEvent::OpenFile(path, at, false)),
+            Action::PreviewFile(path) => cx.emit(ModelEvent::OpenFile(path, None, true)),
             Action::FilterDir(dir) => {
                 self.dir_filter = dir;
                 self.anchor = None;

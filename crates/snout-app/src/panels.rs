@@ -88,15 +88,14 @@ panel!(
 impl Render for SidePanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        // Two panes on the ground colour, as the Git view's left column has.
         div()
             .size_full()
-            .bg(p.panel)
-            .p(px(8.))
+            .bg(p.ground)
             .flex()
             .flex_col()
-            .gap(px(8.))
-            .child(div().flex_none().h(px(200.)).child(self.projects.clone()))
-            .child(div().flex_1().min_h_0().child(self.files.clone()))
+            .child(crate::look::pane(&p).flex_none().h(px(200.)).child(self.projects.clone()))
+            .child(crate::look::pane(&p).child(self.files.clone()))
     }
 }
 

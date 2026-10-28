@@ -12,16 +12,15 @@ use gpui::{
     Render, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px,
 };
 use gpui::{Global, Task};
+use gpui_component::Theme;
 use gpui_component::dock::{
-    BasePanelView, DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin, DockToggleEvent, PanelId,
+    BasePanelView, DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockToggleEvent, PanelId,
     panel_handle, register_panel,
 };
-use gpui_component::spinner::Spinner;
-use gpui_component::{Sizable as _, Theme};
 use snout_core::{FileEntry, PullMode, on_disk, stage_paths, unstage_paths};
 
 use crate::art::glyph;
-use crate::editor::EditorPanel;
+use crate::editor::{EditorEvent, EditorPanel};
 use crate::git_view::GitView;
 use crate::menus::{self, *};
 use crate::model::{Action, Dialog, Model, ModelEvent};
@@ -29,6 +28,7 @@ use crate::panels::{Activity, OutputPanel, SidePanel, WelcomePanel};
 use crate::projects::ProjectsView;
 use crate::search::{Mode, SearchEvent, SearchView};
 use crate::settings::ThemeChoice;
+use crate::status::StatusBar;
 use crate::theme::{self, palette};
 use snout_core::art::Glyph;
 
@@ -54,6 +54,8 @@ pub struct Workspace {
     pub search: Option<Entity<SearchView>>,
     /// The editor tabs, to find the one a file already has.
     editors: Vec<gpui::WeakEntity<EditorPanel>>,
+    /// The status bar under the docks; it follows the editor in front.
+    pub status: Entity<StatusBar>,
     _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -150,7 +152,7 @@ impl Workspace {
         let console = crate::console::build(&model, window, cx);
         let console_view = console.as_ref().map(|c| c.view());
         let git = cx.new(|cx| GitView::new(model.clone(), projects.into(), console_view, window, cx));
-        let (dock, _skin) = DockSkin::dock_area("snout-code", Some(LAYOUT_VERSION), window, cx);
+        let (dock, _skin) = crate::tabs::dock_area("snout-code", Some(LAYOUT_VERSION), window, cx);
 
         // Every panel, where it goes when the saved layout does not place it.
         let mut panels: Vec<(Arc<dyn BasePanelView>, DockPlacement)> = vec![
@@ -213,7 +215,8 @@ impl Workspace {
                 }
             }),
         ];
-        let this = Self {
+        let status = cx.new(|cx| StatusBar::new(model.clone(), cx));
+        let mut this = Self {
             model,
             dock,
             side,
@@ -223,12 +226,40 @@ impl Workspace {
             focus: cx.focus_handle(),
             title: String::new(),
             search: None,
-            editors: restored.1.iter().map(|e| e.downgrade()).collect(),
+            editors: Vec::new(),
+            status,
             _save_layout: None,
             _subscriptions: subscriptions,
         };
+        for editor in restored.1 {
+            this.track_editor(&editor, cx);
+        }
         window.focus(&this.focus, cx);
         this
+    }
+
+    /// Keep `editor` among the tabs, and follow it when it gets the keyboard.
+    fn track_editor(&mut self, editor: &Entity<EditorPanel>, cx: &mut Context<Self>) {
+        self.editors.push(editor.downgrade());
+        self._subscriptions.push(cx.subscribe(editor, |this, editor, e: &EditorEvent, cx| match e {
+            EditorEvent::Focused => this.set_active_editor(Some(&editor), cx),
+        }));
+    }
+
+    /// The editor in front changed: the status bar and the file tree follow it.
+    pub fn set_active_editor(&mut self, editor: Option<&Entity<EditorPanel>>, cx: &mut Context<Self>) {
+        self.status.update(cx, |s, cx| s.set_editor(editor, cx));
+        let path = editor.map(|e| e.read(cx).path.clone());
+        let files = self.side.read(cx).files.clone();
+        files.update(cx, |f, cx| f.reveal(path, cx));
+    }
+
+    /// The editor tab with the keyboard, or else the one the status bar follows.
+    pub fn active_editor(&self, window: &Window, cx: &App) -> Option<Entity<EditorPanel>> {
+        self.editors()
+            .into_iter()
+            .find(|e| gpui::Focusable::focus_handle(e.read(cx).state.read(cx), cx).contains_focused(window, cx))
+            .or_else(|| self.status.read(cx).editor())
     }
 
     fn on_model_event(&mut self, model: &Entity<Model>, e: &ModelEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -252,7 +283,7 @@ impl Workspace {
             // The commit and the diff show in the Git view.
             ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
             ModelEvent::Message => {}
-            ModelEvent::OpenFile(path, at) => self.open_file(path.clone(), *at, window, cx),
+            ModelEvent::OpenFile(path, at, preview) => self.open_file(path.clone(), *at, *preview, window, cx),
         }
     }
 
@@ -299,21 +330,46 @@ impl Workspace {
         self.model.update(cx, |m, cx| m.step_commit(up, cx));
     }
 
-    /// Open `path` in an editor tab (or bring its tab forward), the caret at `at`. The
-    /// docks come forward if the Git view was showing.
-    pub fn open_file(&mut self, path: PathBuf, at: Option<(u32, u32)>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Open `path` in an editor tab (or bring its tab forward), the caret at `at`. A
+    /// preview takes the place of the preview tab already open, unless that one has
+    /// changes. The docks come forward if the Git view was showing.
+    pub fn open_file(
+        &mut self,
+        path: PathBuf,
+        at: Option<(u32, u32)>,
+        preview: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.editors.retain(|e| e.upgrade().is_some());
-        let open = self.editors.iter().filter_map(|e| e.upgrade()).find(|e| e.read(cx).path == path);
+        let open = self.editors().into_iter().find(|e| e.read(cx).path == path);
+        let reusable = if open.is_none() && preview {
+            self.editors().into_iter().find(|e| e.read(cx).preview && !e.read(cx).dirty)
+        } else {
+            None
+        };
         let editor = match open {
-            Some(editor) => editor,
+            Some(editor) => {
+                if !preview {
+                    editor.update(cx, |e, cx| e.pin(cx));
+                }
+                editor
+            }
+            None if reusable.is_some() => {
+                let editor = reusable.expect("checked");
+                editor.update(cx, |e, cx| e.load(path, window, cx));
+                editor
+            }
             None => {
                 let editor = cx.new(|cx| EditorPanel::open(path, window, cx));
-                self.editors.push(editor.downgrade());
+                editor.update(cx, |e, _| e.preview = preview);
+                self.track_editor(&editor, cx);
                 let view = panel_handle(editor.clone());
                 self.dock.update(cx, |d, cx| d.add_panel_view(view, DockPlacement::Center, None, window, cx));
                 editor
             }
         };
+        self.set_active_editor(Some(&editor), cx);
         if self.side.read(cx).activity == Activity::Git {
             self.show_activity(Activity::Projects, window, cx);
         }
@@ -449,27 +505,6 @@ impl Workspace {
                     .on_click(cx.listener(|this, _, _, cx| this.send(Action::ToggleConsole, cx))),
             )
     }
-
-    fn status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
-        let m = self.model.read(cx);
-        div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .px(px(10.))
-            .h(px(26.))
-            .bg(p.ground)
-            .border_t_1()
-            .border_color(p.border)
-            .text_size(px(12.))
-            .when(m.job.is_some(), |d| d.child(Spinner::new().xsmall()))
-            .child(m.message.clone())
-            .child(div().flex_1())
-            .when_some(m.branch_summary(), |d, s| {
-                d.child(glyph(Glyph::Branch, 14., p.ill_ink)).child(div().text_color(p.weak()).child(s))
-            })
-    }
 }
 
 impl Render for Workspace {
@@ -603,7 +638,7 @@ impl Render for Workspace {
                 .flex()
                 .flex_col()
                 .child(div().flex_1().min_h_0().child(self.dock.clone()))
-                .child(self.status_bar(cx))
+                .child(self.status.clone())
                 .into_any_element()
         };
         root.flex_row()

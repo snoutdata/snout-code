@@ -622,9 +622,13 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
         })
     };
     let top = names(cx);
-    assert_eq!(top[0], "src", "folders first: {top:?}");
+    assert_eq!(top[..2], ["build", "src"], "folders first: {top:?}");
     assert!(top.contains(&"status.rs".to_owned()) && top.contains(&".gitignore".to_owned()), "{top:?}");
-    assert!(!top.iter().any(|n| n == "build" || n == ".git"), "ignored and .git stay out: {top:?}");
+    assert!(!top.iter().any(|n| n == ".git"), ".git stays out: {top:?}");
+    let ignored = cx.update(|_, cx| tree.update(cx, |t, _| t.rows()));
+    let build = ignored.iter().find(|(e, _)| e.path.ends_with("build")).expect("ignored folders are listed");
+    assert!(build.0.ignored, "and marked, to be dimmed");
+    assert!(ignored.iter().filter(|(e, _)| !e.path.ends_with("build")).all(|(e, _)| !e.ignored));
     // A click on a folder opens it; one on a file opens an editor tab.
     let src = cx.debug_bounds("file-src").expect("the src row is drawn").center();
     cx.simulate_click(src, Modifiers::none());

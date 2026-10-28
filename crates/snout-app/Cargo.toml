@@ -18,6 +18,9 @@ serde_json.workspace = true
 anyhow.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
+# GPUI Kit's foundation, the release GPUI Kit pins: the dock's resize-handle context, so
+# the app's dock skin can wrap GPUI Kit's and draw its own editor tabs.
+gpui-base = { version = "=0.8.1", default-features = false }
 gpui-platform.workspace = true
 # GPUI Kit's icons (Lucide) and other assets.
 gpui-kit-assets = "=0.8.1"

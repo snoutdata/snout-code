@@ -6,6 +6,7 @@ pub mod dialogs;
 pub mod editor;
 pub mod files;
 pub mod git_view;
+pub mod icons;
 pub mod look;
 pub mod menus;
 pub mod model;
@@ -13,10 +14,14 @@ pub mod panels;
 pub mod projects;
 pub mod search;
 pub mod settings;
+pub mod status;
+pub mod tabs;
 pub mod theme;
 pub mod ui;
 pub mod workspace;
 
+#[cfg(test)]
+mod code_tests;
 #[cfg(test)]
 mod tests;
 

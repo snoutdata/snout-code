@@ -1,0 +1,358 @@
+//! The dock's look: GPUI Kit's dock skin, wrapped. Each tab group sits in a rounded pane
+//! on the ground colour, as the Git view's panes do, and the center's tab groups get the
+//! editor's own tab bar: a file icon, the name (in italics for the preview tab), a dot
+//! while the file has unsaved changes, a close button on hover, a double click to keep a
+//! preview, and a middle click to close.
+
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+    AnyElement, AnyView, App, AppContext as _, Axis, ClickEvent, Context, Div, Entity, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, Render, SharedString, Stateful, StatefulInteractiveElement as _,
+    Styled as _, Window, div, px,
+};
+use gpui_base::ResizeHandleContext;
+use gpui_component::dock::{
+    BasePanelView, DockArea, DockAreaRenderer, DockContext, DockSkin, DragPanel, DropIndicator, NodeId, PanelHandle,
+    PanelId, PanelState, TabGroupContext, TabGroupRenderer,
+};
+use snout_core::art::Glyph;
+
+use crate::art::glyph;
+use crate::editor::EditorPanel;
+use crate::theme::palette;
+
+/// The dock area in the app's look, and GPUI Kit's skin inside it (for its settings).
+pub fn dock_area(
+    id: &'static str,
+    version: Option<usize>,
+    window: &mut Window,
+    cx: &mut App,
+) -> (Entity<DockArea>, Rc<DockSkin>) {
+    let mut skin = None;
+    let area = cx.new(|cx| {
+        let inner = DockSkin::new(cx);
+        skin = Some(inner.clone());
+        DockArea::new(id, version, window, cx).with_renderer(Rc::new(Skin { inner }))
+    });
+    (area, skin.expect("the skin is made with the area"))
+}
+
+struct Skin {
+    inner: Rc<DockSkin>,
+}
+
+impl DockAreaRenderer for Skin {
+    fn frame(&self, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.frame(window, cx)
+    }
+
+    fn split_frame(&self, node: NodeId, axis: Axis, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.split_frame(node, axis, window, cx).bg(palette(cx).ground)
+    }
+
+    fn center_frame(&self, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.center_frame(window, cx).bg(palette(cx).ground)
+    }
+
+    fn render_split_handle(
+        &self,
+        handle: &ResizeHandleContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        self.inner.render_split_handle(handle, window, cx)
+    }
+
+    fn render_dock(&self, dock: &DockContext, content: AnyElement, window: &mut Window, cx: &mut App) -> AnyElement {
+        self.inner.render_dock(dock, content, window, cx)
+    }
+
+    fn build_placeholder(
+        &self,
+        state: &PanelState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Arc<dyn BasePanelView>> {
+        self.inner.build_placeholder(state, window, cx)
+    }
+
+    fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
+        Rc::new(Group { inner: self.inner.tab_group_renderer() })
+    }
+}
+
+struct Group {
+    inner: Rc<dyn TabGroupRenderer>,
+}
+
+/// Whether the group holds the center's tabs (files and the welcome page).
+fn is_editor_group(group: &TabGroupContext, cx: &App) -> bool {
+    group.panels().iter().any(|p| matches!(p.panel_name(cx), crate::editor::PANEL_NAME | "Welcome"))
+}
+
+/// Whether the group is the left dock's one panel, which draws its own panes.
+fn is_side(group: &TabGroupContext, cx: &App) -> bool {
+    group.panels().iter().any(|p| p.panel_name(cx) == "Side")
+}
+
+impl TabGroupRenderer for Group {
+    fn frame(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        let p = palette(cx);
+        let frame = self.inner.frame(group, window, cx);
+        if is_side(group, cx) {
+            return frame.bg(p.ground);
+        }
+        frame.bg(p.panel).border_1().border_color(p.border).rounded(px(10.)).overflow_hidden()
+    }
+
+    fn content_frame(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.content_frame(group, window, cx)
+    }
+
+    fn render_tab_bar(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyElement {
+        if is_editor_group(group, cx) {
+            tab_bar(group, window, cx)
+        } else {
+            self.inner.render_tab_bar(group, window, cx)
+        }
+    }
+
+    fn render_active_panel(
+        &self,
+        panel: AnyView,
+        group: &TabGroupContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        self.inner.render_active_panel(panel, group, window, cx)
+    }
+
+    fn render_drop_indicator(&self, indicator: DropIndicator, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        self.inner.render_drop_indicator(indicator, window, cx)
+    }
+
+    fn render_empty(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        self.inner.render_empty(group, window, cx)
+    }
+}
+
+/// The editor tab a dock panel is, if it is one.
+pub fn editor_of(panel: &Arc<dyn BasePanelView>) -> Option<Entity<EditorPanel>> {
+    panel.view().downcast::<EditorPanel>().ok()
+}
+
+/// What follows the pointer while a tab is dragged.
+struct TabDrag(SharedString);
+
+impl Render for TabDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
+        div()
+            .px(px(10.))
+            .py(px(4.))
+            .rounded(px(6.))
+            .bg(p.card)
+            .border_1()
+            .border_color(p.border)
+            .text_color(p.fg)
+            .opacity(0.9)
+            .child(self.0.clone())
+    }
+}
+
+/// Close the tab of `panel` in `group`: an editor asks first if it has unsaved changes.
+fn close(group: &TabGroupContext, panel: &Arc<dyn BasePanelView>, window: &mut Window, cx: &mut App) {
+    let id = panel.panel_id(cx);
+    if !group.is_panel_closable(id, cx) {
+        return;
+    }
+    let group = group.clone();
+    crate::editor::confirm_close(editor_of(panel), window, cx, move |window, cx| group.close(id, window, cx));
+}
+
+/// Height of the editor tab bar.
+pub const TAB_H: f32 = 34.;
+
+fn tab_bar(group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyElement {
+    let p = palette(cx);
+    let active = group.active_panel().map(|panel| panel.panel_id(cx));
+    let droppable = group.is_droppable();
+    let count = group.panels().len();
+    let mut tabs: Vec<AnyElement> = Vec::new();
+    for (ix, panel) in group.panels().iter().enumerate() {
+        if panel.visible(cx) {
+            let selected = active == Some(panel.panel_id(cx));
+            tabs.push(tab(group, ix, panel, selected, droppable, window, cx));
+        }
+    }
+    let node = group.node();
+    div()
+        .id(("editor-tabs", node.as_u64()))
+        .flex_none()
+        .h(px(TAB_H))
+        .w_full()
+        .flex()
+        .items_end()
+        .px(px(4.))
+        .bg(p.panel)
+        .border_b_1()
+        .border_color(p.border)
+        .child(div().id("editor-tab-strip").flex().items_end().h_full().min_w_0().overflow_x_scroll().children(tabs))
+        .child(div().id("tab-bar-empty-space").flex_1().h_full().when(droppable, |d| {
+            let group = group.clone();
+            d.drag_over::<DragPanel>(move |s, _, _, _| s.bg(p.wash(p.accent))).on_drop(
+                move |drag: &DragPanel, window, cx| {
+                    let ix = (drag.source() == node).then(|| count.saturating_sub(1));
+                    group.drop_panel(drag.clone(), ix, false, window, cx);
+                },
+            )
+        }))
+        .into_any_element()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tab(
+    group: &TabGroupContext,
+    ix: usize,
+    panel: &Arc<dyn BasePanelView>,
+    selected: bool,
+    droppable: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let p = palette(cx);
+    let editor = editor_of(panel);
+    let (name, dirty, preview, path) = match &editor {
+        Some(e) => {
+            let e = e.read(cx);
+            (e.name(), e.dirty, e.preview, Some(e.path.clone()))
+        }
+        None => (
+            PanelHandle::of(panel).and_then(|h| h.tab_name(cx)).unwrap_or_else(|| panel.panel_name(cx).into()),
+            false,
+            false,
+            None,
+        ),
+    };
+    let closable = group.is_panel_closable(panel.panel_id(cx), cx);
+    let hover_bg = p.button_hover;
+    let group_name = SharedString::from(format!("tab-{ix}"));
+    let drag = group.is_draggable().then(|| group.drag_panel(ix, cx)).flatten();
+    let _ = window;
+    let close_button = div()
+        .id(("close-tab", ix))
+        .debug_selector(move || format!("close-tab-{ix}"))
+        .flex_none()
+        .size(px(16.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover_bg))
+        .child(glyph(Glyph::Close, 11., p.fg_dim))
+        .on_click({
+            let (group, panel) = (group.clone(), panel.clone());
+            move |_, window, cx| {
+                cx.stop_propagation();
+                close(&group, &panel, window, cx);
+            }
+        });
+    // The slot after the name: the dot while unsaved, the close button under the pointer
+    // (and always on the tab in front).
+    let trailing = div()
+        .flex_none()
+        .size(px(16.))
+        .relative()
+        .when(dirty, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .group_hover(group_name.clone(), |s| s.opacity(0.))
+                    .child(div().size(px(7.)).rounded_full().bg(p.fg)),
+            )
+        })
+        .when(closable, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .when(dirty || !selected, |d| d.opacity(0.).group_hover(group_name.clone(), |s| s.opacity(1.)))
+                    .child(close_button),
+            )
+        });
+    let ink = if selected { p.fg } else { p.fg_dim };
+    div()
+        .id(("editor-tab", ix))
+        .debug_selector(move || format!("editor-tab-{ix}"))
+        .group(group_name.clone())
+        .relative()
+        .flex_none()
+        .h(px(TAB_H - 5.))
+        .mx(px(1.))
+        .pl(px(10.))
+        .pr(px(5.))
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .rounded_t(px(7.))
+        .text_color(ink)
+        .text_size(px(12.5))
+        .cursor_pointer()
+        .when(selected, |d| d.bg(p.stripe))
+        .when(!selected, |d| d.hover(move |s| s.bg(hover_bg)))
+        .when_some(path.as_ref(), |d, path| d.child(crate::icons::file_icon(path, 14., &p)))
+        .child(div().whitespace_nowrap().when(preview, |d| d.italic()).child(name.clone()))
+        .child(trailing)
+        // The tab in front is underlined in the accent colour.
+        .when(selected, |d| {
+            d.child(div().absolute().left(px(6.)).right(px(6.)).bottom_0().h(px(2.)).rounded(px(1.)).bg(p.accent))
+        })
+        .on_click({
+            let (group, editor) = (group.clone(), editor.clone());
+            move |e: &ClickEvent, window, cx| {
+                group.select_tab(ix, window, cx);
+                if e.click_count() >= 2
+                    && let Some(editor) = &editor
+                {
+                    editor.update(cx, |e, cx| e.pin(cx));
+                }
+            }
+        })
+        .on_aux_click({
+            let (group, panel) = (group.clone(), panel.clone());
+            move |e: &ClickEvent, window, cx| {
+                if e.is_middle_click() {
+                    close(&group, &panel, window, cx);
+                }
+            }
+        })
+        .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+        .when_some(drag, |d, drag| {
+            d.on_drag(drag, move |drag, offset, _, cx| {
+                cx.stop_propagation();
+                drag.set_drag_offset(offset);
+                drag.set_preview_size(gpui::size(px(96.), px(28.)));
+                cx.new(|_| TabDrag(name.clone()))
+            })
+        })
+        .when(droppable, |d| {
+            let accent = p.accent;
+            let group = group.clone();
+            d.drag_over::<DragPanel>(move |s, _, _, _| s.border_l_2().border_color(accent))
+                .on_drop(move |drag: &DragPanel, window, cx| group.drop_panel(drag.clone(), Some(ix), true, window, cx))
+        })
+        .into_any_element()
+}
+
+/// The id a panel has in the dock.
+pub fn panel_id<T: 'static>(entity: &Entity<T>) -> PanelId {
+    PanelId::from(entity.entity_id())
+}

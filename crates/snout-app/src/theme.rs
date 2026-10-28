@@ -257,5 +257,113 @@ pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
         t.font_size = gpui::px(14.);
         t.radius = gpui::px(6.);
         t.radius_lg = gpui::px(12.);
+        t.highlight_theme = std::sync::Arc::new(syntax(&p));
     });
+}
+
+/// The editor's colours: the syntax in the palette's own tones (gold keywords, the
+/// drawings' green for strings, clay for numbers), and its gutter and current line.
+pub fn syntax(p: &Palette) -> gpui_component::highlighter::HighlightTheme {
+    let hex = |c: Hsla| {
+        let c: Rgba = c.into();
+        let b = |x: f32| (x.clamp(0., 1.) * 255.).round() as u8;
+        format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
+    };
+    let s = syntax_colors(p);
+    let style = |c: Hsla| serde_json::json!({ "color": hex(c) });
+    let italic = |c: Hsla| serde_json::json!({ "color": hex(c), "font_style": "italic" });
+    let syntax = serde_json::json!({
+        "keyword": style(s.keyword),
+        "type": style(s.ty),
+        "constructor": style(s.ty),
+        "enum": style(s.ty),
+        "function": style(s.function),
+        "string": style(s.string),
+        "string.escape": style(s.number),
+        "string.special": style(s.string),
+        "string.regex": style(s.string),
+        "text.literal": style(s.string),
+        "number": style(s.number),
+        "boolean": style(s.number),
+        "constant": style(s.number),
+        "comment": italic(s.comment),
+        "comment_doc": italic(s.comment),
+        "attribute": style(s.attribute),
+        "tag": style(s.keyword),
+        "label": style(s.attribute),
+        "property": style(s.property),
+        "variable": style(p.fg),
+        "variable.special": style(s.keyword),
+        "operator": style(s.punctuation),
+        "punctuation": style(s.punctuation),
+        "punctuation.bracket": style(s.punctuation),
+        "punctuation.delimiter": style(s.punctuation),
+        "title": { "color": hex(s.keyword), "font_weight": 600 },
+        "emphasis": { "font_style": "italic" },
+        "emphasis.strong": { "font_weight": 700 },
+        "link_text": style(s.ty),
+        "link_uri": italic(s.ty),
+        "embedded": style(p.fg),
+    });
+    let mut style_json = serde_json::json!({
+        "editor.background": hex(p.panel),
+        "editor.foreground": hex(p.fg),
+        "editor.line_number": hex(s.gutter),
+        "editor.active_line_number": hex(p.fg),
+        "editor.invisible": hex(mix(p.fg, 0.25, p.panel)),
+        "editor.gutter.background": hex(p.panel),
+        "error": hex(p.error),
+        "warning": hex(p.warn),
+    });
+    style_json["syntax"] = syntax;
+    let json = serde_json::json!({
+        "name": if p.dark { "SnoutCode Gold" } else { "SnoutCode Light" },
+        "appearance": if p.dark { "dark" } else { "light" },
+        "style": style_json,
+    });
+    serde_json::from_value(json).expect("the syntax theme is well formed")
+}
+
+/// The tones of the code, picked to sit with the palette.
+pub struct SyntaxColors {
+    pub keyword: Hsla,
+    pub ty: Hsla,
+    pub function: Hsla,
+    pub string: Hsla,
+    pub number: Hsla,
+    pub comment: Hsla,
+    pub attribute: Hsla,
+    pub property: Hsla,
+    pub punctuation: Hsla,
+    pub gutter: Hsla,
+}
+
+pub fn syntax_colors(p: &Palette) -> SyntaxColors {
+    if p.dark {
+        SyntaxColors {
+            keyword: p.accent,
+            ty: hex(0x8fb3e0),
+            function: hex(0xf0d9a6),
+            string: hex(0x9fcf8f),
+            number: hex(0xe39a78),
+            comment: hex(0x7c756b),
+            attribute: hex(0xc2a6e0),
+            property: hex(0xd9cfc1),
+            punctuation: mix(p.fg, 0.7, p.panel),
+            gutter: mix(p.fg, 0.32, p.panel),
+        }
+    } else {
+        SyntaxColors {
+            keyword: hex(0x8a5a00),
+            ty: hex(0x2f62a0),
+            function: hex(0x6b4a12),
+            string: hex(0x2c7a3e),
+            number: hex(0xb3501d),
+            comment: hex(0x8d8a80),
+            attribute: hex(0x7a4fae),
+            property: hex(0x4a473d),
+            punctuation: mix(p.fg, 0.7, p.panel),
+            gutter: mix(p.fg, 0.38, p.panel),
+        }
+    }
 }
