@@ -64,6 +64,9 @@ final class ProjectModel {
                 f.addProperty("gradleVersion", string(gradleBuild, "gradleVersion"));
                 f.addProperty("javaHome", string(gradleBuild, "gradleJavaHome"));
                 f.addProperty("reason", string(gradleBuild, "reason"));
+                if (gradleBuild.has("needsJdk")) {
+                    f.add("needsJdk", gradleBuild.get("needsJdk"));
+                }
                 f.addProperty("error", string(gradleBuild, "error"));
                 // A stale build failed now, but its modules come from the last sync that worked.
                 f.addProperty("stale", "stale".equals(status));

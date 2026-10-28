@@ -59,8 +59,9 @@ public final class JavaHomes {
 
     /**
      * The JDKs found in the usual places: the extra homes given, this JVM, {@code JAVA_HOME}, the
-     * system and user JDK folders of macOS and Linux, SDKMAN, IntelliJ's {@code ~/.jdks}, Gradle's
-     * provisioned toolchains, and SnoutCode's own JDK folders under the cache directory.
+     * system and user JDK folders of macOS and Linux, SDKMAN, {@code ~/.jdks}, Gradle's
+     * provisioned toolchains, and SnoutCode's own: the JDKs the app downloads, the engine's build
+     * JDK, and the JDK folders under the cache directory.
      */
     public static List<Jdk> discover(Collection<File> extra, Path cacheDir) {
         List<File> candidates = new ArrayList<>(extra);
@@ -75,22 +76,11 @@ public final class JavaHomes {
             Path.of("/usr/lib/jvm"), Path.of("/usr/java"), Path.of("/opt/java"),
             home.resolve(".sdkman/candidates/java"), home.resolve(".jdks"), home.resolve(".gradle/jdks"),
             home.resolve(".asdf/installs/java")));
-        if (cacheDir != null) {
-            parents.add(cacheDir.resolve("jdks"));
-            parents.add(cacheDir.resolve("build-jdk"));
-        }
+        List<Path> snout = snoutJdkFolders(home, cacheDir);
+        parents.addAll(snout);
         for (Path parent : parents) {
-            if (!Files.isDirectory(parent)) {
-                continue;
-            }
-            try (Stream<Path> list = Files.list(parent)) {
-                for (Path p : list.sorted().toList()) {
-                    candidates.add(p.toFile());
-                    candidates.add(p.resolve("Contents/Home").toFile());
-                }
-            } catch (IOException e) {
-                // an unreadable folder holds no JDK we can use
-            }
+            // SnoutCode's folders may hold a JDK one level deeper (an archive's own top folder).
+            addJdks(parent, candidates, snout.contains(parent) ? 2 : 1);
         }
         Map<File, Jdk> found = new LinkedHashMap<>();
         for (File candidate : candidates) {
@@ -100,6 +90,58 @@ public final class JavaHomes {
             }
         }
         return new ArrayList<>(found.values());
+    }
+
+    /**
+     * SnoutCode's JDK folders: where the app downloads JDKs ({@code ~/Library/Application
+     * Support/SnoutCode/jdks} on macOS), the engine's build JDK and JDKs in the default cache
+     * directory ({@code ~/Library/Caches/SnoutCode/build-jdk}, {@code .../jdks}), and the same in
+     * another cache directory when one is given.
+     */
+    static List<Path> snoutJdkFolders(Path home, Path cacheDir) {
+        List<Path> out = new ArrayList<>();
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (os.contains("mac")) {
+            out.add(home.resolve("Library/Application Support/SnoutCode/jdks"));
+        } else if (os.contains("win")) {
+            String appData = System.getenv("APPDATA");
+            out.add((appData != null ? Path.of(appData) : home.resolve("AppData/Roaming")).resolve("SnoutCode/jdks"));
+        } else {
+            String data = System.getenv("XDG_DATA_HOME");
+            out.add((data != null && !data.isEmpty() ? Path.of(data) : home.resolve(".local/share")).resolve("SnoutCode/jdks"));
+        }
+        Path defaultCache = Lsp.defaultCacheDir();
+        for (Path cache : cacheDir == null || cacheDir.equals(defaultCache) ? List.of(defaultCache) : List.of(defaultCache, cacheDir)) {
+            out.add(cache.resolve("build-jdk"));
+            out.add(cache.resolve("jdks"));
+        }
+        return out;
+    }
+
+    private static void addJdks(Path parent, List<File> candidates, int depth) {
+        if (depth <= 0 || !Files.isDirectory(parent)) {
+            return;
+        }
+        try (Stream<Path> list = Files.list(parent)) {
+            for (Path p : list.sorted().toList()) {
+                if (!Files.isDirectory(p)) {
+                    continue;
+                }
+                candidates.add(p.toFile());
+                candidates.add(p.resolve("Contents/Home").toFile());
+                if (read(p.toFile()) == null && read(p.resolve("Contents/Home").toFile()) == null) {
+                    addJdks(p, candidates, depth - 1);
+                }
+            }
+        } catch (IOException e) {
+            // an unreadable folder holds no JDK we can use
+        }
+    }
+
+    /** The oldest Java a Gradle version's daemon runs on: 8, and 17 from Gradle 9. */
+    static int minJava(String gradleVersion) {
+        int[] v = gradleVersion(gradleVersion);
+        return v != null && v[0] >= 9 ? 17 : 8;
     }
 
     /** The newest Java a Gradle version's daemon runs on, from Gradle's compatibility matrix. */
@@ -144,8 +186,9 @@ public final class JavaHomes {
      */
     public static Jdk choose(String gradleVersion, Integer scriptLevel, Jdk preferred, List<Jdk> installed) {
         int max = maxJava(gradleVersion);
+        int min = minJava(gradleVersion);
         int wanted = wantedJava(gradleVersion, scriptLevel);
-        int floor = scriptLevel == null ? 0 : scriptLevel;
+        int floor = Math.max(min, scriptLevel == null ? 0 : scriptLevel);
         int[] v = gradleVersion(gradleVersion);
         boolean old = v != null && compare(v, 6, 7) < 0;
         if (preferred != null && preferred.feature() <= max && preferred.feature() >= floor
@@ -154,7 +197,7 @@ public final class JavaHomes {
         }
         List<Jdk> fits = new ArrayList<>();
         for (Jdk jdk : installed) {
-            if (jdk.feature() <= max) {
+            if (jdk.feature() <= max && jdk.feature() >= min) {
                 fits.add(jdk);
             }
         }
@@ -162,6 +205,18 @@ public final class JavaHomes {
         fits.sort(Comparator.<Jdk>comparingInt(j -> j.feature() >= wanted ? 2 * (j.feature() - wanted) : 2 * (wanted - j.feature()) + 1)
             .thenComparing(Jdk::version, Comparator.reverseOrder()));
         return fits.isEmpty() ? null : fits.get(0);
+    }
+
+    /**
+     * The Java major a build needs and the machine lacks: the one it wants when no installed JDK
+     * runs its Gradle version; null when one does (or the version is unknown, so the Tooling API
+     * picks).
+     */
+    public static Integer needs(String gradleVersion, Integer scriptLevel, Jdk chosen) {
+        if (chosen != null || gradleVersion(gradleVersion) == null) {
+            return null;
+        }
+        return wantedJava(gradleVersion, scriptLevel);
     }
 
     /** The Gradle version of a build's wrapper, or null when it has none. */

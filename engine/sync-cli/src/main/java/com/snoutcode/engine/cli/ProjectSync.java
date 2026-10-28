@@ -49,7 +49,8 @@ public final class ProjectSync {
     }
 
     /** One build to sync, with the choices made for it. */
-    public record Plan(String id, File rootDir, String gradleVersion, JavaHomes.Jdk jdk, Sync.Options options) {
+    /** One build to sync; {@code needsJdk} is the Java major it needs when no installed JDK runs its Gradle. */
+    public record Plan(String id, File rootDir, String gradleVersion, JavaHomes.Jdk jdk, Sync.Options options, Integer needsJdk) {
     }
 
     private ProjectSync() {
@@ -91,14 +92,15 @@ public final class ProjectSync {
         for (File root : Discovery.builds(folder)) {
             String id = buildId(folder, root);
             String version = options.sync.gradleVersion != null ? options.sync.gradleVersion : JavaHomes.wrapperVersion(root);
-            JavaHomes.Jdk jdk = JavaHomes.choose(version, JavaHomes.scriptLevel(root), preferred, installed);
+            Integer level = JavaHomes.scriptLevel(root);
+            JavaHomes.Jdk jdk = JavaHomes.choose(version, level, preferred, installed);
             Sync.Options o = copy(options.sync);
             o.projectDir = root;
             o.javaHome = jdk != null ? jdk.home() : options.sync.javaHome;
             if (options.sync.projectCacheDir != null) {
                 o.projectCacheDir = new File(options.sync.projectCacheDir, key(root));
             }
-            plans.add(new Plan(id, root, version, jdk, o));
+            plans.add(new Plan(id, root, version, jdk, o, JavaHomes.needs(version, level, jdk)));
         }
         return plans;
     }
@@ -108,6 +110,11 @@ public final class ProjectSync {
         long start = System.nanoTime();
         JsonObject entry;
         try {
+            if (plan.needsJdk() != null) {
+                // No installed JDK runs this Gradle version: say which one to install, rather than
+                // fail on a JDK that cannot work.
+                throw new MissingJdk(plan.needsJdk(), plan.gradleVersion());
+            }
             entry = Sync.run(plan.options());
             entry.remove("modelVersion");
             entry.addProperty("status", "synced");
@@ -120,7 +127,15 @@ public final class ProjectSync {
             String error = SnoutEngine.describe(e);
             entry.addProperty("status", "failed");
             entry.addProperty("error", error);
-            entry.addProperty("reason", reason(error, plan.gradleVersion(), plan.jdk()));
+            if (e instanceof MissingJdk missing) {
+                entry.addProperty("error", missing.getMessage() + ": Gradle " + missing.gradleVersion + " runs on Java "
+                    + JavaHomes.minJava(missing.gradleVersion) + " to " + JavaHomes.maxJava(missing.gradleVersion)
+                    + ", and no JDK in that range is installed.");
+                entry.addProperty("reason", missing.getMessage());
+                entry.addProperty("needsJdk", missing.major);
+            } else {
+                entry.addProperty("reason", reason(error, plan.gradleVersion(), plan.jdk()));
+            }
         }
         JsonObject out = new JsonObject();
         out.addProperty("id", plan.id());
@@ -134,6 +149,19 @@ public final class ProjectSync {
                 + ", Java " + (plan.jdk() == null ? "?" : plan.jdk().feature()) + ") in " + out.get("syncMillis").getAsLong() + " ms");
         }
         return out;
+    }
+
+    /** A build whose Gradle no installed JDK runs. */
+    static final class MissingJdk extends Exception {
+        private static final long serialVersionUID = 1L;
+        final int major;
+        final String gradleVersion;
+
+        MissingJdk(int major, String gradleVersion) {
+            super("Needs JDK " + major + ", which isn't installed");
+            this.major = major;
+            this.gradleVersion = gradleVersion;
+        }
     }
 
     /**

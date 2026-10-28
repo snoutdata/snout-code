@@ -38,11 +38,12 @@ The folder is the project. It may be one Gradle build or hold many:
 - A folder that is a build, or lies inside one, is that build: the nearest folder at or above it with a `settings.gradle(.kts)`, else the nearest with a `build.gradle(.kts)`. The search upward stops below the user's home.
 - Any other folder holds every build under it: each folder with a settings script, or with a build script and no settings script above it. A build owns everything below it (subprojects, included builds, `buildSrc`), so the search does not descend into one. It skips `build`, `.gradle`, `node_modules`, `out`, `target` and hidden folders, and stops 8 levels down.
 
-Each build syncs on its own Gradle daemon, several at once, and on a JDK its Gradle version runs on, chosen from the JDKs found on the machine (`JAVA_HOME`, this JVM, the macOS and Linux JDK folders, SDKMAN, `~/.jdks`, Gradle's provisioned toolchains, SnoutCode's cache) and those given with `--jdk`:
+Each build syncs on its own Gradle daemon, several at once, and on a JDK its Gradle version runs on, chosen from the JDKs found on the machine (`JAVA_HOME`, this JVM, the macOS and Linux JDK folders, SDKMAN, `~/.jdks`, Gradle's provisioned toolchains, the JDKs the app downloads to `~/Library/Application Support/SnoutCode/jdks`, the engine's build JDK in `~/Library/Caches/SnoutCode/build-jdk`, and the `jdks` and `build-jdk` folders of `--cache-dir`) and those given with `--jdk`:
 
 - Gradle older than 6.7 gets Java 11.
 - Newer Gradle gets the Java its build script names (a toolchain, `jvmToolchain`, a source or target compatibility, a `--release`) when that is newer than 17, else 17.
-- Never newer than the Java the Gradle version supports; when the wanted Java is missing, the nearest installed one it supports.
+- Never newer than the Java the Gradle version supports, nor older (Java 8, and 17 from Gradle 9); when the wanted Java is missing, the nearest installed one it supports.
+- When no installed JDK runs the build's Gradle version, the build is not synced on one that cannot work: its `failedBuilds` entry says `needsJdk` (the Java major to install, the one it would have wanted) with the reason "Needs JDK 11, which isn't installed". The engine's methods refuse such a build the same way.
 - `--java-home` is preferred whenever the build's Gradle runs on it and the script asks for nothing newer.
 
 A build that fails does not fail the others: its entry in the model carries the error, the Gradle version and a short reason.
@@ -288,10 +289,11 @@ Format version 2. The top holds the project view, which the app shows as the Pro
   "gradleScripts": [ { "build": "<build id>",
                        "files": [ { "path", "kind": "settings" | "build" | "applied" | "properties"
                                                   | "versionCatalog" | "wrapper" } ] } ],
-  "failedBuilds": [ { "build", "rootDir", "gradleVersion", "javaHome", "reason", "error", "stale" } ],
+  "failedBuilds": [ { "build", "rootDir", "gradleVersion", "javaHome", "reason", "error", "stale",
+                      "needsJdk": the Java major to install, when no installed JDK runs the build's Gradle } ],
   "gradleBuilds": [ {
     "id": "<build id>", "status": "synced" | "failed" | "stale", "rootDir", "gradleVersion",
-    "gradleJavaHome", "javaVersion", "syncMillis", "error", "reason" (failed and stale only),
+    "gradleJavaHome", "javaVersion", "syncMillis", "error", "reason", "needsJdk" (failed and stale only),
     "builds": [ { "name", "kind": "root" | "included" | "buildSrc", "rootDir", "errors": [],
       "projects": [ {
         "path", "name", "projectDir", "buildFile", "buildDir", "group", "version",

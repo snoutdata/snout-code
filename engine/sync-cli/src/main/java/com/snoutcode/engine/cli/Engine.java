@@ -224,6 +224,13 @@ final class Engine implements GradleRuns.Client {
         out.addProperty("build", plan.id());
         out.addProperty("rootDir", plan.rootDir().getAbsolutePath());
         JsonArray projects = new JsonArray();
+        if (plan.needsJdk() != null) {
+            out.addProperty("error", "Needs JDK " + plan.needsJdk() + ", which isn't installed");
+            out.addProperty("needsJdk", plan.needsJdk());
+            out.add("projects", projects);
+            out.addProperty("millis", 0);
+            return out;
+        }
         try (ProjectConnection connection = Sync.connector(plan.rootDir(), plan.options()).connect()) {
             List<Path> scripts = new ArrayList<>();
             if (plan.options().buildRoot != null) {
@@ -716,15 +723,20 @@ final class Engine implements GradleRuns.Client {
     // ---- lookups
 
     ProjectSync.Plan plan(String buildId) throws RequestError {
+        ProjectSync.Plan plan;
         if (buildId == null) {
-            if (plans.size() == 1) {
-                return plans.values().iterator().next();
+            if (plans.size() != 1) {
+                throw RequestError.invalid("name the build: one of " + plans.keySet());
             }
-            throw RequestError.invalid("name the build: one of " + plans.keySet());
+            plan = plans.values().iterator().next();
+        } else {
+            plan = plans.get(buildId);
+            if (plan == null) {
+                throw RequestError.invalid("no build " + buildId + "; the builds are " + plans.keySet());
+            }
         }
-        ProjectSync.Plan plan = plans.get(buildId);
-        if (plan == null) {
-            throw RequestError.invalid("no build " + buildId + "; the builds are " + plans.keySet());
+        if (plan.needsJdk() != null) {
+            throw new RequestError(-32603, plan.id() + ": Needs JDK " + plan.needsJdk() + ", which isn't installed");
         }
         return plan;
     }

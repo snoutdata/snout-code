@@ -285,6 +285,9 @@ final class Lsp {
             stale.addProperty("status", "stale");
             stale.add("error", entry.get("error"));
             stale.add("reason", entry.get("reason"));
+            if (entry.has("needsJdk")) {
+                stale.add("needsJdk", entry.get("needsJdk"));
+            }
             builds.set(i, stale);
             replaced++;
         }

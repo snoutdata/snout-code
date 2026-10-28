@@ -80,6 +80,39 @@ class ProjectSyncTest {
         assertEquals(j21, JavaHomes.choose("8.10.2", 21, j17, all), "a toolchain of 21 beats the preferred 17");
         assertEquals(j11, JavaHomes.choose("8.10.2", null, null, List.of(j11)), "the closest one installed");
         assertNull(JavaHomes.choose("5.2.1", null, null, List.of(j17, j21)));
+        JavaHomes.Jdk j8 = new JavaHomes.Jdk(new File("/jdk8"), 8, "1.8.0_402");
+        assertNull(JavaHomes.choose("9.1.0", null, j8, List.of(j8)), "Gradle 9 does not run on 8");
+    }
+
+    @Test
+    void saysWhichJdkABuildNeeds() {
+        JavaHomes.Jdk j17 = new JavaHomes.Jdk(new File("/jdk17"), 17, "17.0.9");
+        JavaHomes.Jdk j21 = new JavaHomes.Jdk(new File("/jdk21"), 21, "21.0.2");
+        List<JavaHomes.Jdk> installed = List.of(j17, j21);
+        assertEquals(11, JavaHomes.needs("5.2.1", null, JavaHomes.choose("5.2.1", null, null, installed)));
+        assertEquals(11, JavaHomes.needs("6.0.1", 8, JavaHomes.choose("6.0.1", 8, null, installed)));
+        assertNull(JavaHomes.needs("8.1.1", null, JavaHomes.choose("8.1.1", null, null, installed)));
+        assertNull(JavaHomes.needs(null, null, null), "no wrapper: the Tooling API picks");
+    }
+
+    @Test
+    void syncsNothingWithoutAJdkThatRunsTheBuild() {
+        ProjectSync.Plan plan = new ProjectSync.Plan("old", dir.toFile(), "5.2.1", null, new Sync.Options(), 11);
+        com.google.gson.JsonObject entry = ProjectSync.syncOne(plan, null);
+        assertEquals("failed", entry.get("status").getAsString());
+        assertEquals(11, entry.get("needsJdk").getAsInt());
+        assertEquals("Needs JDK 11, which isn't installed", entry.get("reason").getAsString());
+    }
+
+    @Test
+    void searchesSnoutCodesJdkFolders() {
+        Path home = Path.of("/home/me");
+        List<Path> folders = JavaHomes.snoutJdkFolders(home, Path.of("/elsewhere"));
+        assertTrue(folders.contains(Lsp.defaultCacheDir().resolve("build-jdk")), folders.toString());
+        assertTrue(folders.contains(Path.of("/elsewhere/jdks")), folders.toString());
+        if (System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("mac")) {
+            assertTrue(folders.contains(home.resolve("Library/Application Support/SnoutCode/jdks")), folders.toString());
+        }
     }
 
     @Test
