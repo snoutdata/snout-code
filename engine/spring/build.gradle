@@ -1,0 +1,52 @@
+// Spring support for SnoutCode: an OSGi bundle for jdtls that reads the Spring model of the
+// workspace from JDT's ASTs and bindings (beans, injection points, endpoints, configuration
+// properties) and answers snout-engine's `snout.spring.*` commands. snout-engine routes the
+// `snout/spring*` methods and the application properties documents to it.
+//
+// The parts that need no Eclipse API (the resolver, properties and YAML documents, the
+// configuration metadata, XML bean files) are plain Java, tested on their own.
+
+plugins {
+    id 'java'
+}
+
+evaluationDependsOn(':jdtls-importer')
+def importer = project(':jdtls-importer')
+
+dependencies {
+    compileOnly importer.jdtlsPlugins
+    compileOnly project(':jdtls-importer')
+    testImplementation importer.jdtlsPlugins
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    // Gson's jar refers to annotations it does not ship.
+    options.compilerArgs += ['-Xlint:-classfile']
+}
+
+jar {
+    archiveFileName = "com.snoutcode.engine.spring_${project.version}.jar"
+    manifest {
+        attributes(
+            'Bundle-ManifestVersion': '2',
+            'Bundle-Name': 'SnoutCode Spring support for JDT LS',
+            'Bundle-SymbolicName': 'com.snoutcode.engine.spring;singleton:=true',
+            'Bundle-Version': project.version,
+            'Bundle-Vendor': 'SNOUTDATA INC',
+            'Bundle-RequiredExecutionEnvironment': 'JavaSE-21',
+            'Bundle-ActivationPolicy': 'lazy',
+            'Require-Bundle': [
+                'org.eclipse.core.runtime',
+                'org.eclipse.core.resources',
+                'org.eclipse.jdt.core',
+                'org.eclipse.jdt.ls.core',
+                'org.eclipse.lsp4j',
+                'com.google.gson',
+                'com.snoutcode.engine.jdtls',
+            ].join(','),
+            'Import-Package': 'javax.xml.parsers,org.w3c.dom,org.xml.sax',
+            'Automatic-Module-Name': 'com.snoutcode.engine.spring',
+        )
+    }
+}

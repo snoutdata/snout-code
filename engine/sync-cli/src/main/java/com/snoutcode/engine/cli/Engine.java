@@ -73,6 +73,7 @@ final class Engine implements GradleRuns.Client {
     private final PrintStream log;
     private final Path runDir;
     private volatile Jdtls jdtls;
+    private volatile SpringSupport spring;
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "snout-engine");
         t.setDaemon(true);
@@ -103,6 +104,10 @@ final class Engine implements GradleRuns.Client {
 
     void attach(Jdtls jdtls) {
         this.jdtls = jdtls;
+    }
+
+    void attach(SpringSupport spring) {
+        this.spring = spring;
     }
 
     // ---- messages
@@ -147,8 +152,27 @@ final class Engine implements GradleRuns.Client {
             case "snout/runConfigurations" -> runConfigurations(params);
             case "snout/run" -> run(params);
             case "snout/scalaChanged" -> scalaChanged(params, notification);
+            case "snout/springBeans" -> spring("snout.spring.beans", params);
+            case "snout/springEndpoints" -> spring("snout.spring.endpoints", params);
+            case "snout/springInjections" -> {
+                JsonObject p = params.deepCopy();
+                String file = string(params, "uri") != null ? string(params, "uri") : string(params, "path");
+                if (file == null) {
+                    throw RequestError.invalid("springInjections needs a uri");
+                }
+                p.addProperty("uri", file.startsWith("file:") ? file : toPath(file).toUri().toString());
+                yield spring("snout.spring.injections", p);
+            }
             default -> throw new RequestError(-32601, "unknown method " + method);
         };
+    }
+
+    private JsonElement spring(String command, JsonObject params) throws Exception {
+        SpringSupport s = spring;
+        if (s == null) {
+            throw new RequestError(-32603, "Spring support is off");
+        }
+        return s.request(command, params);
     }
 
     @Override
@@ -601,6 +625,10 @@ final class Engine implements GradleRuns.Client {
                 long refresh = System.nanoTime();
                 try {
                     executeCommand("snout.refreshClassFolders", args, 120);
+                    SpringSupport s = spring;
+                    if (s != null) {
+                        s.scalaCompiled();
+                    }
                     log.println("snout-engine: refreshed " + folders.size() + " Scala class folder(s) in jdtls in "
                         + (System.nanoTime() - refresh) / 1_000_000 + " ms");
                 } catch (Exception e) {

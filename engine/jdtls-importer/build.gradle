@@ -99,6 +99,8 @@ jar {
                 'com.google.gson',
             ].join(','),
             'Automatic-Module-Name': 'com.snoutcode.engine.jdtls',
+            // The Spring bundle reads the import plan to map JDT projects to modules.
+            'Export-Package': 'com.snoutcode.engine.jdtls',
         )
     }
 }
@@ -110,6 +112,9 @@ def downloadJavaDebug = tasks.register('downloadJavaDebug', DownloadVerified) {
     sha256 = javaDebugSha256
     destination = layout.buildDirectory.file("downloads/${name}")
 }
+
+/** jdtls's plugins, for bundles that compile against them (spring). */
+ext.jdtlsPlugins = jdtlsPlugins
 
 /** The unpacked jdtls, for the distribution in sync-cli. */
 ext.jdtlsHome = unpackJdtls

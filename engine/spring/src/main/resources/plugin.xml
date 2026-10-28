@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <!-- Commands snout-engine sends through workspace/executeCommand for its snout/spring* methods. -->
+   <extension point="org.eclipse.jdt.ls.core.delegateCommandHandler">
+      <delegateCommandHandler class="com.snoutcode.engine.spring.SpringCommands">
+         <command id="snout.spring.scan"/>
+         <command id="snout.spring.update"/>
+         <command id="snout.spring.beans"/>
+         <command id="snout.spring.endpoints"/>
+         <command id="snout.spring.injections"/>
+         <command id="snout.spring.properties"/>
+         <command id="snout.spring.inlayHints"/>
+      </delegateCommandHandler>
+   </extension>
+</plugin>

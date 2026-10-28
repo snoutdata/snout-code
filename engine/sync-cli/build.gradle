@@ -4,15 +4,17 @@
 //   bin/snout-engine
 //   lib/                  snout-engine and its dependencies
 //   jdtls/                the pinned jdtls release, as downloaded
-//   jdtls-plugins/        com.snoutcode.engine.jdtls_<version>.jar and java-debug's
-//                         com.microsoft.java.debug.plugin-<version>.jar
+//   jdtls-plugins/        com.snoutcode.engine.jdtls_<version>.jar, com.snoutcode.engine.spring_<version>.jar
+//                         and java-debug's com.microsoft.java.debug.plugin-<version>.jar
 
 plugins {
     id 'application'
 }
 
 evaluationDependsOn(':jdtls-importer')
+evaluationDependsOn(':spring')
 def importer = project(':jdtls-importer')
+def spring = project(':spring')
 
 dependencies {
     implementation project(':sync-plugin')
@@ -40,6 +42,9 @@ distributions {
                 into 'jdtls-plugins'
             }
             from(importer.javaDebugBundle) {
+                into 'jdtls-plugins'
+            }
+            from(spring.tasks.named('jar')) {
                 into 'jdtls-plugins'
             }
         }

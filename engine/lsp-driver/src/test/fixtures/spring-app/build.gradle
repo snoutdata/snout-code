@@ -1,0 +1,17 @@
+// A small Spring Boot application for the Spring support's end-to-end test. It takes Spring Boot's
+// jars as plain dependencies, without the Spring Boot plugin, so nothing beyond Maven Central is needed.
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web:3.1.1'
+}

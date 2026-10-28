@@ -47,7 +47,12 @@ public final class ImportPlan {
         public String name;
         public String buildName;
         public String gradlePath;
+        /** The module id in the model ({@code shop}, {@code shop:app}, {@code shop/tools:lib}); null for a shared project. */
+        public String moduleId;
         public File projectDir;
+        /** Resource folders of the main source sets, and of the test source sets. */
+        public final List<File> resourceDirs = new ArrayList<>();
+        public final List<File> testResourceDirs = new ArrayList<>();
         public final List<SourceRoot> sources = new ArrayList<>();
         /** Libraries and project references, in Gradle's classpath order. */
         public final List<Dependency> dependencies = new ArrayList<>();
@@ -147,6 +152,11 @@ public final class ImportPlan {
                     out.gradlePath = string(project, "path");
                     out.projectDir = projectDir;
                     out.name = uniqueName(names, string(project, "name"), buildName, out.gradlePath);
+                    String buildId = string(gradleBuild, "id");
+                    if (buildId != null) {
+                        String prefix = "root".equals(string(build, "kind")) ? buildId : buildId + "/" + buildName;
+                        out.moduleId = ":".equals(out.gradlePath) || out.gradlePath == null ? prefix : prefix + out.gradlePath;
+                    }
                     byModel.put(project, out);
                     gradleBuildOf.put(project, String.valueOf(g));
                     javaHomeOf.put(project, string(gradleBuild, "gradleJavaHome"));
@@ -173,6 +183,7 @@ public final class ImportPlan {
             List<JsonObject> sourceSets = sourceSetsMainFirst(project);
             Set<String> testSets = testSourceSets(project);
             addSources(out, sourceSets, testSets);
+            addResources(out, sourceSets, testSets);
             addDependencies(out, sourceSets, testSets, gradleBuildOf.get(project), byBuildAndPath, byOutputDir);
             readJavaSettings(out, project, sourceSets, javaHomeOf.get(project));
             plan.projects.add(out);
@@ -510,6 +521,25 @@ public final class ImportPlan {
                 Path innerPath = inner.dir.toPath().toAbsolutePath().normalize();
                 if (inner != outer && innerPath.startsWith(outerPath) && !innerPath.equals(outerPath)) {
                     outer.exclusions.add(outerPath.relativize(innerPath).toString().replace(File.separatorChar, '/') + "/");
+                }
+            }
+        }
+    }
+
+    private static void addResources(Project out, List<JsonObject> sourceSets, Set<String> testSets) {
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonObject sourceSet : sourceSets) {
+            List<String> dirs = new ArrayList<>(strings(object(object(sourceSet, "sources"), "resources"), "srcDirs"));
+            for (JsonElement r : array(sourceSet, "roots")) {
+                JsonObject root = r.getAsJsonObject();
+                if ("resource".equals(string(root, "kind"))) {
+                    dirs.add(string(root, "dir"));
+                }
+            }
+            boolean test = testSets.contains(string(sourceSet, "name"));
+            for (String dir : dirs) {
+                if (dir != null && seen.add(normalize(new File(dir)))) {
+                    (test ? out.testResourceDirs : out.resourceDirs).add(new File(dir));
                 }
             }
         }

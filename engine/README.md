@@ -5,12 +5,14 @@ The JVM side of SnoutCode. Three layers:
 - **Gradle sync**: one Tooling API call per Gradle build that returns the whole build model as JSON, so the editor knows the source roots, classpaths, compiler settings and run targets of a Java, Scala, Kotlin or Groovy project without running a build. A project is any folder: one Gradle build, or many side by side, synced together into one model.
 - **Java semantics**: `snout-engine lsp` runs Eclipse JDT LS (jdtls) as a language server, fed by that model instead of jdtls's own Gradle import (Buildship).
 - **Running and debugging**: the same LSP stream carries the engine's own `snout/` methods: Gradle tasks, tests, run configurations, launching and debugging (through java-debug in jdtls), and recompiling Scala as it changes.
+- **Spring**: a second jdtls bundle reads the Spring model from JDT's ASTs and bindings (beans, injection points, endpoints, configuration properties), warns about missing and ambiguous beans, and gives the `application*.properties` and `application*.yml` files completion, hover, definition and validation.
 
 ## Layout
 
 - `sync-plugin`: model builders that run inside the user's Gradle daemon. Compiled to Java 8 bytecode, and version-sensitive Gradle APIs are reached through reflection, so one jar serves Gradle 5 through 8. The `BuildAction` that walks the build lives here too, because the Tooling API ships it into the daemon.
 - `sync-cli`: the command line, `snout-engine`: the Tooling API client, the Scala bridge and the `lsp` launcher.
 - `jdtls-importer`: an OSGi bundle for jdtls that builds JDT projects from the model.
+- `spring`: an OSGi bundle for jdtls with the Spring support (see [Spring](#spring)). Its resolver, properties and YAML documents, configuration metadata and XML bean files are plain Java with their own tests.
 - `lsp-driver`: a headless LSP client. It runs the end-to-end test and can check a real project.
 
 ## Build
@@ -72,7 +74,7 @@ The command speaks LSP on stdin and stdout, so the app spawns it and talks to it
 
 1. syncs the folder's builds as `sync` does, with every build directory moved out of the project (an init script sets each project's `layout.buildDirectory`) and Gradle's project caches with them;
 2. runs the **Scala bridge**, for each build that has Scala, several builds at once: jdtls cannot read Scala source, so for each source set with Scala files it runs that source set's Scala compile task, and nothing else. The task compiles the Java of a joint source set too, so the bridge keeps a mirror with only the classes whose `SourceFile` is a `.scala` file, hard linked and grouped by the source root that holds the file, and records them in the model. `ScalaBridge.compile` is the one entry point, for recompiling later;
-3. writes the model where the importer reads it, and starts jdtls with the importer bundle and java-debug's;
+3. writes the model where the importer reads it, and starts jdtls with the importer bundle, the Spring bundle and java-debug's;
 4. relays LSP between the app and jdtls, answering the `snout/` methods itself (see [The engine's methods](#the-engines-methods)).
 
 All of it lives under the cache directory (`~/Library/Caches/SnoutCode` on macOS), keyed by a hash of the folder:
@@ -96,6 +98,8 @@ A build whose sync fails keeps its entry from the last model that synced it, mar
 | `--jdtls <dir>`, `--bundle <jar>` | Use another jdtls installation or importer bundle. |
 | `--debug-bundle <jar>` | Use another java-debug bundle. |
 | `--no-debugger` | Do not load java-debug into jdtls. |
+| `--spring-bundle <jar>` | Use another Spring bundle. |
+| `--no-spring` | No Spring support: the bundle is not loaded and the `snout/spring*` methods fail. |
 | `--no-scala-bridge` | Do not compile Scala. |
 | `--max-heap <size>` | jdtls's heap limit (default `2G`). |
 | `--jvm-arg <arg>` | An extra JVM argument for jdtls; repeatable. |
@@ -144,6 +148,9 @@ Builds are named by their id in the model (`gradleBuilds[].id`); `build` may be 
 | `snout/runConfigurations` | `{ module? }` | `{ configurations: [ { id, kind, name, module, build, ... } ] }`, see below. |
 | `snout/run` | `{ config, debug?, dryRun? }` | `{ runId, ... }` at once; `config` is a configuration or its `id`. With `debug`: `debug: { dapPort, attach, listening }`. With `dryRun`: what would run, and nothing starts (below). |
 | `snout/scalaChanged` | `{ files? }` | `{ runId, millis, builds: [ { build, tasks, millis, compileMillis, error } ] }` when the compile is done. Also accepted as a notification, which queues the compile. |
+| `snout/springBeans` | `{ module? }` | The beans of each Spring module's application context, for a bean list: `{ modules: [ { module, project, applications, scanPackages, scansEverything, xmlFiles, libraryBeans, beans: [Bean] } ] }`. See [Spring](#spring). |
+| `snout/springEndpoints` | `{ module? }` | The request mappings of the controllers in each module's context, sorted by path: `{ endpoints: [Endpoint] }`. |
+| `snout/springInjections` | `{ uri \| path }` | For gutter icons and "go to bean" or "go to usages", per line of a Java or Scala file: `{ uri, lines: [ { line, injections: [Injection], beans: [Bean with injectedInto] } ] }`. |
 
 ### Notifications to the app
 
@@ -181,6 +188,61 @@ java-debug resolves sources, evaluates expressions and replaces code in the runn
 The Scala bridge compiles Scala once, before jdtls starts. Afterwards, `snout/scalaChanged` (the app sends it when a `.scala` file is saved, created or deleted) recompiles the builds whose Scala source folders hold the files, every build with Scala when none are given, one compile at a time. It runs Gradle's own Scala compile task again: the build directories, and with them Zinc's analysis, persist under the cache, so the compile is incremental, recompiling the changed files and those that depend on what changed. The class mirrors relink only what changed, and the engine then asks jdtls (`snout.refreshClassFolders`, a command of the importer bundle) to refresh the class folders: JDT reads them again and rebuilds the Java that uses them. Problems of the compile come as `snout/buildProblems`.
 
 Zinc falls back to a full compile when a change invalidates more than half of a source set's files.
+
+The bridge gives the Scala compiler daemon a 3 GB heap when the build sets none (`scalaCompileOptions.forkOptions.memoryMaximumSize`): Gradle's default is too small for a source set of thousands of files.
+
+### Spring
+
+The `com.snoutcode.engine.spring` bundle builds the Spring model inside jdtls from JDT's ASTs and bindings; the engine starts it once jdtls is ready (one scan of the workspace) and then asks it to read again each Java file the app opens, edits or saves (after 400 ms without changes), XML bean files that change, and the Scala bridge's classes after each Scala compile. A project without Spring on its classpath costs one type lookup.
+
+What it reads, per JDT project (test source folders excluded):
+
+- **Beans**: classes annotated `@Component` or any annotation meta-annotated with it (`@Service`, `@Repository`, `@Controller`, `@RestController`, `@Configuration`, `@ControllerAdvice`, the project's own), and `@Named`; `@Bean` methods; `@ConfigurationProperties` classes; `<bean>` definitions of the XML files `@ImportResource` names; Spring Data repository interfaces; MyBatis mappers (`@Mapper`, or interfaces in `@MapperScan` packages). `@Primary`, `@Qualifier` (and custom qualifier annotations), `@Profile` and every `@Conditional...` are recorded and never evaluated.
+- **The application context** of each module: its project and everything on its classpath. Component scans start at its `@SpringBootApplication` (or `@EnableAutoConfiguration`) classes: their packages or `scanBasePackages`, `@ComponentScan`s of the classes in the context, `<context:component-scan>` in its XML files; `@Import`ed classes (through meta-annotations, so `@EnableWebSecurity` brings Spring Security's configurations), nested configuration classes. A module with no application class and no scan counts every component as scanned.
+- **Library beans**: the `@Bean` methods of the auto-configurations every jar lists (`AutoConfiguration.imports`, `spring.factories`), of the configuration classes in their packages (the ones conditions and import selectors choose among), and of the library configurations the sources import; plus what the container supplies itself (`ApplicationContext`, `Environment`, the servlet request and others).
+- **Injection points**: `@Autowired` and `@Inject` fields, setters and methods, constructor injection (the `@Autowired` constructor, or a bean's only constructor), `@Bean` method parameters, `@Resource` (by name, then type) and `@Value`. A collection, map, array, `Optional`, `ObjectProvider` or `Provider` takes the element type; `required = false` and `@Nullable` make it optional.
+- **Endpoints**: `@RequestMapping` and its variants (`@GetMapping` and the others, or any annotation meta-annotated with it) on the controllers' methods and those they inherit, with the class's mapping joined to each method's: paths, HTTP methods, `produces`, `consumes`, `params`, `headers`.
+- **The Scala bridge's classes** go through the same code: their annotations come from the class files, and their positions from the Scala file their `SourceFile` attribute names.
+
+Resolution follows Spring's: candidates by type (generic arguments compared when both sides have concrete ones), narrowed by qualifiers, then the `@Primary` one, then the bean named like the field or parameter. A bean with a profile or a condition, and every library bean, may be absent, so it never makes an injection ambiguous, and one unconditional candidate wins over conditional ones. Code shared by several applications (a source folder each service compiles) is checked in the context of each application that holds it, keeping to the applications that scan its class: a bean is missing when every one lacks it, and ambiguous when one has several.
+
+It warns (severity 2, `source: "spring"`) when a required injection has no candidate (`spring.missingBean`, and says so when the only candidate is a component outside the scanned packages) or several (`spring.ambiguousBean`), and only in a context something starts. It does not warn about an interface with annotations and no implementation (Feign clients, mappers: a library registers a proxy), or a library class annotated as a component.
+
+**Diagnostics and quick fixes.** The engine adds a file's Spring diagnostics to the ones jdtls publishes for it, and publishes the file again when only the Spring ones change. A diagnostic's `data.fixes` holds its quick fixes, `[ { title, edits: [TextEdit] } ]`, which the engine also adds to jdtls's answer to `textDocument/codeAction` for that range: "Inject 'name' with @Qualifier" for each candidate of an ambiguous injection (with the import), and "Make it optional: @Autowired(required = false)" for a missing one.
+
+**Inlay hints.** The engine adds to jdtls's `textDocument/inlayHint` answer the value of each `@Value("${key}")` in range, after the string: `= value` from the module's `application.properties` or `.yml` and the files of the profiles `spring.profiles.active` names, else `= default (default)`.
+
+**Application properties and YAML.** The engine handles `textDocument/didOpen`, `didChange` (whole or ranged), `didClose`, `completion`, `hover` and `definition` for files named `application*.properties`, `application*.yml`, `application*.yaml` (and `bootstrap*`) itself; jdtls never sees them, and any other request for them is answered with `null`. The app sends them on the same connection as the Java files. What a file knows comes from the module whose resource folder holds it:
+
+- the metadata of every jar on its classpath (`META-INF/spring-configuration-metadata.json` and `additional-spring-configuration-metadata.json`), the `@ConfigurationProperties` classes in its sources (with their Javadoc and field defaults), and an `additional-spring-configuration-metadata.json` in its resources;
+- the keys its code reads: `@Value` placeholders, `@ConditionalOnProperty`, `getProperty("key")` calls in Java and Scala, placeholders in its XML bean files and in the file itself, and Logback's `<springProperty source>`.
+
+Completion offers keys (in YAML, relative to the keys above the line, inserting `rest.of.key: `) and values: booleans, an enum's constants, the metadata's hints. Hover shows a key's type, description, default, deprecation and declaring class. Definition goes to the property's field (or setter, or class) in the sources or in the library (a `jdt://` URI jdtls opens), and to the code that reads the key. Validation (published as the file changes, `source: "spring"`) warns about unknown keys (`spring.unknownProperty`), values that do not fit the type (`spring.invalidValue`: numbers, booleans, enums, durations, data sizes, each element of a list) and deprecated keys (`spring.deprecatedProperty`). A value with a `${...}` placeholder is not checked; nor are keys inside a map or a list of objects.
+
+#### Shapes
+
+```
+Bean      { name, aliases?, type, kind: "component" | "service" | "repository" | "controller" | "restController"
+                                     | "configuration" | "bean" | "xml" | "dataRepository" | "mapper" | "properties",
+            stereotype?, declaringType?, method? (a @Bean method), uri, range, language: "java" | "scala" | "xml",
+            primary?, qualifiers?, profiles?, conditions?,
+            injectedInto: count (springBeans) | [ { uri, range, declaringType, kind, member?, name? } ] (springInjections) }
+Endpoint  { module, path, paths, methods: ["GET", ...] (empty: any), produces?, consumes?, params?, headers?,
+            handler: { class, declaringClass? (when inherited), method }, uri, range, language }
+Injection { kind: "field" | "constructor" | "setter" | "method" | "beanMethod",
+            annotation: "autowired" | "inject" | "resource" | "value" | "implicit",
+            declaringType, member?, name?, type?, wrapper?: "collection" | "map" | "array" | "optional" | "provider",
+            required, qualifiers?, value? (@Value's expression), range,
+            status: "resolved" | "missing" | "ambiguous" | "multiple" | "possible" | "optional" | "value"
+                  | "framework" | "unresolved" | "unknown",
+            message?, beans: [ { name, type, kind, declaringType?, method?, uri?, range? } ] }
+```
+
+`applications` are `[ { class, scanPackages, uri, range } ]`. A library bean has `kind: "library"` and no `uri`; `springBeans` lists only the module's own and counts the library's in `libraryBeans`. `possible` is a `@Bean` method declared as a supertype of the injected type, which may still fit; `multiple` a collection; `framework` what the container supplies; `unknown` a type the model cannot decide on.
+
+#### The bundle's commands
+
+The engine reaches the bundle through `workspace/executeCommand`, one JSON argument each: `snout.spring.scan {}`, `snout.spring.update { uris }` (answer: the diagnostics that changed), `snout.spring.beans { module? }`, `snout.spring.endpoints { module? }`, `snout.spring.injections { uri }`, `snout.spring.properties { action: "complete" | "hover" | "definition" | "validate", uri, text, line?, character? }` and `snout.spring.inlayHints { uri, range }`.
 
 ### Checking a real project
 
@@ -293,6 +355,7 @@ A Scala or Groovy source set that also compiles `.java` files (joint compilation
 Parts of `sync-plugin` are adapted from IntelliJ IDEA Community Edition, under the Apache License 2.0. The distribution carries Eclipse JDT LS 1.61.0, under the Eclipse Public License 2.0; 1.61.0 is the last release that runs on Java 21. It also carries java-debug 0.53.1 (microsoft/java-debug), under the Eclipse Public License 1.0. See [NOTICE](NOTICE).
 - `snout-engine lsp` reads the model once, when it starts. After a build file changes, restart it.
 - The engine does not watch Scala files itself; the app sends `snout/scalaChanged`.
+- Spring: conditions and profiles are not evaluated; test sources, Kotlin, Lombok-generated constructors and beans that `ImportBeanDefinitionRegistrar`s or `BeanFactoryPostProcessor`s register are not seen; Scala positions come from the text, so a member is found by its name.
 - A `main` configuration runs jdtls's compile of the Java, which does not run annotation processors, with the resource folders as they are: no `processResources` filtering.
 - jdtls does not run annotation processors for these projects. Generated source folders are used when a Gradle build has filled them.
 - The JDT projects sit outside the root folder, which jdtls treats as an unmanaged project in a few places: if the client changes jdtls's default JDK, their compiler level follows it until the next start.

@@ -37,7 +37,8 @@ public final class SnoutEngine {
         "",
         "lsp: syncs the model, compiles the Scala that Java code uses, then runs jdtls with the SnoutCode",
         "importer and java-debug, and speaks LSP on stdin and stdout: jdtls's methods, and the engine's",
-        "own snout/ methods (Gradle tasks, tests, run configurations, launching and debugging, Scala).",
+        "own snout/ methods (Gradle tasks, tests, run configurations, launching and debugging, Scala,",
+        "Spring), and the application properties and YAML files.",
         "Nothing is written into the project directory.",
         "",
         "options: --java-home, --jdk, --parallel, --gradle-user-home, --gradle-version, --no-sources,",
@@ -48,6 +49,8 @@ public final class SnoutEngine {
         "  --bundle <jar>              importer bundle (default: the bundled one)",
         "  --debug-bundle <jar>        java-debug bundle (default: the bundled one)",
         "  --no-debugger               do not load java-debug into jdtls",
+        "  --spring-bundle <jar>       Spring support bundle (default: the bundled one)",
+        "  --no-spring                 no Spring support",
         "  --no-scala-bridge           do not compile Scala for jdtls",
         "  --max-heap <size>           jdtls heap limit (default: 2G)",
         "  --jvm-arg <arg>             an extra JVM argument for jdtls (repeatable)");
@@ -147,6 +150,8 @@ public final class SnoutEngine {
                     case "--bundle" -> options.bundle = new File(args[++i]);
                     case "--debug-bundle" -> options.debugBundle = new File(args[++i]);
                     case "--no-debugger" -> options.debugger = false;
+                    case "--spring-bundle" -> options.springBundle = new File(args[++i]);
+                    case "--no-spring" -> options.spring = false;
                     case "--no-scala-bridge" -> options.scalaBridge = false;
                     case "--max-heap" -> options.maxHeap = args[++i];
                     case "--jvm-arg" -> options.jvmArgs.add(args[++i]);

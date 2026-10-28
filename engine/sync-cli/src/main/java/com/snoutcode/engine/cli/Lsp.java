@@ -58,6 +58,8 @@ final class Lsp {
         File bundle;
         File debugBundle;
         boolean debugger = true;
+        File springBundle;
+        boolean spring = true;
         File gradleUserHome;
         String gradleVersion;
         boolean scalaBridge = true;
@@ -149,6 +151,10 @@ final class Lsp {
         if (debugBundle != null) {
             bundles.add(debugBundle.toPath());
         }
+        File springBundle = !options.spring ? null : options.springBundle != null ? options.springBundle : installedSpringBundle();
+        if (springBundle != null) {
+            bundles.add(springBundle.toPath());
+        }
         Path config = prepareConfiguration(home.resolve("config"), jdtls.toPath(), bundles);
         List<String> command = new ArrayList<>();
         command.add(java.getAbsolutePath());
@@ -184,6 +190,11 @@ final class Lsp {
         Engine engine = new Engine(model, plans, proxy::toApp, log, home.resolve("runs"));
         engine.attach(proxy);
         proxy.attach(engine);
+        SpringSupport spring = springBundle == null ? null : new SpringSupport(proxy, proxy::toApp, log);
+        if (spring != null) {
+            proxy.attach(spring);
+            engine.attach(spring);
+        }
         Thread stop = new Thread(() -> {
             engine.shutdown();
             process.destroy();
@@ -191,6 +202,9 @@ final class Lsp {
         Runtime.getRuntime().addShutdownHook(stop);
         int exit = proxy.run();
         engine.shutdown();
+        if (spring != null) {
+            spring.shutdown();
+        }
         try {
             Runtime.getRuntime().removeShutdownHook(stop);
         } catch (IllegalStateException e) {
@@ -388,6 +402,12 @@ final class Lsp {
             throw new IllegalStateException("expected one importer bundle in " + installed("jdtls-plugins"));
         }
         return jars[0];
+    }
+
+    /** The Spring bundle, when the distribution carries it; null otherwise (no Spring support). */
+    private static File installedSpringBundle() {
+        File[] jars = installed("jdtls-plugins").listFiles((d, n) -> n.startsWith("com.snoutcode.engine.spring_") && n.endsWith(".jar"));
+        return jars == null || jars.length == 0 ? null : jars[0];
     }
 
     /** java-debug's bundle, when the distribution carries it; null otherwise (no debugger). */

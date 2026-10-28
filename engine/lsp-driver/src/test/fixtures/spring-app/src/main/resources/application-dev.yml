@@ -1,0 +1,5 @@
+server:
+  port: 9090
+demo:
+  timeout: 5s
+  bogus: true

@@ -41,6 +41,7 @@ final class LspProxy implements Engine.Jdtls {
     private final CompletableFuture<Void> initialized = new CompletableFuture<>();
     private final CompletableFuture<Void> serviceReady = new CompletableFuture<>();
     private Engine engine;
+    private volatile SpringSupport spring;
 
     LspProxy(InputStream appIn, OutputStream appOut, Process jdtls, PrintStream log) {
         this.appIn = new BufferedInputStream(appIn);
@@ -52,6 +53,11 @@ final class LspProxy implements Engine.Jdtls {
 
     void attach(Engine engine) {
         this.engine = engine;
+    }
+
+    /** Spring support: it sees the app's messages and jdtls's diagnostics and responses first. */
+    void attach(SpringSupport spring) {
+        this.spring = spring;
     }
 
     /** Runs until the app closes the stream or jdtls exits; returns jdtls's exit code. */
@@ -78,6 +84,10 @@ final class LspProxy implements Engine.Jdtls {
                 String method = message.has("method") ? message.get("method").getAsString() : null;
                 if (method != null && method.startsWith("snout/")) {
                     engine.receive(message);
+                    continue;
+                }
+                SpringSupport s = spring;
+                if (s != null && s.fromApp(message)) {
                     continue;
                 }
                 toJdtls(message);
@@ -124,8 +134,21 @@ final class LspProxy implements Engine.Jdtls {
                 }
                 if ("language/status".equals(method(message)) && message.get("params").isJsonObject()) {
                     JsonElement type = message.getAsJsonObject("params").get("type");
-                    if (type != null && "ServiceReady".equals(type.getAsString())) {
+                    if (type != null && "ServiceReady".equals(type.getAsString()) && !serviceReady.isDone()) {
                         serviceReady.complete(null);
+                        SpringSupport s = spring;
+                        if (s != null) {
+                            s.start();
+                        }
+                    }
+                }
+                SpringSupport s = spring;
+                if (s != null) {
+                    if (!message.has("method") && s.jdtlsResponse(message)) {
+                        continue;
+                    }
+                    if ("textDocument/publishDiagnostics".equals(method(message)) && message.get("params").isJsonObject()) {
+                        message = s.jdtlsDiagnostics(message);
                     }
                 }
                 toApp(message);
