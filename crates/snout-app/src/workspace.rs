@@ -1001,17 +1001,16 @@ impl Render for Workspace {
             .child("Drop a folder to open it");
 
         let git = self.side.read(cx).activity == Activity::Git;
+        if self.status.read(cx).git != git {
+            self.status.update(cx, |s, cx| {
+                s.git = git;
+                cx.notify();
+            });
+        }
         let main = if git {
             self.git.clone().into_any_element()
         } else {
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .children(self.jdk_bar(cx))
-                .child(self.dock_area(cx))
-                .child(self.status.clone())
-                .into_any_element()
+            div().size_full().flex().flex_col().children(self.jdk_bar(cx)).child(self.dock_area(cx)).into_any_element()
         };
         let title = self.title_bar(cx);
         root.child(title)
@@ -1024,6 +1023,7 @@ impl Render for Workspace {
                     .child(div().flex_1().min_w_0().h_full().child(main))
                     .child(self.right_stripe(cx)),
             )
+            .child(self.status.clone())
             .child(drop_hint)
             .children(self.search.clone().map(|view| {
                 div().absolute().top(px(TITLE_H + 24.)).left_0().right_0().flex().justify_center().child(view)

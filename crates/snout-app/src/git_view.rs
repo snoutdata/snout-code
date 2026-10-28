@@ -387,24 +387,6 @@ impl GitView {
             .into_any_element()
     }
 
-    fn status_bar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let p = palette(cx);
-        let m = self.model.read(cx);
-        div()
-            .flex_none()
-            .h(px(30.))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .bg(p.ground)
-            .when(m.job.is_some(), |d| d.child(Spinner::new().xsmall()))
-            .child(div().whitespace_nowrap().child(m.message.clone()))
-            .child(div().flex_1())
-            .when_some(m.branch_summary(), |d, s| d.child(glyph(Glyph::Branch, 14., p.ill_ink)).child(weak(s, &p)))
-            .into_any_element()
-    }
-
     // ----- Left column -------------------------------------------------------------------
 
     fn is_open(&self, key: &str, default: bool) -> bool {
@@ -1409,7 +1391,6 @@ impl Render for GitView {
         let in_commit = m.commit_view.is_some();
         let console_open = m.settings.console_open;
         let toolbar = self.toolbar(cx);
-        let status = self.status_bar(cx);
         let s = &self.sizes;
         let (left_w, branches_h, commit_w, changes_h, journal_h, console_w) =
             (s.left, s.branches, s.commit, s.changes, s.journal, s.console);
@@ -1500,7 +1481,6 @@ impl Render for GitView {
                     .child(div().flex_1().min_w_0().h_full().px(px(5.)).flex().flex_col().child(center))
                     .when_some(console, |d, c| d.child(self.handle(Split::Console, cx)).child(c)),
             )
-            .child(status)
     }
 }
 

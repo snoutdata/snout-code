@@ -1,6 +1,6 @@
 //! Files open in GPUI Kit's `Editor` as center tabs, highlighted with tree-sitter: Java,
 //! Kotlin and YAML from GPUI Kit, Groovy (Gradle scripts) and Java properties registered
-//! here. Above the text, breadcrumbs show where the file sits in the repository. ⌘S saves.
+//! here. The status bar's breadcrumbs show where the file sits in the repository. ⌘S saves.
 //! A tab remembers its file, so the dock layout brings it back. A tab opened by a single
 //! click in the file tree is a preview: the next preview takes its place until it is
 //! edited or double-clicked.
@@ -147,7 +147,7 @@ impl FileInfo {
 
     /// What the status bar says about the indentation.
     pub fn indent_label(&self) -> String {
-        if self.tabs { format!("Tab Size: {}", self.width) } else { format!("Spaces: {}", self.width) }
+        if self.tabs { format!("Tab, {}", self.width) } else { format!("{} spaces", self.width) }
     }
 }
 
@@ -613,33 +613,6 @@ impl EditorPanel {
         out.extend(rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()));
         out
     }
-
-    fn breadcrumbs(&self, cx: &App) -> impl IntoElement {
-        let p = palette(cx);
-        let crumbs = self.crumbs();
-        let last = crumbs.len().saturating_sub(1);
-        div()
-            .id("breadcrumbs")
-            .flex_none()
-            .h(px(26.))
-            .px(px(12.))
-            .flex()
-            .items_center()
-            .gap(px(3.))
-            .overflow_hidden()
-            .text_size(px(12.))
-            .text_color(p.fg_dim)
-            .children(crumbs.into_iter().enumerate().map(move |(i, name)| {
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap(px(5.))
-                    .when(i == last, |d| d.text_color(p.fg).child(crate::icons::file_icon(&self.path, 13., &p)))
-                    .child(name)
-                    .when(i < last, |d| d.child(look::chevron(false, p.fg_dim.opacity(0.7))))
-            }))
-    }
 }
 
 impl EditorPanel {
@@ -849,7 +822,6 @@ impl Render for EditorPanel {
                     .on_action(cx.listener(|this, _: &ShowSignature, _, cx| this.ask_signature(cx)))
                     .on_action(cx.listener(|this, _: &CancelRename, w, cx| this.cancel_rename(w, cx)))
             })
-            .child(self.breadcrumbs(cx))
             .when_some(self.error.clone(), |d, e| d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(e)))
             .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
             .child(

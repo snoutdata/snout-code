@@ -1,6 +1,8 @@
-//! The status bar under the docks: what the app last did on the left; on the right, for
-//! the editor tab in front, the caret's line and column, how much is selected, the
-//! indentation, line endings, encoding and language, then the branch.
+//! The status bar across the foot of the window. Left: where the file in front sits
+//! (project › folders › file), or what the app last did; in the Git view, the branch.
+//! Right, for the editor tab in front: the caret's line and column, how much is selected,
+//! the line endings, encoding and indentation, what the Java engine is doing, and a lock
+//! on a file that cannot be edited.
 
 use gpui::StatefulInteractiveElement as _;
 use gpui::prelude::FluentBuilder as _;
@@ -11,10 +13,9 @@ use gpui::{
 use gpui_component::Sizable as _;
 use gpui_component::input::RopeExt as _;
 use gpui_component::spinner::Spinner;
-use snout_core::art::Glyph;
 
-use crate::art::glyph;
 use crate::editor::EditorPanel;
+use crate::glyphs::{Icon, icon};
 use crate::model::Model;
 use crate::theme::palette;
 
@@ -27,6 +28,8 @@ pub struct StatusBar {
     pub java_note: bool,
     /// The language servers, for what Java is doing.
     hub: Option<Entity<crate::lang::LangHub>>,
+    /// The Git view shows: the branch takes the breadcrumbs' place.
+    pub git: bool,
     _hub_watch: Option<Subscription>,
     _watch: Vec<Subscription>,
 }
@@ -40,6 +43,8 @@ pub struct EditorStatus {
     pub endings: &'static str,
     pub encoding: &'static str,
     pub language: &'static str,
+    /// The file cannot be edited (a library's class file).
+    pub read_only: bool,
 }
 
 impl EditorStatus {
@@ -54,12 +59,13 @@ impl EditorStatus {
             if lines > 0 { format!("{chars} chars, {} lines", lines + 1) } else { format!("{chars} selected") }
         });
         Self {
-            position: format!("Ln {}, Col {}", pos.line + 1, pos.character + 1),
+            position: format!("{}:{}", pos.line + 1, pos.character + 1),
             selection,
             indent: editor.info.indent_label(),
             endings: if editor.info.crlf { "CRLF" } else { "LF" },
             encoding: "UTF-8",
             language: crate::icons::FileKind::of(&editor.path).language(),
+            read_only: editor.class_file.is_some(),
         }
     }
 }
@@ -68,7 +74,16 @@ impl StatusBar {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         let watch = vec![cx.observe(&model, |_, _, cx| cx.notify())];
         let java_missing = crate::lang::java::engine_dist().is_none();
-        Self { model, editor: None, java_missing, java_note: false, hub: None, _hub_watch: None, _watch: watch }
+        Self {
+            model,
+            editor: None,
+            java_missing,
+            java_note: false,
+            hub: None,
+            git: false,
+            _hub_watch: None,
+            _watch: watch,
+        }
     }
 
     /// Show what the language servers are doing.
@@ -130,17 +145,54 @@ impl StatusBar {
     }
 }
 
+impl StatusBar {
+    /// Where the file in front sits: the project, its folders, the file with its icon.
+    fn breadcrumbs(&self, cx: &gpui::App) -> Option<gpui::AnyElement> {
+        let editor = self.editor()?;
+        let e = editor.read(cx);
+        let p = palette(cx);
+        let crumbs = e.crumbs();
+        let last = crumbs.len().saturating_sub(1);
+        let path = e.path.clone();
+        Some(
+            div()
+                .id("breadcrumbs")
+                .debug_selector(|| "breadcrumbs".into())
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(3.))
+                .overflow_hidden()
+                .children(crumbs.into_iter().enumerate().map(move |(i, name)| {
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .gap(px(4.))
+                        .when(i == last, |d| d.text_color(p.fg).child(crate::icons::file_icon(&path, 12., &p)))
+                        .when(i == 0, |d| d.child(icon(Icon::Folder, 12., p.fg_dim)))
+                        .child(name)
+                        .when(i < last, |d| d.child(icon(Icon::ChevronRight, 10., p.fg_dim)))
+                }))
+                .into_any_element(),
+        )
+    }
+}
+
 impl Render for StatusBar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let java_item = self.shows_java_missing(cx).then(|| self.java_missing_item(cx));
         let java = self.java_status(cx);
+        let crumbs = if self.git { None } else { self.breadcrumbs(cx) };
+        let status = if self.git { None } else { self.editor_status(cx) };
         let m = self.model.read(cx);
-        let status = self.editor_status(cx);
+        let busy = m.job.is_some();
         let hover_bg = p.button_hover;
         let item = move |id: &'static str, text: SharedString| {
             div()
                 .id(id)
+                .debug_selector(move || id.to_owned())
                 .flex_none()
                 .h(px(20.))
                 .px(px(6.))
@@ -151,23 +203,47 @@ impl Render for StatusBar {
                 .hover(move |s| s.bg(hover_bg))
                 .child(text)
         };
+        // Left: what runs (with its spinner), else where the file in front sits, else
+        // what the app last did. In the Git view, the branch.
+        let left = if busy || crumbs.is_none() {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .min_w_0()
+                .when(busy, |d| d.child(Spinner::new().xsmall()))
+                .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(m.message.clone()))
+                .when_some(m.branch_summary().filter(|_| self.git), |d, s| {
+                    d.child(div().w(px(10.)))
+                        .child(icon(Icon::Branch, 13., p.fg_dim))
+                        .child(div().whitespace_nowrap().child(s))
+                })
+                .into_any_element()
+        } else {
+            crumbs.unwrap_or_else(|| div().into_any_element())
+        };
         div()
             .id("status-bar")
             .flex()
+            .flex_none()
             .items_center()
             .gap(px(2.))
-            .px(px(10.))
+            .pl(px(10.))
+            .pr(px(8.))
             .h(px(26.))
             .bg(p.ground)
             .border_t_1()
             .border_color(p.border)
             .text_size(px(12.))
-            .text_color(p.weak())
-            .when(m.job.is_some(), |d| d.child(Spinner::new().xsmall()).child(div().w(px(6.))))
-            .child(
-                div().text_color(p.fg).whitespace_nowrap().overflow_hidden().text_ellipsis().child(m.message.clone()),
-            )
-            .child(div().flex_1())
+            .text_color(p.fg_dim)
+            .child(div().flex_1().min_w_0().child(left))
+            .when_some(status, |d, s| {
+                d.child(item("status-position", s.position.into()))
+                    .when_some(s.selection, |d, sel| d.child(item("status-selection", sel.into())))
+                    .child(item("status-endings", s.endings.into()))
+                    .child(item("status-encoding", s.encoding.into()))
+                    .child(item("status-indent", s.indent.into()))
+            })
             .children(java_item)
             .when_some(java, |d, (text, busy)| {
                 d.child(
@@ -188,23 +264,14 @@ impl Render for StatusBar {
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ShowProblems), cx)),
                 )
             })
-            .when_some(status, |d, s| {
-                d.child(item("status-position", s.position.into()))
-                    .when_some(s.selection, |d, sel| d.child(item("status-selection", sel.into())))
-                    .child(item("status-indent", s.indent.into()))
-                    .child(item("status-endings", s.endings.into()))
-                    .child(item("status-encoding", s.encoding.into()))
-                    .child(item("status-language", s.language.into()))
-                    .child(div().w(px(8.)))
-            })
-            .when_some(m.branch_summary(), |d, s| {
+            .when(self.editor_status(cx).is_some_and(|s| s.read_only) && !self.git, |d| {
                 d.child(
                     div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .child(glyph(Glyph::Branch, 14., p.ill_ink))
-                        .child(div().whitespace_nowrap().child(s)),
+                        .id("status-lock")
+                        .debug_selector(|| "status-lock".into())
+                        .px(px(4.))
+                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Read only").build(w, cx))
+                        .child(icon(Icon::Lock, 13., p.fg_dim)),
                 )
             })
     }

@@ -118,9 +118,9 @@ fn the_status_bar_follows_the_editor_in_front(cx: &mut TestAppContext) {
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
     act(&model, cx, Action::OpenFile(repo.join("App.java"), Some((1, 1))));
     let status = cx.update(|_, cx| ws.read(cx).status.read(cx).editor_status(cx)).expect("an editor is in front");
-    assert_eq!(status.position, "Ln 2, Col 2");
+    assert_eq!(status.position, "2:2");
     assert_eq!((status.endings, status.language, status.encoding), ("CRLF", "Java", "UTF-8"));
-    assert!(status.indent.starts_with("Tab Size"), "{}", status.indent);
+    assert!(status.indent.starts_with("Tab"), "{}", status.indent);
     cx.simulate_keystrokes("shift-right");
     let status = cx.update(|_, cx| ws.read(cx).status.read(cx).editor_status(cx)).unwrap();
     assert_eq!(status.selection.as_deref(), Some("1 selected"));
@@ -129,7 +129,7 @@ fn the_status_bar_follows_the_editor_in_front(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert_eq!(files.read(cx).active.as_deref(), Some(repo.join("App.java").as_path())));
     act(&model, cx, Action::OpenFile(repo.join("status.rs"), None));
     let status = cx.update(|_, cx| ws.read(cx).status.read(cx).editor_status(cx)).unwrap();
-    assert_eq!((status.endings, status.language, status.indent.as_str()), ("LF", "Rust", "Spaces: 4"));
+    assert_eq!((status.endings, status.language, status.indent.as_str()), ("LF", "Rust", "4 spaces"));
     let _ = std::fs::remove_dir_all(repo);
 }
 
@@ -849,5 +849,23 @@ fn the_inspections_count_problems_and_step_through_them(cx: &mut TestAppContext)
     assert_eq!(line(cx), 1, "round the file");
     step(cx, false);
     assert_eq!(line(cx), 3, "and back");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_status_bar_shows_where_the_file_sits(cx: &mut TestAppContext) {
+    let repo = demo_repo("crumbs");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    act(&model, cx, Action::OpenFile(repo.join("src/main.rs"), None));
+    cx.run_until_parked();
+    let crumbs = cx.update(|_, cx| editor_for_app(&ws, &repo.join("src/main.rs"), cx).read(cx).crumbs());
+    assert_eq!(crumbs[1..], ["src".to_owned(), "main.rs".to_owned()]);
+    assert!(cx.debug_bounds("breadcrumbs").is_some(), "the status bar draws the breadcrumbs");
+    assert!(cx.debug_bounds("status-position").is_some());
+    // The Git view shows the branch there instead.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("breadcrumbs").is_none());
     let _ = std::fs::remove_dir_all(repo);
 }
