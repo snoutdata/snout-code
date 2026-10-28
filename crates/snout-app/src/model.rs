@@ -570,6 +570,8 @@ impl Model {
                 self.refresh();
                 self.message = format!("Opened {}", path.display());
                 cx.emit(ModelEvent::Message);
+                // Whatever follows the project (its engine, runs, models) sees the change now.
+                cx.notify();
                 true
             }
             Err(e) => {
@@ -663,6 +665,7 @@ impl Model {
         self.refresh();
         self.message = format!("Closed {}", repo.root().display());
         cx.emit(ModelEvent::Closed);
+        cx.notify();
     }
 
     pub fn refresh(&mut self) {

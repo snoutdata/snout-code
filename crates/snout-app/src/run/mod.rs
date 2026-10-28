@@ -446,10 +446,17 @@ impl Runs {
     pub fn engine(&self, cx: &App) -> Option<(PathBuf, u32)> {
         let project = self.model.read(cx).project_root()?;
         let hub = self.hub.read(cx);
-        let mut roots: Vec<&PathBuf> =
-            hub.servers.keys().filter(|r| r.starts_with(&project) || project.starts_with(r)).collect();
-        roots.sort();
-        roots.into_iter().find_map(|r| hub.client(r).map(|c| (r.clone(), c.pid())))
+        let root = hub.engine_root(&project)?;
+        hub.client(&root).map(|c| (root, c.pid()))
+    }
+
+    /// The project's engine has read the build and answers requests.
+    pub fn engine_ready(&self, cx: &App) -> bool {
+        let Some(project) = self.model.read(cx).project_root() else { return false };
+        let hub = self.hub.read(cx);
+        hub.engine_root(&project)
+            .and_then(|r| hub.servers.get(&r))
+            .is_some_and(|s| s.stage == crate::lang::hub::Stage::Ready)
     }
 
     /// Ask the project's engine; fails when none is ready.
@@ -480,8 +487,7 @@ impl Runs {
     /// The engine started or changed: read its configurations and tasks once per process.
     fn engine_changed(&mut self, cx: &mut Context<Self>) {
         let Some((_, pid)) = self.engine(cx) else { return };
-        let ready = self.hub.read(cx).servers.values().any(|s| s.stage == crate::lang::hub::Stage::Ready);
-        if !ready {
+        if !self.engine_ready(cx) {
             return;
         }
         if self.configs_from != Some(pid) && !self.configs_loading {

@@ -216,7 +216,7 @@ impl Workspace {
         let link = editor.as_ref().and_then(|e| e.read(cx).lang.clone());
         let root = link.as_ref().map(|l| l.root.clone()).or_else(|| {
             let repo = self.model.read(cx).project_root()?;
-            self.hub.read(cx).servers.keys().find(|r| r.starts_with(&repo) || repo.starts_with(r)).cloned()
+            self.hub.read(cx).engine_root(&repo)
         });
         let Some(root) = root else {
             self.model.update(cx, |m, cx| {
@@ -265,7 +265,7 @@ impl Workspace {
     /// The workspace's symbols, from the Java server of the open project, if one runs.
     pub fn workspace_symbols(&self, cx: &App) -> Option<crate::search::SymbolSource> {
         let repo = self.model.read(cx).project_root()?;
-        let root = self.hub.read(cx).servers.keys().find(|r| r.starts_with(&repo) || repo.starts_with(r)).cloned()?;
+        let root = self.hub.read(cx).engine_root(&repo)?;
         Some(symbols_of(self.hub.clone(), root))
     }
 
@@ -385,9 +385,7 @@ impl Workspace {
     pub fn open_library_class(&mut self, package: String, class: String, window: &mut Window, cx: &mut Context<Self>) {
         let project = self.model.read(cx).project_root();
         let hub = self.hub.read(cx);
-        let root = project
-            .as_ref()
-            .and_then(|project| hub.servers.keys().find(|r| r.starts_with(project) || project.starts_with(r)).cloned());
+        let root = project.as_ref().and_then(|project| hub.engine_root(project));
         let Some(root) = root.filter(|r| hub.client(r).is_some()) else {
             self.model.update(cx, |m, cx| {
                 m.message = "Library classes open once the Java engine is ready".into();

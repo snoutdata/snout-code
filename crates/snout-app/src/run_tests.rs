@@ -692,3 +692,34 @@ fn a_java_8_build_runs_and_debugs(cx: &mut TestAppContext) {
     };
     tests_run_and_debug(cx, jdk, true);
 }
+
+/// Another project in the window: the engines of builds outside it stop, and runs ask the
+/// new project's engine.
+#[gpui::test]
+fn opening_another_project_drops_the_engines_outside_it(cx: &mut TestAppContext) {
+    let a = demo_repo("engines-a");
+    let b = demo_repo("engines-b");
+    let (model, ws, cx) = open(cx, with_repo(&a));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    let inner = a.join("svc");
+    cx.update(|_, cx| {
+        hub.update(cx, |h, _| {
+            h.insert_published(&a, String::new(), Vec::new());
+            h.insert_published(&inner, String::new(), Vec::new());
+            h.insert_published(&b, String::new(), Vec::new());
+        })
+    });
+    cx.update(|_, cx| {
+        let h = hub.read(cx);
+        assert_eq!(h.engine_root(&a), Some(a.clone()), "the project's own engine first");
+        assert_eq!(h.engine_root(&a.join("svc/src")), Some(inner.clone()), "else the build it lies in");
+    });
+    act(&model, cx, Action::OpenRepo(b.clone()));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let roots: Vec<PathBuf> = hub.read(cx).servers.keys().cloned().collect();
+        assert_eq!(roots, std::slice::from_ref(&b), "only the open project's engine is left");
+    });
+    let _ = std::fs::remove_dir_all(a);
+    let _ = std::fs::remove_dir_all(b);
+}

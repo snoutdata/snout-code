@@ -512,7 +512,7 @@ impl Spring {
     /// The engine started or changed: read the model once per engine process.
     fn engine_changed(&mut self, cx: &mut Context<Self>) {
         let Some((_, pid)) = self.runs.read(cx).engine(cx) else { return };
-        let ready = self.runs.read(cx).hub.read(cx).servers.values().any(|s| s.stage == crate::lang::hub::Stage::Ready);
+        let ready = self.runs.read(cx).engine_ready(cx);
         if ready && self.from != Some(pid) && self.load != Load::Loading {
             self.reload(cx);
         }

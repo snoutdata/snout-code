@@ -1,6 +1,6 @@
 //! The language servers of the window: one Java engine per Gradle build, started when a
 //! Java file of the build opens (or the project is one), restarted when it crashes, and
-//! stopped when the app quits. The hub keeps the documents in sync, holds what the
+//! stopped when the app quits or another project opens in its place. The hub keeps the documents in sync, holds what the
 //! servers publish (diagnostics, progress), and asks the workspace to open locations and
 //! apply edits.
 
@@ -276,8 +276,11 @@ pub struct LangHub {
     pub engine_build: Option<crate::background::EngineBuild>,
     /// What the last build's compile reported (`snout/buildProblems`), by document URI.
     pub build_problems: Vec<(String, Diagnostic)>,
+    /// The project open when the servers were last checked: those of another go.
+    project: Option<PathBuf>,
     _engine_watch: Option<Task<()>>,
     _quit: gpui::Subscription,
+    _project: gpui::Subscription,
 }
 
 impl EventEmitter<HubEvent> for LangHub {}
@@ -297,6 +300,13 @@ pub struct LangEnabled(pub bool);
 
 impl Global for LangEnabled {}
 
+/// A number for each engine process the window starts, never reused: what a process says
+/// after it was replaced (or stopped and its build started again) is told apart.
+fn next_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 fn uri_key(uri: &Uri) -> String {
     uri.as_str().to_owned()
 }
@@ -308,6 +318,14 @@ impl LangHub {
         let quit = cx.on_app_quit(|this, _| {
             this.shutdown_all();
             async {}
+        });
+        let project = model.read(cx).project_root();
+        let project_sub = cx.observe(&model, |this, model, cx| {
+            let project = model.read(cx).project_root();
+            if project != this.project {
+                this.project = project;
+                this.keep_project_servers(cx);
+            }
         });
         let mut this = Self {
             model,
@@ -321,8 +339,10 @@ impl LangHub {
             pending: Vec::new(),
             engine_build: None,
             build_problems: Vec::new(),
+            project,
             _engine_watch: None,
             _quit: quit,
+            _project: project_sub,
         };
         if let Some(file) = std::env::var_os(crate::background::STATUS_ENV).filter(|_| enabled) {
             this.watch_engine_build(PathBuf::from(file), cx);
@@ -385,19 +405,77 @@ impl LangHub {
 
     /// The folder whose engine serves `path`: the project, when it holds Gradle builds and
     /// `path` is in it or in a source folder its model lists (one engine syncs every build
-    /// of the folder); else the Gradle build of `path`.
+    /// of the folder); else the Gradle build of `path` inside the project. A file of no
+    /// build of the project gets none: engines run for the project shown, and no other.
     pub fn root_for(&self, path: &Path, cx: &App) -> Option<PathBuf> {
         let project = self.model.read(cx).project_root();
-        if let Some(project) = &project {
-            let listed = crate::project_model::store(cx)
-                .and_then(|s| s.read(cx).model_for(project))
-                .is_some_and(|m| m.holds(path));
-            let inside = path.starts_with(project) && java::gradle_root(path, Some(project)).is_some();
-            if (inside || listed) && crate::project_model::has_gradle(project) {
-                return Some(project.clone());
-            }
+        let Some(project) = &project else { return java::gradle_root(path, None) };
+        let listed =
+            crate::project_model::store(cx).and_then(|s| s.read(cx).model_for(project)).is_some_and(|m| m.holds(path));
+        let inside = path.starts_with(project) && java::gradle_root(path, Some(project)).is_some();
+        if (inside || listed) && crate::project_model::has_gradle(project) {
+            return Some(project.clone());
         }
-        java::gradle_root(path, project.as_deref())
+        java::gradle_root(path, Some(project)).filter(|r| r.starts_with(project))
+    }
+
+    /// The engine that serves the folder `project`: its own, else one of a build inside it,
+    /// else the one of the build it lies in.
+    pub fn engine_root(&self, project: &Path) -> Option<PathBuf> {
+        if self.servers.contains_key(project) {
+            return Some(project.to_owned());
+        }
+        let mut inside: Vec<&PathBuf> = self.servers.keys().filter(|r| r.starts_with(project)).collect();
+        inside.sort();
+        if let Some(r) = inside.first() {
+            return Some((*r).clone());
+        }
+        self.servers.keys().filter(|r| project.starts_with(r)).max_by_key(|r| r.as_os_str().len()).cloned()
+    }
+
+    /// Another project opened (or none): stop the engines of builds outside it, with their
+    /// jdtls and Gradle daemons, and forget what they said.
+    fn keep_project_servers(&mut self, cx: &mut Context<Self>) {
+        let keep = |root: &Path, project: &Option<PathBuf>| project.as_deref().is_some_and(|p| root.starts_with(p));
+        let gone: Vec<PathBuf> = self.servers.keys().filter(|r| !keep(r, &self.project)).cloned().collect();
+        let project = self.project.clone();
+        self.pending.retain(|r| keep(r, &project));
+        if self.jdk_prompt.as_ref().is_some_and(|p| !keep(&p.root, &project)) {
+            self.jdk_prompt = None;
+        }
+        if gone.is_empty() {
+            return;
+        }
+        for root in &gone {
+            self.stop_server(root);
+        }
+        self.docs.retain(|_, d| !gone.contains(&d.root));
+        self.build_problems.clear();
+        cx.emit(HubEvent::Changed);
+        cx.notify();
+    }
+
+    /// Stop the engine of `root` and forget it: `shutdown` and `exit`, then SIGTERM if it
+    /// lingers (its own hook stops jdtls and its Gradle daemons), on a thread of its own.
+    pub fn stop_server(&mut self, root: &Path) {
+        let Some(mut server) = self.servers.remove(root) else { return };
+        server.stopped = true;
+        // What it says until it ends is read and let go (no server of its generation).
+        for task in server._tasks.drain(..) {
+            task.detach();
+        }
+        let Some(client) = server.client.take() else { return };
+        let (root, pid) = (root.to_owned(), client.pid());
+        eprintln!("[java] stopping the engine for {} (pid {pid})", root.display());
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            client.shutdown_blocking(Duration::from_secs(5));
+            eprintln!(
+                "[java] the engine for {} (pid {pid}) stopped in {:.1} s",
+                root.display(),
+                started.elapsed().as_secs_f32()
+            );
+        });
     }
 
     /// The server of the build at `root`, once it answers requests.
@@ -481,7 +559,7 @@ impl LangHub {
     pub fn restart(&mut self, root: &Path, cx: &mut Context<Self>) {
         let Some(server) = self.servers.get_mut(root) else { return };
         // Messages of the process going away are those of an earlier generation.
-        server.generation += 1;
+        server.generation = next_generation();
         server.crashes = 0;
         server.initialized = false;
         server.progress.clear();
@@ -519,7 +597,7 @@ impl LangHub {
             }
         };
         eprintln!("[java] started the engine for {} on JDK {} (pid {})", root.display(), jdk.version, client.pid());
-        server.generation += 1;
+        server.generation = next_generation();
         let generation = server.generation;
         server.client = Some(client.clone());
         server.stage = Stage::Importing;
