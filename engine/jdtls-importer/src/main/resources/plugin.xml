@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <!-- Ahead of jdtls's Gradle (300) and Maven (400) importers. -->
+   <extension id="importers" point="org.eclipse.jdt.ls.core.importers">
+      <importer
+            id="snoutGradleImporter"
+            order="200"
+            class="com.snoutcode.engine.jdtls.SnoutProjectImporter"/>
+   </extension>
+   <extension id="buildSupport" point="org.eclipse.jdt.ls.core.buildSupport">
+      <buildSupport
+            id="snoutBuildSupport"
+            order="200"
+            class="com.snoutcode.engine.jdtls.SnoutBuildSupport"/>
+   </extension>
+   <!-- Marks the projects this bundle owns: com.snoutcode.engine.jdtls.nature -->
+   <extension id="nature" name="SnoutCode Gradle project" point="org.eclipse.core.resources.natures">
+      <runtime>
+         <run class="com.snoutcode.engine.jdtls.SnoutNature"/>
+      </runtime>
+   </extension>
+</plugin>

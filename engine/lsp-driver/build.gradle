@@ -1,0 +1,35 @@
+// A headless LSP client that drives `snout-engine lsp`: the end-to-end test of the jdtls
+// importer, and a command line runner for checking a real project.
+//
+//   ./gradlew :lsp-driver:run --args='--engine <bin/snout-engine> --project <dir> --script <script.json>'
+
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.11.0'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+application {
+    mainClass = 'com.snoutcode.engine.lsp.Driver'
+    applicationName = 'lsp-driver'
+}
+
+evaluationDependsOn(':sync-cli')
+def engine = project(':sync-cli').tasks.named('installDist')
+
+tasks.named('test') {
+    dependsOn engine
+    // jdtls runs on this JVM's Java (21), and the fixture's Gradle on the version building us.
+    systemProperty 'snout.test.engine', engine.get().destinationDir.toPath().resolve('bin/snout-engine').toString()
+    systemProperty 'snout.test.gradleVersion', gradle.gradleVersion
+    systemProperty 'snout.test.fixtures', file('src/test/fixtures').absolutePath
+    systemProperty 'snout.test.scratch', layout.buildDirectory.dir('test-scratch').get().asFile.absolutePath
+    inputs.files(engine)
+    inputs.dir('src/test/fixtures')
+}

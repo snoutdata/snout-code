@@ -1,0 +1,102 @@
+// An OSGi bundle for Eclipse JDT LS (jdtls). It contributes a project importer that builds JDT
+// projects from the model `snout-engine sync` writes, ahead of jdtls's own Gradle importer.
+//
+// The build also fetches the pinned jdtls release (EPL-2.0) from download.eclipse.org into
+// build/jdtls: the bundle compiles against its plugins, and sync-cli ships it in the distribution.
+
+plugins {
+    id 'java'
+}
+
+// 1.61.0 is the last release that runs on Java 21: from 1.62.0 the Eclipse platform bundles
+// (org.eclipse.core.filesystem and others) are compiled for Java 25.
+ext {
+    jdtlsVersion = '1.61.0'
+    jdtlsTimestamp = '202609031315'
+    jdtlsSha256 = '338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64'
+}
+
+def jdtlsName = "jdt-language-server-${jdtlsVersion}-${jdtlsTimestamp}"
+
+/** Downloads one file and checks its SHA-256. Up to date while the file is there. */
+abstract class DownloadVerified extends DefaultTask {
+    @Input
+    abstract Property<String> getUrl()
+
+    @Input
+    abstract Property<String> getSha256()
+
+    @OutputFile
+    abstract RegularFileProperty getDestination()
+
+    @TaskAction
+    void download() {
+        File out = destination.get().asFile
+        File part = new File(out.parentFile, out.name + '.part')
+        out.parentFile.mkdirs()
+        logger.lifecycle("Downloading ${url.get()}")
+        new URI(url.get()).toURL().withInputStream { input -> part.withOutputStream { it << input } }
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        part.eachByte(1 << 16) { byte[] buffer, int n -> digest.update(buffer, 0, n) }
+        String actual = digest.digest().encodeHex().toString()
+        if (actual != sha256.get()) {
+            part.delete()
+            throw new GradleException("Checksum mismatch for ${url.get()}: expected ${sha256.get()}, got ${actual}")
+        }
+        java.nio.file.Files.move(part.toPath(), out.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+}
+
+def downloadJdtls = tasks.register('downloadJdtls', DownloadVerified) {
+    description = "Downloads jdtls ${jdtlsVersion} from download.eclipse.org."
+    url = "https://download.eclipse.org/jdtls/milestones/${jdtlsVersion}/${jdtlsName}.tar.gz"
+    sha256 = jdtlsSha256
+    destination = layout.buildDirectory.file("downloads/${jdtlsName}.tar.gz")
+}
+
+def unpackJdtls = tasks.register('unpackJdtls', Sync) {
+    description = "Unpacks jdtls ${jdtlsVersion} into build/jdtls."
+    from(downloadJdtls.flatMap { it.destination }.map { tarTree(it) })
+    into layout.buildDirectory.dir('jdtls')
+}
+
+def jdtlsPlugins = files({ fileTree(layout.buildDirectory.dir('jdtls/plugins')) { include '*.jar' } })
+    .builtBy(unpackJdtls)
+
+dependencies {
+    compileOnly jdtlsPlugins
+    testImplementation jdtlsPlugins
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    // Gson's jar refers to annotations it does not ship.
+    options.compilerArgs += ['-Xlint:-classfile']
+}
+
+jar {
+    archiveFileName = "com.snoutcode.engine.jdtls_${project.version}.jar"
+    manifest {
+        attributes(
+            'Bundle-ManifestVersion': '2',
+            'Bundle-Name': 'SnoutCode Gradle importer for JDT LS',
+            'Bundle-SymbolicName': 'com.snoutcode.engine.jdtls;singleton:=true',
+            'Bundle-Version': project.version,
+            'Bundle-Vendor': 'SNOUTDATA INC',
+            'Bundle-RequiredExecutionEnvironment': 'JavaSE-21',
+            'Bundle-ActivationPolicy': 'lazy',
+            'Require-Bundle': [
+                'org.eclipse.core.runtime',
+                'org.eclipse.core.resources',
+                'org.eclipse.jdt.core',
+                'org.eclipse.jdt.launching',
+                'org.eclipse.jdt.ls.core',
+                'com.google.gson',
+            ].join(','),
+            'Automatic-Module-Name': 'com.snoutcode.engine.jdtls',
+        )
+    }
+}
+
+/** The unpacked jdtls, for the distribution in sync-cli. */
+ext.jdtlsHome = unpackJdtls

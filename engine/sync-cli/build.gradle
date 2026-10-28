@@ -1,8 +1,17 @@
-// The Tooling API client: `snout-engine sync <projectDir> [--out model.json]`.
+// The command line: `snout-engine sync <projectDir> [--out model.json]` and
+// `snout-engine lsp <projectDir>`. The distribution carries jdtls and the importer bundle:
+//
+//   bin/snout-engine
+//   lib/                  snout-engine and its dependencies
+//   jdtls/                the pinned jdtls release, as downloaded
+//   jdtls-plugins/        com.snoutcode.engine.jdtls_<version>.jar
 
 plugins {
     id 'application'
 }
+
+evaluationDependsOn(':jdtls-importer')
+def importer = project(':jdtls-importer')
 
 dependencies {
     implementation project(':sync-plugin')
@@ -18,6 +27,19 @@ tasks.withType(JavaCompile).configureEach {
 application {
     mainClass = 'com.snoutcode.engine.cli.SnoutEngine'
     applicationName = 'snout-engine'
+}
+
+distributions {
+    main {
+        contents {
+            from(importer.jdtlsHome) {
+                into 'jdtls'
+            }
+            from(importer.tasks.named('jar')) {
+                into 'jdtls-plugins'
+            }
+        }
+    }
 }
 
 tasks.named('test') {

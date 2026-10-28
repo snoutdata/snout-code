@@ -1,7 +1,11 @@
 // snout-engine: the JVM side of SnoutCode.
 //
-// sync-plugin  model builders that run inside the user's Gradle daemon (Java 8 bytecode)
-// sync-cli     the Tooling API client: `snout-engine sync <projectDir>`
+// sync-plugin     model builders that run inside the user's Gradle daemon (Java 8 bytecode)
+// sync-cli        the command line: `snout-engine sync <projectDir>` and `snout-engine lsp <projectDir>`
+// jdtls-importer  an OSGi bundle that turns the synced model into JDT projects inside jdtls
+// lsp-driver      a headless LSP client that drives `snout-engine lsp` in tests
+//
+// Building needs JDK 21: jdtls is compiled for it, and the importer compiles against jdtls.
 
 ext {
     toolingApiVersion = '8.10.2'

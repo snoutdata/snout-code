@@ -1,0 +1,6 @@
+// A source folder outside the build, shared the way some builds share code without a project.
+sourceSets.main.java.srcDir "$rootDir/../shared/src/main/java"
+
+dependencies {
+    implementation project(':lib')
+}

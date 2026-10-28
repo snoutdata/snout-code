@@ -23,4 +23,16 @@ from plugins/gradle/tooling-extension-impl and plugins/gradle/tooling-extension-
   sync-plugin/src/main/java/com/snoutcode/engine/sync/Reflect.java
       from .../toolingExtension/util/GradleReflectionUtil.java
 
+The snout-engine distribution includes Eclipse JDT Language Server (jdtls) 1.61.0
+(https://github.com/eclipse-jdtls/eclipse.jdt.ls), with the Eclipse platform bundles it ships,
+licensed under the Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-2.0/). The build
+downloads the unmodified release archive
+https://download.eclipse.org/jdtls/milestones/1.61.0/jdt-language-server-1.61.0-202609031315.tar.gz
+(SHA-256 338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64); it is not part of this
+repository. Its source is available from the project page above. The bundles inside it carry their
+own license and about files.
+
+jdtls-importer is an OSGi bundle that runs inside jdtls. It uses jdtls's public extension points
+and is not derived from jdtls source code.
+
 The rest of snout-engine is licensed under the MIT License; see LICENSE at the repository root.

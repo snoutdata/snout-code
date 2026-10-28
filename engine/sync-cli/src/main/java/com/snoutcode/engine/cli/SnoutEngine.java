@@ -15,8 +15,9 @@ import java.nio.file.Files;
 public final class SnoutEngine {
     private static final String USAGE = String.join("\n",
         "usage: snout-engine sync <projectDir> [options]",
+        "       snout-engine lsp <projectDir> [options]",
         "",
-        "Fetches the Gradle build model (configuration only, no tasks run) and writes it as JSON.",
+        "sync: fetches the Gradle build model (configuration only, no tasks run) and writes it as JSON.",
         "",
         "options:",
         "  --out <file>                write the model here instead of stdout",
@@ -26,7 +27,20 @@ public final class SnoutEngine {
         "  --gradle-version <version>  use this Gradle version instead of the build's wrapper",
         "  --no-sources                do not look up source jars",
         "  --offline                   run Gradle offline",
-        "  --verbose                   show Gradle's output on stderr");
+        "  --verbose                   show Gradle's output on stderr",
+        "",
+        "lsp: syncs the model, compiles the Scala that Java code uses, then runs jdtls on stdin and",
+        "stdout with the SnoutCode importer. Nothing is written into the project directory.",
+        "",
+        "options: --java-home, --gradle-user-home, --gradle-version, --no-sources, --offline and",
+        "--verbose as for sync, and:",
+        "  --cache-dir <dir>           caches, models and jdtls workspaces (default: the user cache dir)",
+        "  --jdtls-java-home <dir>     Java 21+ for jdtls (default: this JVM)",
+        "  --jdtls <dir>               jdtls installation (default: the bundled one)",
+        "  --bundle <jar>              importer bundle (default: the bundled one)",
+        "  --no-scala-bridge           do not compile Scala for jdtls",
+        "  --max-heap <size>           jdtls heap limit (default: 2G)",
+        "  --jvm-arg <arg>             an extra JVM argument for jdtls (repeatable)");
 
     private SnoutEngine() {
     }
@@ -36,6 +50,9 @@ public final class SnoutEngine {
     }
 
     static int run(String[] args, PrintStream stdout, PrintStream stderr) {
+        if (args.length >= 2 && "lsp".equals(args[0])) {
+            return lsp(args, stderr);
+        }
         if (args.length < 2 || !"sync".equals(args[0])) {
             stderr.println(USAGE);
             return 2;
@@ -88,6 +105,47 @@ public final class SnoutEngine {
             return hasErrors(model) ? 1 : 0;
         } catch (Exception e) {
             stderr.println("sync failed: " + describe(e));
+            return 1;
+        }
+    }
+
+    private static int lsp(String[] args, PrintStream stderr) {
+        Lsp.Options options = new Lsp.Options();
+        options.projectDir = new File(args[1]);
+        try {
+            for (int i = 2; i < args.length; i++) {
+                switch (args[i]) {
+                    case "--java-home" -> options.javaHome = new File(args[++i]);
+                    case "--gradle-user-home" -> options.gradleUserHome = new File(args[++i]);
+                    case "--gradle-version" -> options.gradleVersion = args[++i];
+                    case "--no-sources" -> options.sources = false;
+                    case "--offline" -> options.offline = true;
+                    case "--verbose" -> options.verbose = true;
+                    case "--cache-dir" -> options.cacheDir = new File(args[++i]);
+                    case "--jdtls-java-home" -> options.jdtlsJavaHome = new File(args[++i]);
+                    case "--jdtls" -> options.jdtlsHome = new File(args[++i]);
+                    case "--bundle" -> options.bundle = new File(args[++i]);
+                    case "--no-scala-bridge" -> options.scalaBridge = false;
+                    case "--max-heap" -> options.maxHeap = args[++i];
+                    case "--jvm-arg" -> options.jvmArgs.add(args[++i]);
+                    default -> {
+                        stderr.println("unknown option: " + args[i] + "\n\n" + USAGE);
+                        return 2;
+                    }
+                }
+            }
+        } catch (ArrayIndexOutOfBoundsException e) {
+            stderr.println("missing value for " + args[args.length - 1] + "\n\n" + USAGE);
+            return 2;
+        }
+        if (!options.projectDir.isDirectory()) {
+            stderr.println("not a directory: " + options.projectDir);
+            return 2;
+        }
+        try {
+            return Lsp.run(options, stderr);
+        } catch (Exception e) {
+            stderr.println("snout-engine lsp failed: " + describe(e));
             return 1;
         }
     }
