@@ -204,6 +204,8 @@ fn git_panel_commits_without_staging_what_is_selected(cx: &mut TestAppContext) {
     act(&model, cx, Action::Unstage(vec!["src/main.rs".into()]));
     // Nothing staged and one file selected: Commit adds and records that file alone.
     cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("NOTES.md", false, false, cx)));
+    // The diff is read off the UI thread.
+    cx.run_until_parked();
     cx.update(|_, cx| {
         let m = model.read(cx);
         assert_eq!(m.commit_scope().label(), "1 selected");
@@ -225,6 +227,7 @@ fn git_panel_commits_without_staging_what_is_selected(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert!(model.read(cx).status.files.is_empty()));
     // Amend fills in the last message.
     cx.update(|_, cx| model.update(cx, |m, cx| m.set_amend(true, cx)));
+    cx.run_until_parked();
     cx.update(|_, cx| assert_eq!(model.read(cx).commit_msg.trim(), "The rest"));
     let _ = std::fs::remove_dir_all(repo);
 }
@@ -313,6 +316,7 @@ fn the_diff_tab_follows_the_selection_and_its_options(cx: &mut TestAppContext) {
     assert!(lines(cx) > compact, "the whole file shows without Compact");
     // Comparing HEAD with the index: status.rs is not staged, so nothing differs.
     cx.update(|_, cx| model.update(cx, |m, cx| m.set_diff_base(DiffBase::HeadToIndex, cx)));
+    cx.run_until_parked();
     cx.update(|_, cx| assert!(model.read(cx).diff.as_ref().unwrap().as_ref().unwrap().diff.is_identical()));
     // Two files selected: no diff, the tab says how many.
     cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("NOTES.md", false, true, cx)));
@@ -349,6 +353,7 @@ fn the_journal_filters_and_opens_commits_in_the_commit_tab(cx: &mut TestAppConte
         assert!(m.commit_scope() != snout_core::Scope::Nothing, "the working tree is untouched");
     });
     cx.update(|_, cx| model.update(cx, |m, cx| m.select_commit_file("status.rs".into(), cx)));
+    cx.run_until_parked();
     cx.update(|_, cx| {
         let view = model.read(cx).commit_view.as_ref().unwrap();
         assert_eq!(view.diff.as_ref().unwrap().as_ref().unwrap().diff.path, "status.rs");

@@ -180,7 +180,7 @@ impl ConsolePanel {
             s.refreshed = Instant::now();
             self.model.update(cx, |m, cx| {
                 if m.job.is_none() {
-                    m.refresh();
+                    m.refresh(cx);
                     cx.notify();
                 }
             });

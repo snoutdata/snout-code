@@ -1,7 +1,7 @@
 //! The Git Panel's state and everything it does, with no drawing: the GPUI counterpart of
 //! the egui app's `SnoutApp` minus its panes. Views read it and send it [`Action`]s.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -229,6 +229,69 @@ enum Outcome {
     Found { root: PathBuf, repos: Vec<PathBuf> },
 }
 
+/// What the Git Panel shows of a repository, read off the UI thread.
+struct Snapshot {
+    status: Result<Status, String>,
+    branches: Vec<Branch>,
+    tags: Vec<Tag>,
+    log: Vec<Commit>,
+    dirs: Vec<String>,
+    errors: Vec<String>,
+}
+
+impl Snapshot {
+    /// Read `repo` (blocking: git on its host).
+    fn read(repo: &Repo) -> Self {
+        let status = repo.status().map_err(|e| e.to_string());
+        if status.is_err() {
+            let (branches, tags, log, dirs, errors) = Default::default();
+            return Self { status, branches, tags, log, dirs, errors };
+        }
+        let mut errors = Vec::new();
+        let branches = repo.branches().map_err(|e| errors.push(e.to_string())).unwrap_or_default();
+        let tags = repo.tags().map_err(|e| errors.push(e.to_string())).unwrap_or_default();
+        let log = repo.log(LOG_LIMIT).map_err(|e| errors.push(e.to_string())).unwrap_or_default();
+        let dirs = repo.directories().map_err(|e| errors.push(e.to_string())).unwrap_or_default();
+        Self { status, branches, tags, log, dirs, errors }
+    }
+}
+
+/// A project opened off the UI thread: its folder, its repository and what that shows.
+struct Opened {
+    /// The folder as it was asked for.
+    asked: PathBuf,
+    /// The folder as opened, in the form Git gives the root (symbolic links resolved).
+    project: PathBuf,
+    repo: Repo,
+    github_url: Option<String>,
+    snapshot: Snapshot,
+}
+
+impl Opened {
+    /// Open the folder `path` on `host` as a project, with the repository at or above it.
+    fn load(host: &snout_core::HostRef, path: &Path) -> snout_core::Result<Self> {
+        let repo = Repo::open(host, path)?;
+        let project = host.canonicalize(path).unwrap_or_else(|_| path.to_owned());
+        let github_url = repo.github_url();
+        let snapshot = Snapshot::read(&repo);
+        Ok(Self { asked: path.to_owned(), project, repo, github_url, snapshot })
+    }
+}
+
+/// What a Git job hands back to the model, on the UI thread.
+type Then = Box<dyn FnOnce(&mut Model, &mut Context<Model>) + Send>;
+
+/// A change to the open repository, made off the UI thread.
+type Change = Box<dyn FnOnce(&Repo) -> snout_core::Result<()> + Send>;
+
+/// Work on the open repository, off the UI thread; jobs run one at a time, in order.
+struct GitJob {
+    repo: Repo,
+    /// The job reads the repository for the panel again.
+    refresh: bool,
+    work: Box<dyn FnOnce(&Repo) -> Then + Send>,
+}
+
 pub struct Model {
     pub settings: Settings,
     store: Option<Store>,
@@ -282,6 +345,18 @@ pub struct Model {
     /// Opening another project asks the workspace first ([`ModelEvent::Switch`]); off
     /// without a window, as in the model's own tests.
     pub confirm_switch: bool,
+    /// The Git jobs waiting, whether one runs, and whether a refresh waits among them.
+    git_jobs: VecDeque<GitJob>,
+    git_busy: bool,
+    refresh_queued: bool,
+    /// A project opened and waiting for the workspace to switch to it.
+    pending_open: Option<Opened>,
+    /// A draft of the commit message is being started.
+    starting_draft: bool,
+    _open: Option<Task<()>>,
+    _diff: Option<Task<()>>,
+    _commit_diff: Option<Task<()>>,
+    _show_commit: Option<Task<()>>,
 }
 
 impl EventEmitter<ModelEvent> for Model {}
@@ -330,8 +405,20 @@ impl Model {
             fetched_at: None,
             fetch_every: None,
             claude: None,
+            git_jobs: VecDeque::new(),
+            git_busy: false,
+            refresh_queued: false,
+            pending_open: None,
+            starting_draft: false,
+            _open: None,
+            _diff: None,
+            _commit_diff: None,
+            _show_commit: None,
         };
         if let Some(path) = model.settings.current.clone() {
+            // The project is known at once (its tabs come back with the window); its
+            // repository opens off the UI thread.
+            model.project = Some(path.clone());
             model.open_repo(&path, cx);
         }
         model
@@ -365,7 +452,7 @@ impl Model {
     }
 
     pub fn can_draft(&self) -> bool {
-        self.repo.is_some() && self.draft.is_none() && self.commit_scope() != Scope::Nothing
+        self.repo.is_some() && self.draft.is_none() && !self.starting_draft && self.commit_scope() != Scope::Nothing
     }
 
     fn has_tracked_changes(&self) -> bool {
@@ -467,7 +554,7 @@ impl Model {
             self.selected = BTreeSet::from([path.to_owned()]);
             self.anchor = Some(path.to_owned());
         }
-        self.update_diff();
+        self.update_diff(cx);
         if self.selected.len() == 1 {
             cx.emit(ModelEvent::ShowDiff);
         }
@@ -476,20 +563,24 @@ impl Model {
 
     pub fn select_all_files(&mut self, cx: &mut Context<Self>) {
         self.selected = self.visible_files().iter().map(|f| f.path.clone()).collect();
-        self.update_diff();
+        self.update_diff(cx);
         cx.notify();
     }
 
     pub fn set_amend(&mut self, amend: bool, cx: &mut Context<Self>) {
         let had = self.amend;
         self.amend = amend && !self.log.is_empty();
-        if self.amend
-            && !had
-            && self.commit_msg.trim().is_empty()
-            && let Some(repo) = &self.repo
-        {
-            self.commit_msg = repo.last_commit_message().unwrap_or_default();
-            cx.emit(ModelEvent::Message);
+        if self.amend && !had && self.commit_msg.trim().is_empty() {
+            // The message being amended, read off the UI thread.
+            self.queue(cx, |repo| {
+                let message = repo.last_commit_message().unwrap_or_default();
+                Box::new(move |m, cx| {
+                    if m.amend && m.commit_msg.trim().is_empty() {
+                        m.commit_msg = message;
+                        cx.emit(ModelEvent::Message);
+                    }
+                })
+            });
         }
         cx.notify();
     }
@@ -501,15 +592,15 @@ impl Model {
         if let Some(c) = compact {
             self.settings.compact = c;
         }
-        self.update_diff();
-        self.update_commit_diff();
+        self.update_diff(cx);
+        self.update_commit_diff(cx);
         self.persist();
         cx.notify();
     }
 
     pub fn set_diff_base(&mut self, base: snout_core::DiffBase, cx: &mut Context<Self>) {
         self.settings.diff_base = base;
-        self.update_diff();
+        self.update_diff(cx);
         self.persist();
         cx.notify();
     }
@@ -535,99 +626,157 @@ impl Model {
         if let Some(view) = &mut self.commit_view {
             view.selected = Some(path);
         }
-        self.update_commit_diff();
+        self.update_commit_diff(cx);
         cx.notify();
     }
 
     // ----- State ----------------------------------------------------------------------
 
-    /// Open the folder `path` as the project, with the repository found at or above it.
-    /// False when the workspace is asked first (another project is open).
-    fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
-        if self.confirm_switch && self.repo.is_some() {
-            let project = self.host.canonicalize(path).unwrap_or_else(|_| path.to_owned());
-            if self.project.as_ref() != Some(&project) && Repo::open(&self.host, path).is_ok() {
-                cx.emit(ModelEvent::Switch(path.to_owned()));
-                return false;
-            }
-        }
-        match Repo::open(&self.host, path) {
-            Ok(repo) => {
-                let root = repo.root().to_owned();
-                // The folder as opened, in the form Git gives the root (symbolic links
-                // resolved), so paths under the project and under the repository compare.
-                let project = self.host.canonicalize(path).unwrap_or_else(|_| path.to_owned());
-                self.remember(&root, &project);
-                self.settings.current = Some(project.clone());
-                self.project = Some(project);
-                self.github_url = repo.github_url();
-                self.repo = Some(repo);
-                self.selected.clear();
-                self.anchor = None;
-                self.dir_filter = None;
-                self.commit_view = None;
-                self.journal_filter.clear();
-                self.commit_msg.clear();
-                self.amend = false;
-                self.draft = None;
-                self.refresh();
-                self.message = format!("Opened {}", path.display());
-                cx.emit(ModelEvent::Message);
-                // Whatever follows the project (its engine, runs, models) sees the change now.
+    /// Open the folder `path` as the project, with the repository found at or above it, off
+    /// the UI thread. When another project is open, the workspace is asked first
+    /// ([`ModelEvent::Switch`]), and [`Model::switch_project`] finishes the opening.
+    fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let host = self.host.clone();
+        let load = cx.background_executor().spawn({
+            let path = path.to_owned();
+            async move { Opened::load(&host, &path).map_err(|e| e.to_string()) }
+        });
+        self._open = Some(cx.spawn(async move |this, cx| {
+            let opened = load.await;
+            let _ = this.update(cx, |m, cx| {
+                match opened {
+                    Ok(o) if m.confirm_switch && m.repo.is_some() && m.project.as_ref() != Some(&o.project) => {
+                        let asked = o.asked.clone();
+                        m.pending_open = Some(o);
+                        cx.emit(ModelEvent::Switch(asked));
+                    }
+                    Ok(o) => {
+                        m.apply_opened(o, cx);
+                        m.open_pending_file(cx);
+                    }
+                    Err(e) => {
+                        // A project remembered from last time that is gone: none is open.
+                        if m.repo.is_none() {
+                            m.project = None;
+                        }
+                        m.pending_file = None;
+                        m.fail(e, cx);
+                    }
+                }
+                m.persist();
                 cx.notify();
-                true
-            }
-            Err(e) => {
-                self.fail(e.to_string(), cx);
-                false
-            }
+            });
+        }));
+    }
+
+    /// Make `o` the open project.
+    fn apply_opened(&mut self, o: Opened, cx: &mut Context<Self>) {
+        let root = o.repo.root().to_owned();
+        self.remember(&root, &o.project);
+        self.settings.current = Some(o.project.clone());
+        self.project = Some(o.project);
+        self.github_url = o.github_url;
+        self.repo = Some(o.repo);
+        self.git_jobs.clear();
+        self.refresh_queued = false;
+        self.selected.clear();
+        self.anchor = None;
+        self.dir_filter = None;
+        self.commit_view = None;
+        self.journal_filter.clear();
+        self.commit_msg.clear();
+        self.amend = false;
+        self.draft = None;
+        self.apply_snapshot(o.snapshot, cx);
+        self.message = format!("Opened {}", o.asked.display());
+        cx.emit(ModelEvent::Message);
+        // Whatever follows the project (its engine, runs, models) sees the change now.
+        cx.notify();
+    }
+
+    /// The file asked for with the project opens in a tab of it.
+    fn open_pending_file(&mut self, cx: &mut Context<Self>) {
+        if let Some((path, at)) = self.pending_file.clone() {
+            cx.emit(ModelEvent::OpenFile(path, at, false));
         }
     }
 
     /// Open `path` in place of the open project, once the workspace has settled its tabs.
     pub fn switch_project(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
-        let confirm = std::mem::replace(&mut self.confirm_switch, false);
-        let opened = self.open_repo(path, cx);
-        self.confirm_switch = confirm;
-        opened
+        match self.pending_open.take() {
+            Some(o) if o.asked == path => {
+                self.apply_opened(o, cx);
+                self.persist();
+                true
+            }
+            _ => {
+                let confirm = std::mem::replace(&mut self.confirm_switch, false);
+                self.open_repo(path, cx);
+                self.confirm_switch = confirm;
+                false
+            }
+        }
     }
 
     /// Open `path` as the command line names it: `File.java:12` or `File.java:12:5` puts the
     /// caret on that line (and column), from 1.
     pub fn open_arg(&mut self, arg: &Path, cx: &mut Context<Self>) {
-        if !self.host.exists(arg)
-            && let Some((path, at)) = split_line_suffix(&arg.to_string_lossy())
-            && self.host.is_file(&path)
-        {
-            self.open_path(&path, cx);
-            if let Some(pending) = self.pending_file.as_mut() {
-                pending.1 = Some(at);
+        let host = self.host.clone();
+        let arg = arg.to_owned();
+        let look = cx.background_executor().spawn(async move {
+            if !host.exists(&arg)
+                && let Some((path, at)) = split_line_suffix(&arg.to_string_lossy())
+                && host.is_file(&path)
+            {
+                return (path, Some(at));
             }
-            return;
-        }
-        self.open_path(arg, cx);
+            (arg, None)
+        });
+        cx.spawn(async move |this, cx| {
+            let (path, at) = look.await;
+            let _ = this.update(cx, |m, cx| m.open_path_at(&path, at, cx));
+        })
+        .detach();
     }
 
     fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let is_file = self.host.is_file(path);
-        let dir = if is_file { path.parent().unwrap_or(path) } else { path };
-        if let Ok(repo) = Repo::open(&self.host, dir) {
-            // A folder is the project as it is; a file opens in its repository.
-            let project = if is_file { repo.root().to_owned() } else { dir.to_owned() };
-            let opened = self.open_repo(&project, cx);
-            // A file opens in a tab of its repository (once the window is there, or once
-            // the switch to its project is done).
-            if is_file {
-                self.pending_file = Some((path.to_owned(), None));
-                if opened {
-                    cx.emit(ModelEvent::OpenFile(path.to_owned(), None, false));
-                }
+        self.open_path_at(path, None, cx);
+    }
+
+    /// Open the folder `path` as the project, or the file `path` (at `at`) in its repository,
+    /// once the host says which it is.
+    fn open_path_at(&mut self, path: &Path, at: Option<(u32, u32)>, cx: &mut Context<Self>) {
+        let host = self.host.clone();
+        let path = path.to_owned();
+        let look = cx.background_executor().spawn({
+            let path = path.clone();
+            async move {
+                let is_file = host.is_file(&path);
+                let dir = if is_file { path.parent().unwrap_or(&path).to_owned() } else { path.clone() };
+                let root = Repo::open(&host, &dir).ok().map(|r| r.root().to_owned());
+                let is_dir = root.is_some() || host.is_dir(&dir);
+                (is_file, dir, root, is_dir)
             }
-        } else if self.host.is_dir(dir) {
-            self.ask(Dialog::InitRepo(dir.to_owned()), cx);
-        } else {
-            self.fail(format!("{} does not exist", dir.display()), cx);
-        }
+        });
+        cx.spawn(async move |this, cx| {
+            let (is_file, dir, root, is_dir) = look.await;
+            let _ = this.update(cx, |m, cx| {
+                match root {
+                    Some(root) => {
+                        // A folder is the project as it is; a file opens in its repository
+                        // (once the window is there, or once the switch to its project is done).
+                        if is_file {
+                            m.pending_file = Some((path, at));
+                        }
+                        m.open_repo(if is_file { &root } else { &dir }, cx);
+                    }
+                    None if is_dir => m.ask(Dialog::InitRepo(dir), cx),
+                    None => m.fail(format!("{} does not exist", dir.display()), cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Keep the repository at `root` in the list, and `project` (the folder opened) first
@@ -666,15 +815,54 @@ impl Model {
         self.dir_filter = None;
         self.commit_view = None;
         self.draft = None;
-        self.refresh();
+        self.git_jobs.clear();
+        self.refresh_queued = false;
+        self.refresh(cx);
         self.message = format!("Closed {}", repo.root().display());
         cx.emit(ModelEvent::Closed);
         cx.notify();
     }
 
-    pub fn refresh(&mut self) {
-        self.diff_key = None;
+    /// Run `work` on the open repository off the UI thread, after the jobs before it; what
+    /// it hands back runs on the model, if that repository is still open.
+    fn queue(&mut self, cx: &mut Context<Self>, work: impl FnOnce(&Repo) -> Then + Send + 'static) {
+        let Some(repo) = self.repo.clone() else { return };
+        self.git_jobs.push_back(GitJob { repo, refresh: false, work: Box::new(work) });
+        self.pump(cx);
+    }
+
+    /// Start the next Git job, unless one runs.
+    fn pump(&mut self, cx: &mut Context<Self>) {
+        if self.git_busy {
+            return;
+        }
+        let Some(job) = self.git_jobs.pop_front() else { return };
+        if job.refresh {
+            self.refresh_queued = false;
+        }
+        self.git_busy = true;
+        let repo = job.repo.clone();
+        let work = cx.background_executor().spawn(async move { (job.work)(&job.repo) });
+        cx.spawn(async move |this, cx| {
+            let then = work.await;
+            let _ = this.update(cx, |m, cx| {
+                m.git_busy = false;
+                if m.repo.as_ref() == Some(&repo) {
+                    then(m, cx);
+                    m.persist();
+                }
+                m.pump(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Read the repository again, off the UI thread (once, however often it is asked while
+    /// it waits).
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else {
+            self.diff_key = None;
             self.status = Status::default();
             self.branches.clear();
             self.tags.clear();
@@ -685,72 +873,115 @@ impl Model {
             self.diff = None;
             return;
         };
-        match repo.status() {
+        if self.refresh_queued {
+            return;
+        }
+        self.refresh_queued = true;
+        self.git_jobs.push_back(GitJob {
+            repo,
+            refresh: true,
+            work: Box::new(|repo| {
+                let snapshot = Snapshot::read(repo);
+                Box::new(move |m, cx| m.apply_snapshot(snapshot, cx))
+            }),
+        });
+        self.pump(cx);
+    }
+
+    /// Show what the repository holds now.
+    fn apply_snapshot(&mut self, snap: Snapshot, cx: &mut Context<Self>) {
+        self.diff_key = None;
+        let Some(repo) = self.repo.clone() else { return };
+        match snap.status {
             Ok(status) => {
                 let present: BTreeSet<&String> = status.files.iter().map(|f| &f.path).collect();
                 self.selected.retain(|p| present.contains(p));
                 self.status = status;
             }
             Err(e) => {
-                self.log_output(e.to_string(), true);
+                self.log_output(e, true);
                 return;
             }
         }
         let b = &self.status.branch;
         let tracking = b.upstream.is_some().then_some(Tracking { ahead: b.ahead, behind: b.behind });
         self.tracking.insert(repo.root().to_owned(), tracking);
-        let mut errors = Vec::new();
-        self.branches = repo.branches().map_err(|e| errors.push(e.to_string())).unwrap_or_default();
-        self.tags = repo.tags().map_err(|e| errors.push(e.to_string())).unwrap_or_default();
-        self.log = repo.log(LOG_LIMIT).map_err(|e| errors.push(e.to_string())).unwrap_or_default();
-        self.dirs = repo.directories().map_err(|e| errors.push(e.to_string())).unwrap_or_default();
-        for e in errors {
+        self.branches = snap.branches;
+        self.tags = snap.tags;
+        self.log = snap.log;
+        self.dirs = snap.dirs;
+        for e in snap.errors {
             self.log_output(e, true);
         }
         self.graph = snout_core::graph::layout(&self.log);
         if self.dir_filter.as_ref().is_some_and(|d| self.dirs.binary_search(d).is_err()) {
             self.dir_filter = None;
         }
-        self.update_diff();
+        self.update_diff(cx);
         self.persist();
     }
 
-    fn update_diff(&mut self) {
+    /// Show the selected file's diff: read off the UI thread, the one shown stays until it is in.
+    fn update_diff(&mut self, cx: &mut Context<Self>) {
         let entry = (self.selected.len() == 1)
             .then(|| self.status.files.iter().find(|f| self.selected.contains(&f.path)))
             .flatten();
-        let Some(entry) = entry else {
+        let Some(entry) = entry.cloned() else {
             self.diff_key = None;
             self.diff = None;
+            self._diff = None;
             return;
         };
         let key = (entry.path.clone(), self.settings.diff_base, self.settings.compact);
         if self.diff_key.as_ref() == Some(&key) {
             return;
         }
-        let Some(repo) = &self.repo else { return };
-        self.diff = Some(
-            repo.file_diff(entry, self.settings.diff_base)
-                .map(|d| std::rc::Rc::new(DiffLayout::new(d, self.settings.compact)))
-                .map_err(|e| e.to_string()),
-        );
-        self.diff_key = Some(key);
+        let Some(repo) = self.repo.clone() else { return };
+        self.diff_key = Some(key.clone());
+        let (base, compact) = (self.settings.diff_base, self.settings.compact);
+        let read = cx.background_executor().spawn(async move {
+            repo.file_diff(&entry, base).map(|d| DiffLayout::new(d, compact)).map_err(|e| e.to_string())
+        });
+        self._diff = Some(cx.spawn(async move |this, cx| {
+            let diff = read.await;
+            let _ = this.update(cx, |m, cx| {
+                if m.diff_key.as_ref() == Some(&key) {
+                    m.diff = Some(diff.map(std::rc::Rc::new));
+                    cx.notify();
+                }
+            });
+        }));
     }
 
-    fn update_commit_diff(&mut self) {
+    /// Show the diff of the commit view's file, read off the UI thread.
+    fn update_commit_diff(&mut self, cx: &mut Context<Self>) {
         let compact = self.settings.compact;
         let Some(view) = &mut self.commit_view else { return };
         let Some(file) = view.selected_file().cloned() else {
             view.diff = None;
             return;
         };
-        let (Some(repo), Ok(details)) = (&self.repo, &view.details) else { return };
-        let parent = details.parents.first().map(String::as_str);
-        view.diff = Some(
-            repo.commit_file_diff(&details.id, parent, &file)
-                .map(|d| std::rc::Rc::new(DiffLayout::new(d, compact)))
-                .map_err(|e| e.to_string()),
-        );
+        let (Some(repo), Ok(details)) = (self.repo.clone(), &view.details) else { return };
+        let (id, parent) = (details.id.clone(), details.parents.first().cloned());
+        let read = cx.background_executor().spawn({
+            let id = id.clone();
+            async move {
+                repo.commit_file_diff(&id, parent.as_deref(), &file)
+                    .map(|d| (file.path, DiffLayout::new(d, compact)))
+                    .map_err(|e| e.to_string())
+            }
+        });
+        let path = view.selected.clone();
+        self._commit_diff = Some(cx.spawn(async move |this, cx| {
+            let diff = read.await;
+            let _ = this.update(cx, |m, cx| {
+                let Some(view) = m.commit_view.as_mut().filter(|v| v.id() == Some(&id) && v.selected == path) else {
+                    return;
+                };
+                view.diff = Some(diff.map(|(_, d)| std::rc::Rc::new(d)));
+                cx.notify();
+            });
+        }));
     }
 
     pub fn log_output(&mut self, text: String, error: bool) {
@@ -834,7 +1065,7 @@ impl Model {
                 None => self.fail(format!("{label} failed:\n{e}"), cx),
             },
         }
-        self.refresh();
+        self.refresh(cx);
         cx.notify();
     }
 
@@ -855,40 +1086,49 @@ impl Model {
         self.done(format!("Found {} repositories in {} ({added} new)", repos.len(), root.display()));
     }
 
+    /// Have Claude draft the commit message: the patch is read, `claude` found and started
+    /// off the UI thread.
     fn start_draft(&mut self, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else { return };
-        let Some(program) =
-            self.claude.clone().or_else(|| self.settings.claude_path.clone()).or_else(|| find_claude(&*self.host))
-        else {
-            return self.fail(
-                "Claude Code was not found. Install it from https://docs.claude.com/en/docs/claude-code.".into(),
-                cx,
-            );
-        };
-        let patch = match repo.commit_patch(self.amend, &self.commit_scope().paths()) {
-            Ok(patch) => patch,
-            Err(e) => return self.fail(e.to_string(), cx),
-        };
+        let known = self.claude.clone().or_else(|| self.settings.claude_path.clone());
+        let (amend, paths) = (self.amend, self.commit_scope().paths());
         // When amending, the last subject is the one being rewritten.
         let recent: Vec<&str> =
             self.log.iter().skip(usize::from(self.amend)).take(12).map(|c| c.summary.as_str()).collect();
         let prompt = draft_prompt(&recent, &self.commit_msg, self.amend);
-        match Draft::start(&**repo.host(), &program, repo.root(), &prompt, &patch, || {}) {
-            Ok(draft) => {
-                self.draft = Some(draft);
-                self.message = "Claude is drafting the commit message…".into();
-                self._draft_poll = Some(cx.spawn(async move |this, cx| {
-                    loop {
-                        cx.background_executor().timer(Duration::from_millis(100)).await;
-                        let Ok(done) = this.update(cx, |m, cx| m.poll_draft(cx)) else { return };
-                        if done {
-                            return;
-                        }
+        self.starting_draft = true;
+        let start = cx.background_executor().spawn(async move {
+            let Some(program) = known.or_else(|| find_claude(&**repo.host())) else {
+                return Err("Claude Code was not found. Install it from https://docs.claude.com/en/docs/claude-code."
+                    .to_owned());
+            };
+            let patch = repo.commit_patch(amend, &paths).map_err(|e| e.to_string())?;
+            Draft::start(&**repo.host(), &program, repo.root(), &prompt, &patch, || {})
+        });
+        cx.spawn(async move |this, cx| {
+            let started = start.await;
+            let _ = this.update(cx, |m, cx| {
+                m.starting_draft = false;
+                match started {
+                    Ok(draft) => {
+                        m.draft = Some(draft);
+                        m.message = "Claude is drafting the commit message…".into();
+                        m._draft_poll = Some(cx.spawn(async move |this, cx| {
+                            loop {
+                                cx.background_executor().timer(Duration::from_millis(100)).await;
+                                let Ok(done) = this.update(cx, |m, cx| m.poll_draft(cx)) else { return };
+                                if done {
+                                    return;
+                                }
+                            }
+                        }));
                     }
-                }));
-            }
-            Err(e) => self.fail(e, cx),
-        }
+                    Err(e) => m.fail(e, cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Take in the draft's result if there is one; whether the draft is over.
@@ -935,7 +1175,7 @@ impl Model {
                     let open = m.repo.as_ref().is_some_and(|r| r.root() == path);
                     m.tracking.insert(path.clone(), tracking);
                     if fetch && open && m.job.is_none() {
-                        m.refresh(); // its remote branches may have moved too
+                        m.refresh(cx); // its remote branches may have moved too
                     }
                     cx.notify();
                 });
@@ -972,16 +1212,20 @@ impl Model {
     fn run(&mut self, action: Action, cx: &mut Context<Self>) {
         let repo = self.repo.clone();
         let host = self.host.clone();
-        let local = |m: &mut Self, label: &str, r: snout_core::Result<()>, cx: &mut Context<Self>| {
-            match r {
-                Ok(()) => m.done(label),
-                Err(e) => m.fail(e.to_string(), cx),
-            }
-            m.refresh();
+        // A change to the repository, made off the UI thread; the panel is read again after it.
+        let local = |m: &mut Self, label: String, op: Change, cx: &mut Context<Self>| {
+            m.queue(cx, move |repo| {
+                let r = op(repo).map_err(|e| e.to_string());
+                Box::new(move |m, cx| match r {
+                    Ok(()) => m.done(label),
+                    Err(e) => m.fail(e, cx),
+                })
+            });
+            m.refresh(cx);
         };
         match action {
             Action::Refresh => {
-                self.refresh();
+                self.refresh(cx);
                 self.message = "Refreshed".into();
                 self.survey(true, cx);
             }
@@ -993,14 +1237,25 @@ impl Model {
             Action::ShowNewProject => cx.emit(ModelEvent::NewProject),
             Action::PickFolder => self.pick_folder("Open project", Action::OpenPath, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
-            Action::InitRepo(path) => match Repo::init(&self.host, &path) {
-                Ok(repo) => {
-                    let root = repo.root().to_owned();
-                    self.open_repo(&root, cx);
-                    self.done(format!("Initialized repository in {}", root.display()));
-                }
-                Err(e) => self.fail(e.to_string(), cx),
-            },
+            Action::InitRepo(path) => {
+                let init = cx.background_executor().spawn(async move {
+                    Repo::init(&host, &path).map(|r| r.root().to_owned()).map_err(|e| e.to_string())
+                });
+                cx.spawn(async move |this, cx| {
+                    let root = init.await;
+                    let _ = this.update(cx, |m, cx| {
+                        match root {
+                            Ok(root) => {
+                                m.open_repo(&root, cx);
+                                m.done(format!("Initialized repository in {}", root.display()));
+                            }
+                            Err(e) => m.fail(e, cx),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+            }
             Action::PickScanFolder => self.pick_folder("Find repositories in folder", Action::Scan, cx),
             Action::Scan(root) => self.spawn("Searching for repositories", cx, move || {
                 let repos = snout_core::find_repos(&*host, &root, SCAN_DEPTH);
@@ -1053,13 +1308,13 @@ impl Model {
             _ if repo.is_none() => {}
             Action::Stage(paths) => {
                 let n = paths.len();
-                local(self, &format!("Staged {n} file(s)"), repo.unwrap().stage(&paths), cx);
+                local(self, format!("Staged {n} file(s)"), Box::new(move |r| r.stage(&paths)), cx);
             }
-            Action::Unstage(paths) => local(self, "Unstaged", repo.unwrap().unstage(&paths), cx),
+            Action::Unstage(paths) => local(self, "Unstaged".into(), Box::new(move |r| r.unstage(&paths)), cx),
             Action::AskDiscard(entries) => self.ask(Dialog::ConfirmDiscard(entries), cx),
             Action::Discard(entries) => {
                 let n = entries.len();
-                local(self, &format!("Discarded {n} file(s)"), repo.unwrap().discard(&entries), cx);
+                local(self, format!("Discarded {n} file(s)"), Box::new(move |r| r.discard(&entries)), cx);
             }
             Action::AskDeleteFiles(entries) => {
                 let entries: Vec<FileEntry> = entries.into_iter().filter(on_disk).collect();
@@ -1074,22 +1329,26 @@ impl Model {
                 } else {
                     format!("Deleted {n} file(s)")
                 };
-                local(self, &label, repo.unwrap().delete_files(&entries, true), cx);
+                local(self, label, Box::new(move |r| r.delete_files(&entries, true)), cx);
             }
             Action::Commit => {
                 if !self.can_commit() {
                     return;
                 }
-                match repo.unwrap().commit(&self.commit_msg, self.amend, &self.commit_scope().paths()) {
-                    Ok(summary) => {
-                        self.done(format!("Committed {summary}"));
-                        self.commit_msg.clear();
-                        self.amend = false;
-                        self.refresh();
-                        cx.emit(ModelEvent::Message);
-                    }
-                    Err(e) => self.fail(e.to_string(), cx),
-                }
+                let (message, amend, paths) = (self.commit_msg.clone(), self.amend, self.commit_scope().paths());
+                self.queue(cx, move |repo| {
+                    let r = repo.commit(&message, amend, &paths).map_err(|e| e.to_string());
+                    Box::new(move |m, cx| match r {
+                        Ok(summary) => {
+                            m.done(format!("Committed {summary}"));
+                            m.commit_msg.clear();
+                            m.amend = false;
+                            cx.emit(ModelEvent::Message);
+                        }
+                        Err(e) => m.fail(e, cx),
+                    })
+                });
+                self.refresh(cx);
             }
             Action::DraftMessage => {
                 if self.can_draft() {
@@ -1110,24 +1369,27 @@ impl Model {
                 }
             }
             Action::Checkout(target, mode) => {
-                match repo.unwrap().checkout(&target, mode) {
-                    Ok(outcome) => {
-                        self.log_output(outcome.output, false);
-                        self.done(format!("Checked out {}", target.label()));
-                        if let Some(warning) = outcome.warning {
-                            self.log_output(warning.clone(), true);
-                            let title = "Local changes conflicted".into();
-                            self.ask(Dialog::Info { title, text: warning, mood: Mood::Warning }, cx);
+                self.queue(cx, move |repo| {
+                    let r = repo.checkout(&target, mode).map_err(|e| e.to_string());
+                    Box::new(move |m, cx| match r {
+                        Ok(outcome) => {
+                            m.log_output(outcome.output, false);
+                            m.done(format!("Checked out {}", target.label()));
+                            if let Some(warning) = outcome.warning {
+                                m.log_output(warning.clone(), true);
+                                let title = "Local changes conflicted".into();
+                                m.ask(Dialog::Info { title, text: warning, mood: Mood::Warning }, cx);
+                            }
                         }
-                    }
-                    Err(e) => self.fail(e.to_string(), cx),
-                }
-                self.refresh();
+                        Err(e) => m.fail(e, cx),
+                    })
+                });
+                self.refresh(cx);
             }
             Action::ShowNewBranch(start) => self.ask(Dialog::NewBranch(start), cx),
             Action::CreateBranch { name, start, checkout } => {
-                let r = repo.unwrap().create_branch(&name, start.as_deref(), checkout);
-                local(self, &format!("Created branch {name}"), r, cx);
+                let label = format!("Created branch {name}");
+                local(self, label, Box::new(move |r| r.create_branch(&name, start.as_deref(), checkout)), cx);
             }
             Action::AskDeleteBranch(b) => {
                 let dialog = match b.kind {
@@ -1149,12 +1411,19 @@ impl Model {
                 self.ask(dialog, cx);
             }
             Action::DeleteBranch { name, force, upstream } => {
-                let deleted = repo.unwrap().delete_branch(&name, force);
-                let ok = deleted.is_ok();
-                local(self, &format!("Deleted branch {name}"), deleted, cx);
-                if let Some(upstream) = upstream.filter(|_| ok) {
-                    self.run(Action::DeleteRemoteBranch(upstream), cx);
-                }
+                self.queue(cx, move |repo| {
+                    let r = repo.delete_branch(&name, force).map_err(|e| e.to_string());
+                    Box::new(move |m, cx| match r {
+                        Ok(()) => {
+                            m.done(format!("Deleted branch {name}"));
+                            if let Some(upstream) = upstream {
+                                m.run(Action::DeleteRemoteBranch(upstream), cx);
+                            }
+                        }
+                        Err(e) => m.fail(e, cx),
+                    })
+                });
+                self.refresh(cx);
             }
             Action::DeleteRemoteBranch(r) => {
                 let repo = repo.unwrap();
@@ -1178,18 +1447,21 @@ impl Model {
             Action::ResetToUpstream => {
                 let upstream = self.status.branch.upstream.clone().unwrap_or_default();
                 let head = self.status.branch.head.clone().unwrap_or_default();
-                match repo.unwrap().reset_to_upstream() {
-                    Ok(backup) => {
-                        self.done(format!("Reset {head} to {upstream}"));
-                        let text = format!(
-                            "Your previous commits are kept on the branch {backup}. Delete it once you no longer need them."
-                        );
-                        let title = format!("{head} now matches {upstream}");
-                        self.ask(Dialog::Info { title, text, mood: Mood::Done }, cx);
-                    }
-                    Err(e) => self.fail(e.to_string(), cx),
-                }
-                self.refresh();
+                self.queue(cx, move |repo| {
+                    let r = repo.reset_to_upstream().map_err(|e| e.to_string());
+                    Box::new(move |m, cx| match r {
+                        Ok(backup) => {
+                            m.done(format!("Reset {head} to {upstream}"));
+                            let text = format!(
+                                "Your previous commits are kept on the branch {backup}. Delete it once you no longer need them."
+                            );
+                            let title = format!("{head} now matches {upstream}");
+                            m.ask(Dialog::Info { title, text, mood: Mood::Done }, cx);
+                        }
+                        Err(e) => m.fail(e, cx),
+                    })
+                });
+                self.refresh(cx);
             }
             Action::Push => {
                 let repo = repo.unwrap();
@@ -1202,14 +1474,20 @@ impl Model {
             }
             Action::ShowCommit(rev) => {
                 let repo = repo.unwrap();
-                let details = repo.commit_details(&rev).map_err(|e| e.to_string());
-                let selected = details.as_ref().ok().and_then(|d| d.files.first()).map(|f| f.path.clone());
-                if let Ok(d) = &details {
-                    self.message = format!("Commit {} {}", d.short_id, d.summary());
-                }
-                self.commit_view = Some(CommitView { details, selected, diff: None });
-                self.update_commit_diff();
-                cx.emit(ModelEvent::ShowCommit);
+                let read = cx.background_executor().spawn(async move { repo.commit_details(&rev) });
+                self._show_commit = Some(cx.spawn(async move |this, cx| {
+                    let details = read.await.map_err(|e| e.to_string());
+                    let _ = this.update(cx, |m, cx| {
+                        let selected = details.as_ref().ok().and_then(|d| d.files.first()).map(|f| f.path.clone());
+                        if let Ok(d) = &details {
+                            m.message = format!("Commit {} {}", d.short_id, d.summary());
+                        }
+                        m.commit_view = Some(CommitView { details, selected, diff: None });
+                        m.update_commit_diff(cx);
+                        cx.emit(ModelEvent::ShowCommit);
+                        cx.notify();
+                    });
+                }));
             }
             Action::CloseCommit => {
                 self.commit_view = None;

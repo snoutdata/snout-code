@@ -188,22 +188,27 @@ mod shots {
             })
             .unwrap();
         let ws = ws.unwrap();
+        // The repository opens off the UI thread.
+        cx.allow_parking();
+        cx.run_until_parked();
         cx.update_window(handle.into(), |_, window, cx| {
             ws.update(cx, |w, cx| w.show_activity(activity, window, cx));
         })
         .unwrap();
         if !matches!(select, Some(Select::Nothing)) {
             cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+            cx.run_until_parked();
         }
         match select {
             Some(Select::File(path)) => cx.update(|cx| model.update(cx, |m, cx| m.click_file(path, false, false, cx))),
-            Some(Select::Commit(summary, file)) => cx.update(|cx| {
-                let id = model.read(cx).log.iter().find(|c| c.summary == summary).unwrap().id.clone();
-                model.update(cx, |m, cx| {
-                    m.handle(Action::ShowCommit(id), cx);
-                    m.select_commit_file(file.into(), cx);
-                })
-            }),
+            Some(Select::Commit(summary, file)) => {
+                cx.update(|cx| {
+                    let id = model.read(cx).log.iter().find(|c| c.summary == summary).unwrap().id.clone();
+                    model.update(cx, |m, cx| m.handle(Action::ShowCommit(id), cx));
+                });
+                cx.run_until_parked();
+                cx.update(|cx| model.update(cx, |m, cx| m.select_commit_file(file.into(), cx)));
+            }
             Some(Select::Console) => {
                 let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
                 let fake = repo.join("fake-claude");
@@ -223,6 +228,7 @@ mod shots {
                 std::fs::write(&file, GREETER_V2).unwrap();
                 std::fs::write(repo.join("build.gradle.kts"), "plugins {\n    java\n}\n").unwrap();
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+                cx.run_until_parked();
                 let open =
                     |cx: &mut HeadlessAppContext, a: Action| cx.update(|cx| model.update(cx, |m, cx| m.handle(a, cx)));
                 open(&mut cx, Action::OpenFile(repo.join("build.gradle.kts"), None));

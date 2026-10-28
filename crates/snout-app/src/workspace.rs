@@ -390,7 +390,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() && this.model.read(cx).job.is_none() {
                     this.model.update(cx, |m, cx| {
-                        m.refresh();
+                        m.refresh(cx);
                         m.survey(true, cx);
                         cx.notify();
                     });
