@@ -78,6 +78,9 @@ pub struct Settings {
     pub plain_files: bool,
     /// When each project was last opened (seconds since 1970), for the Welcome page.
     pub opened: std::collections::BTreeMap<PathBuf, u64>,
+    /// Each recent project's editor tabs as it left them (the center of the dock layout),
+    /// to open them again with the project.
+    pub sessions: std::collections::BTreeMap<PathBuf, serde_json::Value>,
 }
 
 impl Default for Settings {
@@ -107,6 +110,7 @@ impl Default for Settings {
             follow_claude: true,
             plain_files: false,
             opened: Default::default(),
+            sessions: Default::default(),
         }
     }
 }
@@ -130,9 +134,21 @@ impl Store {
     }
 
     /// The saved settings; on a first launch, those of the earlier app; else the defaults.
+    ///
+    /// A file written by another build loads as far as this build can read it: a field it
+    /// cannot read (a value of another shape, an unknown choice) takes its default and the
+    /// rest is kept. A file that is not JSON at all is copied aside first
+    /// (`settings.json.unreadable`), so the next save does not lose it.
     pub fn load(&self) -> Settings {
         if let Ok(text) = std::fs::read_to_string(&self.file) {
-            return serde_json::from_str(&text).unwrap_or_default();
+            return match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(value) => migrate(lenient(value)),
+                Err(e) => {
+                    eprintln!("[settings] {} is not JSON ({e}); starting from the defaults", self.file.display());
+                    let _ = std::fs::copy(&self.file, self.file.with_extension("json.unreadable"));
+                    Settings::default()
+                }
+            };
         }
         std::fs::read_to_string(&self.legacy).ok().and_then(|text| import_legacy(&text)).unwrap_or_default()
     }
@@ -148,6 +164,69 @@ impl Store {
         std::fs::write(&tmp, text)?;
         std::fs::rename(tmp, &self.file)
     }
+}
+
+/// `value` as a `T`, as far as it can be read: each field that does not fit `T` (and each
+/// element of a list that does not) is left out, so it takes its default. Unknown fields
+/// are ignored.
+pub fn lenient<T: Serialize + serde::de::DeserializeOwned + Default>(value: serde_json::Value) -> T {
+    use serde_json::Value;
+    if let Ok(t) = serde_json::from_value(value.clone()) {
+        return t;
+    }
+    let Value::Object(fields) = value else { return T::default() };
+    let Ok(Value::Object(mut base)) = serde_json::to_value(T::default()) else { return T::default() };
+    let fits = |map: &serde_json::Map<String, Value>| serde_json::from_value::<T>(Value::Object(map.clone())).is_ok();
+    for (key, v) in fields {
+        let before = base.insert(key.clone(), v.clone());
+        if fits(&base) {
+            continue;
+        }
+        // A list: keep the elements that can be read.
+        let kept = match v {
+            Value::Array(items) => items
+                .into_iter()
+                .filter(|item| {
+                    base.insert(key.clone(), Value::Array(vec![item.clone()]));
+                    fits(&base)
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        base.insert(key.clone(), Value::Array(kept));
+        if !fits(&base) {
+            match before {
+                Some(old) => base.insert(key, old),
+                None => base.remove(&key),
+            };
+        }
+    }
+    serde_json::from_value(Value::Object(base)).unwrap_or_default()
+}
+
+/// Settings written by an earlier build, brought up to this one's meaning of them.
+fn migrate(mut s: Settings) -> Settings {
+    // Sizes out of range (a hand edit, or a build that allowed more) come back within it.
+    let defaults = Settings::default();
+    if !(crate::editor::FONT_MIN..=crate::editor::FONT_MAX).contains(&s.editor_font_size) {
+        s.editor_font_size = defaults.editor_font_size;
+    }
+    if !(10.0..=20.0).contains(&s.ui_font_size) {
+        s.ui_font_size = defaults.ui_font_size;
+    }
+    if !(1..=8).contains(&s.tab_size) {
+        s.tab_size = defaults.tab_size;
+    }
+    if s.fetch_minutes == 0 {
+        s.fetch_minutes = defaults.fetch_minutes;
+    }
+    if s.ui_font.trim().is_empty() {
+        s.ui_font = defaults.ui_font;
+    }
+    if s.editor_font.trim().is_empty() {
+        s.editor_font = defaults.editor_font;
+    }
+    s
 }
 
 /// eframe keeps a RON map of keys to RON strings; the app's settings are under "app", in

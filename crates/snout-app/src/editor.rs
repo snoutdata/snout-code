@@ -200,6 +200,8 @@ pub enum EditorEvent {
     Reloaded(String),
     /// A new file Claude proposed was rejected: the tab has nothing left to show.
     Discarded,
+    /// The caret moved (the session remembers where it is).
+    CaretMoved,
 }
 
 pub struct EditorPanel {
@@ -275,6 +277,10 @@ pub struct EditorPanel {
     _hints: Option<Task<()>>,
     /// The Spring mark under the pointer: its line, where the pointer is, and what it says.
     pub gutter_tip: Option<(u32, gpui::Point<Pixels>, String)>,
+    /// Where the caret was when last looked at, to tell when it moves.
+    caret_seen: usize,
+    /// How far down a restored tab's view was, until it has been laid out to scroll there.
+    pending_scroll: Option<f32>,
     focus: FocusHandle,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -324,9 +330,14 @@ impl EditorPanel {
             }),
             // The caret moved or the text changed: find the brackets again, and let the
             // signature help go once the caret leaves its line.
-            cx.observe(&state, |this, _, cx| {
+            cx.observe(&state, |this, state, cx| {
                 this.match_brackets(cx);
                 this.follow_signature(cx);
+                let caret = state.read(cx).cursor();
+                if caret != this.caret_seen {
+                    this.caret_seen = caret;
+                    cx.emit(EditorEvent::CaretMoved);
+                }
             }),
             // The server forgets the document with its last tab.
             cx.on_release(|this, cx| this.detach_lang(cx)),
@@ -395,6 +406,8 @@ impl EditorPanel {
             hints: Rc::new(Vec::new()),
             _hints: None,
             gutter_tip: None,
+            caret_seen: 0,
+            pending_scroll: None,
             focus: cx.focus_handle(),
             _poll: poll,
             _subscriptions: subscriptions,
@@ -725,6 +738,19 @@ impl EditorPanel {
     }
 
     /// Put the caret on `line` (from 0), at `column`, and give the editor the keyboard.
+    /// Put the caret on `line` and `column` (from 0) and the view's top `scroll` pixels down,
+    /// as a saved session had them, without taking the keyboard.
+    pub fn restore_view(&mut self, line: u32, column: u32, scroll: f32, cx: &mut Context<Self>) {
+        self.state.update(cx, |s, cx| {
+            let offset = s.text().position_to_offset(&Position::new(line, column));
+            s.set_selected_range(offset..offset, cx);
+        });
+        self.caret_seen = self.state.read(cx).cursor();
+        // The view scrolls once it has been laid out (see `render`).
+        self.pending_scroll = Some(scroll);
+        cx.notify();
+    }
+
     pub fn go_to(&mut self, line: u32, column: u32, window: &mut Window, cx: &mut Context<Self>) {
         self.state.update(cx, |s, cx| {
             s.set_cursor_position(Position::new(line, column), window, cx);
@@ -888,12 +914,19 @@ impl gpui_component::dock::BasePanel for EditorPanel {
         PANEL_NAME
     }
 
-    fn dump(&self, _: &App) -> PanelState {
+    fn dump(&self, cx: &App) -> PanelState {
         let mut state = PanelState::new(PANEL_NAME);
-        let info = match &self.class_file {
+        let mut info = match &self.class_file {
             Some((uri, root)) => serde_json::json!({ "path": self.path, "classFile": uri.as_str(), "root": root }),
             None => serde_json::json!({ "path": self.path }),
         };
+        // Where the caret and the view were, to come back to them.
+        let s = self.state.read(cx);
+        let at = s.cursor_position();
+        info["line"] = at.line.into();
+        info["column"] = at.character.into();
+        let scroll = self.pending_scroll.unwrap_or(f32::from(-s.scroll_offset().y));
+        info["scroll"] = scroll.max(0.).round().into();
         state.info = PanelInfo::panel(info);
         state
     }
@@ -929,6 +962,19 @@ pub fn saved_path(state: &PanelState) -> Option<PathBuf> {
     }
 }
 
+/// Where the caret (line and column, from 0) and the view's top (in pixels) were in an
+/// editor tab of a saved layout.
+pub fn saved_view(state: &PanelState) -> Option<(u32, u32, f32)> {
+    match &state.info {
+        PanelInfo::Panel(v) => {
+            let n = |k: &str| v.get(k).and_then(|n| n.as_u64()).and_then(|n| u32::try_from(n).ok());
+            let scroll = v.get("scroll").and_then(|s| s.as_f64()).unwrap_or(0.) as f32;
+            Some((n("line")?, n("column").unwrap_or(0), scroll.max(0.)))
+        }
+        _ => None,
+    }
+}
+
 /// The class file (its URI and build) an editor tab in a saved layout showed.
 pub fn saved_class_file(state: &PanelState) -> Option<(lsp_types::Uri, PathBuf)> {
     use std::str::FromStr as _;
@@ -944,6 +990,11 @@ pub fn saved_class_file(state: &PanelState) -> Option<(lsp_types::Uri, PathBuf)>
 
 impl Render for EditorPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.state.read(cx).line_height().is_some()
+            && let Some(scroll) = self.pending_scroll.take()
+        {
+            self.state.update(cx, |s, cx| s.set_scroll_offset(gpui::point(px(0.), px(-scroll)), cx));
+        }
         let p = palette(cx);
         let _ = &self.focus;
         let reviewing = self.review.is_some();

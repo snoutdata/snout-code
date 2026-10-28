@@ -221,8 +221,13 @@ pub struct ProjectSettings {
 }
 
 impl ProjectSettings {
+    /// The saved settings, as far as this build can read them (see [`crate::settings::lenient`]).
     pub fn load(file: &Path) -> Self {
-        std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        std::fs::read_to_string(file)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .map(crate::settings::lenient)
+            .unwrap_or_default()
     }
 
     pub fn save(&self, file: &Path) -> std::io::Result<()> {

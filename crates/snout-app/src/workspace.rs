@@ -32,6 +32,7 @@ use crate::theme::{self, palette};
 
 mod lang_ui;
 mod run_ui;
+pub mod session;
 mod stripes;
 mod title;
 pub use stripes::{STRIPE_W, Tool, active_in};
@@ -97,6 +98,10 @@ pub struct Workspace {
     pub config_dialog: Option<Entity<crate::run::config_dialog::ConfigDialog>>,
     /// Claude Code's connection to this window, when the app runs one.
     pub claude: Option<crate::claude_ide::bridge::Bridge>,
+    /// Every panel the window made, and where it goes when a layout does not place it.
+    panels: Vec<(Arc<dyn BasePanelView>, DockPlacement)>,
+    /// The project whose tabs show.
+    shown: Option<PathBuf>,
     _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -147,22 +152,31 @@ fn default_layout(
     });
 }
 
-/// Put back the layout saved last time, with the panels this window already made; a
-/// panel the saved layout lacks (one added since) goes to its usual place. False when
-/// the saved layout cannot be used. Editor tabs open their files again; they come back too.
+/// Put back the layout `state` (saved last time, or a project's tabs over the layout as it
+/// is), with the panels this window already made; a panel the saved layout lacks (one
+/// added since) goes to its usual place. What this build cannot place is left out first:
+/// a panel it no longer has, a file deleted since, a tab of a project other than
+/// `project` (see [`session::sanitize`]). False when the saved layout cannot be used.
+/// Editor tabs open their files again, the caret and the view where they were; they come
+/// back too.
 fn restore_layout(
     dock: &Entity<DockArea>,
     state: serde_json::Value,
     panels: &[(Arc<dyn BasePanelView>, DockPlacement)],
+    project: Option<&std::path::Path>,
     window: &mut Window,
     cx: &mut App,
 ) -> (bool, Vec<Entity<EditorPanel>>) {
-    let Ok(state) = serde_json::from_value::<DockAreaState>(state) else { return (false, Vec::new()) };
-    if state.version != Some(LAYOUT_VERSION) {
+    if state.get("version").and_then(|v| v.as_u64()) != Some(LAYOUT_VERSION as u64) {
         return (false, Vec::new());
     }
     let pool: HashMap<&'static str, Arc<dyn BasePanelView>> =
         panels.iter().map(|(view, _)| (view.panel_name(cx), view.clone())).collect();
+    let names: std::collections::HashSet<String> = pool.keys().map(|n| n.to_string()).collect();
+    let keep = session::Keep { panels: &names, editor: crate::editor::PANEL_NAME, project };
+    let Ok(state) = serde_json::from_value::<DockAreaState>(session::sanitize(state, &keep)) else {
+        return (false, Vec::new());
+    };
     for name in pool.keys().copied() {
         register_panel(cx, name, move |_, _, cx| cx.global::<PanelPool>().0[name].clone());
     }
@@ -177,6 +191,8 @@ fn restore_layout(
         if let Some((uri, root)) = class_file {
             let loading = "// Loading the class from the Java server…\n".to_owned();
             editor.update(cx, |e, cx| e.show_class_file(uri, root, loading, window, cx));
+        } else if let Some((line, column, scroll)) = crate::editor::saved_view(ctx.state()) {
+            editor.update(cx, |e, cx| e.restore_view(line, column, scroll, cx));
         }
         cx.global_mut::<PanelPool>().1.push(editor.clone());
         panel_handle(editor)
@@ -191,8 +207,10 @@ fn restore_layout(
         // A layout saved before the right stripe's tool windows has no right dock: they
         // join one that starts hidden.
         let had_right = d.has_dock(DockPlacement::Right);
+        // The Welcome page only fills a center the layout left empty.
+        let center_empty = d.layout(DockPlacement::Center).is_none_or(|t| t.panels().next().is_none());
         for (view, place) in panels {
-            if d.panel(view.panel_id(cx)).is_none() {
+            if d.panel(view.panel_id(cx)).is_none() && (*place != DockPlacement::Center || center_empty) {
                 d.add_panel_view(view.clone(), *place, None, window, cx);
             }
         }
@@ -278,12 +296,20 @@ impl Workspace {
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
 
         let saved = model.read(cx).settings.dock.clone();
-        let restored = match saved {
-            Some(state) => restore_layout(&dock, state, &panels, window, cx),
+        let root = model.read(cx).project_root();
+        let restored = match saved.clone() {
+            Some(state) => restore_layout(&dock, state, &panels, root.as_deref(), window, cx),
             None => (false, Vec::new()),
         };
+        // A layout this build cannot use (an earlier build's) gives way to the usual one;
+        // the project's files it had open open again in it.
+        let mut reopen = Vec::new();
         if !restored.0 {
             default_layout(&dock, &panels, window, cx);
+            if let (Some(saved), Some(root)) = (&saved, &root) {
+                reopen = session::editor_files(saved, crate::editor::PANEL_NAME);
+                reopen.retain(|p| p.is_file() && p.starts_with(root));
+            }
         }
         let open = model.read(cx).settings.console_open;
         dock.update(cx, |d, cx| {
@@ -295,7 +321,15 @@ impl Workspace {
         });
 
         let subscriptions = vec![
-            cx.observe(&model, |this, model, cx| {
+            cx.observe_in(&model, window, |this, model, window, cx| {
+                // A project opened with none open before: its tabs come back.
+                let root = model.read(cx).project_root();
+                if root != this.shown {
+                    let was = std::mem::replace(&mut this.shown, root.clone());
+                    if was.is_none() && root.is_some() {
+                        this.load_session(window, cx);
+                    }
+                }
                 // A new commit (or another branch): the editors' gutters compare with it.
                 let head = model.read(cx).log.first().map(|c| c.id.clone());
                 if head != this.head {
@@ -307,8 +341,9 @@ impl Workspace {
                 this.ensure_project_server(cx);
                 cx.notify()
             }),
-            cx.subscribe(&dock, |this, _, e: &DockEvent, cx| {
+            cx.subscribe_in(&dock, window, |this, _, e: &DockEvent, window, cx| {
                 if matches!(e, DockEvent::LayoutChanged) {
+                    this.keep_welcome(window, cx);
                     this.save_layout_soon(cx);
                 }
             }),
@@ -380,22 +415,24 @@ impl Workspace {
             welcome,
             config_dialog: None,
             claude: None,
+            panels,
+            shown: root.clone(),
             _save_layout: None,
             _subscriptions: subscriptions,
         };
         crate::claude_ide::bridge::start(&mut this, window, cx);
-        // The Welcome page does not stay beside files the layout brings back.
-        if !restored.1.is_empty() {
-            let welcome = this.welcome.clone();
-            this.dock.update(cx, |d, cx| d.remove_panel(welcome, window, cx));
+        this.model.update(cx, |m, _| m.confirm_switch = true);
+        this.adopt_editors(restored.1, window, cx);
+        for path in reopen {
+            this.reveal_file(path, false, true, window, cx);
         }
-        for editor in restored.1 {
-            this.track_editor(&editor, window, cx);
-            // A library class file's tab fills once the server can show it.
-            if let Some((uri, root)) = editor.read(cx).class_file.clone() {
-                this.load_class_file(editor, root, uri, None, window, cx);
-            }
-        }
+        // What the user arranged is kept on the way out: the caret and the view of each
+        // tab move without saying so.
+        cx.on_app_quit(|this, cx| {
+            this.save_layout(cx);
+            async {}
+        })
+        .detach();
         // Open on the activity the window showed last.
         if let Some(activity) = this.model.read(cx).settings.activity {
             this.show_activity(activity, window, cx);
@@ -405,7 +442,11 @@ impl Workspace {
         // Closing the window with unsaved changes asks first.
         let weak = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
-            weak.update(cx, |this, cx| this.confirm_unsaved(false, window, cx)).unwrap_or(true)
+            weak.update(cx, |this, cx| {
+                this.save_layout(cx);
+                this.confirm_unsaved(false, window, cx)
+            })
+            .unwrap_or(true)
         });
         window.focus(&this.focus, cx);
         // A file named on the command line.
@@ -445,12 +486,18 @@ impl Workspace {
         });
     }
 
-    /// Before the window closes or the app quits: true when no tab has unsaved changes.
-    /// Otherwise ask whether to save them; the answer saves (or drops) them and closes
-    /// the window (or quits) itself.
-    pub fn confirm_unsaved(&mut self, quit: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    /// Ask about the tabs with unsaved changes, if any, and go on with `then` once they are
+    /// saved or dropped; Cancel (or a save that fails) stops there. True when nothing had
+    /// to be asked and `then` ran at once.
+    fn settle_unsaved(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> bool {
         let dirty: Vec<Entity<EditorPanel>> = self.editors(cx).into_iter().filter(|e| e.read(cx).dirty).collect();
         if dirty.is_empty() {
+            then(self, window, cx);
             return true;
         }
         let message = match dirty.as_slice() {
@@ -464,6 +511,7 @@ impl Workspace {
             &["Save", "Don't Save", "Cancel"],
             cx,
         );
+        let this = cx.weak_entity();
         window
             .spawn(cx, async move |cx| {
                 let Ok(answer) = answer.await else { return };
@@ -484,63 +532,119 @@ impl Workspace {
                         }
                         _ => return,
                     }
-                    if quit {
-                        cx.quit();
-                    } else {
-                        window.remove_window();
-                    }
+                    let _ = this.update(cx, |this, cx| then(this, window, cx));
                 });
             })
             .detach();
         false
     }
 
-    /// File ▸ Close Project: ask about unsaved changes first, then close every editor tab
-    /// and the project, and show the Welcome page.
+    /// Before the window closes or the app quits: true when no tab has unsaved changes.
+    /// Otherwise ask whether to save them; the answer saves (or drops) them and closes
+    /// the window (or quits) itself.
+    pub fn confirm_unsaved(&mut self, quit: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let dirty = self.editors(cx).into_iter().any(|e| e.read(cx).dirty);
+        if !dirty {
+            return true;
+        }
+        self.settle_unsaved(window, cx, move |_, window, cx| {
+            if quit {
+                cx.quit();
+            } else {
+                window.remove_window();
+            }
+        });
+        false
+    }
+
+    /// File ▸ Close Project: ask about unsaved changes first, then keep the project's tabs
+    /// for when it opens again, close them and the project, and show the Welcome page.
     pub fn close_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.model.read(cx).repo.is_none() {
             return;
         }
-        let dirty: Vec<Entity<EditorPanel>> = self.editors(cx).into_iter().filter(|e| e.read(cx).dirty).collect();
-        if dirty.is_empty() {
-            return self.send(Action::CloseRepo, cx);
+        self.settle_unsaved(window, cx, |this, _, cx| {
+            this.stash_session(cx);
+            this.send(Action::CloseRepo, cx);
+        });
+    }
+
+    /// Another project is to open in place of this one: settle the unsaved tabs, keep
+    /// this project's tabs for when it opens again, open the other, and bring back its
+    /// tabs (or the Welcome page).
+    fn switch_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        // A file of the other project (Open on a file) opens once the switch is done.
+        let file = self.model.update(cx, |m, _| m.pending_file.take());
+        self.settle_unsaved(window, cx, move |this, window, cx| {
+            this.stash_session(cx);
+            if this.model.update(cx, |m, cx| m.switch_project(&path, cx)) {
+                this.shown = this.model.read(cx).project_root();
+                this.load_session(window, cx);
+                if let Some((path, at)) = file {
+                    this.open_file(path, at, false, window, cx);
+                }
+            }
+            cx.notify();
+        });
+    }
+
+    /// Keep the open project's editor tabs (the center of the layout) for when it opens
+    /// again, and save the layout.
+    fn stash_session(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.model.read(cx).project_root() else { return };
+        let Ok(full) = serde_json::to_value(self.dock.read(cx).dump(cx)) else { return };
+        let center = full.get("center").cloned().unwrap_or_else(session::empty_tabs);
+        self.model.update(cx, |m, _| {
+            let recent = m.recent_projects();
+            m.settings.sessions.insert(root.clone(), center);
+            m.settings.sessions.retain(|p, _| *p == root || recent.contains(p));
+            m.settings.dock = Some(full);
+            m.persist();
+        });
+    }
+
+    /// Bring back the open project's editor tabs as it left them, in place of those
+    /// showing; a project without saved tabs shows the Welcome page.
+    fn load_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let project = self.model.read(cx).project_root();
+        let center = project
+            .as_ref()
+            .and_then(|p| self.model.read(cx).settings.sessions.get(p).cloned())
+            .unwrap_or_else(session::empty_tabs);
+        let Ok(full) = serde_json::to_value(self.dock.read(cx).dump(cx)) else { return };
+        let state = session::with_center(full, center);
+        let (loaded, editors) = restore_layout(&self.dock, state, &self.panels, project.as_deref(), window, cx);
+        if !loaded {
+            return;
         }
-        let message = match dirty.as_slice() {
-            [one] => format!("Do you want to save the changes you made to {}?", one.read(cx).name()),
-            many => format!("Do you want to save the changes you made to {} files?", many.len()),
-        };
-        let answer = window.prompt(
-            gpui::PromptLevel::Warning,
-            &message,
-            Some("Your changes are lost if you don't save them."),
-            &["Save", "Don't Save", "Cancel"],
-            cx,
-        );
-        let this = cx.weak_entity();
-        window
-            .spawn(cx, async move |cx| {
-                let Ok(answer) = answer.await else { return };
-                let _ = cx.update(|_, cx| {
-                    match answer {
-                        0 => {
-                            for e in &dirty {
-                                e.update(cx, |e, cx| e.save(cx));
-                            }
-                            if dirty.iter().any(|e| e.read(cx).dirty) {
-                                return;
-                            }
-                        }
-                        1 => {
-                            for e in &dirty {
-                                e.update(cx, |e, cx| e.discard(cx));
-                            }
-                        }
-                        _ => return,
-                    }
-                    let _ = this.update(cx, |this, cx| this.send(Action::CloseRepo, cx));
-                });
-            })
-            .detach();
+        self.editors.retain(|e| e.upgrade().is_some());
+        self.set_active_editor(None, cx);
+        self.adopt_editors(editors, window, cx);
+        // The keyboard was in a tab that went: it goes to the tab in front, or the window.
+        match self.status.read(cx).editor() {
+            Some(editor) => editor.update(cx, |e, cx| e.state.update(cx, |s, cx| s.focus(window, cx))),
+            None => window.focus(&self.focus, cx),
+        }
+        self.save_layout_soon(cx);
+    }
+
+    /// Editor tabs a layout brought back: the workspace follows them, a library class
+    /// fills once the server can show it, and the Welcome page does not stay beside them.
+    fn adopt_editors(&mut self, editors: Vec<Entity<EditorPanel>>, window: &mut Window, cx: &mut Context<Self>) {
+        if !editors.is_empty() {
+            let welcome = self.welcome.clone();
+            self.dock.update(cx, |d, cx| d.remove_panel(welcome, window, cx));
+        }
+        for editor in editors {
+            self.track_editor(&editor, window, cx);
+            if let Some((uri, root)) = editor.read(cx).class_file.clone() {
+                self.load_class_file(editor, root, uri, None, window, cx);
+            }
+        }
+        // The tab in front is the one the status bar follows.
+        let fronts = self.front_panels(cx);
+        let front = self.editors(cx).into_iter().find(|e| fronts.contains(&PanelId::from(e.entity_id())));
+        self.set_active_editor(front.as_ref(), cx);
     }
 
     /// The project closed: its editor tabs go, and the Welcome page comes forward.
@@ -559,7 +663,19 @@ impl Workspace {
         });
         self.editors.clear();
         self.set_active_editor(None, cx);
+        window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    /// The center is never left empty: with its last tab closed, the Welcome page comes
+    /// back in its place.
+    fn keep_welcome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dock = self.dock.read(cx);
+        let empty = dock.layout(DockPlacement::Center).is_none_or(|t| t.panels().next().is_none());
+        if empty {
+            let page = panel_handle(self.welcome.clone());
+            self.dock.update(cx, |d, cx| d.add_panel_view(page, DockPlacement::Center, None, window, cx));
+        }
     }
 
     /// Keep `editor` among the tabs, and follow it when it gets the keyboard.
@@ -590,6 +706,7 @@ impl Workspace {
                     let e = editor.clone();
                     this.dock.update(cx, |d, cx| d.remove_panel(e, window, cx));
                 }
+                EditorEvent::CaretMoved => this.save_layout_soon(cx),
             }
         }));
     }
@@ -716,6 +833,7 @@ impl Workspace {
             ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
             ModelEvent::Message => {}
             ModelEvent::Closed => self.after_close(window, cx),
+            ModelEvent::Switch(path) => self.switch_project(path.clone(), window, cx),
             ModelEvent::OpenFile(path, at, preview) => {
                 model.update(cx, |m, _| m.pending_file = None);
                 self.open_file(path.clone(), *at, *preview, window, cx)
@@ -1002,6 +1120,22 @@ impl Workspace {
             });
         }
         window.refresh();
+    }
+
+    /// The tab in front of each of the center's tab groups.
+    pub fn front_panels(&self, cx: &App) -> Vec<PanelId> {
+        use gpui_component::dock::PaneRef;
+        let mut out = Vec::new();
+        if let Some(tree) = self.dock.read(cx).layout(DockPlacement::Center) {
+            tree.root().walk(&mut |node| {
+                if let PaneRef::Tabs { panels, active_ix } = node.kind()
+                    && let Some(id) = panels.get(active_ix).or(panels.last())
+                {
+                    out.push(*id);
+                }
+            });
+        }
+        out
     }
 
     /// The editor tabs open now.

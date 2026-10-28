@@ -191,6 +191,9 @@ pub enum ModelEvent {
     OpenFile(PathBuf, Option<(u32, u32)>, bool),
     /// The project was closed.
     Closed,
+    /// Another project is to open in place of the one open: the workspace settles the
+    /// open tabs first, then calls [`Model::switch_project`].
+    Switch(PathBuf),
 }
 
 pub struct OutputLine {
@@ -270,6 +273,9 @@ pub struct Model {
     pub claude: Option<PathBuf>,
     /// A file given on the command line, to open once the window is there.
     pub pending_file: Option<(PathBuf, Option<(u32, u32)>)>,
+    /// Opening another project asks the workspace first ([`ModelEvent::Switch`]); off
+    /// without a window, as in the model's own tests.
+    pub confirm_switch: bool,
 }
 
 impl EventEmitter<ModelEvent> for Model {}
@@ -278,6 +284,7 @@ impl Model {
     pub fn new(settings: Settings, store: Option<Store>, cx: &mut Context<Self>) -> Self {
         let mut model = Self {
             pending_file: None,
+            confirm_switch: false,
             saved: settings.clone(),
             settings,
             store,
@@ -528,7 +535,15 @@ impl Model {
     // ----- State ----------------------------------------------------------------------
 
     /// Open the folder `path` as the project, with the repository found at or above it.
-    fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) {
+    /// False when the workspace is asked first (another project is open).
+    fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
+        if self.confirm_switch && self.repo.is_some() {
+            let project = path.canonicalize().unwrap_or_else(|_| path.to_owned());
+            if self.project.as_ref() != Some(&project) && Repo::open(path).is_ok() {
+                cx.emit(ModelEvent::Switch(path.to_owned()));
+                return false;
+            }
+        }
         match Repo::open(path) {
             Ok(repo) => {
                 let root = repo.root().to_owned();
@@ -551,9 +566,21 @@ impl Model {
                 self.refresh();
                 self.message = format!("Opened {}", path.display());
                 cx.emit(ModelEvent::Message);
+                true
             }
-            Err(e) => self.fail(e.to_string(), cx),
+            Err(e) => {
+                self.fail(e.to_string(), cx);
+                false
+            }
         }
+    }
+
+    /// Open `path` in place of the open project, once the workspace has settled its tabs.
+    pub fn switch_project(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
+        let confirm = std::mem::replace(&mut self.confirm_switch, false);
+        let opened = self.open_repo(path, cx);
+        self.confirm_switch = confirm;
+        opened
     }
 
     /// Open `path` as the command line names it: `File.java:12` or `File.java:12:5` puts the
@@ -577,11 +604,14 @@ impl Model {
         if let Ok(repo) = Repo::open(dir) {
             // A folder is the project as it is; a file opens in its repository.
             let project = if path.is_file() { repo.root().to_owned() } else { dir.to_owned() };
-            self.open_repo(&project, cx);
-            // A file opens in a tab of its repository (once the window is there).
+            let opened = self.open_repo(&project, cx);
+            // A file opens in a tab of its repository (once the window is there, or once
+            // the switch to its project is done).
             if path.is_file() {
                 self.pending_file = Some((path.to_owned(), None));
-                cx.emit(ModelEvent::OpenFile(path.to_owned(), None, false));
+                if opened {
+                    cx.emit(ModelEvent::OpenFile(path.to_owned(), None, false));
+                }
             }
         } else if dir.is_dir() {
             self.ask(Dialog::InitRepo(dir.to_owned()), cx);
@@ -941,7 +971,9 @@ impl Model {
                 self.message = "Refreshed".into();
                 self.survey(true, cx);
             }
-            Action::OpenRepo(path) => self.open_repo(&path, cx),
+            Action::OpenRepo(path) => {
+                self.open_repo(&path, cx);
+            }
             Action::CloseRepo => self.close_repo(cx),
             Action::ClearRecent => self.settings.recent = Some(Vec::new()),
             Action::PickFolder => self.pick_folder("Open project", Action::OpenPath, cx),
@@ -962,12 +994,9 @@ impl Model {
             Action::RemoveRepo(path) => {
                 self.settings.repos.retain(|p| p != &path);
                 move_to_group(&mut self.settings.groups, &path, None);
+                // The open project goes as Close Project would close it, tabs and all.
                 if self.repo.as_ref().is_some_and(|r| r.root() == path) {
-                    self.settings.current = None;
-                    self.repo = None;
-                    self.project = None;
-                    self.github_url = None;
-                    self.refresh();
+                    self.close_repo(cx);
                 }
             }
             Action::ShowNewGroup(repo) => self.ask(Dialog::GroupName { rename: None, repo }, cx),
