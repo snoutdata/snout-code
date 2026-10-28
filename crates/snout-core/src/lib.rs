@@ -8,16 +8,24 @@
 
 mod branches;
 mod checkout;
+pub mod claude;
 mod diff;
+pub mod diff_layout;
 mod discover;
 mod error;
 mod git;
 mod github;
+pub mod graph;
+pub mod groups;
 mod log;
 mod pull;
 mod repo;
+mod scope;
 mod status;
+pub mod survey;
 mod tags;
+
+pub use scope::{Scope, branch_name_problem, on_disk, repo_dir_name, stage_paths, unstage_paths};
 
 pub use branches::{Branch, BranchKind};
 pub use checkout::{CheckoutOutcome, CheckoutTarget, LocalChanges};

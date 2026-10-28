@@ -3,7 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, CornerRadius, FontId, Key, Margin, Rect, RichText, Sense, Stroke, Ui, vec2};
-use snout_core::{Branch, BranchKind, CheckoutTarget, FileEntry, LocalChanges, PullMode, PullProblem, Tag};
+use snout_core::{
+    Branch, BranchKind, CheckoutTarget, FileEntry, LocalChanges, PullMode, PullProblem, Tag, branch_name_problem,
+};
 
 use super::{Action, SnoutApp, dir_name, repo_dir_name, repos, state_color};
 use crate::art::{self, Glyph};
@@ -923,21 +925,6 @@ fn file_line(ui: &mut Ui, e: &FileEntry) {
             ui.label(RichText::new(e.state_label()).size(12.0).color(color));
         });
     });
-}
-
-/// Why `name` cannot be a branch, for the common cases (`git check-ref-format` has the rest).
-fn branch_name_problem(name: &str) -> Option<&'static str> {
-    if name.starts_with('-') {
-        Some("A branch name cannot start with a dash.")
-    } else if name.contains("..") || name.contains("@{") {
-        Some("A branch name cannot contain “..” or “@{”.")
-    } else if name.chars().any(|c| c.is_control() || "~^:?*[\\".contains(c)) {
-        Some("A branch name cannot contain ~ ^ : ? * [ or \\.")
-    } else if name.ends_with('/') || name.ends_with('.') || name.ends_with(".lock") || name.starts_with('/') {
-        Some("A branch name cannot start with “/” or end with “/”, “.” or “.lock”.")
-    } else {
-        None
-    }
 }
 
 fn detach_note(ui: &mut Ui) {

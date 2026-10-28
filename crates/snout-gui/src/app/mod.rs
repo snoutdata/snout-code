@@ -6,9 +6,10 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, Key, RichText, Sense};
 use egui_extras::{Column, TableBuilder};
 use serde::{Deserialize, Serialize};
+use snout_core::groups::dir_name;
 use snout_core::{
     Branch, BranchKind, CheckoutTarget, Commit, CommitDetails, CommitFile, DiffBase, FileEntry, LocalChanges, PullMode,
-    PullProblem, Repo, Status, Tag, Tracking,
+    PullProblem, Repo, Scope, Status, Tag, Tracking, on_disk, repo_dir_name, stage_paths, unstage_paths,
 };
 
 use crate::art::{self, Glyph, glyph_button};
@@ -427,17 +428,7 @@ impl SnoutApp {
     }
 
     fn commit_scope(&self) -> Scope {
-        let staged = self.status.staged_count();
-        if staged > 0 {
-            return Scope::Staged(staged);
-        }
-        let selected = self.selected_entries();
-        let (entries, all) = if selected.is_empty() { (self.status.files.clone(), true) } else { (selected, false) };
-        match stage_paths(&entries) {
-            paths if !paths.is_empty() => Scope::Files { paths, all },
-            _ if self.amend => Scope::MessageOnly,
-            _ => Scope::Nothing,
-        }
+        Scope::of(&self.status, &self.selected_entries(), self.amend)
     }
 
     fn selected_entries(&self) -> Vec<FileEntry> {
@@ -552,7 +543,10 @@ impl SnoutApp {
         let recent: Vec<&str> =
             self.log.iter().skip(usize::from(self.amend)).take(12).map(|c| c.summary.as_str()).collect();
         let prompt = draft::prompt(&recent, &self.commit_msg, self.amend);
-        match Draft::start(&program, repo.root(), &prompt, &patch, ctx) {
+        match Draft::start(&program, repo.root(), &prompt, &patch, {
+            let ctx = ctx.clone();
+            move || ctx.request_repaint()
+        }) {
             Ok(draft) => {
                 self.draft = Some(draft);
                 self.message = "Claude is drafting the commit message…".into();
@@ -638,14 +632,7 @@ impl SnoutApp {
                 self.dialog = Some(Dialog::GroupName { rename: Some(name.clone()), name, repo: None });
             }
             Action::SaveGroup { rename, name, repo } => {
-                let groups = &mut self.settings.groups;
-                match rename.and_then(|old| groups.iter_mut().find(|g| g.name == old)) {
-                    Some(g) => g.name = name.clone(),
-                    None => groups.push(RepoGroup { name: name.clone(), repos: Vec::new() }),
-                }
-                if let Some(repo) = repo {
-                    repos::move_to_group(groups, &repo, Some(&name));
-                }
+                snout_core::groups::save_group(&mut self.settings.groups, rename.as_deref(), &name, repo.as_deref());
             }
             Action::MoveToGroup(path, group) => {
                 repos::move_to_group(&mut self.settings.groups, &path, group.as_deref())
@@ -874,11 +861,15 @@ impl SnoutApp {
         }
         let repos = self.settings.repos.clone();
         let due = self.fetch_every.is_some_and(|every| self.fetched_at.is_none_or(|at| at.elapsed() >= every));
+        let wake = {
+            let ctx = ctx.clone();
+            move || ctx.request_repaint()
+        };
         if due {
             self.fetched_at = Some(Instant::now());
-            self.survey = Some(Survey::start(repos, true, ctx));
+            self.survey = Some(Survey::start(repos, true, wake));
         } else if self.recount || repos.iter().any(|p| !self.tracking.contains_key(p)) {
-            self.survey = Some(Survey::start(repos, false, ctx));
+            self.survey = Some(Survey::start(repos, false, wake));
         }
         self.recount = false;
         if let (Some(every), Some(at)) = (self.fetch_every, self.fetched_at) {
@@ -2135,10 +2126,6 @@ fn diff_body(
     }
 }
 
-fn dir_name(path: &Path) -> String {
-    path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
-}
-
 fn open_menu_items(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     if ui.button("Open local repository…   ⌘O").clicked() {
         actions.push(Action::PickFolder);
@@ -2149,72 +2136,6 @@ fn open_menu_items(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     if ui.button("Clone from GitHub…").clicked() {
         actions.push(Action::ShowClone);
     }
-}
-
-/// What a commit records; see [`SnoutApp::commit_scope`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Scope {
-    Staged(usize),
-    /// Files to add first; `all` when nothing was selected.
-    Files {
-        paths: Vec<String>,
-        all: bool,
-    },
-    /// Amending with nothing new: only the message changes.
-    MessageOnly,
-    Nothing,
-}
-
-impl Scope {
-    fn paths(&self) -> Vec<String> {
-        match self {
-            Scope::Files { paths, .. } => paths.clone(),
-            _ => Vec::new(),
-        }
-    }
-
-    /// Beside the Commit button.
-    fn label(&self) -> String {
-        match self {
-            Scope::Staged(n) => format!("{n} staged"),
-            Scope::Files { paths, all: true } => format!("all {} changed", paths.len()),
-            Scope::Files { paths, all: false } => format!("{} selected", paths.len()),
-            Scope::MessageOnly => "message only".to_owned(),
-            Scope::Nothing => "nothing to commit".to_owned(),
-        }
-    }
-
-    /// In a sentence: "Commits …".
-    fn what(&self) -> String {
-        match self {
-            Scope::Staged(_) => "the staged changes".to_owned(),
-            Scope::Files { paths, all: true } if paths.len() == 1 => "the changed file".to_owned(),
-            Scope::Files { paths, all: true } => format!("all {} changed files", paths.len()),
-            Scope::Files { paths, .. } if paths.len() == 1 => "the selected file".to_owned(),
-            Scope::Files { paths, .. } => format!("the {} selected files", paths.len()),
-            Scope::MessageOnly => "the new message for the last commit".to_owned(),
-            Scope::Nothing => "nothing".to_owned(),
-        }
-    }
-}
-
-fn stage_paths(entries: &[FileEntry]) -> Vec<String> {
-    entries.iter().filter(|e| e.has_unstaged()).map(|e| e.path.clone()).collect()
-}
-
-/// Paths to unstage; renames need both sides restored in the index.
-fn unstage_paths(entries: &[FileEntry]) -> Vec<String> {
-    entries
-        .iter()
-        .filter(|e| e.has_staged())
-        .flat_map(|e| std::iter::once(e.path.clone()).chain(e.orig_path.clone()))
-        .collect()
-}
-
-/// Whether there is a file on disk to delete.
-fn on_disk(e: &FileEntry) -> bool {
-    use snout_core::Change::Deleted;
-    e.worktree != Some(Deleted) && e.index != Some(Deleted)
 }
 
 fn state_color(f: &FileEntry, v: &egui::Visuals) -> Color32 {
@@ -2357,10 +2278,4 @@ fn ref_badge(ui: &mut egui::Ui, r: &str) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).small().color(color));
         });
-}
-
-/// `https://github.com/o/repo.git` -> `repo`.
-fn repo_dir_name(url: &str) -> Option<String> {
-    let name = url.trim().trim_end_matches('/').rsplit(['/', ':']).next()?.trim_end_matches(".git");
-    (!name.is_empty()).then(|| name.to_owned())
 }

@@ -1,86 +1,21 @@
 //! Painter-based diff rendering: side-by-side or unified, optionally compacted.
 
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Sense, TextStyle, pos2, vec2};
+use snout_core::diff_layout::{DiffLayout, SbsLine, UniLine, gap_label};
 use snout_core::{FileDiff, RowKind};
 
 use crate::theme::Palette;
 
-/// Unchanged lines kept around each change in compact mode.
-const CONTEXT: usize = 3;
-
-#[derive(Clone, Copy)]
-enum SbsLine {
-    Row(usize),
-    Gap(usize),
-}
-
-#[derive(Clone, Copy)]
-enum UniLine {
-    Both(usize),
-    Old(usize),
-    New(usize),
-    Gap(usize),
-}
-
 /// A diff prepared for display. Rebuild when the diff or the compact flag changes.
 pub struct DiffView {
     pub diff: FileDiff,
-    sbs: Vec<SbsLine>,
-    unified: Vec<UniLine>,
-    number_digits: usize,
+    layout: DiffLayout,
 }
 
 impl DiffView {
     pub fn new(diff: FileDiff, compact: bool) -> Self {
-        let rows = &diff.rows;
-        let keep = visible_rows(&diff, compact);
-
-        let mut sbs = Vec::new();
-        let mut unified = Vec::new();
-        let mut i = 0;
-        while i < rows.len() {
-            if !keep[i] {
-                let start = i;
-                while i < rows.len() && !keep[i] {
-                    i += 1;
-                }
-                sbs.push(SbsLine::Gap(i - start));
-                unified.push(UniLine::Gap(i - start));
-                continue;
-            }
-            sbs.push(SbsLine::Row(i));
-            match rows[i].kind {
-                RowKind::Equal => unified.push(UniLine::Both(i)),
-                RowKind::Delete => unified.push(UniLine::Old(i)),
-                RowKind::Insert => unified.push(UniLine::New(i)),
-                RowKind::Replace => {
-                    // Emit the whole replaced block as all-old then all-new.
-                    let start = i;
-                    let mut end = i;
-                    while end < rows.len() && rows[end].kind == RowKind::Replace {
-                        end += 1;
-                    }
-                    let block = rows[start..end].iter().enumerate();
-                    unified
-                        .extend(block.clone().filter(|(_, r)| r.old.is_some()).map(|(k, _)| UniLine::Old(start + k)));
-                    unified.extend(block.filter(|(_, r)| r.new.is_some()).map(|(k, _)| UniLine::New(start + k)));
-                    for k in start + 1..end {
-                        sbs.push(SbsLine::Row(k));
-                    }
-                    i = end;
-                    continue;
-                }
-            }
-            i += 1;
-        }
-
-        let max_line = rows
-            .iter()
-            .flat_map(|r| [r.old.as_ref().map(|l| l.0), r.new.as_ref().map(|l| l.0)])
-            .flatten()
-            .max()
-            .unwrap_or(1);
-        Self { diff, sbs, unified, number_digits: max_line.to_string().len() }
+        let layout = DiffLayout::new(diff.clone(), compact);
+        Self { diff, layout }
     }
 
     pub fn show(&self, ui: &mut egui::Ui, side_by_side: bool) {
@@ -88,9 +23,9 @@ impl DiffView {
         let char_w = ui.painter().layout_no_wrap("0".into(), font.clone(), Color32::WHITE).size().x;
         let row_h = ui.text_style_height(&TextStyle::Monospace) + 2.0;
         let colors = Colors::new(ui.visuals());
-        let p = Paint { font, char_w, colors, digits: self.number_digits };
+        let p = Paint { font, char_w, colors, digits: self.layout.number_digits };
 
-        let count = if side_by_side { self.sbs.len() } else { self.unified.len() };
+        let count = if side_by_side { self.layout.sbs.len() } else { self.layout.unified.len() };
         let spacing = ui.spacing().item_spacing.y;
         egui::ScrollArea::vertical().auto_shrink(false).show_rows(ui, row_h - spacing, count, |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -100,9 +35,9 @@ impl DiffView {
                     continue;
                 }
                 if side_by_side {
-                    self.paint_sbs(ui, &p, rect, self.sbs[idx]);
+                    self.paint_sbs(ui, &p, rect, self.layout.sbs[idx]);
                 } else {
-                    self.paint_unified(ui, &p, rect, self.unified[idx]);
+                    self.paint_unified(ui, &p, rect, self.layout.unified[idx]);
                 }
             }
         });
@@ -148,26 +83,6 @@ impl DiffView {
             }
         }
     }
-}
-
-fn visible_rows(diff: &FileDiff, compact: bool) -> Vec<bool> {
-    let n = diff.rows.len();
-    if !compact {
-        return vec![true; n];
-    }
-    let changed: Vec<bool> = diff.rows.iter().map(|r| r.kind != RowKind::Equal).collect();
-    let mut keep = vec![false; n];
-    let mut since = usize::MAX;
-    for i in 0..n {
-        since = if changed[i] { 0 } else { since.saturating_add(1) };
-        keep[i] = since <= CONTEXT;
-    }
-    let mut until = usize::MAX;
-    for i in (0..n).rev() {
-        until = if changed[i] { 0 } else { until.saturating_add(1) };
-        keep[i] |= until <= CONTEXT;
-    }
-    keep
 }
 
 struct Colors {
@@ -238,7 +153,7 @@ impl Paint {
     fn gap(&self, ui: &egui::Ui, rect: Rect, n: usize) {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, self.colors.gap);
-        let label = format!("⋯ {n} unchanged line{}", if n == 1 { "" } else { "s" });
+        let label = gap_label(n);
         painter.text(rect.center(), Align2::CENTER_CENTER, label, self.font.clone(), self.colors.weak);
     }
 }

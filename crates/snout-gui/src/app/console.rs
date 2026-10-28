@@ -7,14 +7,11 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 
+use snout_core::claude::{ENV_REMOVE, find_claude};
+
 use crate::art::{self, Glyph};
 use crate::terminal::{Launch, Terminal};
 use crate::theme::Palette;
-
-/// Inherited variables that would make Claude Code think it runs nested inside another
-/// session (snout started from a Claude Code terminal), or misreport the terminal.
-pub(super) const ENV_REMOVE: &[&str] =
-    &["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "TERM_PROGRAM", "TERM_PROGRAM_VERSION"];
 
 /// Refresh the Git panes once the agent has been quiet this long...
 const QUIET: Duration = Duration::from_millis(800);
@@ -197,16 +194,4 @@ fn header(ui: &mut egui::Ui, title: &str, running: Option<bool>, buttons: impl F
     });
     ui.add_space(4.0);
     ui.separator();
-}
-
-/// `claude` on PATH or in the places its installers put it (an app started from Finder
-/// does not get the shell's PATH).
-fn find_claude() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path_dirs = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
-    let extra = [".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin"]
-        .iter()
-        .filter_map(|d| home.as_ref().map(|h| h.join(d)))
-        .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
-    path_dirs.into_iter().chain(extra).map(|d| d.join("claude")).find(|p| p.is_file())
 }

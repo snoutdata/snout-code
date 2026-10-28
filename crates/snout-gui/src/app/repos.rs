@@ -5,35 +5,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
-use serde::{Deserialize, Serialize};
 use snout_core::Tracking;
+pub(super) use snout_core::groups::{RepoGroup, group_name_problem, move_to_group};
+use snout_core::groups::{arrange, short};
 
 use super::{Action, SnoutApp, dir_name, open_menu_items, pane_title, reveal_items, survey};
 use crate::art::{self, Glyph};
 use crate::theme::{Palette, mix};
-
-/// A named set of repositories in the list. A repository is in one group at most.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct RepoGroup {
-    pub name: String,
-    pub repos: Vec<PathBuf>,
-}
-
-/// Put `repo` in the group named `group`, or in none.
-pub(super) fn move_to_group(groups: &mut [RepoGroup], repo: &Path, group: Option<&str>) {
-    for g in groups.iter_mut() {
-        g.repos.retain(|p| p != repo);
-    }
-    if let Some(g) = group.and_then(|name| groups.iter_mut().find(|g| g.name == name)) {
-        g.repos.push(repo.to_owned());
-    }
-}
-
-/// Why `name` cannot name a group (other than the one being renamed), if it cannot.
-pub(super) fn group_name_problem(groups: &[RepoGroup], name: &str, renaming: Option<&str>) -> Option<&'static str> {
-    let taken = groups.iter().any(|g| g.name.eq_ignore_ascii_case(name) && Some(g.name.as_str()) != renaming);
-    taken.then_some("There is already a group with this name")
-}
 
 /// What a repository row carries while it is dragged.
 struct Dragged(PathBuf);
@@ -64,16 +42,7 @@ impl SnoutApp {
             ui.add_space(4.0);
         }
 
-        let by_name = |a: &PathBuf, b: &PathBuf| dir_name(a).to_lowercase().cmp(&dir_name(b).to_lowercase());
-        let mut groups: Vec<RepoGroup> = self.settings.groups.clone();
-        groups.sort_by_key(|g| g.name.to_lowercase());
-        for g in &mut groups {
-            g.repos.retain(|p| self.settings.repos.contains(p));
-            g.repos.sort_by(by_name);
-        }
-        let mut loose: Vec<PathBuf> =
-            self.settings.repos.iter().filter(|p| !groups.iter().any(|g| g.repos.contains(p))).cloned().collect();
-        loose.sort_by(by_name);
+        let (groups, loose) = arrange(&self.settings.repos, &self.settings.groups);
         let names: Vec<String> = groups.iter().map(|g| g.name.clone()).collect();
         let needle = self.repo_filter.trim().to_lowercase();
         let mut dropped: Dropped = None;
@@ -342,10 +311,6 @@ fn set_open(ui: &egui::Ui, id: egui::Id, open: bool) {
     ui.ctx().data_mut(|d| d.insert_persisted(id, open));
 }
 
-fn short(s: &str, max: usize) -> String {
-    if s.chars().count() <= max { s.to_owned() } else { s.chars().take(max - 1).chain(['…']).collect() }
-}
-
 /// Width of the arrow column at the start of every row, and the indent of each level.
 const ARROW: f32 = 14.0;
 const INDENT: f32 = 14.0;
@@ -498,24 +463,4 @@ fn drag_source(ui: &egui::Ui, resp: &egui::Response, path: &Path, name: &str) {
     let icon = Rect::from_min_size(pos2(rect.left() + 8.0, rect.center().y - 8.0), vec2(16.0, 16.0));
     Glyph::Repo.drawing().paint(&painter, icon, Some(p.fg));
     painter.galley(pos2(icon.right() + 6.0, rect.center().y - galley.size().y / 2.0), galley, p.fg);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_repository_lives_in_one_group_at_most() {
-        let mut groups = vec![
-            RepoGroup { name: "Work".into(), repos: vec!["/a".into()] },
-            RepoGroup { name: "Home".into(), repos: Vec::new() },
-        ];
-        move_to_group(&mut groups, Path::new("/a"), Some("Home"));
-        assert!(groups[0].repos.is_empty() && groups[1].repos == [PathBuf::from("/a")]);
-        move_to_group(&mut groups, Path::new("/a"), None);
-        assert!(groups.iter().all(|g| g.repos.is_empty()));
-        assert!(group_name_problem(&groups, "work", None).is_some());
-        assert!(group_name_problem(&groups, "Work", Some("Work")).is_none());
-        assert_eq!(short("feature/a-long-name", 8), "feature…");
-    }
 }
