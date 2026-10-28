@@ -999,6 +999,11 @@ impl Render for EditorPanel {
         let _ = &self.focus;
         let reviewing = self.review.is_some();
         let has_lang = self.lang.is_some();
+        // What Run and Debug in the menu start: what the caret is in.
+        let run_label = self.runnables.as_ref().and_then(|r| {
+            let line = self.state.read(cx).cursor_position().line;
+            r.at_line(line).map(crate::run::Target::menu_label)
+        });
         div()
             .size_full()
             .flex()
@@ -1055,7 +1060,7 @@ impl Render for EditorPanel {
                             .pl(px(self.gutter_pad))
                             .h_full()
                             .text_size(px(font_size(cx)))
-                            .context_menu(move |menu, _, _| context_menu(menu, has_lang)),
+                            .context_menu(move |menu, _, _| context_menu(menu, has_lang, run_label.as_deref())),
                     )
                     .children(self.claude_overlay(cx))
                     .child(self.gutter(cx))
@@ -1071,10 +1076,21 @@ impl Render for EditorPanel {
     }
 }
 
-/// The editor's right-click menu: the code's own items, sending the selection to Claude
-/// Code, and the clipboard.
-fn context_menu(menu: gpui_component::native_menu::NativeMenu, lang: bool) -> gpui_component::native_menu::NativeMenu {
+/// The editor's right-click menu: Run and Debug for what the caret is in (`run`, its name),
+/// the code's own items, sending the selection to Claude Code, and the clipboard.
+fn context_menu(
+    menu: gpui_component::native_menu::NativeMenu,
+    lang: bool,
+    run: Option<&str>,
+) -> gpui_component::native_menu::NativeMenu {
     use gpui_component::input as i;
+    let menu = match run {
+        Some(name) => menu
+            .menu(format!("Run '{name}'"), Box::new(crate::menus::RunContext))
+            .menu(format!("Debug '{name}'"), Box::new(crate::menus::DebugContext))
+            .separator(),
+        None => menu,
+    };
     let menu = if lang {
         menu.menu("Go to Definition", Box::new(i::GoToDefinition))
             .menu("Quick Fix…", Box::new(i::ToggleCodeActions))

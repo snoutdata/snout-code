@@ -115,13 +115,19 @@ impl Workspace {
         None
     }
 
-    /// The title bar's Run (or Debug): the selected configuration, or what the file in front
-    /// holds (its test class, else its main class).
+    /// The title bar's Run (or Debug): the selected configuration (run again when it runs),
+    /// or what the file in front holds (its test class, else its main class).
     pub fn run_selected(&mut self, debug: bool, window: &mut Window, cx: &mut Context<Self>) {
         let runs = self.runs.clone();
         if let Some(config) = runs.read(cx).selected_config() {
             runs.update(cx, |r, cx| {
-                r.start(Launch::Config { config, debug }, cx);
+                let running = r.running_config(&config.id).filter(|s| s.launch.debug() == debug).map(|s| s.id);
+                match running {
+                    Some(id) => r.rerun(id, cx),
+                    None => {
+                        r.start(Launch::Config { config, debug }, cx);
+                    }
+                }
             });
             return;
         }
@@ -140,6 +146,26 @@ impl Workspace {
             Some((target, module)) => runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx)),
             None => self.model.update(cx, |m, cx| {
                 m.message = "The file in front has no tests or main class to run".into();
+                cx.notify();
+            }),
+        }
+    }
+
+    /// ⌃⇧R, ⌃⇧D and the editor's Run and Debug items: what the caret is in (a test method,
+    /// the test class, the main class), as its run icon does.
+    pub fn run_context(&mut self, debug: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let found = self.active_editor(window, cx).and_then(|e| {
+            let e = e.read(cx);
+            let r = e.runnables.clone()?;
+            let line = e.state.read(cx).cursor_position().line;
+            Some((r.at_line(line)?.clone(), r.module.clone()))
+        });
+        match found {
+            Some((target, module)) => {
+                self.runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx));
+            }
+            None => self.model.update(cx, |m, cx| {
+                m.message = "Nothing to run here: put the caret in a main class or a test".into();
                 cx.notify();
             }),
         }

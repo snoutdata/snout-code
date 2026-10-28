@@ -209,11 +209,14 @@ impl Workspace {
         let ready = runs.engine(cx).is_some();
         let loading = runs.configs_loading;
         let running = runs.any_running();
+        // The selected configuration runs: Run becomes Rerun.
+        let rerun = selected.as_ref().and_then(|c| runs.running_config(&c.id)).is_some_and(|s| !s.launch.debug());
         let runs_entity = self.runs.clone();
         let run_config = {
             let label = selected.as_ref().map_or_else(|| "Current File".to_owned(), |c| c.name.clone());
             let selected_id = selected.as_ref().map(|c| c.id.clone());
             let kind_icon = selected.as_ref().map(|c| match c.kind {
+                crate::run::config::Kind::Main if c.spring_boot => Icon::Leaf,
                 crate::run::config::Kind::Main => Icon::Play,
                 crate::run::config::Kind::Gradle => Icon::Build,
                 crate::run::config::Kind::Tests => Icon::Check,
@@ -259,9 +262,11 @@ impl Workspace {
             .into_any_element()
         };
         let what = selected.as_ref().map_or_else(|| "the Current File".to_owned(), |c| format!("'{}'", c.name));
-        let run_tip: gpui::SharedString = format!("Run {what} (⌃R)").into();
+        let run_tip: gpui::SharedString =
+            if rerun { format!("Rerun {what} (⌃R)") } else { format!("Run {what} (⌃R)") }.into();
         let debug_tip: gpui::SharedString = format!("Debug {what} (⌃D)").into();
-        let run_button = tip_button("title-run", Icon::Play, run_tip, ready, p.ok, &p)
+        let run_icon = if rerun { Icon::Rerun } else { Icon::Play };
+        let run_button = tip_button("title-run", run_icon, run_tip, ready, p.ok, &p)
             .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::RunSelected), cx)));
         let debug_button = tip_button("title-debug", Icon::Bug, debug_tip, ready, p.ok, &p)
             .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::DebugSelected), cx)));

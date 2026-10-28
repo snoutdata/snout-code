@@ -110,6 +110,9 @@ final class Launches {
         out.addProperty("pid", process.pid());
         out.addProperty("mainClass", r.mainClass());
         out.addProperty("projectName", r.projectName());
+        out.addProperty("java", r.java());
+        out.addProperty("workingDir", r.workingDir().toString());
+        out.add("command", array(command));
         if (debug) {
             JsonObject attach = attachArguments(jdwp, r.projectName());
             JsonObject d = new JsonObject();

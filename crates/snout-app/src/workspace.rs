@@ -1342,6 +1342,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &RunSelected, w, cx| this.run_selected(false, w, cx)))
             .on_action(cx.listener(|this, _: &DebugSelected, w, cx| this.run_selected(true, w, cx)))
+            .on_action(cx.listener(|this, _: &RunContext, w, cx| this.run_context(false, w, cx)))
+            .on_action(cx.listener(|this, _: &DebugContext, w, cx| this.run_context(true, w, cx)))
             .on_action(cx.listener(|this, _: &StopRuns, _, cx| this.stop_runs(cx)))
             .on_action(cx.listener(|this, _: &StepOver, _, cx| this.debug_step("next", cx)))
             .on_action(cx.listener(|this, _: &StepInto, _, cx| this.debug_step("stepIn", cx)))

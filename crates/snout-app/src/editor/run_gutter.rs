@@ -339,7 +339,7 @@ impl EditorPanel {
             GutterMenu::Run { at, target } => {
                 let module = self.runnables.as_ref().and_then(|r| r.module.clone());
                 let (t1, t2, m1, m2) = (target.clone(), target.clone(), module.clone(), module);
-                let label = target.label();
+                let label = target.menu_label();
                 let body = div()
                     .flex()
                     .flex_col()

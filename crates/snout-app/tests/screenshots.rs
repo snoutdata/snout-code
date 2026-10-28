@@ -1158,6 +1158,184 @@ mod shots {
         println!("screenshot {name}: ok");
     }
 
+    /// A Spring Boot application of a real project, run and debugged the way a user does it,
+    /// for real. Only with `SNOUT_SHOT_BOOT=<the project's folder>` and
+    /// `SNOUT_SHOT_BOOT_JDK=<JDK home for its Gradle>`; with `SNOUT_SHOT_BOOT_FIRST=<a folder
+    /// above it>`, that folder is the project first (its engine runs, the Project view
+    /// opens on it), and the application's folder replaces it as another project would.
+    /// `SNOUT_SHOT_BOOT_MAIN` names the main class's file under the project. Then: the
+    /// engine of the first project is gone, the run icons and the title bar's configuration
+    /// show, the application runs from its `main` method's icon and says so in the Run
+    /// window, and under the debugger it stops in its `main` method. Shots of each step.
+    fn real_boot_shot(theme: ThemeChoice) {
+        let (Some(folder), Some(jdk)) = (std::env::var_os("SNOUT_SHOT_BOOT"), std::env::var_os("SNOUT_SHOT_BOOT_JDK"))
+        else {
+            return;
+        };
+        let folder = PathBuf::from(folder).canonicalize().unwrap();
+        let first = std::env::var_os("SNOUT_SHOT_BOOT_FIRST").map(|f| PathBuf::from(f).canonicalize().unwrap());
+        let main_file = folder.join(
+            std::env::var("SNOUT_SHOT_BOOT_MAIN")
+                .unwrap_or_else(|_| "src/main/java/com/solarpanda/bamboo/Application.java".into()),
+        );
+        let jdk = PathBuf::from(jdk);
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let opened = first.clone().unwrap_or_else(|| folder.clone());
+        let mut settings = Settings { theme, current: Some(opened.clone()), ..Settings::default() };
+        settings.project_jdks.insert(folder.clone(), jdk.clone());
+        settings.project_jdks.insert(opened.clone(), jdk);
+        cx.update(|cx| snout_app::init(&settings, cx));
+        cx.update(|cx| cx.set_global(snout_app::lang::hub::LangEnabled(true)));
+        let model = cx.update(|cx| {
+            let settings = settings.clone();
+            cx.new(|cx| snout_app::model::Model::new(settings, None, cx))
+        });
+        let mut ws = None;
+        let handle = cx
+            .open_window(size(px(1400.), px(900.)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+                ws = Some(view.clone());
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        let ws = ws.unwrap();
+        cx.allow_parking();
+        let pump = |cx: &mut HeadlessAppContext, secs: u64, done: &dyn Fn(&mut HeadlessAppContext) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+            while std::time::Instant::now() < deadline {
+                cx.advance_clock(Duration::from_millis(200));
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                })
+                .unwrap();
+                if done(cx) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            false
+        };
+        let save = |cx: &mut HeadlessAppContext, name: &str| {
+            let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
+            if let Some(out) = std::env::var_os("SNOUT_SCREENSHOT") {
+                let out = PathBuf::from(out);
+                std::fs::create_dir_all(&out).unwrap();
+                image.save(out.join(format!("{name}.png"))).unwrap();
+            }
+            println!("screenshot {name}: ok");
+        };
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.show_activity(Activity::Project, window, cx));
+        })
+        .unwrap();
+        let runs = cx.update(|cx| ws.read(cx).runs.clone());
+        let hub = cx.update(|cx| ws.read(cx).hub.clone());
+        let r2 = runs.clone();
+        let ready = move |cx: &mut HeadlessAppContext| cx.update(|cx| !r2.read(cx).engine_configs.is_empty());
+        assert!(pump(&mut cx, 900, &ready), "the engine of {} is ready", opened.display());
+        if first.is_some() {
+            save(&mut cx, "boot-first-dark");
+            let before: Vec<u32> = cx.update(|cx| hub.read(cx).server_pids());
+            // Another project in its place, as Open does it.
+            cx.update(|cx| model.update(cx, |m, cx| m.open_arg(&folder, cx)));
+            // A moment in: the views follow the new project at once.
+            pump(&mut cx, 8, &|_| false);
+            save(&mut cx, "boot-switching-dark");
+            let (h2, f2) = (hub.clone(), folder.clone());
+            let switched = pump(&mut cx, 900, &|cx| {
+                cx.update(|cx| {
+                    let h = h2.read(cx);
+                    h.servers.len() == 1 && h.servers.contains_key(&f2) && h.client(&f2).is_some()
+                }) && ready(cx)
+            });
+            assert!(switched, "only the new project's engine runs, and it is ready");
+            let gone = pump(&mut cx, 30, &|_| before.iter().all(|pid| unsafe { libc::kill(*pid as i32, 0) } != 0));
+            assert!(gone, "the first project's engine stopped: {before:?}");
+            let r3 = runs.clone();
+            let f3 = folder.clone();
+            assert!(
+                pump(&mut cx, 600, &|cx| cx.update(|cx| {
+                    let r = r3.read(cx);
+                    !r.gradle.builds.is_empty() && r.gradle.builds.iter().all(|b| b.root_dir.starts_with(&f3))
+                })),
+                "the Gradle window lists the new project's builds only"
+            );
+            save(&mut cx, "boot-switched-dark");
+        }
+        // The main class: run icons on its class and on its main method.
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(main_file.clone(), None), cx)));
+        let editor =
+            cx.update(|cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == main_file).unwrap());
+        let e2 = editor.clone();
+        assert!(
+            pump(&mut cx, 120, &|cx| cx.update(|cx| e2
+                .read(cx)
+                .runnables
+                .as_ref()
+                .is_some_and(|r| r.items.len() >= 2))),
+            "run icons on the class and its main method"
+        );
+        let text = std::fs::read_to_string(&main_file).unwrap();
+        let main_line = text.lines().position(|l| l.contains("void main(")).unwrap() as u32;
+        let (target, module) = cx.update(|cx| {
+            let r = editor.read(cx).runnables.clone().unwrap();
+            let item = r.items.iter().find(|i| i.line == main_line).expect("an icon on main").clone();
+            (item.target, r.module.clone())
+        });
+        let selected = cx.update(|cx| runs.read(cx).selected_config()).expect("a configuration in the title bar");
+        assert!(selected.spring_boot, "the Spring Boot application is the title bar's: {selected:?}");
+        // Run it from the icon on main: the Run window shows the command and its output.
+        cx.update(|cx| runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), false, cx)));
+        let id = cx.update(|cx| runs.read(cx).sessions.last().unwrap().id);
+        let r4 = runs.clone();
+        let output = move |cx: &mut HeadlessAppContext| {
+            cx.update(|cx| {
+                r4.read(cx).session(id).map(|s| s.lines.iter().map(|l| l.text()).collect::<Vec<_>>().join("\n"))
+            })
+            .unwrap_or_default()
+        };
+        let o2 = output.clone();
+        let started = pump(&mut cx, 600, &|cx| o2(cx).contains("Starting Application") || o2(cx).contains("Started "));
+        assert!(started, "the application starts: {}", output(&mut cx));
+        pump(&mut cx, 20, &|_| false);
+        let text_now = output(&mut cx);
+        for line in text_now.lines().take(5) {
+            println!("boot run: {}", line.chars().take(200).collect::<String>());
+        }
+        assert!(text_now.lines().any(|l| l.contains("bin/java") && l.contains("@")), "the command shows: {text_now}");
+        assert!(
+            !text_now.contains("ClassNotFoundException") && !text_now.contains("NoClassDefFoundError"),
+            "every class is on the classpath: {text_now}"
+        );
+        save(&mut cx, "boot-run-dark");
+        cx.update(|cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        let r5 = runs.clone();
+        assert!(pump(&mut cx, 60, &|cx| cx.update(|cx| !r5.read(cx).any_running())), "it stops");
+        // Debug it: a breakpoint where main starts the application stops it there.
+        let line = text.lines().position(|l| l.contains("SpringApplication.run")).unwrap() as u32;
+        cx.update(|cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&main_file, line, cx)));
+        cx.update(|cx| runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), true, cx)));
+        let id = cx.update(|cx| runs.read(cx).sessions.last().unwrap().id);
+        let f4 = main_file.clone();
+        let stopped = pump(&mut cx, 600, &|cx| {
+            cx.update(|cx| snout_app::run::marks(cx).unwrap().read(cx).exec == Some((f4.clone(), line)))
+        });
+        assert!(stopped, "the breakpoint in main is hit");
+        pump(&mut cx, 5, &|_| false);
+        save(&mut cx, "boot-debug-dark");
+        cx.update(|cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&main_file, line, cx)));
+        cx.update(|cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        let r6 = runs.clone();
+        pump(&mut cx, 60, &|cx| cx.update(|cx| !r6.read(cx).any_running()));
+        cx.update(|cx| hub.update(cx, |h, _| h.shutdown_all()));
+    }
+
     /// Spring on a real project, for real: the engine reads it, the window shows its beans
     /// and endpoints, the gutter and the `@Value` hints come from the engine, and
     /// completion in its `application.properties`. Only with `SNOUT_SHOT_SPRING=<project>`
@@ -1427,6 +1605,7 @@ mod shots {
         shot("project-model-light", ThemeChoice::Light, Activity::Project, Some(Select::ProjectModel));
         real_project_shot("project-real-dark", ThemeChoice::Dark);
         real_debug_shot("debug-real-dark", ThemeChoice::Dark);
+        real_boot_shot(ThemeChoice::Dark);
         shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
         shot("palette-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));

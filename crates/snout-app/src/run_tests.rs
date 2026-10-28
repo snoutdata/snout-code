@@ -141,7 +141,7 @@ fn breakpoints_are_kept_and_drawn_and_the_gutter_offers_runs(cx: &mut TestAppCon
     cx.update(|_, cx| assert_eq!(runs.read(cx).breakpoints_in(&file).len(), 1, "the click cleared line 5's"));
     // The file's main class is found for the run icon, with no engine.
     let mains = crate::run::main_classes(&file, &std::fs::read_to_string(&file).unwrap());
-    assert_eq!(mains, [(3, "demo.App".to_owned())]);
+    assert_eq!(mains, [(2, "demo.App".to_owned()), (3, "demo.App".to_owned())]);
     let _ = std::fs::remove_dir_all(repo);
 }
 
@@ -693,14 +693,50 @@ fn a_java_8_build_runs_and_debugs(cx: &mut TestAppContext) {
     tests_run_and_debug(cx, jdk, true);
 }
 
+#[test]
+fn the_caret_picks_the_test_method_else_the_class_else_the_main_class() {
+    use crate::run::{FileRunnables, Runnable};
+    let tests = FileRunnables {
+        module: None,
+        items: vec![
+            Runnable { line: 2, target: Target::TestClass { class: "demo.T".into() } },
+            Runnable { line: 4, target: Target::TestMethod { class: "demo.T".into(), method: "a".into() } },
+            Runnable { line: 9, target: Target::TestMethod { class: "demo.T".into(), method: "b".into() } },
+        ],
+    };
+    assert_eq!(tests.at_line(0), Some(&Target::TestClass { class: "demo.T".into() }));
+    assert_eq!(tests.at_line(6), Some(&Target::TestMethod { class: "demo.T".into(), method: "a".into() }));
+    assert_eq!(tests.at_line(12), Some(&Target::TestMethod { class: "demo.T".into(), method: "b".into() }));
+    let main = FileRunnables {
+        module: None,
+        items: vec![
+            Runnable { line: 12, target: Target::Main { class: "demo.Application".into() } },
+            Runnable { line: 17, target: Target::Main { class: "demo.Application".into() } },
+        ],
+    };
+    let target = main.at_line(0).unwrap();
+    assert_eq!(target.menu_label(), "Application.main()");
+}
+
+#[test]
+fn the_title_bar_starts_on_the_spring_boot_application() {
+    use crate::run::config::{RunConfig, default_config};
+    let c = |id: &str, kind, boot| RunConfig { id: id.into(), kind, spring_boot: boot, ..Default::default() };
+    let all = [c("tests", Kind::Tests, false), c("util", Kind::Main, false), c("app", Kind::Main, true)];
+    assert_eq!(default_config(&all).unwrap().id, "app");
+    assert_eq!(default_config(&all[..2]).unwrap().id, "util");
+    assert!(default_config(&all[..1]).is_none());
+}
+
 /// Another project in the window: the engines of builds outside it stop, and runs ask the
-/// new project's engine.
+/// new project's engine; a run asked for with no engine says why in the Run window.
 #[gpui::test]
 fn opening_another_project_drops_the_engines_outside_it(cx: &mut TestAppContext) {
     let a = demo_repo("engines-a");
     let b = demo_repo("engines-b");
     let (model, ws, cx) = open(cx, with_repo(&a));
     let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    let runs = runs_of(&ws, cx);
     let inner = a.join("svc");
     cx.update(|_, cx| {
         hub.update(cx, |h, _| {
@@ -719,6 +755,20 @@ fn opening_another_project_drops_the_engines_outside_it(cx: &mut TestAppContext)
     cx.update(|_, cx| {
         let roots: Vec<PathBuf> = hub.read(cx).servers.keys().cloned().collect();
         assert_eq!(roots, std::slice::from_ref(&b), "only the open project's engine is left");
+    });
+    // A run with no engine to take it says why, in the Run window, and ends.
+    cx.update(|_, cx| hub.update(cx, |h, _| h.stop_server(&b)));
+    let config = crate::run::config::RunConfig {
+        id: "main:x".into(),
+        name: "App".into(),
+        main_class: Some("demo.App".into()),
+        ..Default::default()
+    };
+    let id = cx.update(|_, cx| runs.update(cx, |r, cx| r.start(Launch::Config { config, debug: false }, cx))).unwrap();
+    cx.update(|_, cx| {
+        let s = runs.read(cx).session(id).unwrap().clone_lines();
+        assert!(s.iter().any(|l| l.contains("Gradle build") || l.contains("Java")), "{s:?}");
+        assert!(!runs.read(cx).session(id).unwrap().running(), "it does not hang");
     });
     let _ = std::fs::remove_dir_all(a);
     let _ = std::fs::remove_dir_all(b);

@@ -209,13 +209,27 @@ pub struct Breakpoint {
     pub condition: Option<String>,
 }
 
+/// What `ProjectSettings::selected` says when the user picked Current File.
+pub const CURRENT_FILE: &str = "current-file";
+
+/// The configuration the title bar starts on: the Spring Boot application, else the first
+/// main class, else the first `bootRun` or `run` task.
+pub fn default_config(all: &[RunConfig]) -> Option<RunConfig> {
+    all.iter()
+        .find(|c| c.kind == Kind::Main && c.spring_boot)
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Main))
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Gradle))
+        .cloned()
+}
+
 /// What the app keeps for one project, outside its folder.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectSettings {
     /// The user's configurations, and the build's as the user changed them (same id).
     pub configurations: Vec<RunConfig>,
-    /// The configuration the title bar shows; none for Current File.
+    /// The configuration the title bar shows: an id, [`CURRENT_FILE`], or none until one is
+    /// picked (then [`default_config`]).
     pub selected: Option<String>,
     pub breakpoints: Vec<Breakpoint>,
 }

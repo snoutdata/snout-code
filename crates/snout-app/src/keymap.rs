@@ -71,6 +71,8 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         // Running and debugging.
         ("ctrl-r", Box::new(RunSelected), None),
         ("ctrl-d", Box::new(DebugSelected), Some("Workspace")),
+        ("ctrl-shift-r", Box::new(RunContext), None),
+        ("ctrl-shift-d", Box::new(DebugContext), None),
         ("cmd-f2", Box::new(StopRuns), None),
         ("f8", Box::new(StepOver), None),
         ("f7", Box::new(StepInto), None),

@@ -57,6 +57,11 @@ impl Launch {
         }
     }
 
+    /// It runs a main class as jdtls compiled it (not through Gradle).
+    pub fn needs_classes(&self) -> bool {
+        matches!(self, Launch::Config { config, .. } if config.kind == Kind::Main)
+    }
+
     pub fn place(&self) -> Place {
         match self {
             Launch::Task { .. } => Place::Build,
@@ -148,6 +153,8 @@ pub struct Session {
     pub debug: Option<debug::Debugger>,
     /// Lines dropped from the start of the console.
     pub dropped: usize,
+    /// Asked for before the Java engine was ready: it starts once it is.
+    pub waiting: bool,
 }
 
 impl Session {
@@ -171,6 +178,11 @@ impl Session {
             self.lines.drain(..cut);
             self.dropped += cut;
         }
+    }
+
+    /// The console's lines as text.
+    pub fn clone_lines(&self) -> Vec<String> {
+        self.lines.iter().map(ConsoleLine::text).collect()
     }
 
     /// "Running 0:12", "Finished in 3.2 s", for the window's tab.
@@ -306,6 +318,28 @@ impl Target {
             Target::TestMethod { class, method } => format!("{}.{method}", simple(class)),
         }
     }
+
+    /// What the Run and Debug items call it: `Application.main()`, `GreeterTest`.
+    pub fn menu_label(&self) -> String {
+        match self {
+            Target::Main { .. } => format!("{}.main()", self.label()),
+            _ => self.label(),
+        }
+    }
+}
+
+impl FileRunnables {
+    /// What runs from the caret's line (from 0), as Run in the editor's menu and ⌃⇧R take
+    /// it: the test method the caret is in, else the test class, else the main class.
+    pub fn at_line(&self, line: u32) -> Option<&Target> {
+        // The nearest item at or above the caret, when it is a test method.
+        let nearest = self.items.iter().filter(|r| r.line <= line).max_by_key(|r| r.line);
+        nearest
+            .filter(|r| matches!(r.target, Target::TestMethod { .. }))
+            .map(|r| &r.target)
+            .or_else(|| self.items.iter().find(|r| matches!(r.target, Target::TestClass { .. })).map(|r| &r.target))
+            .or_else(|| self.items.iter().find(|r| matches!(r.target, Target::Main { .. })).map(|r| &r.target))
+    }
 }
 
 /// What the editors draw for debugging: the breakpoints, and the line the debugger
@@ -325,6 +359,16 @@ impl Global for MarksHandle {}
 
 pub fn marks(cx: &App) -> Option<Entity<Marks>> {
     cx.try_global::<MarksHandle>().map(|h| h.0.clone())
+}
+
+/// Whether runs can start: now, once the engine is ready, or not without the user.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EngineState {
+    Ready,
+    /// The engine is on its way (what it is doing).
+    Waiting(String),
+    /// Why nothing can run.
+    Unavailable(String),
 }
 
 /// What the run windows ask of the workspace.
@@ -486,6 +530,7 @@ impl Runs {
 
     /// The engine started or changed: read its configurations and tasks once per process.
     fn engine_changed(&mut self, cx: &mut Context<Self>) {
+        self.start_waiting(cx);
         let Some((_, pid)) = self.engine(cx) else { return };
         if !self.engine_ready(cx) {
             return;
@@ -560,14 +605,19 @@ impl Runs {
         config::merged(&self.engine_configs, &self.project.configurations)
     }
 
-    /// The configuration the title bar shows; none for Current File.
+    /// The configuration the title bar shows; none for Current File. Until one is picked,
+    /// the project's Spring Boot application, else its first main class.
     pub fn selected_config(&self) -> Option<RunConfig> {
-        let id = self.project.selected.as_ref()?;
-        self.configurations().into_iter().find(|c| &c.id == id)
+        let all = self.configurations();
+        match self.project.selected.as_deref() {
+            Some(config::CURRENT_FILE) => None,
+            Some(id) if all.iter().any(|c| c.id == id) => all.into_iter().find(|c| c.id == id),
+            _ => config::default_config(&all),
+        }
     }
 
     pub fn select_config(&mut self, id: Option<String>, cx: &mut Context<Self>) {
-        self.project.selected = id;
+        self.project.selected = Some(id.unwrap_or_else(|| config::CURRENT_FILE.to_owned()));
         self.save_project();
         cx.notify();
     }
@@ -635,19 +685,137 @@ impl Runs {
         cx.notify();
     }
 
+    /// Whether runs can start now, wait for the engine, or cannot start (and why). A main
+    /// class (`classes`) runs as jdtls compiled it, so it waits for every module to be
+    /// ready, Scala compiled; Gradle compiles for its own runs.
+    pub fn engine_state(&self, classes: bool, cx: &App) -> EngineState {
+        use crate::lang::hub::Stage;
+        let Some(project) = self.model.read(cx).project_root() else {
+            return EngineState::Unavailable("Open a project to run it.".into());
+        };
+        let hub = self.hub.read(cx);
+        let Some(root) = hub.engine_root(&project) else {
+            return if !crate::project_model::has_gradle(&project) {
+                EngineState::Unavailable(format!(
+                    "{} has no Gradle build: runs, tests and the debugger need one.",
+                    Model::dir_name(&project)
+                ))
+            } else if !hub.enabled {
+                EngineState::Unavailable("Java support is off.".into())
+            } else {
+                EngineState::Waiting("starting".into())
+            };
+        };
+        let Some(server) = hub.servers.get(&root) else { return EngineState::Waiting("starting".into()) };
+        match &server.stage {
+            Stage::Ready if classes && server.readiness.pending() => {
+                EngineState::Waiting(server.readiness.summary().to_lowercase())
+            }
+            Stage::Ready if hub.client(&root).is_some() => EngineState::Ready,
+            Stage::NeedsJdk(v) => EngineState::Unavailable(format!(
+                "This build needs JDK {v}, which isn't installed. Download it from the bar above the editor, \
+                 or pick a JDK in Settings."
+            )),
+            Stage::Failed(why) => EngineState::Unavailable(format!("The Java engine is not running: {why}")),
+            other => EngineState::Waiting(other.label().to_lowercase()),
+        }
+    }
+
     /// Run `launch` in a new session (a finished one of the same title gives up its tab).
+    /// Before the engine is ready the session waits for it; when nothing can run, the
+    /// session says why. Either way the window shows it.
     pub fn start(&mut self, launch: Launch, cx: &mut Context<Self>) -> Option<u64> {
-        if self.engine(cx).is_none() {
-            self.say("Runs start once the Java engine is ready", cx);
-            return None;
+        let state = self.engine_state(launch.needs_classes(), cx);
+        if state == EngineState::Waiting("starting".into())
+            && let Some(project) = self.model.read(cx).project_root()
+        {
+            self.hub.update(cx, |h, cx| h.ensure_server(&project, cx));
         }
         let place = launch.place();
         let title = launch.title();
         self.sessions.retain(|s| !(s.place() == place && s.title == title && !s.running()));
         let id = self.next_id;
         self.next_id += 1;
-        let (method, params) = match &launch {
-            Launch::Config { config, debug } => ("snout/run", json!({ "config": config.to_engine(), "debug": debug })),
+        let mut session = Session {
+            id,
+            run_id: None,
+            title,
+            launch: launch.clone(),
+            lines: Vec::new(),
+            style: Default::default(),
+            started: Instant::now(),
+            ended: None,
+            tasks: Vec::new(),
+            tests: None,
+            selected_test: None,
+            collapsed: HashSet::new(),
+            problems: (0, 0),
+            debug: launch.debug().then(debug::Debugger::default),
+            dropped: 0,
+            waiting: false,
+        };
+        let what = match &launch {
+            Launch::Config { config, .. } => match (config.kind, &config.main_class, &config.task) {
+                (Kind::Main, Some(c), _) => format!("Starting {c}"),
+                (_, _, Some(t)) => format!("Running {t}"),
+                _ => format!("Running {}", config.name),
+            },
+            Launch::Tests { label, .. } => format!("Testing {label}"),
+            Launch::Task { task, .. } => format!("Running {task}"),
+        };
+        session.lines.push(ConsoleLine::system(what));
+        if matches!(&launch, Launch::Tests { .. })
+            || matches!(&launch, Launch::Config { config, .. } if config.kind == Kind::Tests)
+        {
+            session.tests = Some(TestTree::default());
+        }
+        match &state {
+            EngineState::Ready => {}
+            EngineState::Waiting(doing) => {
+                session.waiting = true;
+                session.push(
+                    Stream::System,
+                    &format!("Waiting for the Java engine ({doing}): the run starts as soon as it is ready."),
+                );
+            }
+            EngineState::Unavailable(why) => {
+                session.push(Stream::Err, why);
+                session.ended = Some(Ended {
+                    outcome: Outcome::Failed,
+                    elapsed: Duration::ZERO,
+                    exit_code: None,
+                    error: Some(why.clone()),
+                });
+            }
+        }
+        self.sessions.push(session);
+        self.selected.insert(place, id);
+        if state == EngineState::Ready {
+            self.dispatch(id, cx);
+        }
+        self.tick(cx);
+        cx.emit(RunsEvent::Show(place));
+        cx.notify();
+        Some(id)
+    }
+
+    /// Send session `id`'s launch to the engine.
+    fn dispatch(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(s) = self.session_mut(id) else { return };
+        s.waiting = false;
+        let (method, params) = match &s.launch {
+            Launch::Config { config, debug } => {
+                let mut c = config.to_engine();
+                // Spring Boot colours its output only on a terminal, unless told to.
+                if config.kind == Kind::Main
+                    && config.spring_boot
+                    && !config.jvm_args.iter().any(|a| a.starts_with("-Dspring.output.ansi.enabled"))
+                    && let Some(args) = c.get_mut("jvmArgs").and_then(Value::as_array_mut)
+                {
+                    args.push(json!("-Dspring.output.ansi.enabled=always"));
+                }
+                ("snout/run", json!({ "config": c, "debug": debug }))
+            }
             Launch::Tests { module, filter, debug, rerun_failed, .. } => {
                 let mut p = json!({ "module": module, "debug": debug });
                 if *rerun_failed {
@@ -665,50 +833,46 @@ impl Runs {
                 ("snout/runTask", p)
             }
         };
-        let mut session = Session {
-            id,
-            run_id: None,
-            title,
-            launch: launch.clone(),
-            lines: Vec::new(),
-            style: Default::default(),
-            started: Instant::now(),
-            ended: None,
-            tasks: Vec::new(),
-            tests: None,
-            selected_test: None,
-            collapsed: HashSet::new(),
-            problems: (0, 0),
-            debug: launch.debug().then(debug::Debugger::default),
-            dropped: 0,
-        };
-        let what = match &launch {
-            Launch::Config { config, .. } => match (config.kind, &config.main_class, &config.task) {
-                (Kind::Main, Some(c), _) => format!("Starting {c}"),
-                (_, _, Some(t)) => format!("Running {t}"),
-                _ => format!("Running {}", config.name),
-            },
-            Launch::Tests { label, .. } => format!("Testing {label}"),
-            Launch::Task { task, .. } => format!("Running {task}"),
-        };
-        session.lines.push(ConsoleLine::system(what));
-        if matches!(&launch, Launch::Tests { .. })
-            || matches!(&launch, Launch::Config { config, .. } if config.kind == Kind::Tests)
-        {
-            session.tests = Some(TestTree::default());
-        }
-        self.sessions.push(session);
-        self.selected.insert(place, id);
         let call = self.request(method, params, cx);
         cx.spawn(async move |this, cx| {
             let result = call.await;
             let _ = this.update(cx, |this, cx| this.started(id, result, cx));
         })
         .detach();
-        self.tick(cx);
-        cx.emit(RunsEvent::Show(place));
+    }
+
+    /// The engine moved on: start the sessions that waited for it, or tell them why they
+    /// cannot start.
+    fn start_waiting(&mut self, cx: &mut Context<Self>) {
+        let waiting: Vec<(u64, bool)> = self
+            .sessions
+            .iter()
+            .filter(|s| s.waiting && s.running())
+            .map(|s| (s.id, s.launch.needs_classes()))
+            .collect();
+        for (id, classes) in waiting {
+            match self.engine_state(classes, cx) {
+                EngineState::Ready => {
+                    if let Some(s) = self.session_mut(id) {
+                        s.push(Stream::System, "The Java engine is ready.");
+                    }
+                    self.dispatch(id, cx);
+                }
+                EngineState::Waiting(_) => {}
+                EngineState::Unavailable(why) => {
+                    let Some(s) = self.session_mut(id) else { continue };
+                    s.waiting = false;
+                    s.push(Stream::Err, &why);
+                    s.ended = Some(Ended {
+                        outcome: Outcome::Failed,
+                        elapsed: s.started.elapsed(),
+                        exit_code: None,
+                        error: Some(why.clone()),
+                    });
+                }
+            }
+        }
         cx.notify();
-        Some(id)
     }
 
     /// A session for a run started elsewhere, under `run_id`: the engine's notifications for
@@ -733,6 +897,7 @@ impl Runs {
             problems: (0, 0),
             debug: launch.debug().then(debug::Debugger::default),
             dropped: 0,
+            waiting: false,
         };
         s.lines.push(ConsoleLine::system(format!("Running {}", launch.title())));
         if matches!(launch, Launch::Tests { .. }) {
@@ -769,6 +934,18 @@ impl Runs {
         };
         let run_id = v.get("runId").and_then(Value::as_str).map(str::to_owned);
         s.run_id = run_id.clone();
+        // The command line a main class runs with, as the engine launched it.
+        if let Some(command) = v.get("command").and_then(Value::as_array) {
+            let words: Vec<String> = command
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|w| if w.contains(char::is_whitespace) { format!("\"{w}\"") } else { w.to_owned() })
+                .collect();
+            s.push(Stream::System, &words.join(" "));
+        }
+        if let Some(dir) = v.get("workingDir").and_then(Value::as_str) {
+            s.push(Stream::System, &format!("Working directory: {dir}"));
+        }
         if let Some(tasks) = v.get("tasks").and_then(Value::as_array) {
             let names: Vec<&str> = tasks.iter().filter_map(Value::as_str).collect();
             if !names.is_empty() {
@@ -801,6 +978,7 @@ impl Runs {
         if let Some(d) = s.debug.as_mut() {
             d.disconnect();
         }
+        s.waiting = false;
         match s.run_id.clone() {
             Some(run_id) => {
                 let call = self.request("snout/cancelTask", json!({ "runId": run_id }), cx);
@@ -1130,7 +1308,11 @@ impl Runs {
                 Launch::Tests { module: module.to_owned(), filter, label: target.label(), debug, rerun_failed: false }
             }
             Target::Main { class } => {
-                let known = self.configurations().into_iter().find(|c| c.main_class.as_deref() == Some(class));
+                let known = self.configurations().into_iter().find(|c| {
+                    c.kind == Kind::Main
+                        && c.main_class.as_deref() == Some(class)
+                        && module.is_none_or(|m| c.module == m)
+                });
                 let config = match known {
                     Some(c) => c,
                     None => {
@@ -1148,10 +1330,22 @@ impl Runs {
                         }
                     }
                 };
+                // As the title bar's configuration from now on, when it is one of the list.
+                if self.configurations().iter().any(|c| c.id == config.id) {
+                    self.select_config(Some(config.id.clone()), cx);
+                }
                 Launch::Config { config, debug }
             }
         };
         self.start(launch, cx);
+    }
+
+    /// The running session of the configuration `id`, in the Run or Debug window.
+    pub fn running_config(&self, id: &str) -> Option<&Session> {
+        self.sessions
+            .iter()
+            .rev()
+            .find(|s| s.running() && matches!(&s.launch, Launch::Config { config, .. } if config.id == id))
     }
 
     // ----- Breakpoints --------------------------------------------------------------------------
@@ -1218,9 +1412,9 @@ impl Runs {
     }
 }
 
-/// The main classes a file declares, with the line of each (from 0): a class with a
-/// `main` method (Java, or a Scala object's `def main`), or one marked
-/// `@SpringBootApplication`.
+/// The main classes a file declares, with the lines their run icons go on (from 0): the
+/// class's own line and its `main` method's, for a class with a `main` method (Java, or a
+/// Scala object's `def main`); the class's line for one marked `@SpringBootApplication`.
 pub fn main_classes(path: &Path, text: &str) -> Vec<(u32, String)> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
     if !matches!(ext, "java" | "scala") {
@@ -1257,10 +1451,13 @@ pub fn main_classes(path: &Path, text: &str) -> Vec<(u32, String)> {
         let java_main = ext == "java" && t.contains("static") && t.contains("void main(");
         let scala_main = ext == "scala" && t.contains("def main(") && t.contains("Array[String]");
         if (java_main || scala_main)
-            && let Some((_, name)) = &class_line
+            && let Some((at, name)) = &class_line
         {
             let class = qualify(name);
-            if !out.iter().any(|(_, c)| *c == class) {
+            if !out.iter().any(|(l, c)| *c == class && l == at) {
+                out.push((*at, class.clone()));
+            }
+            if *at != i as u32 {
                 out.push((i as u32, class));
             }
         }
@@ -1275,11 +1472,14 @@ mod tests {
     #[test]
     fn finds_main_methods_and_spring_boot_applications() {
         let java = "package demo.app;\n\n@SpringBootApplication\npublic class App {\n  public static void main(String[] args) {}\n}\n";
-        assert_eq!(main_classes(Path::new("/w/App.java"), java), [(3, "demo.app.App".to_owned())]);
+        let app = |l: u32| (l, "demo.app.App".to_owned());
+        assert_eq!(main_classes(Path::new("/w/App.java"), java), [app(3), app(4)]);
         let plain = "package demo;\nclass Tool {\n    static void main(String... a) {}\n}\n";
-        assert_eq!(main_classes(Path::new("/w/Tool.java"), plain), [(2, "demo.Tool".to_owned())]);
+        let tool = |l: u32| (l, "demo.Tool".to_owned());
+        assert_eq!(main_classes(Path::new("/w/Tool.java"), plain), [tool(1), tool(2)]);
         let scala = "package s\nobject Main {\n  def main(args: Array[String]): Unit = ()\n}\n";
-        assert_eq!(main_classes(Path::new("/w/Main.scala"), scala), [(2, "s.Main".to_owned())]);
+        let main = |l: u32| (l, "s.Main".to_owned());
+        assert_eq!(main_classes(Path::new("/w/Main.scala"), scala), [main(1), main(2)]);
         assert!(main_classes(Path::new("/w/x.kt"), java).is_empty());
     }
 
