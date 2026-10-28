@@ -234,8 +234,95 @@ impl Workspace {
         for editor in restored.1 {
             this.track_editor(&editor, cx);
         }
+        let size = this.model.read(cx).settings.editor_font_size;
+        cx.set_global(crate::editor::EditorFont(size.clamp(crate::editor::FONT_MIN, crate::editor::FONT_MAX)));
+        // Closing the window with unsaved changes asks first.
+        let weak = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            weak.update(cx, |this, cx| this.confirm_unsaved(false, window, cx)).unwrap_or(true)
+        });
         window.focus(&this.focus, cx);
         this
+    }
+
+    /// Make the editors' font larger or smaller by `by` points, or the usual size again.
+    pub fn zoom(&mut self, by: Option<f32>, cx: &mut Context<Self>) {
+        let size = match by {
+            Some(by) => (crate::editor::font_size(cx) + by).clamp(crate::editor::FONT_MIN, crate::editor::FONT_MAX),
+            None => crate::look::MONO_SIZE,
+        };
+        cx.set_global(crate::editor::EditorFont(size));
+        self.model.update(cx, |m, _| {
+            m.settings.editor_font_size = size;
+            m.persist();
+        });
+        for editor in self.editors(cx) {
+            editor.update(cx, |_, cx| cx.notify());
+        }
+    }
+
+    /// ⌘W: close the editor tab with the keyboard, asking first if it has changes.
+    pub fn close_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focused = self
+            .editors(cx)
+            .into_iter()
+            .find(|e| gpui::Focusable::focus_handle(e.read(cx).state.read(cx), cx).contains_focused(window, cx));
+        let Some(editor) = focused else { return };
+        let dock = self.dock.clone();
+        let e = editor.clone();
+        crate::editor::confirm_close(Some(editor), window, cx, move |window, cx| {
+            dock.update(cx, |d, cx| d.remove_panel(e, window, cx));
+        });
+    }
+
+    /// Before the window closes or the app quits: true when no tab has unsaved changes.
+    /// Otherwise ask whether to save them; the answer saves (or drops) them and closes
+    /// the window (or quits) itself.
+    pub fn confirm_unsaved(&mut self, quit: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let dirty: Vec<Entity<EditorPanel>> = self.editors(cx).into_iter().filter(|e| e.read(cx).dirty).collect();
+        if dirty.is_empty() {
+            return true;
+        }
+        let message = match dirty.as_slice() {
+            [one] => format!("Do you want to save the changes you made to {}?", one.read(cx).name()),
+            many => format!("Do you want to save the changes you made to {} files?", many.len()),
+        };
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &message,
+            Some("Your changes are lost if you don't save them."),
+            &["Save", "Don't Save", "Cancel"],
+            cx,
+        );
+        window
+            .spawn(cx, async move |cx| {
+                let Ok(answer) = answer.await else { return };
+                let _ = cx.update(|window, cx| {
+                    match answer {
+                        0 => {
+                            for e in &dirty {
+                                e.update(cx, |e, cx| e.save(cx));
+                            }
+                            if dirty.iter().any(|e| e.read(cx).dirty) {
+                                return;
+                            }
+                        }
+                        1 => {
+                            for e in &dirty {
+                                e.update(cx, |e, cx| e.discard(cx));
+                            }
+                        }
+                        _ => return,
+                    }
+                    if quit {
+                        cx.quit();
+                    } else {
+                        window.remove_window();
+                    }
+                });
+            })
+            .detach();
+        false
     }
 
     /// Keep `editor` among the tabs, and follow it when it gets the keyboard.
@@ -256,7 +343,7 @@ impl Workspace {
 
     /// The editor tab with the keyboard, or else the one the status bar follows.
     pub fn active_editor(&self, window: &Window, cx: &App) -> Option<Entity<EditorPanel>> {
-        self.editors()
+        self.editors(cx)
             .into_iter()
             .find(|e| gpui::Focusable::focus_handle(e.read(cx).state.read(cx), cx).contains_focused(window, cx))
             .or_else(|| self.status.read(cx).editor())
@@ -342,9 +429,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.editors.retain(|e| e.upgrade().is_some());
-        let open = self.editors().into_iter().find(|e| e.read(cx).path == path);
+        let open = self.editors(cx).into_iter().find(|e| e.read(cx).path == path);
         let reusable = if open.is_none() && preview {
-            self.editors().into_iter().find(|e| e.read(cx).preview && !e.read(cx).dirty)
+            self.editors(cx).into_iter().find(|e| e.read(cx).preview && !e.read(cx).dirty)
         } else {
             None
         };
@@ -384,13 +471,31 @@ impl Workspace {
 
     /// Put up the go-to-file or find-in-files box over the open repository.
     pub fn open_search(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(root) = self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()) else { return };
+        let target = self.active_editor(window, cx);
+        let root = match mode {
+            Mode::GoToLine => match &target {
+                Some(e) => e.read(cx).path.parent().map(PathBuf::from).unwrap_or_default(),
+                None => return,
+            },
+            _ => match self.model.read(cx).repo.as_ref() {
+                Some(r) => r.root().to_owned(),
+                None => return,
+            },
+        };
         let model = self.model.clone();
         let view = cx.new(|cx| SearchView::new(model, root, mode, window, cx));
-        cx.subscribe_in(&view, window, |this, _, e: &SearchEvent, window, cx| match e {
+        let target = target.map(|e| e.downgrade());
+        cx.subscribe_in(&view, window, move |this, _, e: &SearchEvent, window, cx| match e {
             SearchEvent::Close => {
                 this.search = None;
                 window.focus(&this.focus, cx);
+                cx.notify();
+            }
+            SearchEvent::GoToLine(line, column) => {
+                this.search = None;
+                if let Some(editor) = target.as_ref().and_then(|t| t.upgrade()) {
+                    editor.update(cx, |e, cx| e.go_to(*line, *column, window, cx));
+                }
                 cx.notify();
             }
         })
@@ -403,8 +508,13 @@ impl Workspace {
     }
 
     /// The editor tabs open now.
-    pub fn editors(&self) -> Vec<Entity<EditorPanel>> {
-        self.editors.iter().filter_map(|e| e.upgrade()).collect()
+    pub fn editors(&self, cx: &App) -> Vec<Entity<EditorPanel>> {
+        let dock = self.dock.read(cx);
+        self.editors
+            .iter()
+            .filter_map(|e| e.upgrade())
+            .filter(|e| dock.panel(PanelId::from(e.entity_id())).is_some())
+            .collect()
     }
 
     /// Save the dock layout once it has stopped changing for a moment (a drag resizes it
@@ -584,6 +694,16 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
             .on_action(cx.listener(|this, _: &FindInFiles, w, cx| this.open_search(Mode::FindInFiles, w, cx)))
+            .on_action(cx.listener(|this, _: &GoToLine, w, cx| this.open_search(Mode::GoToLine, w, cx)))
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(Some(1.), cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(Some(-1.), cx)))
+            .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(None, cx)))
+            .on_action(cx.listener(|this, _: &CloseTab, w, cx| this.close_tab(w, cx)))
+            .on_action(cx.listener(|this, _: &Quit, w, cx| {
+                if this.confirm_unsaved(true, w, cx) {
+                    cx.quit();
+                }
+            }))
             .on_action(cx.listener(|this, _: &PrevCommit, w, cx| this.step_commit(true, w, cx)))
             .on_action(cx.listener(|this, _: &NextCommit, w, cx| this.step_commit(false, w, cx)));
         let root = act!(root, Open, free, |_| Action::PickFolder);

@@ -106,6 +106,19 @@ pub fn find_in_files(root: &Path, files: &[String], text: &str) -> Vec<Hit> {
 pub enum Mode {
     GoToFile,
     FindInFiles,
+    /// Go to a line (and column) of the editor in front: `12` or `12:5`.
+    GoToLine,
+}
+
+/// The line and column (from 0) that `12` or `12:5` (from 1) names.
+pub fn parse_line(text: &str) -> Option<(u32, u32)> {
+    let mut parts = text.trim().splitn(2, [':', ',']);
+    let line: u32 = parts.next()?.trim().parse().ok()?;
+    let column: u32 = match parts.next() {
+        Some(c) => c.trim().parse().ok()?,
+        None => 1,
+    };
+    Some((line.max(1) - 1, column.max(1) - 1))
 }
 
 /// A row the box offers.
@@ -118,6 +131,7 @@ pub struct Item {
 
 pub enum SearchEvent {
     Close,
+    GoToLine(u32, u32),
 }
 
 pub struct SearchView {
@@ -142,6 +156,7 @@ impl SearchView {
         let placeholder = match mode {
             Mode::GoToFile => "Go to file",
             Mode::FindInFiles => "Find in files",
+            Mode::GoToLine => "Line, or line:column",
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
@@ -150,7 +165,7 @@ impl SearchView {
             _ => {}
         })
         .detach();
-        let files = Arc::new(list_files(&root));
+        let files = Arc::new(if mode == Mode::GoToLine { Vec::new() } else { list_files(&root) });
         let mut this = Self {
             model,
             root,
@@ -182,6 +197,7 @@ impl SearchView {
         let query = self.input.read(cx).value().to_string();
         self.selected = 0;
         match self.mode {
+            Mode::GoToLine => cx.notify(),
             Mode::GoToFile => {
                 self.items = go_to_file(&self.files, &query)
                     .into_iter()
@@ -223,6 +239,12 @@ impl SearchView {
     }
 
     pub fn open_selected(&mut self, cx: &mut Context<Self>) {
+        if self.mode == Mode::GoToLine {
+            if let Some((line, column)) = parse_line(&self.input.read(cx).value()) {
+                cx.emit(SearchEvent::GoToLine(line, column));
+            }
+            return;
+        }
         let Some(item) = self.items.get(self.selected).cloned() else { return };
         let action = Action::OpenFile(self.root.join(&item.path), item.at);
         cx.emit(SearchEvent::Close);
@@ -244,7 +266,35 @@ impl Render for SearchView {
             Mode::GoToFile => "No file matches".into(),
             Mode::FindInFiles if self.input.read(cx).value().is_empty() => "Type what to look for".into(),
             Mode::FindInFiles => "Nothing found".into(),
+            Mode::GoToLine => SharedString::default(),
         };
+        if self.mode == Mode::GoToLine {
+            let hint = match parse_line(&self.input.read(cx).value()) {
+                Some((line, column)) => format!("Go to line {}, column {}", line + 1, column + 1),
+                None => "Type a line number, or line:column".to_owned(),
+            };
+            return div()
+                .id("search")
+                .key_context("SearchBox")
+                .debug_selector(|| "line-box".into())
+                .track_focus(&self.focus)
+                .on_action(cx.listener(|_, _: &SearchClose, _, cx| cx.emit(SearchEvent::Close)))
+                .w(px(360.))
+                .p(px(8.))
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .bg(p.card)
+                .border_1()
+                .border_color(p.border)
+                .rounded(px(10.))
+                .shadow_lg()
+                .font_family(look::FONT)
+                .text_size(px(look::BODY))
+                .text_color(p.fg)
+                .child(look::field(&self.input, false, None, &p))
+                .child(div().px(px(4.)).text_size(px(12.)).text_color(p.weak()).child(hint));
+        }
         let list = uniform_list("search-items", count, move |range, _, _| {
             range
                 .map(|i| {

@@ -576,20 +576,21 @@ fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext
         assert_eq!(language_for(&repo.join(name)), language);
         assert!(LanguageRegistry::singleton().language(language).is_some(), "{language} is registered");
         act(&model, cx, Action::OpenFile(repo.join(name), None));
-        let editor = cx.update(|_, cx| ws.read(cx).editors().into_iter().find(|e| e.read(cx).path == repo.join(name)));
+        let editor =
+            cx.update(|_, cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == repo.join(name)));
         let editor = editor.expect("the file has a tab");
         cx.update(|_, cx| assert_eq!(editor.read(cx).text(cx), text));
     }
     cx.update(|_, cx| {
-        assert_eq!(ws.read(cx).editors().len(), files.len());
+        assert_eq!(ws.read(cx).editors(cx).len(), files.len());
         assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Projects, "the docks come forward");
     });
     // Opening a file again brings its tab forward instead of a second one.
     act(&model, cx, Action::OpenFile(repo.join("build.gradle"), Some((0, 6))));
-    cx.update(|_, cx| assert_eq!(ws.read(cx).editors().len(), files.len()));
+    cx.update(|_, cx| assert_eq!(ws.read(cx).editors(cx).len(), files.len()));
     // Type, then ⌘S saves.
     act(&model, cx, Action::OpenFile(repo.join("src/App.java"), Some((0, 0))));
-    let editor = cx.update(|_, cx| ws.read(cx).editors()[0].clone());
+    let editor = cx.update(|_, cx| ws.read(cx).editors(cx)[0].clone());
     cx.simulate_keystrokes("x");
     cx.update(|_, cx| assert!(editor.read(cx).dirty, "typing marks the tab"));
     cx.simulate_keystrokes("cmd-s");
@@ -635,7 +636,7 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
     assert!(names(cx).contains(&"  main.rs".to_owned()));
     let main = cx.debug_bounds("file-main.rs").expect("the main.rs row is drawn").center();
     cx.simulate_click(main, Modifiers::none());
-    cx.update(|_, cx| assert!(ws.read(cx).editors().iter().any(|e| e.read(cx).path == repo.join("src/main.rs"))));
+    cx.update(|_, cx| assert!(ws.read(cx).editors(cx).iter().any(|e| e.read(cx).path == repo.join("src/main.rs"))));
     // A file made elsewhere shows up once the watcher reports it.
     std::fs::write(repo.join("src/lib.rs"), "").unwrap();
     for _ in 0..100 {
@@ -684,7 +685,7 @@ fn go_to_file_and_find_in_files_open_the_file(cx: &mut TestAppContext) {
     cx.update(|_, cx| {
         let ws = ws.read(cx);
         assert!(ws.search.is_none(), "↩ closes it");
-        assert!(ws.editors().iter().any(|e| e.read(cx).path == repo.join("src/main.rs")));
+        assert!(ws.editors(cx).iter().any(|e| e.read(cx).path == repo.join("src/main.rs")));
     });
     cx.simulate_keystrokes("cmd-shift-f");
     let search = cx.update(|_, cx| ws.read(cx).search.clone().unwrap());

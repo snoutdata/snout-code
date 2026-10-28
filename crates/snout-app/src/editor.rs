@@ -7,18 +7,44 @@
 
 use std::path::{Path, PathBuf};
 
+use std::time::{Duration, SystemTime};
+
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, actions, div, px,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Global, InteractiveElement as _, IntoElement,
+    ParentElement as _, PromptLevel, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
+    Task, Window, actions, div, px,
 };
 use gpui_component::dock::{PanelInfo, PanelState};
-use gpui_component::input::{Editor, EditorState, InputEvent, Position, TabSize};
+use gpui_component::input::{
+    Editor, EditorState, InputEvent, Position, RangeDecoration, RangeDecorationCollection, RangeDecorationStyle,
+    RopeExt as _, TabSize,
+};
 
+use crate::editing::{self, Edit};
 use crate::look;
-use crate::theme::palette;
+use crate::theme::{mix, palette};
 
-actions!(editor, [Save]);
+actions!(editor, [Save, ToggleComment, DuplicateLine, MoveLineUp, MoveLineDown, ToggleSoftWrap]);
+
+/// The editors' font size, which ⌘+ and ⌘- change for every tab.
+pub struct EditorFont(pub f32);
+
+impl Global for EditorFont {}
+
+pub const FONT_MIN: f32 = 8.;
+pub const FONT_MAX: f32 = 32.;
+
+/// The editors' font size now.
+pub fn font_size(cx: &App) -> f32 {
+    cx.try_global::<EditorFont>().map_or(look::MONO_SIZE, |f| f.0)
+}
+
+/// How often an open file is checked for changes made elsewhere.
+pub const DISK_POLL: Duration = Duration::from_millis(700);
+
+/// How far bracket matching looks from the caret.
+const BRACKET_REACH: usize = 64 * 1024;
 
 /// The name an editor tab goes by in a saved layout.
 pub const PANEL_NAME: &str = "Editor";
@@ -117,7 +143,20 @@ pub struct EditorPanel {
     /// The repository the file is in, for the breadcrumbs.
     root: Option<PathBuf>,
     error: Option<String>,
+    /// Lines wrap at the window edge.
+    pub soft_wrap: bool,
+    /// The file changed on disk while the tab had changes of its own.
+    pub conflict: bool,
+    /// The file's modification time and length when last read or written.
+    disk: Option<(SystemTime, u64)>,
+    /// The frames around the bracket at the caret and its match.
+    brackets: Option<RangeDecorationCollection>,
+    pub bracket_pair: Option<(usize, usize)>,
+    /// What the brackets were found for: the caret and the text's revision.
+    seen: (usize, u64),
+    revision: u64,
     focus: FocusHandle,
+    _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -127,21 +166,36 @@ impl EditorPanel {
     /// Open `path` in a new editor.
     pub fn open(path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let state = cx.new(|cx| EditorState::new(window, cx).line_number(true).soft_wrap(false));
-        let subscriptions = vec![cx.subscribe(&state, |this, state, e: &InputEvent, cx| match e {
-            InputEvent::Change => {
-                let dirty = state.read(cx).value().as_ref() != this.saved;
-                if dirty {
-                    // Editing keeps a preview tab.
-                    this.preview = false;
+        let subscriptions = vec![
+            cx.subscribe(&state, |this, state, e: &InputEvent, cx| match e {
+                InputEvent::Change => {
+                    this.revision += 1;
+                    let dirty = state.read(cx).value().as_ref() != this.saved;
+                    if dirty {
+                        // Editing keeps a preview tab.
+                        this.preview = false;
+                    }
+                    if dirty != this.dirty {
+                        this.dirty = dirty;
+                    }
+                    cx.notify();
                 }
-                if dirty != this.dirty {
-                    this.dirty = dirty;
+                InputEvent::Focus => cx.emit(EditorEvent::Focused),
+                _ => {}
+            }),
+            // The caret moved or the text changed: find the brackets again.
+            cx.observe(&state, |this, _, cx| this.match_brackets(cx)),
+        ];
+        let brackets = state.update(cx, |s, cx| s.create_range_decorations_collection(Vec::new(), cx));
+        // Look at the file on disk now and then, for changes made elsewhere.
+        let poll = cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(DISK_POLL).await;
+                if this.update_in(cx, |this, window, cx| this.check_disk(window, cx)).is_err() {
+                    return;
                 }
-                cx.notify();
             }
-            InputEvent::Focus => cx.emit(EditorEvent::Focused),
-            _ => {}
-        })];
+        });
         let mut this = Self {
             path: PathBuf::new(),
             state,
@@ -151,7 +205,15 @@ impl EditorPanel {
             info: FileInfo::detect(""),
             root: None,
             error: None,
+            soft_wrap: false,
+            conflict: false,
+            disk: None,
+            brackets: Some(brackets),
+            bracket_pair: None,
+            seen: (usize::MAX, 0),
+            revision: 0,
             focus: cx.focus_handle(),
+            _poll: poll,
             _subscriptions: subscriptions,
         };
         this.load(path, window, cx);
@@ -173,11 +235,130 @@ impl EditorPanel {
             s.set_value(text.clone(), window, cx);
         });
         self.root = path.ancestors().skip(1).find(|d| d.join(".git").exists()).map(Path::to_owned);
+        self.disk = disk_stamp(&path);
         self.path = path;
         self.saved = text;
         self.dirty = false;
+        self.conflict = false;
         self.error = error;
         cx.notify();
+    }
+
+    /// Read the file again, keeping the caret where it was.
+    pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let at = self.state.read(cx).cursor_position();
+        let preview = self.preview;
+        self.load(self.path.clone(), window, cx);
+        self.preview = preview;
+        self.state.update(cx, |s, cx| s.set_cursor_position(at, window, cx));
+    }
+
+    /// Keep this tab's text over what changed on disk; saving writes it.
+    pub fn keep_mine(&mut self, cx: &mut Context<Self>) {
+        self.conflict = false;
+        self.disk = disk_stamp(&self.path);
+        cx.notify();
+    }
+
+    /// If the file changed on disk: take the new text when this tab has no changes, or
+    /// say so when it has.
+    pub fn check_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = disk_stamp(&self.path);
+        if now.is_none() || now == self.disk || self.conflict {
+            return;
+        }
+        self.disk = now;
+        let Ok(text) = std::fs::read_to_string(&self.path) else { return };
+        if text == self.saved {
+            return;
+        }
+        if self.dirty {
+            self.conflict = true;
+            cx.notify();
+            return;
+        }
+        self.reload(window, cx);
+    }
+
+    /// Frame the bracket at the caret and its match, once per caret move or edit.
+    fn match_brackets(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        let caret = state.cursor();
+        if self.seen == (caret, self.revision) {
+            return;
+        }
+        self.seen = (caret, self.revision);
+        let text = state.text();
+        // Look in a window around the caret, cut at characters.
+        let snap = |at: usize| text.char_index_to_offset(text.offset_to_char_index(at));
+        let start = snap(caret.saturating_sub(BRACKET_REACH));
+        let end = snap((caret + BRACKET_REACH).min(text.len()));
+        let window = text.slice(start..end).to_string();
+        let pair =
+            editing::matching_bracket(&window, caret - start, BRACKET_REACH).map(|(a, b)| (a + start, b + start));
+        if pair == self.bracket_pair {
+            return;
+        }
+        self.bracket_pair = pair;
+        let p = palette(cx);
+        let color = mix(p.fg, 0.45, p.panel);
+        let frames = pair
+            .map(|(a, b)| {
+                [a, b]
+                    .map(|at| {
+                        RangeDecoration::new(at..at + 1).with_style(RangeDecorationStyle::Frame).with_color(color)
+                    })
+                    .to_vec()
+            })
+            .unwrap_or_default();
+        if let Some(brackets) = self.brackets.clone() {
+            brackets.set(frames, cx);
+        }
+    }
+
+    /// Replace a part of the text and select what the edit says, as one undo step.
+    fn apply(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |s, cx| {
+            s.set_selected_range(edit.range.clone(), cx);
+            s.replace(edit.text, window, cx);
+            s.set_selected_range(edit.select, cx);
+        });
+    }
+
+    /// The text and the selection, for the line commands.
+    fn text_and_selection(&self, cx: &App) -> (String, std::ops::Range<usize>) {
+        let s = self.state.read(cx);
+        (s.text().to_string(), s.selected_range())
+    }
+
+    pub fn toggle_comment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(prefix) = editing::comment_prefix(language_for(&self.path)) else { return };
+        let (text, sel) = self.text_and_selection(cx);
+        self.apply(editing::toggle_comment(&text, sel, prefix), window, cx);
+    }
+
+    pub fn duplicate_line(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (text, sel) = self.text_and_selection(cx);
+        self.apply(editing::duplicate(&text, sel), window, cx);
+    }
+
+    pub fn move_lines(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let (text, sel) = self.text_and_selection(cx);
+        if let Some(edit) = editing::move_lines(&text, sel, up) {
+            self.apply(edit, window, cx);
+        }
+    }
+
+    pub fn toggle_soft_wrap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.soft_wrap = !self.soft_wrap;
+        let wrap = self.soft_wrap;
+        self.state.update(cx, |s, cx| s.set_soft_wrap(wrap, window, cx));
+        cx.notify();
+    }
+
+    /// The number of lines in the file.
+    pub fn line_count(&self, cx: &App) -> usize {
+        self.state.read(cx).text().lines_len()
     }
 
     /// Write the text to the file.
@@ -185,6 +366,8 @@ impl EditorPanel {
         let text = self.state.read(cx).value().to_string();
         match std::fs::write(&self.path, &text) {
             Ok(()) => {
+                self.disk = disk_stamp(&self.path);
+                self.conflict = false;
                 self.saved = text;
                 self.dirty = false;
                 self.preview = false;
@@ -192,6 +375,12 @@ impl EditorPanel {
             }
             Err(e) => self.error = Some(format!("Could not save {}: {e}", self.path.display())),
         }
+        cx.notify();
+    }
+
+    /// Drop the unsaved changes (the window is closing without saving them).
+    pub fn discard(&mut self, cx: &mut Context<Self>) {
+        self.dirty = false;
         cx.notify();
     }
 
@@ -263,6 +452,43 @@ impl EditorPanel {
     }
 }
 
+impl EditorPanel {
+    /// The warning when the file changed on disk under unsaved changes.
+    fn conflict_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
+        div()
+            .id("conflict")
+            .flex_none()
+            .mx(px(8.))
+            .mb(px(4.))
+            .px(px(10.))
+            .py(px(5.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(6.))
+            .bg(p.wash(p.warn))
+            .border_1()
+            .border_color(mix(p.warn, 0.4, p.panel))
+            .child(crate::art::glyph(snout_core::art::Glyph::Alert, 14., p.warn))
+            .child(div().flex_1().child("This file changed on disk, and this tab has unsaved changes."))
+            .child(
+                look::small_button("conflict-reload", "Reload from disk", &p)
+                    .on_click(cx.listener(|this, _, w, cx| this.reload(w, cx))),
+            )
+            .child(
+                look::small_button("conflict-keep", "Keep my changes", &p)
+                    .on_click(cx.listener(|this, _, _, cx| this.keep_mine(cx))),
+            )
+    }
+}
+
+/// A file's modification time and length, to notice changes made elsewhere.
+fn disk_stamp(path: &Path) -> Option<(SystemTime, u64)> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.modified().ok()?, m.len()))
+}
+
 impl gpui_component::dock::BasePanel for EditorPanel {
     fn panel_name(&self) -> &'static str {
         PANEL_NAME
@@ -316,25 +542,54 @@ impl Render for EditorPanel {
             .bg(p.panel)
             .key_context("EditorPanel")
             .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx)))
+            .on_action(cx.listener(|this, _: &ToggleComment, w, cx| this.toggle_comment(w, cx)))
+            .on_action(cx.listener(|this, _: &DuplicateLine, w, cx| this.duplicate_line(w, cx)))
+            .on_action(cx.listener(|this, _: &MoveLineUp, w, cx| this.move_lines(true, w, cx)))
+            .on_action(cx.listener(|this, _: &MoveLineDown, w, cx| this.move_lines(false, w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSoftWrap, w, cx| this.toggle_soft_wrap(w, cx)))
             .child(self.breadcrumbs(cx))
             .when_some(self.error.clone(), |d, e| d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(e)))
+            .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .font_family(look::MONO)
-                    .child(Editor::new(&self.state).appearance(false).h_full().text_size(px(look::MONO_SIZE))),
+                    .child(Editor::new(&self.state).appearance(false).h_full().text_size(px(font_size(cx)))),
             )
     }
 }
 
-/// Close an editor tab (`then` does the closing).
+/// Close an editor tab (`then` does the closing), asking first whether to save it when
+/// it has unsaved changes.
 pub fn confirm_close(
     editor: Option<Entity<EditorPanel>>,
     window: &mut Window,
     cx: &mut App,
     then: impl FnOnce(&mut Window, &mut App) + 'static,
 ) {
-    let _ = editor;
-    then(window, cx);
+    let Some(editor) = editor.filter(|e| e.read(cx).dirty) else { return then(window, cx) };
+    let name = editor.read(cx).name();
+    let answer = window.prompt(
+        PromptLevel::Warning,
+        &format!("Do you want to save the changes you made to {name}?"),
+        Some("Your changes are lost if you don't save them."),
+        &["Save", "Don't Save", "Cancel"],
+        cx,
+    );
+    window
+        .spawn(cx, async move |cx| {
+            let Ok(answer) = answer.await else { return };
+            let _ = cx.update(|window, cx| match answer {
+                0 => {
+                    editor.update(cx, |e, cx| e.save(cx));
+                    if !editor.read(cx).dirty {
+                        then(window, cx);
+                    }
+                }
+                1 => then(window, cx),
+                _ => {}
+            });
+        })
+        .detach();
 }

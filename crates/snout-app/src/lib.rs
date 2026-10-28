@@ -3,6 +3,7 @@
 pub mod art;
 pub mod console;
 pub mod dialogs;
+pub mod editing;
 pub mod editor;
 pub mod files;
 pub mod git_view;

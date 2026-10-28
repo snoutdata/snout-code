@@ -51,6 +51,11 @@ actions!(
         NextCommit,
         GoToFile,
         FindInFiles,
+        GoToLine,
+        CloseTab,
+        ZoomIn,
+        ZoomOut,
+        ZoomReset,
     ]
 );
 
@@ -79,6 +84,22 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-s", crate::editor::Save, Some("EditorPanel")),
         KeyBinding::new("cmd-p", GoToFile, None),
         KeyBinding::new("cmd-shift-f", FindInFiles, None),
+        // GPUI Kit's editor takes ⇧⌘F for replace; here it stays find in files, and
+        // replace is ⌥⌘F. ⌘F finds in the file.
+        KeyBinding::new("cmd-shift-f", FindInFiles, Some("EditorPanel > Input")),
+        KeyBinding::new("cmd-alt-f", gpui_component::input::Replace, Some("EditorPanel > Input")),
+        KeyBinding::new("cmd-l", GoToLine, None),
+        KeyBinding::new("cmd-w", CloseTab, Some("Workspace")),
+        KeyBinding::new("cmd-=", ZoomIn, None),
+        KeyBinding::new("cmd-+", ZoomIn, None),
+        KeyBinding::new("cmd--", ZoomOut, None),
+        // ⌘0 is the Git view, so the reset takes ⌥⌘0.
+        KeyBinding::new("cmd-alt-0", ZoomReset, None),
+        KeyBinding::new("cmd-/", crate::editor::ToggleComment, Some("EditorPanel")),
+        KeyBinding::new("cmd-d", crate::editor::DuplicateLine, Some("EditorPanel")),
+        KeyBinding::new("alt-up", crate::editor::MoveLineUp, Some("EditorPanel > Input")),
+        KeyBinding::new("alt-down", crate::editor::MoveLineDown, Some("EditorPanel > Input")),
+        KeyBinding::new("alt-z", crate::editor::ToggleSoftWrap, Some("EditorPanel")),
         // In the go-to box the arrows pick and Esc closes, ahead of the field's own keys.
         KeyBinding::new("up", crate::search::SearchUp, Some("SearchBox > Input")),
         KeyBinding::new("down", crate::search::SearchDown, Some("SearchBox > Input")),
@@ -106,6 +127,9 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::action("Go to File…", GoToFile),
             MenuItem::action("Find in Files…", FindInFiles),
+            MenuItem::separator(),
+            MenuItem::action("Save", crate::editor::Save),
+            MenuItem::action("Close Tab", CloseTab),
         ]),
         Menu::new("Edit").items([
             MenuItem::os_action("Undo", Undo, OsAction::Undo),
@@ -115,6 +139,15 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             MenuItem::os_action("Copy", Copy, OsAction::Copy),
             MenuItem::os_action("Paste", Paste, OsAction::Paste),
             MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
+            MenuItem::separator(),
+            MenuItem::action("Find", gpui_component::input::Search),
+            MenuItem::action("Replace", gpui_component::input::Replace),
+            MenuItem::action("Go to Line…", GoToLine),
+            MenuItem::separator(),
+            MenuItem::action("Toggle Comment", crate::editor::ToggleComment),
+            MenuItem::action("Duplicate Line", crate::editor::DuplicateLine),
+            MenuItem::action("Move Line Up", crate::editor::MoveLineUp),
+            MenuItem::action("Move Line Down", crate::editor::MoveLineDown),
         ]),
         Menu::new("View").items([
             MenuItem::action("Projects", ShowProjects),
@@ -124,6 +157,11 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             check(MenuItem::action("Side by Side Diff", SideBySide), s.side_by_side),
             check(MenuItem::action("Unified Diff", Unified), !s.side_by_side),
             check(MenuItem::action("Compact Diff", Compact), s.compact),
+            MenuItem::separator(),
+            MenuItem::action("Zoom In", ZoomIn),
+            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::action("Actual Size", ZoomReset),
+            MenuItem::action("Soft Wrap", crate::editor::ToggleSoftWrap),
             MenuItem::separator(),
             MenuItem::submenu(Menu::new("Appearance").items([
                 check(MenuItem::action(ThemeChoice::System.label(), ThemeSystem), s.theme == ThemeChoice::System),

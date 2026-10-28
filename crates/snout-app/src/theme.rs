@@ -310,6 +310,7 @@ pub fn syntax(p: &Palette) -> gpui_component::highlighter::HighlightTheme {
         "editor.foreground": hex(p.fg),
         "editor.line_number": hex(s.gutter),
         "editor.active_line_number": hex(p.fg),
+        "editor.active_line.background": hex(active_line(p)),
         "editor.invisible": hex(mix(p.fg, 0.25, p.panel)),
         "editor.gutter.background": hex(p.panel),
         "error": hex(p.error),
@@ -366,4 +367,9 @@ pub fn syntax_colors(p: &Palette) -> SyntaxColors {
             gutter: mix(p.fg, 0.38, p.panel),
         }
     }
+}
+
+/// The band behind the caret's line in the editor.
+pub fn active_line(p: &Palette) -> Hsla {
+    mix(p.fg, if p.dark { 0.05 } else { 0.045 }, p.panel)
 }

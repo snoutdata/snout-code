@@ -164,11 +164,26 @@ mod shots {
                 // An unsaved change in another tab, for its dot.
                 cx.update_window(handle.into(), |_, window, cx| {
                     let ws = ws.read(cx);
-                    let main = ws.editors().into_iter().find(|e| e.read(cx).path.ends_with("src/main.rs")).unwrap();
+                    let main = ws.editors(cx).into_iter().find(|e| e.read(cx).path.ends_with("src/main.rs")).unwrap();
                     let state = main.read(cx).state.clone();
                     state.update(cx, |s, cx| s.insert("// edited\n", window, cx));
                 })
                 .unwrap();
+                // In the light shot, find and replace in the file is open on a word.
+                if theme == ThemeChoice::Light {
+                    cx.update_window(handle.into(), |_, _, cx| {
+                        let ws = ws.read(cx);
+                        let greeter =
+                            ws.editors(cx).into_iter().find(|e| e.read(cx).path.ends_with("Greeter.java")).unwrap();
+                        let state = greeter.read(cx).state.clone();
+                        state.update(cx, |s, cx| {
+                            let at = s.text().to_string().find("name;").unwrap();
+                            s.set_selected_range(at..at + 4, cx);
+                            s.open_search(true, cx);
+                        });
+                    })
+                    .unwrap();
+                }
             }
             Some(Select::Nothing) | None => {}
         }

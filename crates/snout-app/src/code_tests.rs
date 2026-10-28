@@ -12,11 +12,12 @@ use crate::tests::{act, demo_repo, open, with_repo};
 use crate::workspace::Workspace;
 
 pub fn editor_for(ws: &Entity<Workspace>, path: &Path, cx: &mut VisualTestContext) -> Entity<EditorPanel> {
-    cx.update(|_, cx| ws.read(cx).editors().into_iter().find(|e| e.read(cx).path == path)).expect("a tab for the file")
+    cx.update(|_, cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == path))
+        .expect("a tab for the file")
 }
 
 fn tab_names(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> Vec<String> {
-    cx.update(|_, cx| ws.read(cx).editors().iter().map(|e| e.read(cx).name().to_string()).collect())
+    cx.update(|_, cx| ws.read(cx).editors(cx).iter().map(|e| e.read(cx).name().to_string()).collect())
 }
 
 #[test]
@@ -87,7 +88,7 @@ fn a_single_click_previews_and_editing_or_a_double_click_keeps_the_tab(cx: &mut 
 }
 
 fn editor_for_app(ws: &Entity<Workspace>, path: &Path, cx: &gpui::App) -> Entity<EditorPanel> {
-    ws.read(cx).editors().into_iter().find(|e| e.read(cx).path == path).unwrap()
+    ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == path).unwrap()
 }
 
 #[gpui::test]
@@ -137,4 +138,189 @@ fn indentation_and_line_endings_are_read_from_the_file() {
     assert_eq!((four.tabs, four.width, four.crlf), (false, 4, true));
     assert!(FileInfo::detect("x\n\ty\n\t\tz\n").tabs);
     assert_eq!(FileInfo::detect("").width, 4);
+}
+
+/// Open `name` (holding `text`) in an editor tab with the caret at `at`.
+#[allow(clippy::type_complexity)]
+fn open_text<'a>(
+    name: &str,
+    text: &str,
+    at: (u32, u32),
+    cx: &'a mut TestAppContext,
+) -> (std::path::PathBuf, Entity<crate::model::Model>, Entity<Workspace>, Entity<EditorPanel>, &'a mut VisualTestContext)
+{
+    let repo = demo_repo(&format!("edit-{}", name.replace('.', "-")));
+    std::fs::write(repo.join(name), text).unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    act(&model, cx, Action::OpenFile(repo.join(name), Some(at)));
+    let editor = editor_for(&ws, &repo.join(name), cx);
+    (repo, model, ws, editor, cx)
+}
+
+fn text_of(editor: &Entity<EditorPanel>, cx: &mut VisualTestContext) -> String {
+    cx.update(|_, cx| editor.read(cx).text(cx))
+}
+
+#[gpui::test]
+fn the_caret_line_is_lit_and_brackets_match(cx: &mut TestAppContext) {
+    let text = "class A {\n    void f() { g(1); }\n}\n";
+    let (repo, _, _, editor, cx) = open_text("A.java", text, (0, 9), cx);
+    cx.update(|_, cx| {
+        let theme = gpui_component::Theme::global(cx);
+        assert!(theme.highlight_theme.style.editor_active_line.is_some(), "the caret's line has a band");
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(editor.read(cx).bracket_pair, Some((8, text.len() - 2))));
+    // Moving onto other brackets frames those instead.
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(1, 17, w, cx)));
+    cx.run_until_parked();
+    let open = text.find("g(").unwrap() + 1;
+    cx.update(|_, cx| assert_eq!(editor.read(cx).bracket_pair, Some((open, open + 2))));
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(1, 5, w, cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(editor.read(cx).bracket_pair, None));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn find_replace_and_go_to_line_have_their_keys(cx: &mut TestAppContext) {
+    let text = "one\ntwo\nthree\nfour\n";
+    let (repo, _, ws, editor, cx) = open_text("notes.txt", text, (0, 0), cx);
+    let state = cx.update(|_, cx| editor.read(cx).state.clone());
+    cx.simulate_keystrokes("cmd-f");
+    cx.update(|_, cx| assert!(state.read(cx).search_session().open, "⌘F finds in the file"));
+    cx.simulate_keystrokes("escape");
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
+    cx.simulate_keystrokes("cmd-alt-f");
+    cx.update(|_, cx| {
+        let s = state.read(cx).search_session();
+        assert!(s.open && s.replace_mode, "⌥⌘F replaces");
+    });
+    cx.simulate_keystrokes("escape");
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
+    cx.simulate_keystrokes("cmd-shift-f");
+    cx.update(|_, cx| {
+        let search = ws.read(cx).search.clone().expect("⇧⌘F in the editor is still find in files");
+        assert_eq!(search.read(cx).mode, crate::search::Mode::FindInFiles);
+    });
+    cx.simulate_keystrokes("escape");
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
+    cx.simulate_keystrokes("cmd-l");
+    cx.update(|_, cx| assert_eq!(ws.read(cx).search.as_ref().unwrap().read(cx).mode, crate::search::Mode::GoToLine));
+    cx.simulate_input("3:2");
+    cx.simulate_keystrokes("enter");
+    cx.update(|_, cx| {
+        assert!(ws.read(cx).search.is_none());
+        let pos = state.read(cx).cursor_position();
+        assert_eq!((pos.line, pos.character), (2, 1), "⌘L went to line 3, column 2");
+    });
+    assert_eq!(crate::search::parse_line("12"), Some((11, 0)));
+    assert_eq!(crate::search::parse_line(" 4:7 "), Some((3, 6)));
+    assert_eq!(crate::search::parse_line("x"), None);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn line_commands_comment_duplicate_move_and_undo(cx: &mut TestAppContext) {
+    let text = "class A {\n    int x;\n    int y;\n}\n";
+    let (repo, _, _, editor, cx) = open_text("B.java", text, (1, 6), cx);
+    cx.simulate_keystrokes("cmd-/");
+    assert_eq!(text_of(&editor, cx), "class A {\n    // int x;\n    int y;\n}\n");
+    cx.simulate_keystrokes("cmd-/");
+    assert_eq!(text_of(&editor, cx), text, "⌘/ again uncomments");
+    cx.simulate_keystrokes("cmd-d");
+    assert_eq!(text_of(&editor, cx), "class A {\n    int x;\n    int x;\n    int y;\n}\n");
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(text_of(&editor, cx), text, "one undo takes the duplicate back");
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(2, 4, w, cx)));
+    cx.simulate_keystrokes("alt-up");
+    assert_eq!(text_of(&editor, cx), "class A {\n    int y;\n    int x;\n}\n");
+    cx.simulate_keystrokes("alt-down alt-down");
+    assert_eq!(text_of(&editor, cx), "class A {\n    int x;\n}\n    int y;\n");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).state.read(cx).cursor_position().line, 3, "the caret moves along"));
+    // ⌥Z wraps long lines, and again does not.
+    cx.update(|_, cx| assert!(!editor.read(cx).soft_wrap));
+    cx.simulate_keystrokes("alt-z");
+    cx.update(|_, cx| assert!(editor.read(cx).soft_wrap));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_font_zooms_for_every_editor_and_is_remembered(cx: &mut TestAppContext) {
+    let (repo, model, _, _, cx) = open_text("Z.java", "class Z {}\n", (0, 0), cx);
+    let size = |cx: &mut VisualTestContext| cx.update(|_, cx| crate::editor::font_size(cx));
+    assert_eq!(size(cx), crate::look::MONO_SIZE);
+    cx.simulate_keystrokes("cmd-= cmd-=");
+    assert_eq!(size(cx), crate::look::MONO_SIZE + 2.);
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.editor_font_size, crate::look::MONO_SIZE + 2.));
+    cx.simulate_keystrokes("cmd--");
+    assert_eq!(size(cx), crate::look::MONO_SIZE + 1.);
+    cx.simulate_keystrokes("cmd-alt-0");
+    assert_eq!(size(cx), crate::look::MONO_SIZE, "⌥⌘0 (⌘0 is the Git view) resets it");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn closing_a_tab_or_the_window_with_changes_asks_first(cx: &mut TestAppContext) {
+    let (repo, model, ws, editor, cx) = open_text("C.java", "class C {}\n", (0, 0), cx);
+    cx.simulate_keystrokes("x");
+    cx.simulate_keystrokes("cmd-w");
+    assert!(cx.has_pending_prompt(), "⌘W on a changed tab asks");
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    assert_eq!(tab_names(&ws, cx), ["C.java"], "Cancel keeps the tab");
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
+    cx.simulate_keystrokes("cmd-w");
+    cx.simulate_prompt_answer("Save");
+    cx.run_until_parked();
+    assert!(tab_names(&ws, cx).is_empty(), "Save closes it");
+    assert_eq!(std::fs::read_to_string(repo.join("C.java")).unwrap(), "xclass C {}\n");
+
+    // A clean tab closes without asking; Don't Save drops the changes.
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), Some((0, 0))));
+    cx.simulate_keystrokes("y");
+    cx.simulate_keystrokes("cmd-w");
+    cx.simulate_prompt_answer("Don't Save");
+    cx.run_until_parked();
+    assert!(tab_names(&ws, cx).is_empty());
+    assert_eq!(std::fs::read_to_string(repo.join("README.md")).unwrap(), "# demo\n");
+
+    // The window: nothing unsaved closes at once; otherwise it asks.
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), Some((0, 0))));
+    assert!(cx.update(|w, cx| ws.update(cx, |ws, cx| ws.confirm_unsaved(false, w, cx))));
+    cx.simulate_keystrokes("z");
+    assert!(!cx.update(|w, cx| ws.update(cx, |ws, cx| ws.confirm_unsaved(false, w, cx))));
+    assert!(cx.has_pending_prompt());
+    cx.simulate_prompt_answer("Save");
+    cx.run_until_parked();
+    assert_eq!(std::fs::read_to_string(repo.join("README.md")).unwrap(), "z# demo\n");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn a_file_changed_on_disk_reloads_or_warns(cx: &mut TestAppContext) {
+    let (repo, _, _, editor, cx) = open_text("D.java", "class D {}\n", (0, 0), cx);
+    let file = repo.join("D.java");
+    let wait = |cx: &mut VisualTestContext| {
+        for _ in 0..5 {
+            cx.executor().advance_clock(crate::editor::DISK_POLL);
+            cx.run_until_parked();
+        }
+    };
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&file, "class D { int a; }\n").unwrap();
+    wait(cx);
+    assert_eq!(text_of(&editor, cx), "class D { int a; }\n", "a clean tab takes the new text");
+    cx.update(|_, cx| assert!(!editor.read(cx).dirty));
+
+    cx.simulate_keystrokes("x");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&file, "class D { int b; }\n").unwrap();
+    wait(cx);
+    cx.update(|_, cx| assert!(editor.read(cx).conflict, "a changed tab warns instead"));
+    assert!(text_of(&editor, cx).starts_with('x'), "and keeps its text");
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.reload(w, cx)));
+    assert_eq!(text_of(&editor, cx), "class D { int b; }\n");
+    cx.update(|_, cx| assert!(!editor.read(cx).conflict && !editor.read(cx).dirty));
+    let _ = std::fs::remove_dir_all(repo);
 }
