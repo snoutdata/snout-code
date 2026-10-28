@@ -30,6 +30,10 @@ pub struct DocLink {
     /// The last completion list, as the server sent it, and the text it was for: to find
     /// the item a completion inserted, and add the imports it needs.
     pub completions: RefCell<(Vec<CompletionItem>, Rope)>,
+    /// The last edit was typed. GPUI Kit asks whether typed text triggers completion,
+    /// and inserts an accepted completion without asking: so an edit it did not ask about
+    /// is no typing, even when it adds a single character (`ArrayLis` to `ArrayList`).
+    pub typed: std::cell::Cell<bool>,
 }
 
 impl DocLink {
@@ -208,6 +212,7 @@ impl CompletionProvider for JavaProviders {
     }
 
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
+        self.0.typed.set(true);
         new_text == "." || new_text.chars().last().is_some_and(|c| c.is_alphanumeric() || c == '_')
     }
 }
@@ -222,16 +227,17 @@ pub fn inserted_text(item: &CompletionItem) -> &str {
 }
 
 /// After an edit put `inserted` in the text, ending at byte `end` of `now`: the completion
-/// item it was, if one of the last list ends there with that text. Typing one character
-/// is taken for typing.
+/// item it was, if one of the last list ends there with that text. A typed edit is no
+/// completion, however much it looks like one.
 pub fn accepted_item(
     link: &DocLink,
     now: &Rope,
     end: usize,
     change: &(Range<usize>, String),
+    typed: bool,
 ) -> Option<CompletionItem> {
-    let (removed, inserted) = change;
-    if inserted.chars().count() < 2 && removed.is_empty() {
+    let (_, inserted) = change;
+    if typed || inserted.is_empty() {
         return None;
     }
     let list = link.completions.borrow();

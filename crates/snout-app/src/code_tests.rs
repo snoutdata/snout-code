@@ -768,3 +768,56 @@ fn hover_and_command_click_answer_the_pointer(cx: &mut TestAppContext) {
     assert_eq!(definitions.get(), 1);
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// Accepting a completion that adds a single character (`ArrayLis` to `ArrayList`) adds
+/// the import it carries; typing that character does not.
+#[gpui::test]
+fn an_accepted_completion_adds_its_import_however_little_it_inserts(cx: &mut TestAppContext) {
+    let repo = demo_repo("completion-import");
+    std::fs::write(repo.join("settings.gradle"), "rootProject.name = 'demo'\n").unwrap();
+    std::fs::write(repo.join("build.gradle"), "plugins { id 'java' }\n").unwrap();
+    let file = repo.join("src/Foo.java");
+    let text = "class Foo {\n    Object o = new ArrayLis\n}\n";
+    std::fs::write(&file, text).unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    act(&model, cx, Action::OpenFile(file.clone(), None));
+    let editor = editor_for(&ws, &file, cx);
+    let link = cx.update(|_, cx| editor.read(cx).lang.clone()).expect("a Java file of a build has a server link");
+    let import = lsp_types::TextEdit {
+        range: lsp_types::Range::new(lsp_types::Position::new(0, 0), lsp_types::Position::new(0, 0)),
+        new_text: "import java.util.ArrayList;\n\n".into(),
+    };
+    let item = lsp_types::CompletionItem {
+        label: "ArrayList".into(),
+        insert_text: Some("ArrayList".into()),
+        additional_text_edits: Some(vec![import]),
+        ..Default::default()
+    };
+    let offer = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let rope = editor.read(cx).state.read(cx).text().clone();
+            *link.completions.borrow_mut() = (vec![item.clone()], rope);
+        })
+    };
+    let end = text.find("ArrayLis").unwrap() + "ArrayLis".len();
+    // Typed: the `t` is only typing.
+    offer(cx);
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(1, 27, w, cx)));
+    cx.simulate_input("t");
+    assert!(!text_of(&editor, cx).contains("import"), "typing adds no import");
+    // Accepted from the menu (GPUI Kit's insert): the import comes with it.
+    cx.simulate_keystrokes("backspace");
+    cx.run_until_parked();
+    assert_eq!(text_of(&editor, cx), text);
+    offer(cx);
+    cx.update(|w, cx| {
+        let state = editor.read(cx).state.clone();
+        let item = lsp_types::CompletionItem { insert_text: None, ..item.clone() };
+        state.update(cx, |s, cx| s.insert_completion(&item, end - "ArrayLis".len()..end, w, cx));
+    });
+    cx.run_until_parked();
+    let now = text_of(&editor, cx);
+    assert!(now.starts_with("import java.util.ArrayList;\n\nclass Foo"), "{now}");
+    assert!(now.contains("new ArrayList\n"), "{now}");
+    let _ = std::fs::remove_dir_all(repo);
+}

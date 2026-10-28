@@ -41,6 +41,7 @@ impl EditorPanel {
             root,
             editor: cx.entity_id(),
             completions: RefCell::new((Vec::new(), Rope::new())),
+            typed: std::cell::Cell::new(false),
         });
         providers::install(&link, &self.state, cx);
         self.lang = Some(link);
@@ -62,10 +63,11 @@ impl EditorPanel {
     /// and ask for signature help when a call's arguments are being typed.
     pub(super) fn lang_changed(&mut self, cx: &mut Context<Self>) {
         let Some(link) = self.lang.clone() else { return };
+        let typed = link.typed.replace(false);
         let rope = self.state.read(cx).text().clone();
         let Some(change) = link.sync(&rope, cx) else { return };
         let end = change.0.start + change.1.len();
-        if let Some(item) = providers::accepted_item(&link, &rope, end, &change) {
+        if let Some(item) = providers::accepted_item(&link, &rope, end, &change, typed) {
             link.completions.borrow_mut().0.clear();
             self.add_completion_imports(&link, item, cx);
         }
@@ -482,6 +484,7 @@ impl EditorPanel {
                 root,
                 editor: cx.entity_id(),
                 completions: RefCell::new((Vec::new(), Rope::new())),
+                typed: std::cell::Cell::new(false),
             });
             providers::install(&link, &self.state, cx);
             self.lang = Some(link);
