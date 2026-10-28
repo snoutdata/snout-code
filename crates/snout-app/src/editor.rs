@@ -48,7 +48,7 @@ pub fn font_size(cx: &App) -> f32 {
 pub const DISK_POLL: Duration = Duration::from_millis(700);
 
 /// How far bracket matching looks from the caret.
-const BRACKET_REACH: usize = 64 * 1024;
+const BRACKET_REACH: usize = 16 * 1024;
 
 /// The name an editor tab goes by in a saved layout.
 pub const PANEL_NAME: &str = "Editor";
@@ -185,7 +185,9 @@ impl EditorPanel {
             cx.subscribe(&state, |this, state, e: &InputEvent, cx| match e {
                 InputEvent::Change => {
                     this.revision += 1;
-                    let dirty = state.read(cx).value().as_ref() != this.saved;
+                    // Compared in place: no copy of a large file on every keystroke.
+                    let text = state.read(cx).text();
+                    let dirty = text.len() != this.saved.len() || *text != this.saved.as_str();
                     if dirty {
                         // Editing keeps a preview tab.
                         this.preview = false;

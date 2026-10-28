@@ -450,3 +450,70 @@ fn the_window_opens_on_the_activity_it_showed_last(cx: &mut TestAppContext) {
     vcx2.update(|_, cx| assert_eq!(ws2.unwrap().read(cx).side.read(cx).activity, Activity::Projects));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// A Java file of about 5,000 lines.
+fn big_java() -> String {
+    let mut s = String::from("package demo;\n\nimport java.util.*;\n\npublic class Big {\n");
+    let mut i = 0;
+    while s.lines().count() < 5000 {
+        s.push_str(&format!(
+            "    /** Method {i}. */\n    public int method{i}(List<String> names, int x) {{\n        int total = x * {i};\n        for (String n : names) {{\n            if (n.length() > {m}) {{\n                total += n.hashCode() % 7;\n            }}\n        }}\n        return total + \"{i}\".length();\n    }}\n\n",
+            m = i % 9
+        ));
+        i += 1;
+    }
+    s.push_str("}\n");
+    s
+}
+
+#[gpui::test]
+fn typing_and_scrolling_a_large_java_file_stay_quick(cx: &mut TestAppContext) {
+    use std::time::Instant;
+    let text = big_java();
+    // Committed, so the gutter compares with it as the text changes.
+    let repo = demo_repo("big-java");
+    std::fs::write(repo.join("Big.java"), &text).unwrap();
+    crate::tests::git(&repo, &["add", "Big.java"]);
+    crate::tests::git(&repo, &["commit", "-qm", "A big file"]);
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    act(&model, cx, Action::OpenFile(repo.join("Big.java"), Some((2500, 8))));
+    let editor = editor_for(&ws, &repo.join("Big.java"), cx);
+    cx.update(|w, cx| w.draw(cx).clear(cx));
+    // A frame with nothing new, for comparison.
+    let started = Instant::now();
+    for _ in 0..40 {
+        cx.update(|w, cx| {
+            w.refresh();
+            w.draw(cx).clear(cx)
+        });
+    }
+    let idle = started.elapsed() / 40;
+    // Typing: each keystroke and the frame after it.
+    let started = Instant::now();
+    for _ in 0..40 {
+        cx.simulate_keystrokes("a");
+        cx.update(|w, cx| w.draw(cx).clear(cx));
+    }
+    let typing = started.elapsed() / 40;
+    cx.executor().advance_clock(std::time::Duration::from_millis(500));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(editor.read(cx).changes.len(), 1, "the gutter marks the typed line"));
+    // Scrolling: a page at a time through the file, a frame each.
+    let state = cx.update(|_, cx| editor.read(cx).state.clone());
+    let started = Instant::now();
+    for i in 0..40 {
+        cx.update(|_, cx| {
+            state.update(cx, |s, cx| s.set_scroll_offset(gpui::point(gpui::px(0.), gpui::px(-600. * i as f32)), cx))
+        });
+        cx.update(|w, cx| w.draw(cx).clear(cx));
+    }
+    let scrolling = started.elapsed() / 40;
+    println!("Big.java: {idle:?} a frame, {typing:?} a keystroke, {scrolling:?} a scrolled frame");
+    // Debug builds are several times slower than release; these bounds catch a regression
+    // that does whole-file work on every keystroke or frame, not the last millisecond.
+    let limit = std::time::Duration::from_millis(if cfg!(debug_assertions) { 120 } else { 16 });
+    assert!(typing < limit, "typing takes {typing:?} a keystroke");
+    assert!(scrolling < limit, "scrolling takes {scrolling:?} a frame");
+    assert_eq!(text_of(&editor, cx).len(), text.len() + 40);
+    let _ = std::fs::remove_dir_all(repo);
+}
