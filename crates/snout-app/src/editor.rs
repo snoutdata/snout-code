@@ -868,6 +868,7 @@ impl Render for EditorPanel {
                     .child(self.gutter(cx))
                     .child(self.problem_marks(cx))
                     .children(self.signature_popup(cx))
+                    .children(self.inspections(cx))
                     .children(self.rename_box(cx)),
             )
     }

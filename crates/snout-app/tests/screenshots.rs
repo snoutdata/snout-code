@@ -169,6 +169,31 @@ mod shots {
                     state.update(cx, |s, cx| s.insert("// edited\n", window, cx));
                 })
                 .unwrap();
+                // What a server would report: an error and a warning, for the inspections
+                // widget and the squiggles.
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let ws = ws.read(cx);
+                    let greeter =
+                        ws.editors(cx).into_iter().find(|e| e.read(cx).path.ends_with("Greeter.java")).unwrap();
+                    let at =
+                        |l, a, b| lsp_types::Range::new(lsp_types::Position::new(l, a), lsp_types::Position::new(l, b));
+                    let diags = vec![
+                        lsp_types::Diagnostic {
+                            range: at(10, 20, 27),
+                            severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+                            message: "Objects cannot be resolved".into(),
+                            ..Default::default()
+                        },
+                        lsp_types::Diagnostic {
+                            range: at(2, 7, 21),
+                            severity: Some(lsp_types::DiagnosticSeverity::WARNING),
+                            message: "The import java.util.List is never used".into(),
+                            ..Default::default()
+                        },
+                    ];
+                    greeter.update(cx, |e, cx| e.set_diagnostics(diags, cx));
+                })
+                .unwrap();
                 // The palette shot: the file split in two, and the command palette over it.
                 if name.contains("palette") {
                     cx.update_window(handle.into(), |_, window, cx| {

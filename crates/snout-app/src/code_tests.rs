@@ -821,3 +821,33 @@ fn an_accepted_completion_adds_its_import_however_little_it_inserts(cx: &mut Tes
     assert!(now.contains("new ArrayList\n"), "{now}");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_inspections_count_problems_and_step_through_them(cx: &mut TestAppContext) {
+    use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+    let text = "class A {\n    int a = x;\n    int b = y;\n    int c = z;\n}\n";
+    let (repo, _, _, editor, cx) = open_text("Inspect.java", text, (0, 0), cx);
+    let diag = |line, severity| Diagnostic {
+        range: Range::new(Position::new(line, 12), Position::new(line, 13)),
+        severity: Some(severity),
+        message: "x".into(),
+        ..Default::default()
+    };
+    let list = vec![diag(3, DiagnosticSeverity::WARNING), diag(1, DiagnosticSeverity::ERROR)];
+    cx.update(|_, cx| editor.update(cx, |e, cx| e.set_diagnostics(list, cx)));
+    cx.update(|_, cx| assert_eq!(editor.read(cx).problem_counts(), (1, 1)));
+    let line = |cx: &mut VisualTestContext| cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
+    let step = |cx: &mut VisualTestContext, forward: bool| {
+        cx.update(|w, cx| editor.update(cx, |e, cx| e.jump_problem(forward, w, cx)));
+        cx.run_until_parked();
+    };
+    step(cx, true);
+    assert_eq!(line(cx), 1, "the first problem after the caret");
+    step(cx, true);
+    assert_eq!(line(cx), 3);
+    step(cx, true);
+    assert_eq!(line(cx), 1, "round the file");
+    step(cx, false);
+    assert_eq!(line(cx), 3, "and back");
+    let _ = std::fs::remove_dir_all(repo);
+}

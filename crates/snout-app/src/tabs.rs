@@ -18,9 +18,7 @@ use gpui_component::dock::{
     BasePanelView, DockArea, DockAreaRenderer, DockContext, DockSkin, DragPanel, DropIndicator, NodeId, PanelHandle,
     PanelId, PanelState, TabGroupContext, TabGroupRenderer,
 };
-use snout_core::art::Glyph;
 
-use crate::art::glyph;
 use crate::editor::EditorPanel;
 use crate::theme::palette;
 
@@ -183,7 +181,7 @@ fn close(group: &TabGroupContext, panel: &Arc<dyn BasePanelView>, window: &mut W
 }
 
 /// Height of the editor tab bar.
-pub const TAB_H: f32 = 34.;
+pub const TAB_H: f32 = 32.;
 
 fn tab_bar(group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyElement {
     let p = palette(cx);
@@ -205,8 +203,7 @@ fn tab_bar(group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyEle
         .w_full()
         .flex()
         .items_end()
-        .px(px(4.))
-        .bg(p.panel)
+        .bg(p.ground)
         .border_b_1()
         .border_color(p.border)
         .child(
@@ -272,7 +269,7 @@ fn tab(
         .rounded(px(4.))
         .cursor_pointer()
         .hover(move |s| s.bg(hover_bg))
-        .child(glyph(Glyph::Close, 11., p.fg_dim))
+        .child(crate::glyphs::icon(crate::glyphs::Icon::Close, 12., p.fg_dim))
         .on_click({
             let (group, panel) = (group.clone(), panel.clone());
             move |_, window, cx| {
@@ -315,21 +312,18 @@ fn tab(
         .relative()
         // Tabs shrink (their names cut short) before the strip has to scroll.
         .flex_shrink(1.)
-        .min_w(px(if selected { 96. } else { 64. }))
-        .h(px(TAB_H - 5.))
-        .mx(px(1.))
+        .min_w(px(if selected { 88. } else { 60. }))
+        .h_full()
         .pl(px(10.))
-        .pr(px(5.))
+        .pr(px(6.))
         .flex()
         .items_center()
         .gap(px(6.))
-        .rounded_t(px(7.))
         .text_color(ink)
         .text_size(px(12.5))
         .cursor_pointer()
-        .when(selected, |d| d.bg(p.stripe))
         .when(!selected, |d| d.hover(move |s| s.bg(hover_bg)))
-        .when_some(path.as_ref(), |d, path| d.child(crate::icons::file_icon(path, 14., &p)))
+        .when_some(path.as_ref(), |d, path| d.child(crate::icons::file_icon(path, 13., &p)))
         .child(
             div()
                 .min_w_0()
@@ -341,9 +335,7 @@ fn tab(
         )
         .child(trailing)
         // The tab in front is underlined in the accent colour.
-        .when(selected, |d| {
-            d.child(div().absolute().left(px(6.)).right(px(6.)).bottom_0().h(px(2.)).rounded(px(1.)).bg(p.accent))
-        })
+        .when(selected, |d| d.child(div().absolute().left_0().right_0().bottom_0().h(px(2.)).bg(p.accent)))
         .on_click({
             let (group, editor) = (group.clone(), editor.clone());
             move |e: &ClickEvent, window, cx| {

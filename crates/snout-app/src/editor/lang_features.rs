@@ -6,9 +6,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
-    Styled as _, Window, canvas, div, point, px, size,
+    StatefulInteractiveElement as _, Styled as _, Window, canvas, div, point, px, size,
 };
 use gpui_component::input::{InputEvent, InputState, Rope, RopeExt as _};
 use lsp_types::{SignatureHelp, TextEdit, Uri, WorkspaceEdit};
@@ -189,6 +190,90 @@ impl EditorPanel {
         });
         window.dispatch_action(Box::new(gpui_component::input::GoToDefinition), cx);
         true
+    }
+
+    /// The errors and warnings the server reports for the file.
+    pub fn problem_counts(&self) -> (usize, usize) {
+        use lsp_types::DiagnosticSeverity as S;
+        let count = |s: S| self.problems.iter().filter(|d| d.severity.unwrap_or(S::ERROR) == s).count();
+        (count(S::ERROR), count(S::WARNING))
+    }
+
+    /// Go to the next problem after the caret (or the one before it), round the file.
+    pub fn jump_problem(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let mut at: Vec<lsp_types::Position> = self.problems.iter().map(|d| d.range.start).collect();
+        at.sort_by_key(|p| (p.line, p.character));
+        at.dedup();
+        if at.is_empty() {
+            return;
+        }
+        let (caret, _, _) = self.at_caret(cx);
+        let key = |p: &lsp_types::Position| (p.line, p.character);
+        let next = if forward {
+            at.iter().find(|p| key(p) > key(&caret)).or(at.first())
+        } else {
+            at.iter().rev().find(|p| key(p) < key(&caret)).or(at.last())
+        };
+        if let Some(p) = next.copied() {
+            self.go_to_lsp(p, window, cx);
+        }
+    }
+
+    /// The inspections widget at the editor's top right: the file's errors and warnings,
+    /// and arrows to step through them (or a tick when there are none).
+    pub(super) fn inspections(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::glyphs::{Icon, icon};
+        self.lang.as_ref()?;
+        let p = palette(cx);
+        let (errors, warnings) = self.problem_counts();
+        let hover = p.button_hover;
+        let arrow = |id: &'static str, g: Icon, forward: bool, cx: &mut Context<Self>| {
+            div()
+                .id(id)
+                .debug_selector(move || id.to_owned())
+                .size(px(18.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(3.))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .child(icon(g, 12., p.fg_dim))
+                .on_click(cx.listener(move |this, _, w, cx| this.jump_problem(forward, w, cx)))
+        };
+        let count = |g: Icon, n: usize, color: gpui::Hsla| {
+            div().flex().items_center().gap(px(3.)).child(icon(g, 13., color)).child(n.to_string())
+        };
+        Some(
+            div()
+                .id("inspections")
+                .debug_selector(|| "inspections".into())
+                .absolute()
+                .top(px(4.))
+                .right(px(18.))
+                .h(px(22.))
+                .px(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(4.))
+                .bg(p.panel)
+                .text_size(px(11.5))
+                .text_color(p.fg_dim)
+                .font_family(look::FONT)
+                .when(errors + warnings == 0, |d| d.child(icon(Icon::Check, 13., p.ok)))
+                .when(errors > 0, |d| d.child(count(Icon::Problems, errors, p.error)))
+                .when(warnings > 0, |d| d.child(count(Icon::Warning, warnings, p.warn)))
+                .when(errors + warnings > 0, |d| {
+                    d.child(arrow("inspections-prev", Icon::ChevronUp, false, cx)).child(arrow(
+                        "inspections-next",
+                        Icon::ChevronDown,
+                        true,
+                        cx,
+                    ))
+                })
+                .into_any_element(),
+        )
     }
 
     /// The word at the caret and the caret as a protocol position.
