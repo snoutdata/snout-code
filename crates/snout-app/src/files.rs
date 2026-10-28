@@ -1,4 +1,4 @@
-//! The file tree of the open repository, in the Projects panel: folders open and close,
+//! The file tree of the open project, in the Project tool window's Files view: folders open and close,
 //! a click previews a file in an editor tab and a double click keeps it open. Files carry
 //! their Git state in colour (modified, added, untracked, conflicted), what `.gitignore`
 //! leaves out is listed dimmed, and indent guides show the nesting. The repository is
@@ -150,7 +150,7 @@ pub struct FileTree {
 impl FileTree {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |this, model, cx| {
-            let root = model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
+            let root = model.read(cx).project_root();
             if root != this.root {
                 this.set_root(root);
             }
@@ -167,7 +167,7 @@ impl FileTree {
             }
         })
         .detach();
-        let root = model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
+        let root = model.read(cx).project_root();
         let mut this = Self {
             model,
             root: None,
@@ -292,8 +292,9 @@ impl Render for FileTree {
         let p = palette(cx);
         let name = self.root.as_ref().map(|r| Model::dir_name(r));
         let rows = self.rows();
-        let marks = match &self.root {
-            Some(root) => git_marks(root, &self.model.read(cx).status.files),
+        // Git's paths are relative to the repository, which may be above the project.
+        let marks = match self.model.read(cx).repo_root() {
+            Some(repo) => git_marks(&repo, &self.model.read(cx).status.files),
             None => HashMap::new(),
         };
         let model = self.model.clone();

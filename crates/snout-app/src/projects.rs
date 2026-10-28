@@ -276,7 +276,7 @@ impl ProjectsView {
         let m = self.model.read(cx);
         let model = self.model.clone();
         let name = dir_name(path);
-        let current = m.settings.current.as_deref() == Some(path);
+        let current = m.repo.as_ref().is_some_and(|r| r.root() == path);
         let missing = !path.is_dir();
         let mut chips = Vec::new();
         if missing {

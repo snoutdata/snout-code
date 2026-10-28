@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use super::Workspace;
 use crate::editor::EditorPanel;
 use crate::lang::edits::{self, Step};
-use crate::lang::{HubEvent, LangHub, java};
+use crate::lang::{HubEvent, LangHub};
 use crate::look;
 use crate::search::{Item, Mode, SearchEvent, SearchView};
 use crate::theme::{mix, palette};
@@ -62,13 +62,16 @@ impl Workspace {
         self.show_bottom(PanelId::from(self.problems.entity_id()), window, cx);
     }
 
-    /// Start the Java server when the project shown is a Gradle build.
+    /// Start the Java server when the project shown holds Gradle builds.
     pub(super) fn ensure_project_server(&mut self, cx: &mut Context<Self>) {
         if self.side.read(cx).activity != crate::panels::Activity::Project {
             return;
         }
-        let Some(root) = self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()) else { return };
-        if java::is_gradle_root(&root) {
+        let Some(root) = self.model.read(cx).project_root() else { return };
+        if self.hub.read(cx).servers.contains_key(&root) || !self.hub.read(cx).enabled {
+            return;
+        }
+        if crate::project_model::has_gradle(&root) {
             self.hub.update(cx, |h, cx| h.ensure_server(&root, cx));
         }
     }
@@ -211,7 +214,7 @@ impl Workspace {
         let editor = self.active_editor(window, cx);
         let link = editor.as_ref().and_then(|e| e.read(cx).lang.clone());
         let root = link.as_ref().map(|l| l.root.clone()).or_else(|| {
-            let repo = self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned())?;
+            let repo = self.model.read(cx).project_root()?;
             self.hub.read(cx).servers.keys().find(|r| r.starts_with(&repo) || repo.starts_with(r)).cloned()
         });
         let Some(root) = root else {
@@ -260,7 +263,7 @@ impl Workspace {
 
     /// The workspace's symbols, from the Java server of the open project, if one runs.
     pub fn workspace_symbols(&self, cx: &App) -> Option<crate::search::SymbolSource> {
-        let repo = self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned())?;
+        let repo = self.model.read(cx).project_root()?;
         let root = self.hub.read(cx).servers.keys().find(|r| r.starts_with(&repo) || repo.starts_with(r)).cloned()?;
         Some(symbols_of(self.hub.clone(), root))
     }
@@ -324,6 +327,90 @@ impl Workspace {
                 })
                 .into_any_element(),
         )
+    }
+
+    /// The bar saying the Gradle scripts changed since the model was read, offering to sync.
+    pub(super) fn gradle_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let store = crate::project_model::store(cx)?;
+        let s = store.read(cx);
+        let text = match (&s.sync_error, s.scripts_changed) {
+            (_, true) => "Gradle files changed. Sync?".to_owned(),
+            (Some(e), false) if s.current.is_some() => format!("The Gradle sync failed: {e}"),
+            _ => return None,
+        };
+        let changed = s.scripts_changed;
+        let p = palette(cx);
+        let (sync, dismiss) = (store.clone(), store.clone());
+        Some(
+            div()
+                .id("gradle-bar")
+                .debug_selector(|| "gradle-bar".into())
+                .flex_none()
+                .mx(px(6.))
+                .mt(px(6.))
+                .px(px(10.))
+                .py(px(5.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(8.))
+                .bg(p.wash(p.accent))
+                .border_1()
+                .border_color(mix(p.accent, 0.4, p.panel))
+                .text_size(px(12.5))
+                .child(crate::glyphs::icon(crate::glyphs::Icon::Build, 14., p.accent))
+                .child(div().flex_1().min_w_0().child(text))
+                .child(
+                    look::small_button("gradle-sync", if changed { "Sync" } else { "Try again" }, &p)
+                        .debug_selector(|| "gradle-sync".into())
+                        .on_click(move |_, _, cx| sync.update(cx, |s, cx| s.sync(cx))),
+                )
+                .child(
+                    look::small_button("gradle-dismiss", "Not now", &p)
+                        .debug_selector(|| "gradle-dismiss".into())
+                        .on_click(move |_, _, cx| {
+                            dismiss.update(cx, |s, cx| {
+                                s.sync_error = None;
+                                s.dismiss_changes(cx);
+                            })
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Open a library's class read only, as going to its definition does: the Java engine
+    /// finds it by name and hands back its class file.
+    pub fn open_library_class(&mut self, package: String, class: String, window: &mut Window, cx: &mut Context<Self>) {
+        let project = self.model.read(cx).project_root();
+        let hub = self.hub.read(cx);
+        let root = project
+            .as_ref()
+            .and_then(|project| hub.servers.keys().find(|r| r.starts_with(project) || project.starts_with(r)).cloned());
+        let Some(root) = root.filter(|r| hub.client(r).is_some()) else {
+            self.model.update(cx, |m, cx| {
+                m.message = "Library classes open once the Java engine is ready".into();
+                cx.notify();
+            });
+            return;
+        };
+        let call = hub.request(&root, "workspace/symbol", json!({ "query": class }));
+        let qualified = if package.is_empty() { class.clone() } else { format!("{package}.{class}") };
+        cx.spawn_in(window, async move |this, cx| {
+            let answer = call.await.unwrap_or_default();
+            let list: Vec<lsp_types::SymbolInformation> = serde_json::from_value(answer).unwrap_or_default();
+            let hit = list
+                .into_iter()
+                .find(|s| s.name == class && s.container_name.as_deref().unwrap_or_default() == package);
+            let _ = this.update_in(cx, |this, window, cx| match hit {
+                Some(s) => this.open_location(root, s.location.uri, s.location.range.start, window, cx),
+                None => this.model.update(cx, |m, cx| {
+                    m.message = format!("The Java engine does not know {qualified}");
+                    cx.notify();
+                }),
+            });
+        })
+        .detach();
     }
 }
 

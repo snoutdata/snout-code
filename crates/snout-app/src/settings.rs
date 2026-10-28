@@ -73,6 +73,9 @@ pub struct Settings {
     /// The editor follows the files Claude Code changes: opens them, scrolls to the
     /// change and lights it briefly. Off, a dot on the tab says so.
     pub follow_claude: bool,
+    /// The Project tool window shows the plain file tree (Files) rather than the project
+    /// as its Gradle model has it.
+    pub plain_files: bool,
 }
 
 impl Default for Settings {
@@ -100,6 +103,7 @@ impl Default for Settings {
             fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,
             claude_path: None,
             follow_claude: true,
+            plain_files: false,
         }
     }
 }

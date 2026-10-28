@@ -227,6 +227,9 @@ pub struct Model {
     store: Option<Store>,
     saved: Settings,
     pub repo: Option<Repo>,
+    /// The folder opened as the project, as it was opened: the repository's root or any
+    /// folder inside it. Git works on the repository found at or above it.
+    pub project: Option<PathBuf>,
     pub status: Status,
     pub branches: Vec<Branch>,
     pub tags: Vec<Tag>,
@@ -279,6 +282,7 @@ impl Model {
             settings,
             store,
             repo: None,
+            project: None,
             status: Status::default(),
             branches: Vec::new(),
             tags: Vec::new(),
@@ -320,6 +324,16 @@ impl Model {
     }
 
     // ----- Reading --------------------------------------------------------------------
+
+    /// The open project's folder: the folder opened, else the repository's root.
+    pub fn project_root(&self) -> Option<PathBuf> {
+        self.project.clone().or_else(|| self.repo.as_ref().map(|r| r.root().to_owned()))
+    }
+
+    /// The root of the repository the project is in.
+    pub fn repo_root(&self) -> Option<PathBuf> {
+        self.repo.as_ref().map(|r| r.root().to_owned())
+    }
 
     pub fn selected_entries(&self) -> Vec<FileEntry> {
         self.status.files.iter().filter(|f| self.selected.contains(&f.path)).cloned().collect()
@@ -373,9 +387,9 @@ impl Model {
     }
 
     pub fn title(&self) -> String {
-        match &self.repo {
-            Some(repo) => format!("{} ({}) · SnoutCode", repo.name(), self.head_label()),
-            None => "SnoutCode".into(),
+        match (&self.repo, self.project_root()) {
+            (Some(_), Some(project)) => format!("{} ({}) · SnoutCode", dir_name(&project), self.head_label()),
+            _ => "SnoutCode".into(),
         }
     }
 
@@ -513,12 +527,17 @@ impl Model {
 
     // ----- State ----------------------------------------------------------------------
 
+    /// Open the folder `path` as the project, with the repository found at or above it.
     fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) {
         match Repo::open(path) {
             Ok(repo) => {
                 let root = repo.root().to_owned();
-                self.remember(&root);
-                self.settings.current = Some(root);
+                // The folder as opened, in the form Git gives the root (symbolic links
+                // resolved), so paths under the project and under the repository compare.
+                let project = path.canonicalize().unwrap_or_else(|_| path.to_owned());
+                self.remember(&root, &project);
+                self.settings.current = Some(project.clone());
+                self.project = Some(project);
                 self.github_url = repo.github_url();
                 self.repo = Some(repo);
                 self.selected.clear();
@@ -555,8 +574,10 @@ impl Model {
 
     fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         let dir = if path.is_file() { path.parent().unwrap_or(path) } else { path };
-        if Repo::open(dir).is_ok() {
-            self.open_repo(dir, cx);
+        if let Ok(repo) = Repo::open(dir) {
+            // A folder is the project as it is; a file opens in its repository.
+            let project = if path.is_file() { repo.root().to_owned() } else { dir.to_owned() };
+            self.open_repo(&project, cx);
             // A file opens in a tab of its repository (once the window is there).
             if path.is_file() {
                 self.pending_file = Some((path.to_owned(), None));
@@ -569,13 +590,15 @@ impl Model {
         }
     }
 
-    fn remember(&mut self, root: &Path) {
+    /// Keep the repository at `root` in the list, and `project` (the folder opened) first
+    /// among the recent projects.
+    fn remember(&mut self, root: &Path, project: &Path) {
         if !self.settings.repos.iter().any(|p| p == root) {
             self.settings.repos.push(root.to_owned());
         }
         let mut recent = self.recent_projects();
-        recent.retain(|p| p != root);
-        recent.insert(0, root.to_owned());
+        recent.retain(|p| p != project);
+        recent.insert(0, project.to_owned());
         recent.truncate(RECENT_LIMIT);
         self.settings.recent = Some(recent);
     }
@@ -588,6 +611,7 @@ impl Model {
     /// Close the open project.
     fn close_repo(&mut self, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.take() else { return };
+        self.project = None;
         self.settings.current = None;
         self.github_url = None;
         self.selected.clear();
@@ -774,7 +798,7 @@ impl Model {
         }
         let before = self.settings.repos.len();
         for r in &repos {
-            self.remember(r);
+            self.remember(r, r);
         }
         let added = self.settings.repos.len() - before;
         if self.repo.is_none() {
@@ -858,7 +882,7 @@ impl Model {
                 let tracking =
                     cx.background_executor().spawn(async move { snout_core::survey::count(&p, fetch) }).await;
                 let ok = this.update(cx, |m, cx| {
-                    let open = m.settings.current.as_ref() == Some(&path);
+                    let open = m.repo.as_ref().is_some_and(|r| r.root() == path);
                     m.tracking.insert(path.clone(), tracking);
                     if fetch && open && m.job.is_none() {
                         m.refresh(); // its remote branches may have moved too
@@ -931,9 +955,10 @@ impl Model {
             Action::RemoveRepo(path) => {
                 self.settings.repos.retain(|p| p != &path);
                 move_to_group(&mut self.settings.groups, &path, None);
-                if self.settings.current.as_ref() == Some(&path) {
+                if self.repo.as_ref().is_some_and(|r| r.root() == path) {
                     self.settings.current = None;
                     self.repo = None;
+                    self.project = None;
                     self.github_url = None;
                     self.refresh();
                 }

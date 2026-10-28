@@ -38,6 +38,23 @@ pub enum Icon {
     Brush,
     Code,
     Tools,
+    /// A module: a folder with a block in its corner.
+    Module,
+    /// Source roots, by what they hold: a folder with a dot, a check (tests), two lines
+    /// (resources), lines and a dot (test resources), a spark (generated), a stroke
+    /// through (excluded).
+    SourceFolder,
+    TestFolder,
+    ResourceFolder,
+    TestResourceFolder,
+    GeneratedFolder,
+    ExcludedFolder,
+    /// External libraries: books on a shelf.
+    Library,
+    Jar,
+    Package,
+    /// A JDK: a cup.
+    Jdk,
 }
 
 /// One stroke of an icon, in grid units (16 across).
@@ -53,6 +70,9 @@ enum Part {
 }
 
 use Part::*;
+
+/// The folder the source roots' glyphs draw on.
+const FOLDER: Part = Line(&[(1.5, 13.), (1.5, 3.5), (6., 3.5), (7.5, 5.5), (14.5, 5.5), (14.5, 13.)], true);
 
 impl Icon {
     fn parts(self) -> &'static [Part] {
@@ -195,6 +215,52 @@ impl Icon {
                 Line(&[(2.5, 13.5), (9., 7.)], false),
                 Circle(11., 5., 2.8, false),
                 Line(&[(2., 3.), (5., 3.), (5., 6.), (2., 6.)], true),
+            ],
+            Icon::Module => &[
+                Line(&[(1.5, 11.), (1.5, 3.5), (6., 3.5), (7.5, 5.5), (14.5, 5.5), (14.5, 7.5)], false),
+                Line(&[(1.5, 11.), (1.5, 13.), (7.5, 13.)], false),
+                Fill(&[(9.5, 9.), (15., 9.), (15., 14.5), (9.5, 14.5)]),
+            ],
+            Icon::SourceFolder => &[FOLDER, Circle(8., 9.3, 1.9, true)],
+            Icon::TestFolder => &[FOLDER, Line(&[(5.3, 9.2), (7.2, 11.), (10.7, 7.6)], false)],
+            Icon::ResourceFolder => {
+                &[FOLDER, Line(&[(4.5, 8.3), (11.5, 8.3)], false), Line(&[(4.5, 10.7), (11.5, 10.7)], false)]
+            }
+            Icon::TestResourceFolder => &[
+                FOLDER,
+                Line(&[(4.5, 8.3), (8.5, 8.3)], false),
+                Line(&[(4.5, 10.7), (8.5, 10.7)], false),
+                Circle(11.3, 9.5, 1.3, true),
+            ],
+            Icon::GeneratedFolder => &[
+                FOLDER,
+                Curve((8., 6.6), (8.3, 9.), (10.7, 9.3)),
+                Curve((10.7, 9.3), (8.3, 9.6), (8., 12.)),
+                Curve((8., 12.), (7.7, 9.6), (5.3, 9.3)),
+                Curve((5.3, 9.3), (7.7, 9.), (8., 6.6)),
+            ],
+            Icon::ExcludedFolder => &[FOLDER, Line(&[(5.3, 11.5), (10.7, 7.)], false)],
+            Icon::Library => &[
+                Line(&[(2., 3.), (4.8, 3.), (4.8, 13.5), (2., 13.5)], true),
+                Line(&[(6.2, 4.5), (9., 4.5), (9., 13.5), (6.2, 13.5)], true),
+                Line(&[(10., 4.2), (12.6, 3.4), (15., 12.6), (12.4, 13.4)], true),
+            ],
+            Icon::Jar => &[
+                Line(&[(3.5, 5.5), (12.5, 5.5), (12.5, 14.), (3.5, 14.)], true),
+                Line(&[(4.5, 2.), (11.5, 2.), (11.5, 5.5), (4.5, 5.5)], true),
+                Line(&[(6., 9.), (10., 9.)], false),
+            ],
+            Icon::Package => &[
+                Line(&[(2.5, 3.5), (13.5, 3.5), (13.5, 13.5), (2.5, 13.5)], true),
+                Line(&[(2.5, 7.), (13.5, 7.)], false),
+                Line(&[(6.5, 3.5), (6.5, 7.)], false),
+                Line(&[(9.5, 3.5), (9.5, 7.)], false),
+            ],
+            Icon::Jdk => &[
+                Line(&[(2.5, 6.5), (2.5, 11.5), (4.5, 14.), (9.5, 14.), (11.5, 11.5), (11.5, 6.5)], true),
+                Curve((11.5, 7.5), (15., 8.), (11.5, 11.)),
+                Curve((5., 1.5), (6.5, 3.), (5., 4.8)),
+                Curve((8.5, 1.5), (10., 3.), (8.5, 4.8)),
             ],
         }
     }

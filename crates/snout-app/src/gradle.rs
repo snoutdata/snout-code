@@ -44,8 +44,17 @@ pub fn parse(json: &Value) -> Build {
         root: json.get("rootDir").and_then(Value::as_str).map(PathBuf::from).unwrap_or_default(),
         projects: Vec::new(),
     };
-    let builds = json.get("builds").and_then(Value::as_array).cloned().unwrap_or_default();
-    for build in builds.iter().take(1) {
+    // Format 2 holds each Gradle build of the folder under `gradleBuilds`; format 1 was one.
+    let mut builds: Vec<Value> = Vec::new();
+    match json.get("gradleBuilds").and_then(Value::as_array) {
+        Some(all) => {
+            for b in all {
+                builds.extend(b.get("builds").and_then(Value::as_array).and_then(|l| l.first()).cloned());
+            }
+        }
+        None => builds.extend(json.get("builds").and_then(Value::as_array).and_then(|l| l.first()).cloned()),
+    }
+    for build in &builds {
         for p in build.get("projects").and_then(Value::as_array).into_iter().flatten() {
             let classes: Vec<&str> = p
                 .get("plugins")
@@ -122,5 +131,20 @@ mod tests {
         assert!(app.tasks.contains(&"build".to_owned()) && app.tasks.contains(&"test".to_owned()));
         assert_eq!(app.task_path("test"), ":app:test");
         assert_eq!(build.projects[0].task_path("help"), ":help");
+    }
+
+    #[test]
+    fn a_folder_of_builds_lists_the_projects_of_each() {
+        let json = serde_json::json!({
+            "modelVersion": 2,
+            "rootDir": "/w",
+            "gradleBuilds": [
+                { "id": "a", "builds": [{ "projects": [{ "path": ":", "name": "a", "plugins": [] }] }] },
+                { "id": "b", "status": "failed" },
+                { "id": "c", "builds": [{ "projects": [{ "path": ":", "name": "c", "plugins": [] }] }] }
+            ]
+        });
+        let names: Vec<String> = parse(&json).projects.into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["a", "c"]);
     }
 }

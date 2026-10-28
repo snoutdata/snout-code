@@ -94,6 +94,9 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
             });
         }
     }
+    if let Some(task) = crate::project_model::store(cx).and_then(|s| s.read(cx).task()) {
+        out.push(task);
+    }
     if let Some(job) = &model.job {
         out.push(BgTask { title: "Git".into(), stage: job.clone(), percent: None });
     }

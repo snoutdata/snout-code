@@ -62,7 +62,7 @@ impl GradlePanel {
 
     /// The Gradle build of the open project: one its server runs, or the project itself.
     pub fn root(&self, cx: &App) -> Option<PathBuf> {
-        let repo = self.model.read(cx).repo.as_ref()?.root().to_owned();
+        let repo = self.model.read(cx).project_root()?;
         let hub = self.hub.read(cx);
         let mut roots: Vec<&PathBuf> = hub.servers.keys().filter(|r| r.starts_with(&repo)).collect();
         roots.sort();

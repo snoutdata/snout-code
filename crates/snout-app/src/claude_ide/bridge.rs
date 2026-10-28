@@ -61,7 +61,7 @@ impl Bridge {
 /// Start the server for this window, if the app asks for one.
 pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     let Some(config) = cx.try_global::<IdeConfig>().cloned() else { return };
-    let root = ws.model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
+    let root = ws.model.read(cx).project_root();
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
     let folders: Vec<PathBuf> = root.iter().cloned().collect();
     let server = match Server::start(&config.lock_dir, &folders, move |e| {
@@ -163,7 +163,7 @@ fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Conte
         }
         "getOpenEditors" => reply.ok(tools::json_text(&open_editors(ws, window, cx))),
         "getWorkspaceFolders" => {
-            let root = ws.model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
+            let root = ws.model.read(cx).project_root();
             let folders: Vec<Value> = root
                 .iter()
                 .map(|r| {
@@ -456,7 +456,7 @@ fn tick(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     track_selection(ws, window, cx);
     follow_watched(ws, window, cx);
     // The lock file names the project open now.
-    let root = ws.model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
+    let root = ws.model.read(cx).project_root();
     if let Some(b) = ws.claude.as_mut()
         && b.root != root
     {
@@ -520,7 +520,7 @@ pub fn send_selection(ws: &mut Workspace, window: &mut Window, cx: &mut Context<
     }
     show_console(ws, window, cx);
     if !connected {
-        let root = ws.model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
+        let root = ws.model.read(cx).project_root();
         let rel = root.as_ref().and_then(|r| path.strip_prefix(r).ok()).unwrap_or(&path).to_string_lossy().into_owned();
         let mention = match lines {
             Some((a, b)) if a == b => format!("@{rel}#L{} ", a + 1),
@@ -618,7 +618,7 @@ fn watch(root: &Path) -> Option<Watch> {
 
 /// Files changed on disk that no tab shows: follow Claude into them.
 fn follow_watched(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
-    let root = ws.model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
+    let root = ws.model.read(cx).project_root();
     let Some(b) = ws.claude.as_mut() else { return };
     if b.watch.as_ref().map(|w| &w.root) != root.as_ref() {
         b.watch = root.as_deref().and_then(watch);

@@ -38,8 +38,18 @@ pub fn engine_command(dist: &Path, project: &Path, jdk: &Path) -> Command {
         .arg(project)
         .arg("--java-home")
         .arg(jdk)
+        // The cache the app looks in for the model the engine writes (the same as the
+        // engine's own default, unless HOME points elsewhere).
+        .arg("--cache-dir")
+        .arg(engine_cache())
         .current_dir(project);
     c
+}
+
+/// SnoutCode's cache folder, where the engine keeps its builds, models and jdtls data.
+pub fn engine_cache() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    crate::project_model::cache_dir(&home)
 }
 
 const SETTINGS: [&str; 2] = ["settings.gradle", "settings.gradle.kts"];

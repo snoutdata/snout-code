@@ -259,10 +259,21 @@ impl LangHub {
         }
     }
 
-    /// The Gradle build `path` belongs to, inside the open repository.
+    /// The folder whose engine serves `path`: the project, when it holds Gradle builds and
+    /// `path` is in it or in a source folder its model lists (one engine syncs every build
+    /// of the folder); else the Gradle build of `path`.
     pub fn root_for(&self, path: &Path, cx: &App) -> Option<PathBuf> {
-        let repo = self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned());
-        java::gradle_root(path, repo.as_deref())
+        let project = self.model.read(cx).project_root();
+        if let Some(project) = &project {
+            let listed = crate::project_model::store(cx)
+                .and_then(|s| s.read(cx).model_for(project))
+                .is_some_and(|m| m.holds(path));
+            let inside = path.starts_with(project) && java::gradle_root(path, Some(project)).is_some();
+            if (inside || listed) && crate::project_model::has_gradle(project) {
+                return Some(project.clone());
+            }
+        }
+        java::gradle_root(path, project.as_deref())
     }
 
     /// The server of the build at `root`, once it answers requests.
@@ -333,6 +344,28 @@ impl LangHub {
                 m.persist();
             }
         });
+    }
+
+    /// Start the engine of `root` again (it syncs the Gradle model as it starts).
+    pub fn restart(&mut self, root: &Path, cx: &mut Context<Self>) {
+        let Some(server) = self.servers.get_mut(root) else { return };
+        // Messages of the process going away are those of an earlier generation.
+        server.generation += 1;
+        server.crashes = 0;
+        server.initialized = false;
+        server.progress.clear();
+        if let Some(old) = server.client.take() {
+            std::thread::spawn(move || {
+                drop(old.request_raw("shutdown", Value::Null));
+                std::thread::sleep(Duration::from_millis(300));
+                old.notify_raw("exit", Value::Null);
+                old.kill(Duration::from_millis(1500));
+            });
+        }
+        server.stage = Stage::Importing;
+        self.spawn(root, cx);
+        cx.emit(HubEvent::Changed);
+        cx.notify();
     }
 
     /// Start (or restart) the engine of `root` on its JDK.

@@ -200,7 +200,11 @@ impl Workspace {
         let references = cx.new(|cx| crate::lang::panels::ReferencesPanel::new(hub.clone(), cx));
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
         let files = cx.new(|cx| crate::files::FileTree::new(model.clone(), cx));
-        let side = cx.new(|cx| SidePanel::new(files, cx));
+        let models = cx.new(|cx| crate::project_model::ProjectModels::new(model.clone(), Some(hub.clone()), cx));
+        cx.set_global(crate::project_model::ProjectModelsHandle(models.clone()));
+        let project =
+            cx.new(|cx| crate::project_view::ProjectView::new(model.clone(), files.clone(), models.clone(), cx));
+        let side = cx.new(|cx| SidePanel::new(model.clone(), files, project.clone(), cx));
         let welcome = cx.new(|cx| WelcomePanel::new(model.clone(), cx));
         let output = cx.new(|cx| OutputPanel::new(model.clone(), cx));
         let console = crate::console::build(&model, window, cx);
@@ -283,6 +287,15 @@ impl Workspace {
             }),
             cx.subscribe_in(&model, window, Self::on_model_event),
             cx.subscribe_in(&hub, window, Self::on_hub_event),
+            cx.subscribe_in(&project, window, |this, _, e: &crate::project_view::ProjectViewEvent, window, cx| {
+                let crate::project_view::ProjectViewEvent::OpenClass { package, class } = e;
+                this.open_library_class(package.clone(), class.clone(), window, cx);
+            }),
+            // The status bar lists the model's sync among the background tasks.
+            cx.observe(&models, |this, _, cx| {
+                this.status.update(cx, |_, cx| cx.notify());
+                cx.notify()
+            }),
             // Coming back to the window, re-read the repository and count again, so
             // changes made elsewhere (terminal, editor, an agent) show up at once.
             cx.observe_window_activation(window, |this, window, cx| {
@@ -608,7 +621,11 @@ impl Workspace {
         self.status.update(cx, |s, cx| s.set_editor(editor, cx));
         let path = editor.map(|e| e.read(cx).path.clone());
         let files = self.side.read(cx).files.clone();
-        files.update(cx, |f, cx| f.reveal(path, cx));
+        files.update(cx, |f, cx| f.reveal(path.clone(), cx));
+        if let Some(path) = path {
+            let project = self.side.read(cx).project.clone();
+            project.update(cx, |v, cx| v.reveal(&path, cx));
+        }
     }
 
     /// The editor tab with the keyboard, or else the one the status bar follows.
@@ -798,8 +815,8 @@ impl Workspace {
                 Some(e) => e.read(cx).path.parent().map(PathBuf::from).unwrap_or_default(),
                 None => return,
             },
-            _ => match self.model.read(cx).repo.as_ref() {
-                Some(r) => r.root().to_owned(),
+            _ => match self.model.read(cx).project_root() {
+                Some(r) => r,
                 None => return,
             },
         };
@@ -1063,14 +1080,19 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &LocateFile, _, cx| {
                 let path = this.status.read(cx).editor().map(|e| e.read(cx).path.clone());
                 let files = this.side.read(cx).files.clone();
-                files.update(cx, |f, cx| f.reveal(path, cx));
+                files.update(cx, |f, cx| f.reveal(path.clone(), cx));
+                if let Some(path) = path {
+                    let project = this.side.read(cx).project.clone();
+                    project.update(cx, |v, cx| v.reveal(&path, cx));
+                }
             }))
             .on_action(cx.listener(|this, _: &CollapseAll, _, cx| {
-                let files = this.side.read(cx).files.clone();
+                let (files, project) = (this.side.read(cx).files.clone(), this.side.read(cx).project.clone());
                 files.update(cx, |f, cx| {
                     f.expanded.clear();
                     cx.notify();
                 });
+                project.update(cx, |v, cx| v.collapse_all(cx));
             }))
             .on_action(cx.listener(|this, _: &CollapseGradle, _, cx| {
                 this.gradle.update(cx, |g, cx| g.collapse_all(cx));
@@ -1124,7 +1146,7 @@ impl Render for Workspace {
         let root = act!(root, Github, has_github, |_| Action::OpenGithub);
         let root = root.when(free && has_repo, |d| {
             d.on_action(cx.listener(|this, _: &Reveal, _, cx| {
-                if let Some(root) = this.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()) {
+                if let Some(root) = this.model.read(cx).project_root() {
                     this.send(Action::Reveal(root), cx);
                 }
             }))
@@ -1158,7 +1180,14 @@ impl Render for Workspace {
         let main = if git {
             self.git.clone().into_any_element()
         } else {
-            div().size_full().flex().flex_col().children(self.jdk_bar(cx)).child(self.dock_area(cx)).into_any_element()
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .children(self.jdk_bar(cx))
+                .children(self.gradle_bar(cx))
+                .child(self.dock_area(cx))
+                .into_any_element()
         };
         let title = self.title_bar(cx);
         root.child(title)

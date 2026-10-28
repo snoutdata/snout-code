@@ -103,7 +103,7 @@ impl StatusBar {
             let e = e.read(cx);
             e.class_file.as_ref().map(|(_, root)| root.clone()).unwrap_or_else(|| e.path.clone())
         });
-        let path = path.or_else(|| self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()));
+        let path = path.or_else(|| self.model.read(cx).project_root());
         hub.server_for(path.as_deref()).map(|s| (s.status(), s.busy()))
     }
 
@@ -143,7 +143,7 @@ impl StatusBar {
                 && self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.as_ref().is_some_and(|b| b.finished()));
         }
         let java_file = self.editor().is_some_and(|e| crate::editor::language_for(&e.read(cx).path) == "java");
-        let gradle = self.model.read(cx).repo.as_ref().is_some_and(|r| crate::lang::java::is_gradle_root(r.root()));
+        let gradle = self.model.read(cx).project_root().is_some_and(|r| crate::lang::java::is_gradle_root(&r));
         java_file || gradle
     }
 

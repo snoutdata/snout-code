@@ -18,6 +18,8 @@ pub mod look;
 pub mod menus;
 pub mod model;
 pub mod panels;
+pub mod project_model;
+pub mod project_view;
 pub mod projects;
 pub mod search;
 pub mod settings;
@@ -34,6 +36,8 @@ pub mod workspace;
 mod code_tests;
 #[cfg(test)]
 mod lang_tests;
+#[cfg(test)]
+mod project_tests;
 #[cfg(test)]
 mod tests;
 

@@ -103,7 +103,7 @@ impl Workspace {
         let p = palette(cx);
         let gradle = self.gradle.update(cx, |g, cx| g.build(cx));
         let m = self.model.read(cx);
-        let name = m.repo.as_ref().map(|r| Model::dir_name(r.root()));
+        let name = m.repo.as_ref().and(m.project_root()).map(|r| Model::dir_name(&r));
         let branch = m.repo.as_ref().map(|_| m.head_label());
         let recent = m.recent_projects();
         let model = self.model.clone();

@@ -99,7 +99,12 @@ mod shots {
         /// A change Claude Code proposes, under review in its tab: part way through
         /// typing itself in, or all in; Claude connected in the console.
         Review(Option<f32>),
+        /// The Project view on the fixture model: modules, a shared folder, a failed build,
+        /// the Gradle scripts and the libraries, some of them open.
+        ProjectModel,
     }
+
+    include!("fixtures/project_fixture.rs");
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
         let repo = demo_repo(name);
@@ -289,6 +294,50 @@ mod shots {
                 })
                 .unwrap();
             }
+            Some(Select::ProjectModel) => {
+                use snout_app::project_view::NodeId;
+                let jars = repo.with_extension("jars");
+                let json = write_project_fixture(&repo, &jars);
+                let parsed = snout_app::project_model::parse(&serde_json::from_str(&json).unwrap()).unwrap();
+                // Committed, then one file changed: Git's colours as a project usually has them.
+                std::fs::write(repo.join(".gitignore"), "build/\n").unwrap();
+                git(&repo, &["add", "-A"]);
+                git(&repo, &["commit", "-qm", "The shop"]);
+                std::fs::write(
+                    repo.join("app/src/main/java/shop/Cart.java"),
+                    "package shop;\n\npublic class Cart { }\n",
+                )
+                .unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+                let open =
+                    |cx: &mut HeadlessAppContext, a: Action| cx.update(|cx| model.update(cx, |m, cx| m.handle(a, cx)));
+                open(&mut cx, Action::OpenFile(repo.join("app/src/main/java/shop/App.java"), None));
+                cx.update(|cx| {
+                    let store = snout_app::project_model::store(cx).unwrap();
+                    store.update(cx, |s, cx| s.set_model(parsed, cx));
+                    let project = ws.read(cx).side.read(cx).project.clone();
+                    project.update(cx, |v, cx| {
+                        for id in [
+                            NodeId::Module("shop:app".into()),
+                            NodeId::Dir(repo.join("app/src")),
+                            NodeId::Dir(repo.join("app/src/main")),
+                            NodeId::Dir(repo.join("app/src/main/java")),
+                            NodeId::Dir(repo.join("app/src/main/java/shop")),
+                            NodeId::Shared(repo.join("core")),
+                            NodeId::Failed("legacy".into()),
+                            NodeId::Libraries,
+                            NodeId::Library("com.google.guava:guava:33.0.0-jre".into()),
+                            NodeId::Package(
+                                "com.google.guava:guava:33.0.0-jre".into(),
+                                "com.google.common.base".into(),
+                            ),
+                        ] {
+                            v.expanded.insert(id);
+                        }
+                        cx.notify();
+                    });
+                });
+            }
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -312,6 +361,94 @@ mod shots {
             image.save(dir.join(format!("{name}.png"))).unwrap();
         }
         let _ = std::fs::remove_dir_all(repo);
+        println!("screenshot {name}: ok");
+    }
+
+    /// The Project view of a real folder with a model the engine wrote for it, when
+    /// `SNOUT_SHOT_PROJECT` and `SNOUT_SHOT_MODEL` name them; `SNOUT_SHOT_OPEN` lists module
+    /// names to open, separated by commas. The folder is only read.
+    fn real_project_shot(name: &str, theme: ThemeChoice) {
+        let (Some(folder), Some(file)) = (std::env::var_os("SNOUT_SHOT_PROJECT"), std::env::var_os("SNOUT_SHOT_MODEL"))
+        else {
+            return;
+        };
+        let folder = PathBuf::from(folder).canonicalize().unwrap();
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        let parsed = snout_app::project_model::parse(&json).expect("a model of format 2");
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let settings = Settings { theme, current: Some(folder.clone()), ..Settings::default() };
+        cx.update(|cx| snout_app::init(&settings, cx));
+        let model = cx.update(|cx| {
+            let settings = settings.clone();
+            cx.new(|cx| snout_app::model::Model::new(settings, None, cx))
+        });
+        let mut ws = None;
+        let handle = cx
+            .open_window(size(px(1400.), px(900.)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+                ws = Some(view.clone());
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        let ws = ws.unwrap();
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.show_activity(Activity::Project, window, cx));
+        })
+        .unwrap();
+        let open: Vec<String> = std::env::var("SNOUT_SHOT_OPEN")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        cx.update(|cx| {
+            use snout_app::project_view::NodeId;
+            let ids: Vec<NodeId> = parsed
+                .modules
+                .iter()
+                .filter(|m| open.contains(&m.name))
+                .map(|m| NodeId::Module(m.id.clone()))
+                .chain(
+                    parsed
+                        .shared
+                        .iter()
+                        .filter(|s| open.contains(&s.name))
+                        .map(|s| NodeId::Shared(s.content_root.clone())),
+                )
+                .chain(
+                    parsed.failed.iter().filter(|f| open.contains(&f.build)).map(|f| NodeId::Failed(f.build.clone())),
+                )
+                .chain(open.iter().filter(|o| *o == "libraries").map(|_| NodeId::Libraries))
+                .chain(open.iter().filter(|o| *o == "scripts").map(|_| NodeId::Scripts))
+                .collect();
+            snout_app::project_model::store(cx).unwrap().update(cx, |s, cx| s.set_model(parsed, cx));
+            let project = ws.read(cx).side.read(cx).project.clone();
+            project.update(cx, |v, cx| {
+                v.expanded.extend(ids);
+                cx.notify();
+            });
+        });
+        cx.allow_parking();
+        for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(50));
+            cx.advance_clock(Duration::from_millis(300));
+            cx.run_until_parked();
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        }
+        let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
+        if let Some(dir) = std::env::var_os("SNOUT_SCREENSHOT") {
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(dir.join(format!("{name}.png"))).unwrap();
+        }
         println!("screenshot {name}: ok");
     }
 
@@ -361,6 +498,9 @@ mod shots {
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
         shot("welcome-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
         shot("project-dark", ThemeChoice::Dark, Activity::Project, None);
+        shot("project-model-dark", ThemeChoice::Dark, Activity::Project, Some(Select::ProjectModel));
+        shot("project-model-light", ThemeChoice::Light, Activity::Project, Some(Select::ProjectModel));
+        real_project_shot("project-real-dark", ThemeChoice::Dark);
         shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
         shot("palette-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));

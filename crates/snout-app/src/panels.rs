@@ -67,14 +67,38 @@ pub enum Activity {
 /// project.
 pub struct SidePanel {
     pub activity: Activity,
-    /// The open project's files, the whole height of the panel.
+    model: Entity<Model>,
+    /// The open project's files, the whole height of the panel (the Files view).
     pub files: Entity<crate::files::FileTree>,
+    /// The project as its Gradle model has it (the Project view).
+    pub project: Entity<crate::project_view::ProjectView>,
     focus: FocusHandle,
 }
 
 impl SidePanel {
-    pub fn new(files: Entity<crate::files::FileTree>, cx: &mut Context<Self>) -> Self {
-        Self { activity: Activity::Project, files, focus: cx.focus_handle() }
+    pub fn new(
+        model: Entity<Model>,
+        files: Entity<crate::files::FileTree>,
+        project: Entity<crate::project_view::ProjectView>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        cx.observe(&model, |_, _, cx| cx.notify()).detach();
+        Self { activity: Activity::Project, model, files, project, focus: cx.focus_handle() }
+    }
+
+    /// The Files view shows (the plain tree), not the Project view.
+    pub fn plain_files(&self, cx: &App) -> bool {
+        self.model.read(cx).settings.plain_files
+    }
+
+    /// Show the Files view (`true`) or the Project view.
+    pub fn set_plain_files(&mut self, plain: bool, cx: &mut Context<Self>) {
+        self.model.update(cx, |m, cx| {
+            m.settings.plain_files = plain;
+            m.persist();
+            cx.notify();
+        });
+        cx.notify();
     }
 }
 
@@ -94,7 +118,27 @@ impl Render for SidePanel {
         use crate::menus::{CollapseAll, HideSide, LocateFile};
         use crate::tabs::tool_button;
         let p = palette(cx);
-        // The tool window's header: its title and toolbar, then the files.
+        let plain = self.plain_files(cx);
+        let view_name = if plain { "Files" } else { "Project" };
+        let side = cx.entity();
+        // The view switcher: Project (the Gradle model's view) or Files (the plain tree).
+        let switcher = Button::new("side-view")
+            .debug_selector(|| "side-view".into())
+            .ghost()
+            .small()
+            .label(view_name)
+            .dropdown_menu(move |menu, _, _| {
+                let pick = |plain: bool| {
+                    let side = side.clone();
+                    move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+                        side.update(cx, |s, cx| s.set_plain_files(plain, cx))
+                    }
+                };
+                menu.item(gpui_component::menu::PopupMenuItem::new("Project").checked(!plain).on_click(pick(false)))
+                    .item(gpui_component::menu::PopupMenuItem::new("Files").checked(plain).on_click(pick(true)))
+            });
+        // The tool window's header: its title, the view switcher and the toolbar, then the
+        // view.
         let header = div()
             .flex_none()
             .h(px(32.))
@@ -104,7 +148,7 @@ impl Render for SidePanel {
             .items_center()
             .gap(px(2.))
             .text_size(px(crate::look::BODY))
-            .child(div().font_weight(FontWeight::MEDIUM).child("Project"))
+            .child(div().ml(px(-8.)).font_weight(FontWeight::MEDIUM).child(switcher))
             .child(div().flex_1())
             .child(
                 tool_button("side-locate", Icon::Locate, "Select Opened File", &p)
@@ -118,13 +162,11 @@ impl Render for SidePanel {
                 tool_button("side-hide", Icon::Minus, "Hide", &p)
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(HideSide), cx)),
             );
-        div()
-            .size_full()
-            .bg(p.ground)
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(div().flex_1().min_h_0().px(px(4.)).child(self.files.clone()))
+        div().size_full().bg(p.ground).flex().flex_col().child(header).child(div().flex_1().min_h_0().px(px(4.)).map(
+            |d| {
+                if plain { d.child(self.files.clone()) } else { d.child(self.project.clone()) }
+            },
+        ))
     }
 }
 

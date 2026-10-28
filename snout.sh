@@ -2,7 +2,7 @@
 # Build (if needed) and start SnoutCode.
 #
 #   ./snout.sh                 start with the repositories you had open last time
-#   ./snout.sh <path>          open a repository (any folder inside it), or a folder to search/init
+#   ./snout.sh <path>          open a folder as the project (Git finds its repository above it)
 #   ./snout.sh --pick          choose an existing repository with a folder dialog
 #   ./snout.sh --fg [...]      stay in the foreground (logs go to the terminal)
 #   ./snout.sh --old [...]     start the earlier Git-only app instead
@@ -40,9 +40,9 @@ done
 
 if [[ -n "$repo" ]]; then
   [[ -d "$repo" ]] || { echo "Not a folder: $repo" >&2; exit 1; }
-  # Inside a repository: open its root. Otherwise snout offers to search the folder
-  # for repositories or to initialize one there.
-  repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || (cd "$repo" && pwd))"
+  # The folder is the project, as given; Git finds the repository at or above it. Outside
+  # a repository, snout offers to initialize one there.
+  repo="$(cd "$repo" && pwd)"
 fi
 
 # Make cargo available even in shells that haven't sourced rustup's env yet.

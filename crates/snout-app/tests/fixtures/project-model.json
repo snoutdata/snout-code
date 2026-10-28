@@ -1,0 +1,79 @@
+{
+  "modelVersion": 2,
+  "pluginModelVersion": 1,
+  "rootDir": "$ROOT",
+  "name": "shop",
+  "syncMillis": 4210,
+  "modules": [
+    {
+      "id": "shop", "name": "shop", "build": "shop", "buildKind": "root", "includedBuild": null,
+      "gradlePath": ":", "contentRoot": "$ROOT", "buildFile": "$ROOT/build.gradle",
+      "sourceRoots": [],
+      "excludedDirs": ["$ROOT/build", "$ROOT/.gradle"],
+      "dependencies": {},
+      "jdk": { "javaHome": "$JARS/jdk-21", "version": "21.0.2", "languageLevel": "21" }
+    },
+    {
+      "id": "shop:app", "name": "app", "build": "shop", "buildKind": "root", "includedBuild": null,
+      "gradlePath": ":app", "contentRoot": "$ROOT/app", "buildFile": "$ROOT/app/build.gradle",
+      "sourceRoots": [
+        { "dir": "$ROOT/app/src/main/java", "type": "main", "sourceSet": "main", "languages": ["java"], "exists": true, "shared": false },
+        { "dir": "$ROOT/app/src/main/resources", "type": "resources", "sourceSet": "main", "languages": ["resources"], "exists": true, "shared": false },
+        { "dir": "$ROOT/app/src/test/java", "type": "test", "sourceSet": "test", "languages": ["java"], "exists": true, "shared": false },
+        { "dir": "$ROOT/app/src/test/resources", "type": "test-resources", "sourceSet": "test", "languages": ["resources"], "exists": true, "shared": false },
+        { "dir": "$ROOT/app/build/generated/sources/annotationProcessor/java/main", "type": "generated", "sourceSet": "main", "test": false, "languages": ["java"], "exists": true, "shared": false },
+        { "dir": "$ROOT/core/src/main/java", "type": "main", "sourceSet": "main", "languages": ["java"], "exists": true, "shared": true },
+        { "dir": "$ROOT/core/src/main/resources", "type": "resources", "sourceSet": "main", "languages": ["resources"], "exists": true, "shared": true }
+      ],
+      "excludedDirs": ["$ROOT/app/build", "$ROOT/app/.gradle"],
+      "dependencies": { "compile": [ { "kind": "library", "id": "com.google.guava:guava:33.0.0-jre" } ], "test": [ { "kind": "library", "id": "junit:junit:4.13.2" } ] },
+      "jdk": { "javaHome": "$JARS/jdk-21", "version": "21.0.2", "languageLevel": "21" }
+    },
+    {
+      "id": "billing", "name": "billing", "build": "billing", "buildKind": "root", "includedBuild": null,
+      "gradlePath": ":", "contentRoot": "$ROOT/billing", "buildFile": "$ROOT/billing/build.gradle",
+      "sourceRoots": [
+        { "dir": "$ROOT/billing/src/main/java", "type": "main", "sourceSet": "main", "languages": ["java"], "exists": true, "shared": false },
+        { "dir": "$ROOT/core/src/main/java", "type": "main", "sourceSet": "main", "languages": ["java"], "exists": true, "shared": true }
+      ],
+      "excludedDirs": ["$ROOT/billing/build", "$ROOT/billing/.gradle"],
+      "dependencies": { "compile": [ { "kind": "module", "id": "shop:app" } ] },
+      "jdk": { "javaHome": "$JARS/jdk-17", "version": "17.0.10", "languageLevel": "17" }
+    }
+  ],
+  "sharedSourceRoots": [
+    { "dir": "$ROOT/core/src/main/java", "type": "main", "languages": ["java"], "exists": true,
+      "name": "core", "contentRoot": "$ROOT/core", "modules": ["shop:app", "billing"] },
+    { "dir": "$ROOT/core/src/main/resources", "type": "resources", "languages": ["resources"], "exists": true,
+      "name": "core", "contentRoot": "$ROOT/core", "modules": ["shop:app"] }
+  ],
+  "libraries": [
+    { "id": "junit:junit:4.13.2", "group": "junit", "name": "junit", "version": "4.13.2", "file": "$JARS/junit-4.13.2.jar", "sources": null },
+    { "id": "com.google.guava:guava:33.0.0-jre", "group": "com.google.guava", "name": "guava", "version": "33.0.0-jre", "file": "$JARS/guava-33.0.0-jre.jar", "sources": "$JARS/guava-33.0.0-jre-sources.jar" },
+    { "id": "org.slf4j:slf4j-api:2.0.9", "group": "org.slf4j", "name": "slf4j-api", "version": "2.0.9", "file": "$JARS/slf4j-api-2.0.9.jar", "sources": null }
+  ],
+  "gradleScripts": [
+    { "build": "shop", "files": [
+      { "path": "$ROOT/settings.gradle", "kind": "settings" },
+      { "path": "$ROOT/build.gradle", "kind": "build" },
+      { "path": "$ROOT/app/build.gradle", "kind": "build" },
+      { "path": "$ROOT/gradle/deps.gradle", "kind": "applied" },
+      { "path": "$ROOT/gradle.properties", "kind": "properties" },
+      { "path": "$ROOT/gradle/wrapper/gradle-wrapper.properties", "kind": "wrapper" }
+    ] },
+    { "build": "billing", "files": [
+      { "path": "$ROOT/billing/settings.gradle", "kind": "settings" },
+      { "path": "$ROOT/billing/build.gradle", "kind": "build" },
+      { "path": "$ROOT/gradle/deps.gradle", "kind": "applied" }
+    ] },
+    { "build": "legacy", "files": [
+      { "path": "$ROOT/legacy/build.gradle", "kind": "build" }
+    ] }
+  ],
+  "failedBuilds": [
+    { "build": "legacy", "rootDir": "$ROOT/legacy", "gradleVersion": "6.0.1", "javaHome": null,
+      "reason": "Gradle 6.0.1 needs Java 13 or older",
+      "error": "Could not run build action using connection to Gradle distribution 'gradle-6.0.1-all.zip'.", "stale": false }
+  ],
+  "gradleBuilds": []
+}

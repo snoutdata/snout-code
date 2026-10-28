@@ -162,7 +162,7 @@ impl ConsolePanel {
     fn root(&self, cx: &App) -> Option<PathBuf> {
         let m = self.model.read(cx);
         let on = self.kind == Kind::Shell || m.settings.console_open;
-        on.then(|| m.repo.as_ref().map(|r| r.root().to_owned())).flatten()
+        on.then(|| m.project_root()).flatten()
     }
 
     /// Redraw on new output; re-read the repository once the agent goes quiet.
@@ -287,7 +287,7 @@ impl ConsolePanel {
 impl Render for ConsolePanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        let root = self.root(cx).or_else(|| self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()));
+        let root = self.root(cx).or_else(|| self.model.read(cx).project_root());
         let kind = self.kind;
         let connected =
             kind == Kind::Claude && cx.try_global::<crate::claude_ide::IdeStatus>().is_some_and(|s| s.clients > 0);
