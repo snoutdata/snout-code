@@ -12,7 +12,7 @@ use snout_core::{
     PullProblem, Repo, Scope, Status, Tag, Tracking, on_disk, repo_dir_name, stage_paths, unstage_paths,
 };
 
-use crate::art::{self, Glyph, glyph_button};
+use crate::art::{self, Glyph, Paint as _, glyph_button};
 use crate::diff_view::DiffView;
 use crate::graph::{self, GraphRow};
 use crate::theme::{self, Palette, ThemeChoice};

@@ -8,7 +8,7 @@ use snout_core::{
 };
 
 use super::{Action, SnoutApp, dir_name, repo_dir_name, repos, state_color};
-use crate::art::{self, Glyph};
+use crate::art::{self, Glyph, Paint as _};
 use crate::theme::{self, Palette, mix};
 
 pub(super) enum Dialog {

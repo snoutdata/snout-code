@@ -6,6 +6,7 @@
 //! The API is deliberately front-end agnostic: all results are plain `serde`-serializable
 //! values, so the same calls can back the desktop GUI and an MCP server.
 
+pub mod art;
 mod branches;
 mod checkout;
 pub mod claude;

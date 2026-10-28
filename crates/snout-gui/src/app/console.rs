@@ -9,7 +9,7 @@ use eframe::egui::{self, RichText};
 
 use snout_core::claude::{ENV_REMOVE, find_claude};
 
-use crate::art::{self, Glyph};
+use crate::art::{self, Glyph, Paint as _};
 use crate::terminal::{Launch, Terminal};
 use crate::theme::Palette;
 

@@ -10,7 +10,7 @@ pub(super) use snout_core::groups::{RepoGroup, group_name_problem, move_to_group
 use snout_core::groups::{arrange, short};
 
 use super::{Action, SnoutApp, dir_name, open_menu_items, pane_title, reveal_items, survey};
-use crate::art::{self, Glyph};
+use crate::art::{self, Glyph, Paint as _};
 use crate::theme::{Palette, mix};
 
 /// What a repository row carries while it is dragged.
