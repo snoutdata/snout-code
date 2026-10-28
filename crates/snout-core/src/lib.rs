@@ -18,6 +18,7 @@ mod github;
 pub mod graph;
 pub mod groups;
 mod log;
+pub mod pty;
 mod pull;
 mod repo;
 mod scope;

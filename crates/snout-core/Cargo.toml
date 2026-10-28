@@ -11,6 +11,10 @@ repository.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 similar.workspace = true
+# The terminal under the Claude Code console (pseudo-terminal and xterm parser).
+portable-pty.workspace = true
+vt100.workspace = true
+anyhow.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

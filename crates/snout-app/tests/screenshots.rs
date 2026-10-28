@@ -64,6 +64,7 @@ mod shots {
     pub enum Select {
         File(&'static str),
         Commit(usize),
+        Console,
     }
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
@@ -100,11 +101,21 @@ mod shots {
                 let id = model.read(cx).log[back].id.clone();
                 model.update(cx, |m, cx| m.handle(Action::ShowCommit(id), cx))
             }),
+            Some(Select::Console) => {
+                let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+                let fake = repo.join("fake-claude");
+                let script = "#!/bin/sh\nprintf '\\033]0;Fixing the diff view\\007'\nprintf '\\033[1;32m✓\\033[0m Read \\033[36msrc/main.rs\\033[0m\\n'\nprintf '\\033[7m inverse \\033[0m and \\033[4munderline\\033[0m\\n> '\nsleep 30\n";
+                std::fs::write(&fake, script).unwrap();
+                Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+                cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+            }
             None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
         cx.allow_parking();
         for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(50));
             cx.advance_clock(Duration::from_millis(300));
             cx.run_until_parked();
             cx.update_window(handle.into(), |_, window, cx| {
@@ -130,5 +141,6 @@ mod shots {
         shot("diff-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("diff-dark", ThemeChoice::Dark, Activity::Git, Some(Select::File("src/main.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit(1)));
+        shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
     }
 }

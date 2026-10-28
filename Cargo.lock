@@ -7338,10 +7338,13 @@ dependencies = [
 name = "snout-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "portable-pty",
  "serde",
  "serde_json",
  "similar 3.2.0",
  "thiserror 2.0.21",
+ "vt100",
 ]
 
 [[package]]

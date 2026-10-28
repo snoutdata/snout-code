@@ -344,3 +344,50 @@ fn the_journal_filters_and_opens_commits_in_the_commit_tab(cx: &mut TestAppConte
     cx.update(|_, cx| assert!(model.read(cx).commit_view.is_none()));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn claude_console_runs_in_the_repo_and_refreshes_git(cx: &mut TestAppContext) {
+    let repo = demo_repo("console");
+    let bin = scratch_dir("console-bin");
+    // A stand-in for `claude`: it says where it runs, then makes the file it is told to.
+    let fake = bin.join("claude");
+    let script = "#!/bin/sh\necho \"ready in $(pwd)\"\nread name\ntouch \"$name.txt\"\necho \"made $name\"\nsleep 30\n";
+    std::fs::write(&fake, script).unwrap();
+    Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).expect("the console is docked");
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
+    act(&model, cx, Action::ToggleConsole);
+    let wait = |cx: &mut VisualTestContext, what: &str| {
+        for _ in 0..300 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            cx.executor().advance_clock(std::time::Duration::from_millis(50));
+            cx.run_until_parked();
+            let text = cx.update(|_, cx| console.read(cx).session_text(&repo)).unwrap_or_default();
+            if text.contains(what) {
+                return text;
+            }
+        }
+        panic!("{what:?} never appeared");
+    };
+    let text = wait(cx, "ready in");
+    assert!(text.contains(repo.file_name().unwrap().to_str().unwrap()), "{text}");
+    cx.simulate_keystrokes("n o t e enter");
+    wait(cx, "made note");
+    assert!(repo.join("note.txt").exists());
+    // Once the agent goes quiet, the Git views read the repository again.
+    for _ in 0..60 {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        if cx.update(|_, cx| model.read(cx).status.files.iter().any(|f| f.path == "note.txt")) {
+            break;
+        }
+    }
+    cx.update(|_, cx| assert!(model.read(cx).status.files.iter().any(|f| f.path == "note.txt")));
+    act(&model, cx, Action::ToggleConsole);
+    cx.update(|_, cx| assert!(!model.read(cx).settings.console_open));
+    for dir in [repo, bin] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

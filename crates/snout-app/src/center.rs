@@ -6,12 +6,12 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, BorderStyle, Bounds, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, PathBuilder, Pixels, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, point, px, quad, uniform_list,
+    AnyElement, App, AppContext as _, BorderStyle, Bounds, ClickEvent, Context, Entity, FocusHandle, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement as _, PathBuilder, Pixels, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, canvas, div, point, px, quad, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dock::{BasePanel, BasePanelView, Panel, PanelEvent, panel_handle};
+use gpui_component::dock::{BasePanelView, panel_handle};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel, v_resizable};

@@ -3,12 +3,11 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyView, App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
+    AnyView, App, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Window, div, px,
 };
 use gpui_component::Sizable as _;
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dock::{BasePanel, Panel, PanelEvent};
 use gpui_component::menu::DropdownMenu as _;
 use gpui_component::scroll::ScrollableElement as _;
 
@@ -20,32 +19,32 @@ use crate::ui::{icon, icons};
 /// Implements the dock traits for a panel holding a `focus` handle.
 macro_rules! panel {
     ($ty:ty, $name:literal, $title:expr, $bar:expr) => {
-        impl EventEmitter<PanelEvent> for $ty {}
-        impl Focusable for $ty {
-            fn focus_handle(&self, _: &App) -> FocusHandle {
+        impl ::gpui::EventEmitter<::gpui_component::dock::PanelEvent> for $ty {}
+        impl ::gpui::Focusable for $ty {
+            fn focus_handle(&self, _: &::gpui::App) -> ::gpui::FocusHandle {
                 self.focus.clone()
             }
         }
-        impl BasePanel for $ty {
+        impl ::gpui_component::dock::BasePanel for $ty {
             fn panel_name(&self) -> &'static str {
                 $name
             }
-            fn closable(&self, _: &App) -> bool {
+            fn closable(&self, _: &::gpui::App) -> bool {
                 false
             }
         }
-        impl Panel for $ty {
-            fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-                let f: fn(&Self, &App) -> SharedString = $title;
+        impl ::gpui_component::dock::Panel for $ty {
+            fn title(&mut self, _: &mut ::gpui::Window, cx: &mut ::gpui::Context<Self>) -> impl ::gpui::IntoElement {
+                let f: fn(&Self, &::gpui::App) -> ::gpui::SharedString = $title;
                 f(self, cx)
             }
-            fn title_bar(&self, _: &App) -> bool {
+            fn title_bar(&self, _: &::gpui::App) -> bool {
                 $bar
             }
-            fn inner_padding(&self, _: &App) -> bool {
+            fn inner_padding(&self, _: &::gpui::App) -> bool {
                 false
             }
-            fn zoom_control(&self, _: &App) -> Option<gpui_component::dock::PanelControl> {
+            fn zoom_control(&self, _: &::gpui::App) -> Option<::gpui_component::dock::PanelControl> {
                 None
             }
         }
