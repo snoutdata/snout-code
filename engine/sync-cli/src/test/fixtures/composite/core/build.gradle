@@ -1,0 +1,7 @@
+dependencies {
+    annotationProcessor files("$rootDir/libs/processor.jar")
+}
+
+tasks.named('compileJava') {
+    options.compilerArgs += ['-Xlint:deprecation']
+}

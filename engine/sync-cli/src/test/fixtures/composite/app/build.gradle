@@ -1,0 +1,12 @@
+apply from: "$rootDir/gradle/shared-deps.gradle"
+
+sourceSets.main.java.srcDir "$rootDir/shared/src/main/java"
+
+dependencies {
+    implementation project(':core')
+    implementation 'demo:tools:1.0'
+}
+
+test {
+    useJUnitPlatform()
+}

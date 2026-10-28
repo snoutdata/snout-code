@@ -1,0 +1,4 @@
+// Applied with `apply from` by app; the sync must report it as a resync trigger.
+dependencies {
+    implementation files("$rootDir/libs/local.jar")
+}

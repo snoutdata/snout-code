@@ -1,0 +1,28 @@
+// The Tooling API client: `snout-engine sync <projectDir> [--out model.json]`.
+
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation project(':sync-plugin')
+    implementation "org.gradle:gradle-tooling-api:${rootProject.toolingApiVersion}"
+    implementation 'com.google.code.gson:gson:2.11.0'
+    runtimeOnly 'org.slf4j:slf4j-nop:1.7.36'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+application {
+    mainClass = 'com.snoutcode.engine.cli.SnoutEngine'
+    applicationName = 'snout-engine'
+}
+
+tasks.named('test') {
+    // The integration test drives a real Gradle build of the same version as this one.
+    systemProperty 'snout.test.gradleVersion', gradle.gradleVersion
+    systemProperty 'snout.test.fixtures', file('src/test/fixtures').absolutePath
+    systemProperty 'snout.test.scratch', layout.buildDirectory.dir('test-scratch').get().asFile.absolutePath
+}

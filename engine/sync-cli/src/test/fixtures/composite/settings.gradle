@@ -1,0 +1,5 @@
+rootProject.name = 'demo'
+
+include 'core'
+include 'app'
+includeBuild 'tools'
