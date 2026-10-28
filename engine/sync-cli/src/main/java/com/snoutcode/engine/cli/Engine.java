@@ -315,6 +315,7 @@ final class Engine implements GradleRuns.Client {
         inv.options = plan.options();
         inv.tasks.add(task);
         inv.args.addAll(GradleRuns.strings(array(params, "args")));
+        inv.env.putAll(GradleRuns.env(params));
         return start(inv, null);
     }
 
@@ -382,6 +383,7 @@ final class Engine implements GradleRuns.Client {
         GradleRuns.Invocation inv = new GradleRuns.Invocation();
         inv.options = plan(module.buildId()).options();
         inv.tasks.addAll(testTasks);
+        inv.env.putAll(GradleRuns.env(params));
         inv.rerunTests = true;
         boolean rerunFailed = params.has("rerunFailed") && params.get("rerunFailed").getAsBoolean();
         if (rerunFailed) {
@@ -463,6 +465,7 @@ final class Engine implements GradleRuns.Client {
                 inv.options = plan(string(config, "build")).options();
                 inv.tasks.add(string(config, "task"));
                 inv.args.addAll(GradleRuns.strings(array(config, "args")));
+                inv.env.putAll(GradleRuns.env(config));
                 if (dryRun) {
                     return dryGradle(inv);
                 }
@@ -473,10 +476,14 @@ final class Engine implements GradleRuns.Client {
                 tests.addProperty("module", string(config, "module"));
                 tests.addProperty("task", string(config, "task"));
                 tests.addProperty("debug", debug);
+                if (config.has("env")) {
+                    tests.add("env", config.get("env"));
+                }
                 if (dryRun) {
                     GradleRuns.Invocation inv = new GradleRuns.Invocation();
                     inv.options = plan(string(config, "build")).options();
                     inv.tasks.add(string(config, "task"));
+                    inv.env.putAll(GradleRuns.env(config));
                     return dryGradle(inv);
                 }
                 return runTests(tests);
@@ -510,6 +517,9 @@ final class Engine implements GradleRuns.Client {
         inv.args.forEach(args::add);
         result.add("args", args);
         result.addProperty("javaHome", inv.options.javaHome == null ? null : inv.options.javaHome.getAbsolutePath());
+        JsonObject env = new JsonObject();
+        inv.env.forEach(env::addProperty);
+        result.add("env", env);
         return result;
     }
 

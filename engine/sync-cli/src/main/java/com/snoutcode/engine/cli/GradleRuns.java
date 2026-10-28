@@ -25,8 +25,11 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -99,6 +102,11 @@ final class GradleRuns {
         int debugPort;
         /** Sees every output line, test event lines excluded. */
         Consumer<String> lineHook;
+        /**
+         * Environment variables for the build, on top of the engine's own: the tasks' forked
+         * JVMs (tests, {@code run}, {@code bootRun}) inherit them.
+         */
+        final Map<String, String> env = new LinkedHashMap<>();
     }
 
     static final String TEST_EVENT_MARKER = "@@snout-test ";
@@ -141,6 +149,12 @@ final class GradleRuns {
                 .setColorOutput(false);
             if (inv.options.javaHome != null) {
                 launcher.setJavaHome(inv.options.javaHome);
+            }
+            if (!inv.env.isEmpty()) {
+                // The Tooling API replaces the whole environment: keep the engine's own under the run's.
+                Map<String, String> env = new HashMap<>(System.getenv());
+                env.putAll(inv.env);
+                launcher.setEnvironmentVariables(env);
             }
             launcher.addProgressListener(event -> progress(run, client, event), EnumSet.of(OperationType.TASK));
             launcher.run();
@@ -476,6 +490,20 @@ final class GradleRuns {
     }
 
     /** The arguments a JSON array of strings holds. */
+    /** An {@code env} object of names to values; values that are not strings are skipped. */
+    static Map<String, String> env(JsonObject o) {
+        Map<String, String> out = new LinkedHashMap<>();
+        JsonElement env = o == null ? null : o.get("env");
+        if (env != null && env.isJsonObject()) {
+            for (Map.Entry<String, JsonElement> e : env.getAsJsonObject().entrySet()) {
+                if (e.getValue().isJsonPrimitive()) {
+                    out.put(e.getKey(), e.getValue().getAsString());
+                }
+            }
+        }
+        return out;
+    }
+
     static List<String> strings(JsonArray array) {
         List<String> out = new ArrayList<>();
         if (array != null) {

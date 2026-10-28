@@ -107,6 +107,26 @@ class EngineIntegrationTest {
     }
 
     @Test
+    void passesEnvironmentVariablesToGradleRuns() throws Exception {
+        JsonObject config = new JsonObject();
+        config.addProperty("kind", "gradle");
+        config.addProperty("task", ":app:run");
+        JsonObject env = new JsonObject();
+        env.addProperty("SNOUT_DEMO", "from gradle");
+        config.add("env", env);
+        JsonObject params = new JsonObject();
+        params.add("config", config);
+        params.addProperty("dryRun", true);
+        JsonObject dry = engine.dispatch("snout/run", params, false).getAsJsonObject();
+        assertEquals("from gradle", dry.getAsJsonObject("env").get("SNOUT_DEMO").getAsString(), dry.toString());
+        params.remove("dryRun");
+        String runId = engine.dispatch("snout/run", params, false).getAsJsonObject().get("runId").getAsString();
+        JsonObject done = await("snout/taskFinished", runId, p -> true);
+        assertEquals("success", done.get("outcome").getAsString(), done + " " + lines(runId));
+        assertTrue(lines(runId).contains("env from gradle"), lines(runId).toString());
+    }
+
+    @Test
     void reportsCompilerProblems() throws Exception {
         Path broken = project.resolve("app/src/main/java/demo/app/Broken.java");
         Files.writeString(broken, """

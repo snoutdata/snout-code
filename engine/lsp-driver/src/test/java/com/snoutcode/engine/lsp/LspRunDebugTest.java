@@ -99,7 +99,11 @@ class LspRunDebugTest {
     @Order(3)
     void runsAMainClass() throws Exception {
         JsonObject params = new JsonObject();
-        params.add("config", mainConfig);
+        JsonObject config = mainConfig.deepCopy();
+        JsonObject env = new JsonObject();
+        env.addProperty("SNOUT_DEMO", "from the configuration");
+        config.add("env", env);
+        params.add("config", config);
         String runId = client.request("snout/run", params, LONG).getAsJsonObject().get("runId").getAsString();
         JsonObject done = client.awaitNotification("snout/taskFinished", runId, p -> true, LONG);
         assertEquals(0, done.get("exitCode").getAsInt(), done + " " + client.outputLines(runId));
@@ -107,6 +111,7 @@ class LspRunDebugTest {
         assertTrue(lines.contains("total 6"), lines.toString());
         assertTrue(lines.contains("hello debugger"), lines.toString());
         assertTrue(lines.contains("resource from resources"), lines.toString());
+        assertTrue(lines.contains("env from the configuration"), lines.toString());
     }
 
     @Test

@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -42,7 +43,7 @@ final class Launches {
 
     /** What a launch resolves to. */
     record Resolved(String mainClass, String projectName, String java, List<String> classpath, List<String> modulepath,
-                    Path workingDir, List<String> jvmArgs, List<String> args) {
+                    Path workingDir, List<String> jvmArgs, List<String> args, Map<String, String> env) {
     }
 
     static JsonObject main(Engine engine, JsonObject config, boolean debug, boolean dryRun) throws Exception {
@@ -55,6 +56,9 @@ final class Launches {
             out.add("classpath", array(r.classpath()));
             out.add("modulepath", array(r.modulepath()));
             out.addProperty("workingDir", r.workingDir().toString());
+            JsonObject env = new JsonObject();
+            r.env().forEach(env::addProperty);
+            out.add("env", env);
             out.add("command", array(command(r, null, null)));
             return out;
         }
@@ -64,6 +68,7 @@ final class Launches {
         Path argFile = engine.runDir().resolve(run.id + "-" + ProcessHandle.current().pid() + ".args");
         List<String> command = command(r, jdwp > 0 ? jdwp : null, argFile);
         ProcessBuilder builder = new ProcessBuilder(command).directory(r.workingDir().toFile());
+        builder.environment().putAll(r.env());
         if (argFile == null || !Files.exists(argFile)) {
             builder.environment().put("CLASSPATH", String.join(java.io.File.pathSeparator, r.classpath()));
         }
@@ -219,7 +224,8 @@ final class Launches {
         String dir = Engine.string(config, "workingDir");
         Path workingDir = dir != null ? Path.of(dir) : module != null ? module.projectDir() : Path.of(System.getProperty("user.dir"));
         return new Resolved(mainClass, projectName, java, classpath, modulepath, workingDir,
-            GradleRuns.strings(Engine.array(config, "jvmArgs")), GradleRuns.strings(Engine.array(config, "args")));
+            GradleRuns.strings(Engine.array(config, "jvmArgs")), GradleRuns.strings(Engine.array(config, "args")),
+            GradleRuns.env(config));
     }
 
     /** The module's JDK as the model's project view has it, else its Gradle daemon's. */

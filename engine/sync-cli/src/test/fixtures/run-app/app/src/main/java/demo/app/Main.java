@@ -15,6 +15,7 @@ public final class Main {
         }
         System.out.println("total " + total);
         System.out.println(Greeter.greet("debugger"));
+        System.out.println("env " + System.getenv("SNOUT_DEMO"));
         try (InputStream in = Main.class.getResourceAsStream("/greeting.txt")) {
             System.out.println("resource " + (in == null ? "missing" : new String(in.readAllBytes(), StandardCharsets.UTF_8).trim()));
         }
