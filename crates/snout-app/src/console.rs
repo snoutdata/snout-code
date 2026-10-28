@@ -24,7 +24,6 @@ use snout_core::pty::{self, Launch, Pty, Rgb};
 use crate::art::glyph;
 use crate::look;
 use crate::model::{Action, Model};
-use crate::panels::panel;
 use crate::theme::{Palette, mix, palette};
 use snout_core::art::Glyph;
 
@@ -35,8 +34,31 @@ const BUSY_REFRESH: Duration = Duration::from_secs(3);
 const FONT_SIZE: f32 = 13.0;
 
 pub fn build<T>(model: &Entity<Model>, _window: &mut Window, cx: &mut Context<T>) -> Option<Arc<dyn BasePanelView>> {
-    let console = cx.new(|cx| ConsolePanel::new(model.clone(), cx));
+    let console = cx.new(|cx| ConsolePanel::new(model.clone(), Kind::Claude, cx));
     Some(panel_handle(console))
+}
+
+/// The plain terminal tab beside the console: the login shell in the open repository.
+pub fn build_terminal<T>(model: &Entity<Model>, cx: &mut Context<T>) -> Arc<dyn BasePanelView> {
+    panel_handle(cx.new(|cx| ConsolePanel::new(model.clone(), Kind::Shell, cx)))
+}
+
+/// What a terminal panel runs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    /// Claude Code, while the console is showing.
+    Claude,
+    /// The user's shell (`$SHELL -l`), whenever a repository is open.
+    Shell,
+}
+
+impl Kind {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Shell => "Terminal",
+        }
+    }
 }
 
 struct Session {
@@ -47,6 +69,7 @@ struct Session {
 
 pub struct ConsolePanel {
     model: Entity<Model>,
+    pub kind: Kind,
     sessions: HashMap<PathBuf, Session>,
     /// Program override (tests); otherwise `claude` is looked up.
     pub program: Option<PathBuf>,
@@ -60,7 +83,40 @@ pub struct ConsolePanel {
     focus: FocusHandle,
 }
 
-panel!(ConsolePanel, "Claude", |_, _| "Claude Code".into(), true);
+impl gpui::EventEmitter<gpui_component::dock::PanelEvent> for ConsolePanel {}
+
+impl gpui::Focusable for ConsolePanel {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl gpui_component::dock::BasePanel for ConsolePanel {
+    fn panel_name(&self) -> &'static str {
+        match self.kind {
+            Kind::Claude => "Claude",
+            Kind::Shell => "Terminal",
+        }
+    }
+
+    fn closable(&self, _: &App) -> bool {
+        false
+    }
+}
+
+impl gpui_component::dock::Panel for ConsolePanel {
+    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.kind.title()
+    }
+
+    fn inner_padding(&self, _: &App) -> bool {
+        false
+    }
+
+    fn zoom_control(&self, _: &App) -> Option<gpui_component::dock::PanelControl> {
+        None
+    }
+}
 
 fn rgb(c: Hsla) -> Rgb {
     let c: gpui::Rgba = c.into();
@@ -73,7 +129,7 @@ fn hsla((r, g, b): Rgb) -> Hsla {
 }
 
 impl ConsolePanel {
-    fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
+    fn new(model: Entity<Model>, kind: Kind, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
         // The reader thread cannot reach GPUI; look for new output on a short timer.
         cx.spawn(async move |this, cx| {
@@ -87,6 +143,7 @@ impl ConsolePanel {
         .detach();
         Self {
             model,
+            kind,
             sessions: HashMap::new(),
             program: None,
             error: None,
@@ -100,7 +157,8 @@ impl ConsolePanel {
 
     fn root(&self, cx: &App) -> Option<PathBuf> {
         let m = self.model.read(cx);
-        m.settings.console_open.then(|| m.repo.as_ref().map(|r| r.root().to_owned())).flatten()
+        let on = self.kind == Kind::Shell || m.settings.console_open;
+        on.then(|| m.repo.as_ref().map(|r| r.root().to_owned())).flatten()
     }
 
     /// Redraw on new output; re-read the repository once the agent goes quiet.
@@ -128,7 +186,13 @@ impl ConsolePanel {
     pub fn start(&mut self, root: &Path, args: &[String], window: &mut Window, cx: &mut Context<Self>) {
         self.sessions.remove(root);
         self.error = None;
-        let Some(program) = self.program.clone().or_else(find_claude) else {
+        let found = match self.kind {
+            Kind::Claude => find_claude(),
+            Kind::Shell => Some(std::env::var_os("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from)),
+        };
+        let shell_args = ["-l".to_owned()];
+        let args = if self.kind == Kind::Shell && args.is_empty() { &shell_args[..] } else { args };
+        let Some(program) = self.program.clone().or(found) else {
             self.error = Some(
                 "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, /opt/homebrew/bin, \
                  /usr/local/bin.\nInstall it from https://docs.claude.com/en/docs/claude-code and press Start."
@@ -137,7 +201,8 @@ impl ConsolePanel {
             return;
         };
         let p = palette(cx);
-        let launch = Launch { program: &program, args, cwd: root, env: &[], env_remove: ENV_REMOVE };
+        let env_remove: &[&str] = if self.kind == Kind::Claude { ENV_REMOVE } else { &[] };
+        let launch = Launch { program: &program, args, cwd: root, env: &[], env_remove };
         match Pty::spawn(&launch, rgb(p.fg), rgb(p.panel), || {}) {
             Ok(pty) => {
                 self.sessions.insert(root.to_owned(), Session { pty, seen_gen: 0, refreshed: Instant::now() });
@@ -206,6 +271,7 @@ impl Render for ConsolePanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let root = self.root(cx).or_else(|| self.model.read(cx).repo.as_ref().map(|r| r.root().to_owned()));
+        let kind = self.kind;
         let header = |title: String, running: Option<bool>, buttons: Vec<gpui::AnyElement>| {
             let title = title.trim().trim_start_matches(['✳', '✻', '·', '✶', '✢', '*', ' ']).to_owned();
             div()
@@ -218,12 +284,12 @@ impl Render for ConsolePanel {
                         .flex()
                         .items_center()
                         .gap(px(6.))
-                        .child(glyph(Glyph::Spark, 16., p.fg))
-                        .child(div().whitespace_nowrap().child("Claude Code"))
+                        .when(kind == Kind::Claude, |d| d.child(glyph(Glyph::Spark, 16., p.fg)))
+                        .child(div().whitespace_nowrap().child(kind.title()))
                         .when_some(running, |d, on| {
                             d.child(div().size(px(7.)).rounded(px(4.)).bg(if on { p.ok } else { p.fg_dim }))
                         })
-                        .when(!title.is_empty() && title != "Claude Code", |d| {
+                        .when(!title.is_empty() && title != kind.title(), |d| {
                             d.child(
                                 div().min_w_0().text_color(p.fg_dim).overflow_hidden().whitespace_nowrap().child(title),
                             )
@@ -244,9 +310,10 @@ impl Render for ConsolePanel {
                 .flex()
                 .flex_col()
                 .child(header(String::new(), None, vec![hide]))
-                .child(look::centered_note("Open a repository to run Claude Code in it", &p));
+                .child(look::centered_note(format!("Open a repository to run {} in it", kind.title()), &p));
         };
-        if self.model.read(cx).settings.console_open && !self.sessions.contains_key(&root) && self.error.is_none() {
+        let wanted = kind == Kind::Shell || self.model.read(cx).settings.console_open;
+        if wanted && !self.sessions.contains_key(&root) && self.error.is_none() {
             self.start(&root, &[], window, cx);
         }
         let (title, exit) = match self.sessions.get_mut(&root) {
@@ -261,17 +328,20 @@ impl Render for ConsolePanel {
                     .on_click(cx.listener(move |this, _, window, cx| this.start(&root, &args, window, cx)))
                     .into_any_element()
             };
-        let mut buttons = vec![
-            restart("new", Glyph::Plus, "New", "Restart with a new conversation", Vec::new(), root.clone()),
-            restart(
-                "continue",
-                Glyph::Refresh,
-                "Continue",
-                "Restart with the most recent conversation in this folder (claude --continue)",
-                vec!["--continue".into()],
-                root.clone(),
-            ),
-        ];
+        let mut buttons = match kind {
+            Kind::Claude => vec![
+                restart("new", Glyph::Plus, "New", "Restart with a new conversation", Vec::new(), root.clone()),
+                restart(
+                    "continue",
+                    Glyph::Refresh,
+                    "Continue",
+                    "Restart with the most recent conversation in this folder (claude --continue)",
+                    vec!["--continue".into()],
+                    root.clone(),
+                ),
+            ],
+            Kind::Shell => vec![restart("new", Glyph::Plus, "New", "Start a new shell", Vec::new(), root.clone())],
+        };
         if running {
             let r = root.clone();
             buttons.push(
@@ -286,8 +356,10 @@ impl Render for ConsolePanel {
                     .into_any_element(),
             );
         }
-        buttons.push(div().w(px(4.)).into_any_element());
-        buttons.push(hide);
+        if kind == Kind::Claude {
+            buttons.push(div().w(px(4.)).into_any_element());
+            buttons.push(hide);
+        }
 
         let body = if self.sessions.contains_key(&root) {
             self.terminal(&root, exit, window, cx).into_any_element()
@@ -343,7 +415,7 @@ impl ConsolePanel {
                         .gap(px(6.))
                         .px(px(8.))
                         .text_color(p.fg_dim)
-                        .child(format!("Claude Code {how}."))
+                        .child(format!("{} {how}.", self.kind.title()))
                         .child(
                             Button::new("again")
                                 .link()

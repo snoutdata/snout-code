@@ -698,3 +698,45 @@ fn go_to_file_and_find_in_files_open_the_file(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert!(ws.read(cx).search.is_none(), "Esc closes it"));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_terminal_tab_runs_a_shell_in_the_repository(cx: &mut TestAppContext) {
+    use gpui_component::dock::DockPlacement;
+    let repo = demo_repo("terminal");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let terminal = cx.update(|_, cx| {
+        let ws = ws.read(cx);
+        let view = ws.dock.read(cx).panel(ws.tabs.terminal).expect("the terminal is docked").clone();
+        view.view().downcast::<crate::console::ConsolePanel>().unwrap()
+    });
+    cx.update(|_, cx| assert_eq!(terminal.read(cx).kind, crate::console::Kind::Shell));
+    cx.update(|_, cx| terminal.update(cx, |t, _| t.program = Some("/bin/sh".into())));
+    // Show the docks, open the bottom dock and bring the terminal forward.
+    cx.update(|w, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.show_activity(Activity::Projects, w, cx);
+            let id = ws.tabs.terminal;
+            ws.dock.update(cx, |d, cx| {
+                if !d.is_dock_open(DockPlacement::Bottom) {
+                    d.toggle_dock(DockPlacement::Bottom, w, cx);
+                }
+                d.select_panel(id, w, cx);
+            });
+        })
+    });
+    let wait = |cx: &mut VisualTestContext, what: &str| {
+        for _ in 0..300 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            cx.executor().advance_clock(std::time::Duration::from_millis(50));
+            cx.run_until_parked();
+            if cx.update(|_, cx| terminal.read(cx).session_text(&repo)).unwrap_or_default().contains(what) {
+                return;
+            }
+        }
+        panic!("{what:?} never appeared: {:?}", cx.update(|_, cx| terminal.read(cx).session_text(&repo)));
+    };
+    wait(cx, "$");
+    cx.simulate_keystrokes("p w d enter");
+    wait(cx, repo.file_name().unwrap().to_str().unwrap());
+    let _ = std::fs::remove_dir_all(repo);
+}

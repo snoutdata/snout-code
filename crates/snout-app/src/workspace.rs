@@ -36,6 +36,7 @@ use snout_core::art::Glyph;
 pub struct Tabs {
     pub welcome: PanelId,
     pub console: Option<PanelId>,
+    pub terminal: PanelId,
 }
 
 pub struct Workspace {
@@ -156,11 +157,14 @@ impl Workspace {
             (panel_handle(side.clone()), DockPlacement::Left),
             (panel_handle(welcome.clone()), DockPlacement::Center),
         ];
-        let mut tabs = Tabs { welcome: PanelId::from(welcome.entity_id()), console: None };
+        let terminal = crate::console::build_terminal(&model, cx);
+        let mut tabs =
+            Tabs { welcome: PanelId::from(welcome.entity_id()), console: None, terminal: terminal.panel_id(cx) };
         if let Some(console) = console {
             tabs.console = Some(console.panel_id(cx));
             panels.push((console, DockPlacement::Bottom));
         }
+        panels.push((terminal, DockPlacement::Bottom));
         panels.push((panel_handle(output.clone()), DockPlacement::Bottom));
 
         let saved = model.read(cx).settings.dock.clone();
