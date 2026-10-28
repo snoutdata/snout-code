@@ -85,6 +85,63 @@ class ProjectSyncTest {
     }
 
     @Test
+    void followsGradlesCompatibilityMatrix() {
+        assertEquals(21, JavaHomes.maxJava("8.5"));
+        assertEquals(20, JavaHomes.maxJava("8.4"));
+        assertEquals(19, JavaHomes.maxJava("8.1.1"));
+        assertEquals(19, JavaHomes.maxJava("8.0"));
+        assertEquals(17, JavaHomes.maxJava("7.3"));
+        assertEquals(16, JavaHomes.maxJava("7.0.2"));
+        assertEquals(15, JavaHomes.maxJava("6.7"));
+        assertEquals(11, JavaHomes.maxJava("5.2.1"));
+        assertEquals(8, JavaHomes.maxJava("4.10"));
+        assertEquals(17, JavaHomes.minJava("9.0"));
+
+        // Only Java 21 installed: every Gradle before 8.5 needs another JDK, the newest LTS it runs on.
+        JavaHomes.Jdk j21 = new JavaHomes.Jdk(new File("/jdk21"), 21, "21.0.2");
+        List<JavaHomes.Jdk> only21 = List.of(j21);
+        String[][] cases = {{"8.1.1", "17"}, {"8.0", "17"}, {"7.3", "17"}, {"7.0.2", "11"}, {"6.7", "11"}, {"6.0.1", "11"},
+            {"5.2.1", "11"}, {"4.10", "8"}};
+        for (String[] c : cases) {
+            assertNull(JavaHomes.choose(c[0], null, j21, only21), "Gradle " + c[0] + " does not run on 21");
+            assertEquals(Integer.valueOf(c[1]), JavaHomes.needs(c[0], null, JavaHomes.choose(c[0], null, j21, only21)), "Gradle " + c[0]);
+        }
+        assertEquals(j21, JavaHomes.choose("8.5", null, j21, only21));
+        assertEquals(17, JavaHomes.needs("8.1.1", 17, null), "a toolchain of 17");
+        assertEquals(17, JavaHomes.needs("8.1.1", 21, null), "a toolchain of 21 needs no daemon of 21");
+    }
+
+    @Test
+    void neverRunsABuildOnAJdkItsGradleCannotRunOn() throws IOException {
+        touch("old/settings.gradle", "old/gradle/wrapper/gradle-wrapper.properties");
+        Files.writeString(dir.resolve("old/gradle/wrapper/gradle-wrapper.properties"),
+            "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.1.1-bin.zip\n");
+        ProjectSync.Options options = new ProjectSync.Options();
+        options.sync.projectDir = dir.resolve("old").toFile();
+        options.sync.javaHome = new File(System.getProperty("java.home"));
+        options.jdks.clear();
+        List<ProjectSync.Plan> plans = ProjectSync.plan(options);
+        ProjectSync.Plan plan = plans.get(0);
+        if (plan.jdk() == null) {
+            assertEquals(17, plan.needsJdk());
+            assertNull(plan.options().javaHome, "no fallback to the preferred JDK Gradle 8.1.1 cannot run on");
+        } else {
+            assertTrue(plan.jdk().feature() <= 19, plan.jdk().toString());
+        }
+    }
+
+    @Test
+    void aGroovyFailureOnANewJdkNeedsAnotherJdk() {
+        JavaHomes.Jdk j21 = new JavaHomes.Jdk(new File("/jdk21"), 21, "21.0.2");
+        assertEquals(11, ProjectSync.jdkMismatch("org.codehaus.groovy.GroovyBugError: BUG! exception in phase 'semantic analysis'",
+            "6.0.1", j21));
+        assertEquals(17, ProjectSync.jdkMismatch("Unsupported class file major version 65", "8.1.1", j21));
+        assertNull(ProjectSync.jdkMismatch("Could not find org.example:missing:1.0.", "8.10.2", j21));
+        assertEquals("Gradle 6.0.1 does not run on Java 21",
+            ProjectSync.reason("java.lang.NoClassDefFoundError: Could not initialize class org.codehaus.groovy.vmplugin.v7.Java7", "6.0.1", j21));
+    }
+
+    @Test
     void saysWhichJdkABuildNeeds() {
         JavaHomes.Jdk j17 = new JavaHomes.Jdk(new File("/jdk17"), 17, "17.0.9");
         JavaHomes.Jdk j21 = new JavaHomes.Jdk(new File("/jdk21"), 21, "21.0.2");

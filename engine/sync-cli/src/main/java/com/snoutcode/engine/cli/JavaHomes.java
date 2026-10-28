@@ -21,10 +21,12 @@ import java.util.stream.Stream;
 /**
  * The JDKs on this machine, and the one each Gradle build's daemon should run on.
  *
- * <p>A daemon must run on a Java its Gradle version supports: Gradle older than 6.7 gets Java 11,
+ * <p>A daemon must run on a Java its Gradle version supports (Gradle's compatibility matrix:
+ * 21 from Gradle 8.5, 17 from 7.3, 16 from 7.0, and so on): Gradle older than 6.7 gets Java 11,
  * newer Gradle the Java its build's toolchain names, else Java 17, each capped at the newest Java
  * that Gradle version runs on. A preferred JDK (the {@code --java-home} option) wins whenever the
- * build's Gradle can run on it and the build names no other Java.
+ * build's Gradle can run on it and the build names no other Java. A build is never run on a JDK
+ * its Gradle cannot run on: when none is installed, it needs the newest LTS Java that fits.
  */
 public final class JavaHomes {
     /** An installed JDK. */
@@ -78,9 +80,12 @@ public final class JavaHomes {
             home.resolve(".asdf/installs/java")));
         List<Path> snout = snoutJdkFolders(home, cacheDir);
         parents.addAll(snout);
+        Path gradleJdks = home.resolve(".gradle/jdks");
         for (Path parent : parents) {
-            // SnoutCode's folders may hold a JDK one level deeper (an archive's own top folder).
-            addJdks(parent, candidates, snout.contains(parent) ? 2 : 1);
+            // SnoutCode's folders, and Gradle's provisioned toolchains
+            // (jdks/eclipse_adoptium-17-aarch64-os_x.2/jdk-17.0.20.1+1), may hold a JDK one level
+            // deeper: an archive's own top folder.
+            addJdks(parent, candidates, snout.contains(parent) || parent.equals(gradleJdks) ? 2 : 1);
         }
         Map<File, Jdk> found = new LinkedHashMap<>();
         for (File candidate : candidates) {
@@ -208,15 +213,31 @@ public final class JavaHomes {
     }
 
     /**
-     * The Java major a build needs and the machine lacks: the one it wants when no installed JDK
-     * runs its Gradle version; null when one does (or the version is unknown, so the Tooling API
-     * picks).
+     * The Java major a build needs and the machine lacks, when no installed JDK runs its Gradle
+     * version: the newest LTS release (8, 11, 17, 21, 25) its Gradle runs on, not newer than the
+     * Java it wants; null when a JDK does run it (or the version is unknown, so the Tooling API
+     * picks). Gradle 8.1.1 needs 17, 7.0.2 needs 11, 5.2.1 needs 11.
      */
     public static Integer needs(String gradleVersion, Integer scriptLevel, Jdk chosen) {
         if (chosen != null || gradleVersion(gradleVersion) == null) {
             return null;
         }
-        return wantedJava(gradleVersion, scriptLevel);
+        return lts(gradleVersion, wantedJava(gradleVersion, scriptLevel));
+    }
+
+    private static final int[] LTS = {8, 11, 17, 21, 25};
+
+    /** The newest LTS Java a Gradle version runs on that is not newer than {@code wanted}. */
+    static int lts(String gradleVersion, int wanted) {
+        int min = minJava(gradleVersion);
+        int max = maxJava(gradleVersion);
+        int best = -1;
+        for (int lts : LTS) {
+            if (lts >= min && lts <= max && (lts <= wanted || best < 0)) {
+                best = lts;
+            }
+        }
+        return best > 0 ? best : wanted;
     }
 
     /** The Gradle version of a build's wrapper, or null when it has none. */

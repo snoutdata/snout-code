@@ -96,11 +96,13 @@ public final class ProjectSync {
             JavaHomes.Jdk jdk = JavaHomes.choose(version, level, preferred, installed);
             Sync.Options o = copy(options.sync);
             o.projectDir = root;
-            o.javaHome = jdk != null ? jdk.home() : options.sync.javaHome;
+            Integer needs = JavaHomes.needs(version, level, jdk);
+            // Never a JDK the build's Gradle cannot run on: with none installed, it needs one.
+            o.javaHome = jdk != null ? jdk.home() : needs != null ? null : options.sync.javaHome;
             if (options.sync.projectCacheDir != null) {
                 o.projectCacheDir = new File(options.sync.projectCacheDir, key(root));
             }
-            plans.add(new Plan(id, root, version, jdk, o, JavaHomes.needs(version, level, jdk)));
+            plans.add(new Plan(id, root, version, jdk, o, needs));
         }
         return plans;
     }
@@ -135,6 +137,11 @@ public final class ProjectSync {
                 entry.addProperty("needsJdk", missing.major);
             } else {
                 entry.addProperty("reason", reason(error, plan.gradleVersion(), plan.jdk()));
+                Integer major = jdkMismatch(error, plan.gradleVersion(), plan.jdk());
+                if (major != null) {
+                    // The JDK chosen does not run this build after all: say which one would.
+                    entry.addProperty("needsJdk", major);
+                }
             }
         }
         JsonObject out = new JsonObject();
@@ -263,6 +270,24 @@ public final class ProjectSync {
 
     // ---- why a build failed, in a few words
 
+    /** Errors of a Gradle (its Groovy) that runs on a Java newer than it supports. */
+    private static final Pattern GROOVY_ON_NEW_JAVA = Pattern.compile(
+        "GroovyBugError|Unsupported class file major version|NoClassDefFoundError: Could not initialize class org\\.codehaus\\.groovy"
+            + "|Could not initialize class org\\.codehaus\\.groovy|BUG! exception in phase");
+
+    /**
+     * When a sync failed because its Gradle cannot run on the JDK it got (a class it cannot read,
+     * Groovy failing inside Gradle), the LTS Java that Gradle runs on, for {@code needsJdk}; else null.
+     */
+    static Integer jdkMismatch(String error, String gradleVersion, JavaHomes.Jdk jdk) {
+        if (error == null || jdk == null || JavaHomes.gradleVersion(gradleVersion) == null) {
+            return null;
+        }
+        boolean mismatch = GROOVY_ON_NEW_JAVA.matcher(error).find() || error.contains("Unsupported Java")
+            || jdk.feature() > JavaHomes.maxJava(gradleVersion) || jdk.feature() < JavaHomes.minJava(gradleVersion);
+        return mismatch ? JavaHomes.lts(gradleVersion, JavaHomes.wantedJava(gradleVersion, null)) : null;
+    }
+
     private static final Pattern CLASS_VERSION = Pattern.compile("class file (?:major )?version (\\d+)");
     private static final Pattern PLUGIN_NOT_FOUND = Pattern.compile("Plugin \\[id: '([^']+)'(?:, version: '([^']+)')?[^]]*\\] was not found");
     private static final Pattern REQUIRES_GRADLE = Pattern.compile("[^\\n.]*requires Gradle [^\\n]*");
@@ -292,7 +317,8 @@ public final class ProjectSync {
         if (error.contains("Could not install Gradle distribution") || error.contains("Could not download Gradle")) {
             return gradle.trim() + " could not be downloaded";
         }
-        if (error.contains("Unsupported Java") || error.contains("Could not determine java version")) {
+        if (error.contains("Unsupported Java") || error.contains("Could not determine java version")
+            || GROOVY_ON_NEW_JAVA.matcher(error).find() && !error.contains("class file")) {
             return gradle.trim() + " does not run on " + (jdk == null ? "this Java" : "Java " + jdk.feature());
         }
         m = NO_VARIANT.matcher(error);

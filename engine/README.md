@@ -42,8 +42,8 @@ Each build syncs on its own Gradle daemon, several at once, and on a JDK its Gra
 
 - Gradle older than 6.7 gets Java 11.
 - Newer Gradle gets the Java its build script names (a toolchain, `jvmToolchain`, a source or target compatibility, a `--release`) when that is newer than 17, else 17.
-- Never newer than the Java the Gradle version supports, nor older (Java 8, and 17 from Gradle 9); when the wanted Java is missing, the nearest installed one it supports.
-- When no installed JDK runs the build's Gradle version, the build is not synced on one that cannot work: its `failedBuilds` entry says `needsJdk` (the Java major to install, the one it would have wanted) with the reason "Needs JDK 11, which isn't installed". The engine's methods refuse such a build the same way.
+- Never newer than the Java the Gradle version supports (Gradle's compatibility matrix: 21 from Gradle 8.5, 17 from 7.3, 16 from 7.0, 15 from 6.7, 11 from 5.0), nor older (Java 8, and 17 from Gradle 9); when the wanted Java is missing, the nearest installed one it supports.
+- When no installed JDK runs the build's Gradle version, the build is never synced on one that cannot work: its `failedBuilds` entry says `needsJdk`, the Java major to install (the newest LTS its Gradle runs on, not newer than it wants: 17 for Gradle 8.1.1, 11 for 7.0.2 and for anything before 6.7), with the reason "Needs JDK 17, which isn't installed". The engine's methods refuse such a build the same way. A sync that fails because its Gradle cannot run on the JDK it got after all (a class file it cannot read, Groovy failing inside Gradle) gets a `needsJdk` too.
 - `--java-home` is preferred whenever the build's Gradle runs on it and the script asks for nothing newer.
 
 A build that fails does not fail the others: its entry in the model carries the error, the Gradle version and a short reason.
