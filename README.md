@@ -76,11 +76,10 @@ cargo install --path crates/snout-gui
 
 ### macOS app
 
-`scripts/package-mac.sh` builds `SnoutCode.app` and a disk image to install it from, in `target/release/bundle/`:
+`scripts/package-mac.sh` builds `SnoutCode.app` and a disk image to install it from, in `target/release/bundle/`, for this Mac's architecture. The app carries the Java engine with its own Java runtime, so it needs nothing else installed to start; building the engine needs JDK 21 (the script finds one as `snout.sh` does).
 
 ```sh
-scripts/package-mac.sh               # for this Mac's architecture
-scripts/package-mac.sh --universal   # Apple silicon and Intel in one app
+scripts/package-mac.sh
 ```
 
 Open the `.dmg` and drag SnoutCode into Applications. Without signing settings the app is signed ad hoc: it opens as is on the Mac that built it, and a copy downloaded on another Mac has to be allowed once in System Settings > Privacy & Security. To sign with a Developer ID and notarize, so it opens on any Mac, set `SNOUT_APPLE_DIR` and `SNOUT_NOTARY_ISSUER` in the environment or in a gitignored `.signing.env`; the comment at the top of the script lists what the folder holds.

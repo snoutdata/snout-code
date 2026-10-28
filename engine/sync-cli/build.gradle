@@ -105,8 +105,11 @@ def jlinkRuntime = tasks.register('jlinkRuntime') {
 
 // The distribution is built in a fresh folder and swapped in whole, never written over: macOS
 // keeps a binary's code signature per file, and kills a binary that was rewritten in place
-// (runtime/bin/java exiting with 137 on its next launch).
-def distDir = rootProject.layout.buildDirectory.dir('dist')
+// (runtime/bin/java exiting with 137 on its next launch). -PsnoutDistDir=<dir> builds it there
+// instead (scripts/package-mac.sh), leaving engine/build/dist to the app running from it.
+def distDir = project.hasProperty('snoutDistDir')
+    ? project.objects.directoryProperty().fileValue(file(project.property('snoutDistDir')))
+    : rootProject.layout.buildDirectory.dir('dist')
 
 tasks.register('snoutDist') {
     description = 'Assembles the self-contained engine distribution in engine/build/dist.'
