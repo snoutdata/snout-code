@@ -85,6 +85,8 @@ mod shots {
         /// A commit (by summary) and one of its files, in a repository with a merge.
         Commit(&'static str, &'static str),
         Console,
+        /// No repository open: the welcome page.
+        Nothing,
     }
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
@@ -97,8 +99,8 @@ mod shots {
             Arc::new(gpui_kit_assets::AllAssets),
             gpui_platform::current_headless_renderer,
         );
-        let settings =
-            Settings { theme, repos: vec![repo.clone()], current: Some(repo.clone()), ..Settings::default() };
+        let current = (!matches!(select, Some(Select::Nothing))).then(|| repo.clone());
+        let settings = Settings { theme, repos: vec![repo.clone()], current, ..Settings::default() };
         cx.update(|cx| snout_app::init(&settings, cx));
         let model = cx.update(|cx| {
             let settings = settings.clone();
@@ -117,7 +119,9 @@ mod shots {
             ws.update(cx, |w, cx| w.show_activity(activity, window, cx));
         })
         .unwrap();
-        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+        if !matches!(select, Some(Select::Nothing)) {
+            cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+        }
         match select {
             Some(Select::File(path)) => cx.update(|cx| model.update(cx, |m, cx| m.click_file(path, false, false, cx))),
             Some(Select::Commit(summary, file)) => cx.update(|cx| {
@@ -136,7 +140,7 @@ mod shots {
                 cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
             }
-            None => {}
+            Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
         cx.allow_parking();
@@ -169,6 +173,7 @@ mod shots {
         shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
+        shot("welcome-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
         shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
     }
 }

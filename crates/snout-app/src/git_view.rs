@@ -1360,24 +1360,22 @@ impl GitView {
                     .flex_col()
                     .items_center()
                     .gap(px(5.))
-                    .pt(px(40.))
+                    .pt(px(47.))
                     .child(drawing(snout_core::art::welcome(), 360., 228., None))
-                    .child(div().h(px(6.)))
-                    .child(wordmark(&p))
+                    .child(div().mt(px(-7.)).child(wordmark(&p)))
                     .child(
                         div()
                             .text_color(p.fg_dim)
                             .text_size(px(15.))
                             .child("See what changed, read the diff, commit, ship."),
                     )
-                    .child(div().h(px(22.)))
+                    .child(div().h(px(15.)))
                     .child(button("welcome-open", Glyph::Open, "Open local repository…   ⌘O", Action::PickFolder))
                     .child(button("welcome-find", Glyph::Fetch, "Find repositories in folder…", Action::PickScanFolder))
                     .child(button("welcome-clone", Glyph::Pull, "Clone from GitHub…", Action::ShowClone))
-                    .child(div().h(px(8.)))
                     .child(weak("or drop a folder onto this window", &p))
                     .when(!recent.is_empty(), |d| {
-                        d.child(div().h(px(26.)))
+                        d.child(div().h(px(21.)))
                             .child(div().text_size(px(look::SMALL)).text_color(p.fg_dim).child("RECENT"))
                             .children(recent.into_iter().enumerate().map(|(i, path)| {
                                 let tip: SharedString = path.display().to_string().into();
