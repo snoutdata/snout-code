@@ -31,10 +31,11 @@ use crate::status::StatusBar;
 use crate::theme::{self, palette};
 
 mod lang_ui;
+mod run_ui;
 mod stripes;
 mod title;
 pub use stripes::{STRIPE_W, Tool, active_in};
-pub use title::{TITLE_H, branch_popup, initials};
+pub use title::{TITLE_H, badge_color, branch_popup, initials};
 
 /// The center and bottom tabs, so events can bring one forward.
 pub struct Tabs {
@@ -45,6 +46,9 @@ pub struct Tabs {
     pub problems: PanelId,
     pub gradle: PanelId,
     pub notifications: PanelId,
+    pub run: PanelId,
+    pub debug: PanelId,
+    pub build: PanelId,
 }
 
 pub struct Workspace {
@@ -76,8 +80,17 @@ pub struct Workspace {
     /// The Settings sheet, while it shows.
     pub settings_sheet: Option<Entity<crate::settings_view::SettingsView>>,
     /// The right stripe's tool windows.
-    pub gradle: Entity<crate::tool_windows::GradlePanel>,
+    pub gradle: Entity<crate::run::gradle_window::GradleWindow>,
     pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
+    /// Runs, tests and the debugger, and their tool windows.
+    pub runs: Entity<crate::run::Runs>,
+    pub run_window: Entity<crate::run::windows::RunWindow>,
+    pub debug_window: Entity<crate::run::windows::RunWindow>,
+    pub build_window: Entity<crate::run::windows::RunWindow>,
+    /// The Welcome page, while no file is open.
+    pub welcome: Entity<WelcomePanel>,
+    /// The Edit Configurations dialog, while it shows.
+    pub config_dialog: Option<Entity<crate::run::config_dialog::ConfigDialog>>,
     /// Claude Code's connection to this window, when the app runs one.
     pub claude: Option<crate::claude_ide::bridge::Bridge>,
     _save_layout: Option<Task<()>>,
@@ -196,6 +209,10 @@ impl Workspace {
         cx.set_global(crate::lang::hub::HubHandle(hub.clone()));
         // The window first: the Java servers start once it has drawn (see `render`).
         hub.update(cx, |h, _| h.paused = true);
+        let runs = cx.new(|cx| crate::run::Runs::new(model.clone(), hub.clone(), cx));
+        cx.set_global(crate::run::RunsHandle(runs.clone()));
+        let marks = runs.read(cx).marks.clone();
+        cx.set_global(crate::run::MarksHandle(marks));
         let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), cx));
         let references = cx.new(|cx| crate::lang::panels::ReferencesPanel::new(hub.clone(), cx));
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
@@ -205,7 +222,7 @@ impl Workspace {
         let project =
             cx.new(|cx| crate::project_view::ProjectView::new(model.clone(), files.clone(), models.clone(), cx));
         let side = cx.new(|cx| SidePanel::new(model.clone(), files, project.clone(), cx));
-        let welcome = cx.new(|cx| WelcomePanel::new(model.clone(), cx));
+        let welcome = cx.new(|cx| WelcomePanel::new(model.clone(), window, cx));
         let output = cx.new(|cx| OutputPanel::new(model.clone(), cx));
         let console = crate::console::build(&model, window, cx);
         let console_view = console.as_ref().map(|c| c.view());
@@ -218,7 +235,12 @@ impl Workspace {
             (panel_handle(welcome.clone()), DockPlacement::Center),
         ];
         let terminal = crate::console::build_terminal(&model, cx);
-        let gradle = cx.new(|cx| crate::tool_windows::GradlePanel::new(model.clone(), hub.clone(), cx));
+        let gradle = cx.new(|cx| crate::run::gradle_window::GradleWindow::new(runs.clone(), cx));
+        use crate::run::Place;
+        use crate::run::windows::RunWindow;
+        let run_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Run, window, cx));
+        let debug_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Debug, window, cx));
+        let build_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Build, window, cx));
         let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
         let mut tabs = Tabs {
             welcome: PanelId::from(welcome.entity_id()),
@@ -228,6 +250,9 @@ impl Workspace {
             problems: PanelId::from(problems.entity_id()),
             gradle: PanelId::from(gradle.entity_id()),
             notifications: PanelId::from(notifications.entity_id()),
+            run: PanelId::from(run_window.entity_id()),
+            debug: PanelId::from(debug_window.entity_id()),
+            build: PanelId::from(build_window.entity_id()),
         };
         if let Some(console) = console {
             tabs.console = Some(console.panel_id(cx));
@@ -237,6 +262,9 @@ impl Workspace {
         panels.push((panel_handle(output.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(problems.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(references.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(run_window.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(debug_window.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
 
@@ -287,10 +315,13 @@ impl Workspace {
             }),
             cx.subscribe_in(&model, window, Self::on_model_event),
             cx.subscribe_in(&hub, window, Self::on_hub_event),
+            cx.subscribe_in(&runs, window, Self::on_runs_event),
             cx.subscribe_in(&project, window, |this, _, e: &crate::project_view::ProjectViewEvent, window, cx| {
                 let crate::project_view::ProjectViewEvent::OpenClass { package, class } = e;
                 this.open_library_class(package.clone(), class.clone(), window, cx);
             }),
+            // The status bar lists the Scala compile and the Gradle runs among the tasks.
+            cx.observe(&runs, |this, _, cx| this.status.update(cx, |_, cx| cx.notify())),
             // The status bar lists the model's sync among the background tasks.
             cx.observe(&models, |this, _, cx| {
                 this.status.update(cx, |_, cx| cx.notify());
@@ -330,11 +361,22 @@ impl Workspace {
             settings_sheet: None,
             gradle,
             notifications,
+            runs,
+            run_window,
+            debug_window,
+            build_window,
+            welcome,
+            config_dialog: None,
             claude: None,
             _save_layout: None,
             _subscriptions: subscriptions,
         };
         crate::claude_ide::bridge::start(&mut this, window, cx);
+        // The Welcome page does not stay beside files the layout brings back.
+        if !restored.1.is_empty() {
+            let welcome = this.welcome.clone();
+            this.dock.update(cx, |d, cx| d.remove_panel(welcome, window, cx));
+        }
         for editor in restored.1 {
             this.track_editor(&editor, window, cx);
             // A library class file's tab fills once the server can show it.
@@ -493,9 +535,13 @@ impl Workspace {
     fn after_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let editors = self.editors(cx);
         let welcome = self.tabs.welcome;
+        let page = self.welcome.clone();
         self.dock.update(cx, |d, cx| {
             for e in editors {
                 d.remove_panel(e, window, cx);
+            }
+            if d.panel(welcome).is_none() {
+                d.add_panel_view(panel_handle(page), DockPlacement::Center, None, window, cx);
             }
             d.select_panel(welcome, window, cx);
         });
@@ -783,7 +829,15 @@ impl Workspace {
                 editor.update(cx, |e, _| e.preview = preview);
                 self.track_editor(&editor, window, cx);
                 let view = panel_handle(editor.clone());
-                self.dock.update(cx, |d, cx| d.add_panel_view(view, DockPlacement::Center, None, window, cx));
+                let welcome = self.welcome.clone();
+                let welcome_id = self.tabs.welcome;
+                self.dock.update(cx, |d, cx| {
+                    d.add_panel_view(view, DockPlacement::Center, None, window, cx);
+                    // The first file takes the Welcome page's place.
+                    if d.panel(welcome_id).is_some() {
+                        d.remove_panel(welcome, window, cx);
+                    }
+                });
                 editor
             }
         };
@@ -878,7 +932,7 @@ impl Workspace {
             })
             .collect();
         let mut builds: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
-        if let Some(root) = self.gradle.read(cx).root(cx)
+        if let Some(root) = self.model.read(cx).project_root().filter(|r| crate::project_model::has_gradle(r))
             && !builds.contains(&root)
         {
             builds.push(root);
@@ -1097,6 +1151,22 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &CollapseGradle, _, cx| {
                 this.gradle.update(cx, |g, cx| g.collapse_all(cx));
             }))
+            .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
+            .on_action(cx.listener(|this, _: &RunSelected, w, cx| this.run_selected(false, w, cx)))
+            .on_action(cx.listener(|this, _: &DebugSelected, w, cx| this.run_selected(true, w, cx)))
+            .on_action(cx.listener(|this, _: &StopRuns, _, cx| this.stop_runs(cx)))
+            .on_action(cx.listener(|this, _: &StepOver, _, cx| this.debug_step("next", cx)))
+            .on_action(cx.listener(|this, _: &StepInto, _, cx| this.debug_step("stepIn", cx)))
+            .on_action(cx.listener(|this, _: &StepOut, _, cx| this.debug_step("stepOut", cx)))
+            .on_action(cx.listener(|this, _: &Resume, _, cx| this.debug_step("continue", cx)))
+            .on_action(cx.listener(|_, _: &SyncGradle, _, cx| {
+                if let Some(store) = crate::project_model::store(cx) {
+                    store.update(cx, |s, cx| s.sync(cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &RefreshGradle, _, cx| {
+                this.runs.update(cx, |r, cx| r.load_gradle_tasks(true, cx));
+            }))
             .on_action(cx.listener(|this, _: &ClearOutput, _, cx| {
                 this.model.update(cx, |m, cx| {
                     m.output.clear();
@@ -1213,6 +1283,18 @@ impl Render for Workspace {
                     .bg(gpui::black().opacity(0.4))
                     .occlude()
                     .child(sheet)
+            }))
+            .children(self.config_dialog.clone().map(|dialog| {
+                div()
+                    .id("config-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui::black().opacity(0.4))
+                    .occlude()
+                    .child(dialog)
             }))
             .children(self.search.clone().map(|view| {
                 div().absolute().top(px(TITLE_H + 24.)).left_0().right_0().flex().justify_center().child(view)

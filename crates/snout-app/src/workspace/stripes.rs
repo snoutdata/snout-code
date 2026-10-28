@@ -1,6 +1,6 @@
 //! The tool window stripes: thin icon strips down both edges of the window. Left, at the
-//! top: the Project and Git activities; at the bottom: Output, Terminal, Problems and
-//! Claude Code, which open in the bottom dock. Right: Gradle and Notifications, in the
+//! top: the Project and Git activities; at the bottom: Run, Debug, Build, Output,
+//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Gradle and Notifications, in the
 //! right dock. The item showing is a filled accent square with a white glyph.
 
 use gpui::prelude::FluentBuilder as _;
@@ -25,6 +25,9 @@ pub const STRIPE_W: f32 = 40.;
 /// A tool window a stripe opens.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tool {
+    Run,
+    Debug,
+    Build,
     Output,
     Terminal,
     Problems,
@@ -43,6 +46,9 @@ impl Tool {
 
     fn icon(self) -> Icon {
         match self {
+            Tool::Run => Icon::RunWindow,
+            Tool::Debug => Icon::Bug,
+            Tool::Build => Icon::Hammer,
             Tool::Output => Icon::Output,
             Tool::Terminal => Icon::Terminal,
             Tool::Problems => Icon::Problems,
@@ -54,6 +60,9 @@ impl Tool {
 
     fn tip(self) -> &'static str {
         match self {
+            Tool::Run => "Run",
+            Tool::Debug => "Debug",
+            Tool::Build => "Build",
             Tool::Output => "Output",
             Tool::Terminal => "Terminal",
             Tool::Problems => "Problems (⇧⌘M)",
@@ -65,6 +74,9 @@ impl Tool {
 
     fn id(self) -> &'static str {
         match self {
+            Tool::Run => "stripe-run",
+            Tool::Debug => "stripe-debug",
+            Tool::Build => "stripe-build",
             Tool::Output => "stripe-output",
             Tool::Terminal => "stripe-terminal",
             Tool::Problems => "stripe-problems",
@@ -144,6 +156,9 @@ impl Workspace {
     /// The dock panel of `tool`.
     pub fn tool_panel(&self, tool: Tool) -> Option<PanelId> {
         match tool {
+            Tool::Run => Some(self.tabs.run),
+            Tool::Debug => Some(self.tabs.debug),
+            Tool::Build => Some(self.tabs.build),
             Tool::Output => Some(self.tabs.output),
             Tool::Terminal => Some(self.tabs.terminal),
             Tool::Problems => Some(self.tabs.problems),
@@ -249,6 +264,9 @@ impl Workspace {
                 .on_click(pick(Activity::Git)),
             )
             .child(div().flex_1())
+            .child(self.tool_item(Tool::Run, None, cx))
+            .child(self.tool_item(Tool::Debug, None, cx))
+            .child(self.tool_item(Tool::Build, None, cx))
             .child(self.tool_item(Tool::Output, None, cx))
             .child(self.tool_item(Tool::Terminal, None, cx))
             .child(self.tool_item(Tool::Problems, Some((errors, p.error)), cx))

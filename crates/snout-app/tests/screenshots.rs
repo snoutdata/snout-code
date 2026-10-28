@@ -102,6 +102,23 @@ mod shots {
         /// The Project view on the fixture model: modules, a shared folder, a failed build,
         /// the Gradle scripts and the libraries, some of them open.
         ProjectModel,
+        /// The Run window on a test run: the tree with a failure and its diff.
+        RunTests,
+        /// The debugger stopped on a breakpoint: the line in the editor, the Debug window.
+        Debug,
+        /// The Gradle window's tasks, and a task's run in the Build window.
+        Gradle,
+    }
+
+    const MAIN_JAVA: &str = "package demo.app;\n\nimport java.util.List;\n\npublic final class Main {\n    public static void main(String[] args) {\n        List<String> names = List.of(\"ada\", \"grace\");\n        int total = 0;\n        for (int i = 1; i <= 3; i++) {\n            total = add(total, i);\n        }\n        System.out.println(\"total \" + total + \" for \" + names);\n    }\n\n    static int add(int a, int b) {\n        return a + b;\n    }\n}\n";
+
+    fn note(
+        runs: &gpui::Entity<snout_app::run::Runs>,
+        method: &str,
+        params: serde_json::Value,
+        cx: &mut HeadlessAppContext,
+    ) {
+        cx.update(|cx| runs.update(cx, |r, cx| r.engine_notification(method, params, cx)));
     }
 
     include!("fixtures/project_fixture.rs");
@@ -117,7 +134,19 @@ mod shots {
             gpui_platform::current_headless_renderer,
         );
         let current = (!matches!(select, Some(Select::Nothing))).then(|| repo.clone());
-        let settings = Settings { theme, repos: vec![repo.clone()], current, ..Settings::default() };
+        let mut settings = Settings { theme, repos: vec![repo.clone()], current, ..Settings::default() };
+        if matches!(select, Some(Select::Nothing)) {
+            // The Welcome page's recent projects, opened a while ago.
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            let others =
+                ["/Users/demo/dev/billing-service", "/Users/demo/dev/shop-platform", "/Users/demo/work/analytics"];
+            let mut recent = vec![repo.clone()];
+            recent.extend(others.iter().map(PathBuf::from));
+            for (i, p) in recent.iter().enumerate() {
+                settings.opened.insert(p.clone(), now - [120, 7_200, 90_000, 864_000][i]);
+            }
+            settings.recent = Some(recent);
+        }
         cx.update(|cx| snout_app::init(&settings, cx));
         let model = cx.update(|cx| {
             let settings = settings.clone();
@@ -338,6 +367,273 @@ mod shots {
                     });
                 });
             }
+            Some(Select::RunTests) => {
+                use serde_json::json;
+                let runs = cx.update(|cx| ws.read(cx).runs.clone());
+                let launch = snout_app::run::Launch::Tests {
+                    module: "shop:app".into(),
+                    filter: serde_json::Value::Null,
+                    label: "CartTest".into(),
+                    debug: false,
+                    rerun_failed: false,
+                };
+                let id = cx.update(|cx| runs.update(cx, |r, cx| r.adopt(launch, "t1", cx)));
+                for line in ["> Task :app:compileJava", "> Task :app:compileTestJava", "> Task :app:test"] {
+                    note(
+                        &runs,
+                        "snout/taskOutput",
+                        json!({ "runId": "t1", "stream": "stdout", "line": line }),
+                        &mut cx,
+                    );
+                }
+                let ev = |event: &str, id: &str, parent: Option<&str>, kind: &str, name: &str| {
+                    json!({ "runId": "t1", "event": event, "id": id, "parent": parent, "kind": kind, "name": name,
+                            "displayName": name, "className": "shop.CartTest" })
+                };
+                note(&runs, "snout/testEvent", ev("started", "r", None, "suite", "Gradle Test Run :app:test"), &mut cx);
+                for (sid, suite, tests) in [
+                    (
+                        "s1",
+                        "CartTest",
+                        vec![
+                            ("adds an item", "passed", 12),
+                            ("totals the prices", "failed", 31),
+                            ("empties", "passed", 3),
+                            ("applies a coupon", "skipped", 0),
+                        ],
+                    ),
+                    ("s2", "PriceTest", vec![("rounds half up", "passed", 2), ("formats euros", "passed", 5)]),
+                ] {
+                    note(&runs, "snout/testEvent", ev("started", sid, Some("r"), "suite", suite), &mut cx);
+                    for (i, (name, outcome, ms)) in tests.into_iter().enumerate() {
+                        let tid = format!("{sid}-{i}");
+                        note(&runs, "snout/testEvent", ev("started", &tid, Some(sid), "test", name), &mut cx);
+                        let mut done = ev("finished", &tid, Some(sid), "test", name);
+                        done["outcome"] = json!(outcome);
+                        done["durationMillis"] = json!(ms);
+                        if outcome == "failed" {
+                            done["message"] = json!("expected: <42.50> but was: <40.00>");
+                            done["stackTrace"] = json!(
+                                "org.opentest4j.AssertionFailedError: expected: <42.50> but was: <40.00>\n\tat org.junit.jupiter.api.AssertionUtils.fail(AssertionUtils.java:151)\n\tat shop.CartTest.totalsThePrices(CartTest.java:27)\n\tat java.base/java.util.ArrayList.forEach(ArrayList.java:1596)"
+                            );
+                            note(
+                                &runs,
+                                "snout/testEvent",
+                                json!({ "runId": "t1", "event": "output", "kind": "test", "id": tid, "text": "cart: 2 items\n" }),
+                                &mut cx,
+                            );
+                        }
+                        note(&runs, "snout/testEvent", done, &mut cx);
+                    }
+                    let mut end = ev("finished", sid, Some("r"), "suite", suite);
+                    end["outcome"] = json!("passed");
+                    note(&runs, "snout/testEvent", end, &mut cx);
+                }
+                note(
+                    &runs,
+                    "snout/taskFinished",
+                    json!({ "runId": "t1", "outcome": "failed", "millis": 4300 }),
+                    &mut cx,
+                );
+                let _ = id;
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.show_bottom(ws.tabs.run, window, cx));
+                })
+                .unwrap();
+            }
+            Some(Select::Debug) => {
+                use snout_app::run::debug::{Frame, Var};
+                std::fs::create_dir_all(repo.join("app/src/main/java/demo/app")).unwrap();
+                let file = repo.join("app/src/main/java/demo/app/Main.java");
+                std::fs::write(&file, MAIN_JAVA).unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((9, 0))), cx)));
+                let runs = cx.update(|cx| ws.read(cx).runs.clone());
+                let config = snout_app::run::config::RunConfig {
+                    id: "main:app:demo.app.Main".into(),
+                    name: "Main".into(),
+                    main_class: Some("demo.app.Main".into()),
+                    ..Default::default()
+                };
+                cx.update(|cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&file, 9, cx)));
+                cx.update(|cx| runs.update(cx, |r, cx| r.set_condition(&file, 15, Some("a > 2".into()), cx)));
+                let id = cx.update(|cx| {
+                    runs.update(cx, |r, cx| r.adopt(snout_app::run::Launch::Config { config, debug: true }, "d1", cx))
+                });
+                note(
+                    &runs,
+                    "snout/taskOutput",
+                    serde_json::json!({ "runId": "d1", "stream": "stdout",
+                    "line": "Listening for transport dt_socket at address: 52311" }),
+                    &mut cx,
+                );
+                // A connection that answers nothing: the debugger is attached and stopped.
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+                let (_server, _) = listener.accept().unwrap();
+                let (dap, _events) = snout_lang::dap::Dap::over(client).unwrap();
+                cx.update(|cx| {
+                    runs.update(cx, |r, cx| {
+                        let s = r.session_mut(id).unwrap();
+                        let d = s.debug.as_mut().unwrap();
+                        d.dap = Some(dap);
+                        d.paused = true;
+                        d.reason = Some("breakpoint".into());
+                        d.thread = Some(1);
+                        d.threads = vec![(1, "main".into()), (14, "Reference Handler".into())];
+                        d.frames = vec![
+                            Frame {
+                                id: 1,
+                                name: "Main.main(String[])".into(),
+                                path: Some(file.clone()),
+                                source: None,
+                                line: 10,
+                            },
+                            Frame {
+                                id: 2,
+                                name: "NativeMethodAccessorImpl.invoke0(Method, Object, Object[])".into(),
+                                path: None,
+                                source: Some("NativeMethodAccessorImpl.java".into()),
+                                line: 0,
+                            },
+                        ];
+                        d.scopes = vec![Var { name: "Local".into(), value: String::new(), ty: None, reference: 5 }];
+                        d.children.insert(
+                            5,
+                            vec![
+                                Var {
+                                    name: "args".into(),
+                                    value: "String[0]@12".into(),
+                                    ty: Some("String[]".into()),
+                                    reference: 0,
+                                },
+                                Var {
+                                    name: "names".into(),
+                                    value: "ImmutableCollections$List12@13 size=2".into(),
+                                    ty: Some("List<String>".into()),
+                                    reference: 6,
+                                },
+                                Var { name: "total".into(), value: "3".into(), ty: Some("int".into()), reference: 0 },
+                                Var { name: "i".into(), value: "3".into(), ty: Some("int".into()), reference: 0 },
+                            ],
+                        );
+                        d.children.insert(
+                            6,
+                            vec![
+                                Var {
+                                    name: "[0]".into(),
+                                    value: "\"ada\"".into(),
+                                    ty: Some("String".into()),
+                                    reference: 0,
+                                },
+                                Var {
+                                    name: "[1]".into(),
+                                    value: "\"grace\"".into(),
+                                    ty: Some("String".into()),
+                                    reference: 0,
+                                },
+                            ],
+                        );
+                        d.expanded.insert("scope:Local".into());
+                        d.expanded.insert("scope:Local/names".into());
+                        d.watches.push(snout_app::run::debug::Watch {
+                            expr: "total * 2".into(),
+                            value: Some(Ok(Var {
+                                name: String::new(),
+                                value: "6".into(),
+                                ty: Some("int".into()),
+                                reference: 0,
+                            })),
+                        });
+                        d.evaluated = Some((
+                            "add(total, 10)".into(),
+                            Ok(Var { name: String::new(), value: "13".into(), ty: None, reference: 0 }),
+                        ));
+                        r.sync_marks(cx);
+                    })
+                });
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.show_bottom(ws.tabs.debug, window, cx));
+                })
+                .unwrap();
+                std::mem::forget(_server);
+            }
+            Some(Select::Gradle) => {
+                use serde_json::json;
+                let runs = cx.update(|cx| ws.read(cx).runs.clone());
+                let tasks = json!({ "builds": [ { "build": "shop", "rootDir": repo, "projects": [
+                    { "project": ":", "name": "shop", "module": "shop", "groups": [
+                        { "name": "help", "tasks": [ { "name": "tasks", "path": ":tasks" }, { "name": "projects", "path": ":projects" } ] } ] },
+                    { "project": ":app", "name": "app", "module": "shop:app", "groups": [
+                        { "name": "application", "tasks": [ { "name": "bootRun", "path": ":app:bootRun", "description": "Runs this project as a Spring Boot application." } ] },
+                        { "name": "build", "tasks": [
+                            { "name": "assemble", "path": ":app:assemble" }, { "name": "build", "path": ":app:build" },
+                            { "name": "classes", "path": ":app:classes", "description": "Assembles main classes." },
+                            { "name": "clean", "path": ":app:clean" }, { "name": "jar", "path": ":app:jar" } ] },
+                        { "name": "verification", "tasks": [ { "name": "check", "path": ":app:check" }, { "name": "test", "path": ":app:test" } ] },
+                        { "name": "other", "tasks": [ { "name": "compileJava", "path": ":app:compileJava" } ] } ] } ] },
+                    { "build": "billing", "rootDir": repo.join("billing"), "projects": [] } ] });
+                cx.update(|cx| runs.update(cx, |r, _| r.gradle.builds = snout_app::run::parse_gradle_tasks(&tasks)));
+                let gradle = cx.update(|cx| ws.read(cx).gradle.clone());
+                cx.update(|cx| {
+                    gradle.update(cx, |g, cx| {
+                        g.reveal("classes", cx);
+                        g.reveal("bootRun", cx);
+                    })
+                });
+                let id = cx.update(|cx| {
+                    runs.update(cx, |r, cx| {
+                        r.adopt(
+                            snout_app::run::Launch::Task { build: Some("shop".into()), task: ":app:classes".into() },
+                            "g1",
+                            cx,
+                        )
+                    })
+                });
+                for (task, outcome, ms) in [
+                    (":app:compileJava", "success", 2140),
+                    (":app:processResources", "up-to-date", 3),
+                    (":app:classes", "success", 0),
+                ] {
+                    note(
+                        &runs,
+                        "snout/taskProgress",
+                        json!({ "runId": "g1", "task": task, "event": "started" }),
+                        &mut cx,
+                    );
+                    note(
+                        &runs,
+                        "snout/taskOutput",
+                        json!({ "runId": "g1", "stream": "stdout", "line": format!("> Task {task}") }),
+                        &mut cx,
+                    );
+                    note(
+                        &runs,
+                        "snout/taskProgress",
+                        json!({ "runId": "g1", "task": task, "event": "finished", "outcome": outcome, "millis": ms }),
+                        &mut cx,
+                    );
+                }
+                note(
+                    &runs,
+                    "snout/taskOutput",
+                    json!({ "runId": "g1", "stream": "stdout", "line": "\u{1b}[32;1mBUILD SUCCESSFUL\u{1b}[0m in 3s" }),
+                    &mut cx,
+                );
+                note(
+                    &runs,
+                    "snout/taskFinished",
+                    json!({ "runId": "g1", "outcome": "success", "millis": 3120 }),
+                    &mut cx,
+                );
+                let _ = id;
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| {
+                        ws.toggle_tool(snout_app::workspace::Tool::Gradle, window, cx);
+                        ws.show_bottom(ws.tabs.build, window, cx);
+                    });
+                })
+                .unwrap();
+            }
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -452,6 +748,124 @@ mod shots {
         println!("screenshot {name}: ok");
     }
 
+    /// The debugger stopped on a breakpoint in the engine's run-app fixture, for real: the
+    /// engine (`engine/build/dist`, or `SNOUT_ENGINE_DIST`) runs and debugs it. Only with
+    /// `SNOUT_SHOT_DEBUG=<JDK 17 to 21 home>`.
+    fn real_debug_shot(name: &str, theme: ThemeChoice) {
+        let Some(jdk) = std::env::var_os("SNOUT_SHOT_DEBUG").map(PathBuf::from) else { return };
+        let dir = std::env::temp_dir().join(format!("snout-app-shot-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../engine/sync-cli/src/test/fixtures/run-app");
+        assert!(Command::new("cp").arg("-R").arg(&from).arg(&dir).status().unwrap().success());
+        let repo = dir.join("run-app").canonicalize().unwrap();
+        std::fs::write(repo.join("gradle.properties"), "org.gradle.daemon.idletimeout=60000\n").unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["-c", "user.name=t", "-c", "user.email=t@example.com", "add", "-A"]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "f",
+            ],
+        );
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let mut settings =
+            Settings { theme, repos: vec![repo.clone()], current: Some(repo.clone()), ..Settings::default() };
+        settings.project_jdks.insert(repo.clone(), jdk);
+        cx.update(|cx| snout_app::init(&settings, cx));
+        cx.update(|cx| cx.set_global(snout_app::lang::hub::LangEnabled(true)));
+        let model = cx.update(|cx| {
+            let settings = settings.clone();
+            cx.new(|cx| snout_app::model::Model::new(settings, None, cx))
+        });
+        let mut ws = None;
+        let handle = cx
+            .open_window(size(px(1400.), px(900.)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+                ws = Some(view.clone());
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        let ws = ws.unwrap();
+        cx.allow_parking();
+        let pump = |cx: &mut HeadlessAppContext, secs: u64, done: &dyn Fn(&mut HeadlessAppContext) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+            while std::time::Instant::now() < deadline {
+                cx.advance_clock(Duration::from_millis(200));
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                })
+                .unwrap();
+                if done(cx) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            false
+        };
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.show_activity(Activity::Project, window, cx));
+        })
+        .unwrap();
+        let runs = cx.update(|cx| ws.read(cx).runs.clone());
+        let r2 = runs.clone();
+        assert!(
+            pump(&mut cx, 600, &|cx| cx.update(|cx| !r2.read(cx).engine_configs.is_empty())),
+            "the engine is ready"
+        );
+        let file = repo.join("app/src/main/java/demo/app/Main.java");
+        let line =
+            std::fs::read_to_string(&file).unwrap().lines().position(|l| l.contains("total = add(total, i);")).unwrap()
+                as u32;
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((line, 0))), cx)));
+        cx.update(|cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&file, line, cx)));
+        let main = cx.update(|cx| runs.read(cx).configurations().into_iter().find(|c| c.main_class.is_some()).unwrap());
+        cx.update(|cx| {
+            runs.update(cx, |r, cx| r.start(snout_app::run::Launch::Config { config: main, debug: true }, cx))
+        });
+        let stopped = pump(&mut cx, 300, &|cx| {
+            cx.update(|cx| {
+                let m = snout_app::run::marks(cx).unwrap();
+                m.read(cx).exec.is_some() && !m.read(cx).locals.is_empty()
+            })
+        });
+        assert!(stopped, "the breakpoint is hit");
+        // One step, so the loop has gone round once.
+        let id = cx.update(|cx| runs.read(cx).sessions.last().unwrap().id);
+        cx.update(|cx| runs.update(cx, |r, cx| r.step(id, "continue", cx)));
+        pump(&mut cx, 30, &|cx| {
+            cx.update(|cx| snout_app::run::marks(cx).unwrap().read(cx).locals.iter().any(|(n, v)| n == "i" && v == "2"))
+        });
+        cx.update(|cx| runs.update(cx, |r, cx| r.add_watch(id, "total * 10".into(), cx)));
+        pump(&mut cx, 3, &|_| false);
+        let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
+        if let Some(out) = std::env::var_os("SNOUT_SCREENSHOT") {
+            let out = PathBuf::from(out);
+            std::fs::create_dir_all(&out).unwrap();
+            image.save(out.join(format!("{name}.png"))).unwrap();
+        }
+        cx.update(|cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        pump(&mut cx, 10, &|cx| cx.update(|cx| !runs.read(cx).any_running()));
+        let hub = cx.update(|cx| ws.read(cx).hub.clone());
+        cx.update(|cx| hub.update(cx, |h, _| h.shutdown_all()));
+        let _ = std::fs::remove_dir_all(dir);
+        println!("screenshot {name}: ok");
+    }
+
     /// The splash window on its own.
     fn splash_shot(name: &str, theme: ThemeChoice) {
         let mut cx = HeadlessAppContext::with_platform(
@@ -496,11 +910,13 @@ mod shots {
         shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
-        shot("welcome-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
+        shot("welcome-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Nothing));
+        shot("git-empty-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
         shot("project-dark", ThemeChoice::Dark, Activity::Project, None);
         shot("project-model-dark", ThemeChoice::Dark, Activity::Project, Some(Select::ProjectModel));
         shot("project-model-light", ThemeChoice::Light, Activity::Project, Some(Select::ProjectModel));
         real_project_shot("project-real-dark", ThemeChoice::Dark);
+        real_debug_shot("debug-real-dark", ThemeChoice::Dark);
         shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
         shot("palette-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
@@ -512,5 +928,11 @@ mod shots {
         shot("review-streaming-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(Some(0.45))));
         shot("review-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(None)));
         shot("review-light", ThemeChoice::Light, Activity::Project, Some(Select::Review(None)));
+        shot("welcome-light", ThemeChoice::Light, Activity::Project, Some(Select::Nothing));
+        shot("run-tests-dark", ThemeChoice::Dark, Activity::Project, Some(Select::RunTests));
+        shot("run-tests-light", ThemeChoice::Light, Activity::Project, Some(Select::RunTests));
+        shot("debug-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Debug));
+        shot("debug-light", ThemeChoice::Light, Activity::Project, Some(Select::Debug));
+        shot("gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Gradle));
     }
 }

@@ -1333,51 +1333,29 @@ impl GitView {
 
     // ----- Welcome -----------------------------------------------------------------------
 
+    /// No project open: the Git view says so and offers to open one (the Welcome page, with
+    /// the recent projects, is the Project view's).
     fn welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        let recent: Vec<_> = self.model.read(cx).settings.repos.iter().rev().take(8).cloned().collect();
         let button = |id: &'static str, g: Glyph, label: &'static str, action: Action| {
-            look::glyph_button(id, g, label, true, &p).w(px(300.)).h(px(36.)).on_click(self.on_click(action))
+            look::glyph_button(id, g, label, true, &p).w(px(240.)).h(px(34.)).on_click(self.on_click(action))
         };
         pane(&p)
             .child(
                 div()
-                    .id("welcome")
+                    .id("git-empty")
                     .size_full()
-                    .overflow_y_scrollbar()
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(5.))
-                    .pt(px(47.))
-                    .child(drawing(snout_core::art::welcome(), 360., 228., None))
-                    .child(div().mt(px(-7.)).child(wordmark(&p)))
-                    .child(
-                        div()
-                            .text_color(p.fg_dim)
-                            .text_size(px(15.))
-                            .child("See what changed, read the diff, commit, ship."),
-                    )
-                    .child(div().h(px(15.)))
-                    .child(button("welcome-open", Glyph::Open, "Open local repository…   ⌘O", Action::PickFolder))
-                    .child(button("welcome-find", Glyph::Fetch, "Find repositories in folder…", Action::PickScanFolder))
-                    .child(button("welcome-clone", Glyph::Pull, "Clone from GitHub…", Action::ShowClone))
-                    .child(weak("or drop a folder onto this window", &p))
-                    .when(!recent.is_empty(), |d| {
-                        d.child(div().h(px(21.)))
-                            .child(div().text_size(px(look::SMALL)).text_color(p.fg_dim).child("RECENT"))
-                            .children(recent.into_iter().enumerate().map(|(i, path)| {
-                                let tip: SharedString = path.display().to_string().into();
-                                div()
-                                    .id(("recent", i))
-                                    .text_color(if p.dark { p.accent } else { p.fg })
-                                    .cursor_pointer()
-                                    .hover(|s| s.underline())
-                                    .child(Model::dir_name(&path))
-                                    .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
-                                    .on_click(self.on_click(Action::OpenRepo(path)))
-                            }))
-                    }),
+                    .justify_center()
+                    .gap(px(6.))
+                    .child(drawing(snout_core::art::welcome(), 240., 152., None))
+                    .child(div().mt(px(6.)).text_size(px(16.)).child("No project open"))
+                    .child(div().text_color(p.fg_dim).child("Open a project to see its changes, branches and history."))
+                    .child(div().h(px(10.)))
+                    .child(button("git-empty-open", Glyph::Open, "Open Project…   ⌘O", Action::PickFolder))
+                    .child(button("git-empty-clone", Glyph::Pull, "Clone Repository…", Action::ShowClone)),
             )
             .into_any_element()
     }
@@ -1840,7 +1818,7 @@ fn paint_graph(bounds: Bounds<Pixels>, row: &GraphRow, filled: bool, head: bool,
 }
 
 /// "SnoutCode" with its mark beside it and a green stroke under it, after the website's lockup.
-fn wordmark(p: &Palette) -> impl IntoElement {
+pub(crate) fn wordmark(p: &Palette) -> impl IntoElement {
     let accent = p.ill_accent;
     div().flex().items_center().gap(px(10.)).child(drawing(snout_core::art::mark(), 52., 44., None)).child(
         div().relative().text_size(px(40.)).child("SnoutCode").child(

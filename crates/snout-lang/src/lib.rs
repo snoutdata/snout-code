@@ -1,9 +1,10 @@
 //! SnoutCode's language server client, for any language: JSON-RPC over a child process's
 //! stdio, the capabilities SnoutCode's editor offers, progress tracking, URIs and the
-//! incremental text sync. What is particular to one server (how to start it, its settings)
-//! lives with the app.
+//! incremental text sync; and a Debug Adapter Protocol client. What is particular to one
+//! server (how to start it, its settings) lives with the app.
 
 pub mod client;
+pub mod dap;
 pub mod progress;
 pub mod rpc;
 pub mod text;

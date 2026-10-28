@@ -55,6 +55,32 @@ pub enum Icon {
     Package,
     /// A JDK: a cup.
     Jdk,
+    /// The Run tool window: a play triangle in outline.
+    RunWindow,
+    /// A filled square: stop a run.
+    Stop,
+    /// Two bars: pause the program.
+    Pause,
+    /// A bar and a triangle: resume the program.
+    Resume,
+    /// Rerun: a circular arrow round a small triangle.
+    Rerun,
+    /// Rerun the failed tests: a circular arrow round a cross.
+    RerunFailed,
+    /// Step over: an arc over a dot.
+    StepOver,
+    /// Step into: an arrow down to a dot.
+    StepInto,
+    /// Step out: an arrow up from a dot.
+    StepOut,
+    /// The Build tool window: a hammer.
+    Hammer,
+    /// A watch: an eye.
+    Eye,
+    /// A variable: a small box with a dot.
+    Variable,
+    /// A stack frame: three bars, stacked.
+    Frames,
 }
 
 /// One stroke of an icon, in grid units (16 across).
@@ -255,6 +281,62 @@ impl Icon {
                 Line(&[(2.5, 7.), (13.5, 7.)], false),
                 Line(&[(6.5, 3.5), (6.5, 7.)], false),
                 Line(&[(9.5, 3.5), (9.5, 7.)], false),
+            ],
+            Icon::RunWindow => &[Line(&[(4., 2.5), (13., 8.), (4., 13.5)], true)],
+            Icon::Stop => &[Fill(&[(3.5, 3.5), (12.5, 3.5), (12.5, 12.5), (3.5, 12.5)])],
+            Icon::Pause => &[
+                Fill(&[(4., 3.), (6.8, 3.), (6.8, 13.), (4., 13.)]),
+                Fill(&[(9.2, 3.), (12., 3.), (12., 13.), (9.2, 13.)]),
+            ],
+            Icon::Resume => {
+                &[Fill(&[(3., 3.), (5., 3.), (5., 13.), (3., 13.)]), Fill(&[(7., 3.), (14., 8.), (7., 13.)])]
+            }
+            Icon::Rerun => &[
+                Curve((13., 8.), (13., 13.), (8., 13.)),
+                Curve((8., 13.), (3., 13.), (3., 8.)),
+                Curve((3., 8.), (3., 3.), (8., 3.)),
+                Line(&[(6.5, 1.2), (8.5, 3.), (6.5, 4.8)], false),
+                Fill(&[(6.8, 6.), (10.5, 8.), (6.8, 10.)]),
+            ],
+            Icon::RerunFailed => &[
+                Curve((13., 8.), (13., 13.), (8., 13.)),
+                Curve((8., 13.), (3., 13.), (3., 8.)),
+                Curve((3., 8.), (3., 3.), (8., 3.)),
+                Line(&[(6.5, 1.2), (8.5, 3.), (6.5, 4.8)], false),
+                Line(&[(6.3, 6.3), (9.7, 9.7)], false),
+                Line(&[(9.7, 6.3), (6.3, 9.7)], false),
+            ],
+            Icon::StepOver => &[
+                Curve((2.5, 9.), (8., 0.5), (13.5, 9.)),
+                Line(&[(10.5, 8.), (13.5, 9.), (14.2, 6.)], false),
+                Circle(8., 13., 1.6, true),
+            ],
+            Icon::StepInto => &[
+                Line(&[(8., 1.5), (8., 8.5)], false),
+                Line(&[(5., 5.5), (8., 8.5), (11., 5.5)], false),
+                Circle(8., 13., 1.6, true),
+            ],
+            Icon::StepOut => &[
+                Line(&[(8., 9.), (8., 1.8)], false),
+                Line(&[(5., 4.8), (8., 1.8), (11., 4.8)], false),
+                Circle(8., 13., 1.6, true),
+            ],
+            Icon::Hammer => &[
+                Line(&[(2.5, 4.), (8.5, 2.), (11., 4.5), (9., 6.5), (6.5, 6.)], true),
+                Line(&[(8., 6.2), (14., 13.)], false),
+            ],
+            Icon::Eye => &[
+                Curve((1.5, 8.), (8., 1.5), (14.5, 8.)),
+                Curve((1.5, 8.), (8., 14.5), (14.5, 8.)),
+                Circle(8., 8., 2., true),
+            ],
+            Icon::Variable => {
+                &[Line(&[(2.5, 3.5), (13.5, 3.5), (13.5, 12.5), (2.5, 12.5)], true), Circle(8., 8., 1.7, true)]
+            }
+            Icon::Frames => &[
+                Line(&[(2.5, 3.5), (13.5, 3.5)], false),
+                Line(&[(2.5, 8.), (13.5, 8.)], false),
+                Line(&[(2.5, 12.5), (13.5, 12.5)], false),
             ],
             Icon::Jdk => &[
                 Line(&[(2.5, 6.5), (2.5, 11.5), (4.5, 14.), (9.5, 14.), (11.5, 11.5), (11.5, 6.5)], true),

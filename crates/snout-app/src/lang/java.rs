@@ -43,7 +43,19 @@ pub fn engine_command(dist: &Path, project: &Path, jdk: &Path) -> Command {
         .arg("--cache-dir")
         .arg(engine_cache())
         .current_dir(project);
+    // The JDKs the app downloaded, for builds that want another Java than `jdk`.
+    for extra in downloaded_jdks() {
+        if extra.home != jdk {
+            c.arg("--jdk").arg(extra.home);
+        }
+    }
     c
+}
+
+/// The JDKs the app downloaded, under the user's home.
+pub fn downloaded_jdks() -> Vec<Jdk> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    jdks_in(&downloads_dir(&home))
 }
 
 /// SnoutCode's cache folder, where the engine keeps its builds, models and jdtls data.
@@ -107,7 +119,7 @@ pub fn major_of(version: &str) -> Option<u32> {
 }
 
 /// The JDK homes in a folder of JDKs: each entry, or its `Contents/Home` (macOS bundles).
-fn jdks_in(dir: &Path) -> Vec<Jdk> {
+pub fn jdks_in(dir: &Path) -> Vec<Jdk> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut out = Vec::new();
     for e in entries.flatten() {

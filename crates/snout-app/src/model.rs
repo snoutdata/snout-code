@@ -601,6 +601,13 @@ impl Model {
         recent.insert(0, project.to_owned());
         recent.truncate(RECENT_LIMIT);
         self.settings.recent = Some(recent);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        self.settings.opened.insert(project.to_owned(), now);
+    }
+
+    /// The folder the app keeps its settings in, when it keeps them (not in tests).
+    pub fn support_dir(&self) -> Option<PathBuf> {
+        self.store.as_ref().and_then(|s| s.file.parent().map(Path::to_owned))
     }
 
     /// The projects opened lately, most recent first.

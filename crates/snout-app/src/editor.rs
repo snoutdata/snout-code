@@ -31,10 +31,12 @@ use crate::lang::providers::DocLink;
 
 mod claude;
 mod lang_features;
+mod run_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
 pub use claude::{Answer, Outcome, Proposal, Review, STREAM_TICK};
 pub use lang_features::{class_file_name, is_class_file_path};
+pub use run_gutter::{GutterMenu, runnables_of};
 
 actions!(
     editor,
@@ -251,6 +253,13 @@ pub struct EditorPanel {
     _review_task: Option<Task<()>>,
     _flash_task: Option<Task<()>>,
     _diff: Option<Task<()>>,
+    /// What the file holds to run (test classes and methods, main classes), for the gutter.
+    pub runnables: Option<Rc<crate::run::FileRunnables>>,
+    _runnables: Option<Task<()>>,
+    /// The gutter's menu, while it shows.
+    pub gutter_menu: Option<GutterMenu>,
+    /// Where the gutter's lanes were drawn last.
+    pub lanes: run_gutter::LanesCell,
     focus: FocusHandle,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -306,6 +315,11 @@ impl EditorPanel {
             // The server forgets the document with its last tab.
             cx.on_release(|this, cx| this.detach_lang(cx)),
         ];
+        let mut subscriptions = subscriptions;
+        // Breakpoints and the debugger's line are drawn in the gutter.
+        if let Some(marks) = crate::run::marks(cx) {
+            subscriptions.push(cx.observe(&marks, |_, _, cx| cx.notify()));
+        }
         let brackets = state.update(cx, |s, cx| s.create_range_decorations_collection(Vec::new(), cx));
         // Look at the file on disk now and then, for changes made elsewhere.
         let poll = cx.spawn_in(window, async move |this, cx| {
@@ -349,6 +363,10 @@ impl EditorPanel {
             _review_task: None,
             _flash_task: None,
             _diff: None,
+            runnables: None,
+            _runnables: None,
+            gutter_menu: None,
+            lanes: Default::default(),
             focus: cx.focus_handle(),
             _poll: poll,
             _subscriptions: subscriptions,
@@ -393,6 +411,8 @@ impl EditorPanel {
         self.changes = Arc::new(Vec::new());
         self.refresh_head(cx);
         self.attach_lang(cx);
+        self.runnables = None;
+        self.refresh_runnables(cx);
         cx.notify();
     }
 
@@ -595,7 +615,15 @@ impl EditorPanel {
                     hub.update(cx, |h, _| h.saved(&uri));
                 }
                 cx.emit(EditorEvent::Saved);
+                // A saved Scala file: the engine compiles the Scala again.
+                if self.path.extension().is_some_and(|e| e == "scala")
+                    && let Some(runs) = crate::run::runs(cx)
+                {
+                    let path = self.path.clone();
+                    runs.update(cx, |r, cx| r.scala_changed(&path, cx));
+                }
                 self.saved = text;
+                self.refresh_runnables(cx);
                 self.dirty = false;
                 self.preview = false;
                 self.error = None;
@@ -917,7 +945,7 @@ impl Render for EditorPanel {
                     .relative()
                     .font_family(look::mono_font(cx))
                     .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
-                        if this.command_click(e, window, cx) {
+                        if this.gutter_press(e, window, cx) || this.command_click(e, window, cx) {
                             window.prevent_default();
                             cx.stop_propagation();
                         }
@@ -932,6 +960,8 @@ impl Render for EditorPanel {
                     .children(self.claude_overlay(cx))
                     .child(self.gutter(cx))
                     .child(self.problem_marks(cx))
+                    .child(self.run_gutter(cx))
+                    .children(self.gutter_popup(cx))
                     .children(self.signature_popup(cx))
                     .children(self.inspections(cx))
                     .children(self.rename_box(cx)),

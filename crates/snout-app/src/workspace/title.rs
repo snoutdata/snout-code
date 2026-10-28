@@ -33,7 +33,7 @@ pub fn initials(name: &str) -> String {
 }
 
 /// The badge colour of a project, picked from its name so it stays the same.
-fn badge_color(name: &str, p: &Palette) -> gpui::Hsla {
+pub fn badge_color(name: &str, p: &Palette) -> gpui::Hsla {
     let hues = [0.58, 0.08, 0.36, 0.75, 0.95, 0.15, 0.5];
     let hash = name.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
     let hue = hues[hash as usize % hues.len()];
@@ -75,6 +75,31 @@ fn icon_button(id: &'static str, g: Icon, tip: &'static str, enabled: bool, p: &
         .child(icon(g, 16., ink))
 }
 
+/// A title bar icon button in its own colour, with a tooltip made at run time.
+fn tip_button(
+    id: &'static str,
+    g: Icon,
+    tip: gpui::SharedString,
+    enabled: bool,
+    ink: gpui::Hsla,
+    p: &Palette,
+) -> gpui::Stateful<gpui::Div> {
+    let hover = p.button_hover;
+    let ink = if enabled { ink } else { mix(p.fg_dim, 0.6, p.ground) };
+    div()
+        .id(id)
+        .debug_selector(move || id.to_owned())
+        .flex_none()
+        .size(px(28.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(5.))
+        .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
+        .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
+        .child(icon(g, 16., ink))
+}
+
 impl Workspace {
     /// Show or hide the branch popup.
     pub fn toggle_branches(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -101,7 +126,6 @@ impl Workspace {
 
     pub(super) fn title_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        let gradle = self.gradle.update(cx, |g, cx| g.build(cx));
         let m = self.model.read(cx);
         let name = m.repo.as_ref().and(m.project_root()).map(|r| Model::dir_name(&r));
         let branch = m.repo.as_ref().map(|_| m.head_label());
@@ -177,32 +201,74 @@ impl Workspace {
                 }))
         });
 
-        // The run configuration: the current file, or a Gradle task of the build.
+        // The run configuration: the current file, or one of the project's; Run and Debug
+        // start it, Stop ends what runs.
+        let runs = self.runs.read(cx);
+        let configs = runs.configurations();
+        let selected = runs.selected_config();
+        let ready = runs.engine(cx).is_some();
+        let loading = runs.configs_loading;
+        let running = runs.any_running();
+        let runs_entity = self.runs.clone();
         let run_config = {
-            let tasks: Vec<(String, String)> = gradle
-                .as_ref()
-                .map(|b| {
-                    b.projects.iter().flat_map(|pr| pr.tasks.iter().map(|t| (pr.task_path(t), t.clone()))).collect()
-                })
-                .unwrap_or_default();
-            Trigger(bar_button("title-run-config", &p).child(div().child("Current File")).child(icon(
-                Icon::ChevronDown,
-                12.,
-                p.fg_dim,
-            )))
+            let label = selected.as_ref().map_or_else(|| "Current File".to_owned(), |c| c.name.clone());
+            let selected_id = selected.as_ref().map(|c| c.id.clone());
+            let kind_icon = selected.as_ref().map(|c| match c.kind {
+                crate::run::config::Kind::Main => Icon::Play,
+                crate::run::config::Kind::Gradle => Icon::Build,
+                crate::run::config::Kind::Tests => Icon::Check,
+            });
+            Trigger(
+                bar_button("title-run-config", &p)
+                    .children(kind_icon.map(|g| icon(g, 13., p.ok)))
+                    .child(div().max_w(px(220.)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(label))
+                    .child(icon(Icon::ChevronDown, 12., p.fg_dim)),
+            )
             .dropdown_menu(move |mut menu, _, _| {
-                menu = menu.item(PopupMenuItem::new("Current File").checked(true));
-                menu = menu.separator().label("Gradle");
-                if tasks.is_empty() {
-                    return menu.item(PopupMenuItem::new("Tasks appear once the build is imported").disabled(true));
+                let pick = |id: Option<String>| {
+                    let runs = runs_entity.clone();
+                    move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {
+                        runs.update(cx, |r, cx| r.select_config(id.clone(), cx))
+                    }
+                };
+                menu =
+                    menu.item(PopupMenuItem::new("Current File").checked(selected_id.is_none()).on_click(pick(None)));
+                let mut group = "";
+                for c in &configs {
+                    let g = if c.user && c.id.starts_with("user:") { "Yours" } else { c.group() };
+                    if g != group {
+                        group = g;
+                        menu = menu.separator().label(g);
+                    }
+                    let on = selected_id.as_deref() == Some(c.id.as_str());
+                    menu = menu.item(PopupMenuItem::new(c.name.clone()).checked(on).on_click(pick(Some(c.id.clone()))));
                 }
-                for (path, _) in tasks.iter().take(40) {
-                    menu = menu.item(PopupMenuItem::new(path.clone()).disabled(true));
+                if configs.is_empty() {
+                    let note = if loading {
+                        "Reading the configurations…"
+                    } else {
+                        "Configurations appear once the Java engine is ready"
+                    };
+                    menu = menu.separator().item(PopupMenuItem::new(note).disabled(true));
                 }
-                menu
+                menu.separator().item(
+                    PopupMenuItem::new("Edit Configurations…")
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::EditConfigurations), cx)),
+                )
             })
             .into_any_element()
         };
+        let what = selected.as_ref().map_or_else(|| "the Current File".to_owned(), |c| format!("'{}'", c.name));
+        let run_tip: gpui::SharedString = format!("Run {what} (⌃R)").into();
+        let debug_tip: gpui::SharedString = format!("Debug {what} (⌃D)").into();
+        let run_button = tip_button("title-run", Icon::Play, run_tip, ready, p.ok, &p)
+            .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::RunSelected), cx)));
+        let debug_button = tip_button("title-debug", Icon::Bug, debug_tip, ready, p.ok, &p)
+            .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::DebugSelected), cx)));
+        let stop_button = running.then(|| {
+            tip_button("title-stop", Icon::Stop, "Stop (⌘F2)".into(), true, p.error, &p)
+                .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::StopRuns), cx))
+        });
 
         let right = div()
             .flex_none()
@@ -210,8 +276,9 @@ impl Workspace {
             .items_center()
             .gap(px(2.))
             .child(run_config)
-            .child(icon_button("title-run", Icon::Play, "Run (coming soon)", false, &p))
-            .child(icon_button("title-debug", Icon::Bug, "Debug (coming soon)", false, &p))
+            .child(run_button)
+            .child(debug_button)
+            .children(stop_button)
             .child(div().w(px(6.)))
             .child(
                 icon_button("title-search", Icon::Search, "Search Everywhere (⇧⌘A)", true, &p)

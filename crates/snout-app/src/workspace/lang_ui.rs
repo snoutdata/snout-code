@@ -39,6 +39,7 @@ impl Workspace {
                     self.hub.read(cx).reply_apply(root, id.clone(), applied);
                 }
             }
+            HubEvent::Engine { .. } => {}
             HubEvent::References { title, locations } => {
                 let (title, locations) = (title.clone(), locations.clone());
                 self.references.update(cx, |r, cx| r.show(title, locations, cx));

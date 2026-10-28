@@ -123,6 +123,9 @@ struct Doc {
 pub struct JdkPrompt {
     pub root: PathBuf,
     pub major: u32,
+    /// Asked for by the Gradle model (a build that failed for want of this JDK): the model
+    /// is synced again once it is downloaded.
+    pub resync: bool,
     pub progress: Option<DownloadProgress>,
     pub error: Option<String>,
 }
@@ -138,6 +141,8 @@ pub enum HubEvent {
     ApplyEdit { edit: WorkspaceEdit, reply: Option<(PathBuf, Value)> },
     /// Show these locations in the References panel.
     References { title: String, locations: Vec<Location> },
+    /// One of the engine's own notifications (`snout/taskOutput`, `snout/testEvent`…).
+    Engine { root: PathBuf, method: String, params: Value },
 }
 
 pub struct LangHub {
@@ -147,6 +152,8 @@ pub struct LangHub {
     pub servers: HashMap<PathBuf, Server>,
     docs: HashMap<String, Doc>,
     pub jdk_prompt: Option<JdkPrompt>,
+    /// The JDKs the user said no to, this session.
+    dismissed_jdks: Vec<u32>,
     /// The home folder JDKs are looked for and downloaded under.
     pub home: PathBuf,
     /// Held until the window has painted: the builds asked for meanwhile start then.
@@ -154,6 +161,8 @@ pub struct LangHub {
     pending: Vec<PathBuf>,
     /// The engine build snout.sh runs beside the app, in development.
     pub engine_build: Option<crate::background::EngineBuild>,
+    /// What the last build's compile reported (`snout/buildProblems`), by document URI.
+    pub build_problems: Vec<(String, Diagnostic)>,
     _engine_watch: Option<Task<()>>,
     _quit: gpui::Subscription,
 }
@@ -193,10 +202,12 @@ impl LangHub {
             servers: HashMap::new(),
             docs: HashMap::new(),
             jdk_prompt: None,
+            dismissed_jdks: Vec::new(),
             home,
             paused: false,
             pending: Vec::new(),
             engine_build: None,
+            build_problems: Vec::new(),
             _engine_watch: None,
             _quit: quit,
         };
@@ -328,8 +339,13 @@ impl LangHub {
             None => {
                 self.servers.insert(root.to_owned(), server);
                 if self.jdk_prompt.is_none() {
-                    self.jdk_prompt =
-                        Some(JdkPrompt { root: root.to_owned(), major: req.wanted(), progress: None, error: None });
+                    self.jdk_prompt = Some(JdkPrompt {
+                        root: root.to_owned(),
+                        major: req.wanted(),
+                        resync: false,
+                        progress: None,
+                        error: None,
+                    });
                 }
             }
         }
@@ -543,8 +559,18 @@ impl LangHub {
                     });
                 }
             }
+            m if m.starts_with("snout/") => {
+                cx.emit(HubEvent::Engine { root: root.to_owned(), method: m.to_owned(), params });
+            }
             _ => {}
         }
+    }
+
+    /// Put what a build's compile reported in place of what the last one did.
+    pub fn set_build_problems(&mut self, list: Vec<(String, Diagnostic)>, cx: &mut Context<Self>) {
+        self.build_problems = list;
+        cx.emit(HubEvent::Changed);
+        cx.notify();
     }
 
     fn on_request(&mut self, root: &Path, id: Value, method: &str, params: Value, cx: &mut Context<Self>) {
@@ -797,7 +823,7 @@ impl LangHub {
         let progress = DownloadProgress::default();
         prompt.progress = Some(progress.clone());
         prompt.error = None;
-        let (major, root) = (prompt.major, prompt.root.clone());
+        let (major, root, resync) = (prompt.major, prompt.root.clone(), prompt.resync);
         let dir = java::downloads_dir(&self.home);
         let job = cx.background_executor().spawn({
             let progress = progress.clone();
@@ -838,6 +864,10 @@ impl LangHub {
                                 this.spawn(&r, cx);
                             }
                         }
+                        // A build of the model wanted it: sync the model again, so it can.
+                        if resync && let Some(store) = crate::project_model::store(cx) {
+                            store.update(cx, |s, cx| s.sync(cx));
+                        }
                     }
                     Err(e) => {
                         if let Some(p) = this.jdk_prompt.as_mut() {
@@ -855,10 +885,25 @@ impl LangHub {
     }
 
     pub fn dismiss_jdk(&mut self, cx: &mut Context<Self>) {
-        if self.jdk_prompt.as_ref().is_some_and(|p| p.progress.is_none()) {
+        if let Some(p) = self.jdk_prompt.as_ref().filter(|p| p.progress.is_none()) {
+            self.dismissed_jdks.push(p.major);
             self.jdk_prompt = None;
             cx.notify();
         }
+    }
+
+    /// A build of the Gradle model at `root` failed for want of JDK `major`: offer it, unless
+    /// it was turned down or is here already.
+    pub fn offer_jdk(&mut self, root: &Path, major: u32, cx: &mut Context<Self>) {
+        if self.jdk_prompt.is_some() || self.dismissed_jdks.contains(&major) {
+            return;
+        }
+        if java::downloaded_jdks().iter().any(|j| j.major == major) {
+            return;
+        }
+        self.jdk_prompt = Some(JdkPrompt { root: root.to_owned(), major, resync: true, progress: None, error: None });
+        cx.emit(HubEvent::Changed);
+        cx.notify();
     }
 
     // ----- Requests the editors and the workspace make --------------------------------
@@ -947,6 +992,7 @@ impl LangHub {
             .values()
             .flat_map(|s| s.diagnostics.iter())
             .flat_map(|(uri, list)| list.iter().map(move |d| (uri.clone(), d.clone())))
+            .chain(self.build_problems.iter().cloned())
             .filter(|(_, d)| {
                 matches!(
                     d.severity,

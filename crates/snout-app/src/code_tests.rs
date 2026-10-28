@@ -62,7 +62,8 @@ fn a_single_click_previews_and_editing_or_a_double_click_keeps_the_tab(cx: &mut 
     assert_eq!(tab_names(&ws, cx), ["status.rs", "README.md"]);
     // A double click on a preview tab keeps it.
     cx.run_until_parked();
-    let tab = cx.debug_bounds("editor-tab-2").expect("the README tab is drawn").center();
+    // The Welcome page went with the first file: the README's tab is the second.
+    let tab = cx.debug_bounds("editor-tab-1").expect("the README tab is drawn").center();
     cx.simulate_click(tab, Modifiers::none());
     let readme = editor_for(&ws, &repo.join("README.md"), cx);
     cx.update(|_, cx| assert!(readme.read(cx).preview, "one click only selects it"));
@@ -102,7 +103,7 @@ fn a_middle_click_closes_a_tab(cx: &mut TestAppContext) {
     act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
     act(&model, cx, Action::OpenFile(repo.join("status.rs"), None));
     cx.run_until_parked();
-    let tab = cx.debug_bounds("editor-tab-1").expect("the README tab is drawn").center();
+    let tab = cx.debug_bounds("editor-tab-0").expect("the README tab is drawn").center();
     cx.simulate_mouse_down(tab, MouseButton::Middle, Modifiers::none());
     cx.simulate_mouse_up(tab, MouseButton::Middle, Modifiers::none());
     cx.run_until_parked();

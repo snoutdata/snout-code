@@ -11,7 +11,6 @@ pub mod editor;
 pub mod files;
 pub mod git_view;
 pub mod glyphs;
-pub mod gradle;
 pub mod icons;
 pub mod lang;
 pub mod look;
@@ -21,6 +20,7 @@ pub mod panels;
 pub mod project_model;
 pub mod project_view;
 pub mod projects;
+pub mod run;
 pub mod search;
 pub mod settings;
 pub mod settings_view;
@@ -30,6 +30,7 @@ pub mod tabs;
 pub mod theme;
 pub mod tool_windows;
 pub mod ui;
+pub mod welcome;
 pub mod workspace;
 
 #[cfg(test)]
@@ -38,6 +39,8 @@ mod code_tests;
 mod lang_tests;
 #[cfg(test)]
 mod project_tests;
+#[cfg(test)]
+mod run_tests;
 #[cfg(test)]
 mod tests;
 

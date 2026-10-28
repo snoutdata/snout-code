@@ -76,6 +76,8 @@ pub struct Settings {
     /// The Project tool window shows the plain file tree (Files) rather than the project
     /// as its Gradle model has it.
     pub plain_files: bool,
+    /// When each project was last opened (seconds since 1970), for the Welcome page.
+    pub opened: std::collections::BTreeMap<PathBuf, u64>,
 }
 
 impl Default for Settings {
@@ -104,6 +106,7 @@ impl Default for Settings {
             claude_path: None,
             follow_claude: true,
             plain_files: false,
+            opened: Default::default(),
         }
     }
 }

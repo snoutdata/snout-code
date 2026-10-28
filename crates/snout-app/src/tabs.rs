@@ -499,10 +499,19 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
             )
         }
         "Gradle" => {
-            row = row.child(
-                tool_button("tool-collapse-gradle", Icon::CollapseAll, "Collapse All", &p)
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseGradle), cx)),
-            )
+            row = row
+                .child(
+                    tool_button("tool-sync-gradle", Icon::Refresh, "Sync the Gradle Project", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
+                )
+                .child(
+                    tool_button("tool-refresh-gradle", Icon::Fetch, "Read the Tasks Again", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RefreshGradle), cx)),
+                )
+                .child(
+                    tool_button("tool-collapse-gradle", Icon::CollapseAll, "Collapse All", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseGradle), cx)),
+                )
         }
         _ => {}
     }

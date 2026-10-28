@@ -155,6 +155,8 @@ pub struct FailedBuild {
     pub gradle_version: Option<String>,
     pub reason: String,
     pub error: String,
+    /// The JDK (its major version) the build needs and the machine lacks.
+    pub needs_jdk: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -310,6 +312,7 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
                 gradle_version: str_of(f, "gradleVersion").map(str::to_owned),
                 reason: str_of(f, "reason").unwrap_or("The build did not sync").to_owned(),
                 error: str_of(f, "error").unwrap_or_default().to_owned(),
+                needs_jdk: f.get("needsJdk").and_then(Value::as_u64).map(|v| v as u32),
             })
         })
         .collect();
@@ -647,9 +650,14 @@ impl ProjectModels {
                         model.failed.len(),
                         model.libraries.len()
                     );
+                    // A build that needs a JDK this machine lacks: offer to download it.
+                    let wanted = model.failed.iter().find_map(|f| f.needs_jdk);
                     this.current = Some(Rc::new(model));
                     this.stamps = stamps;
                     this.scripts_changed = false;
+                    if let (Some(major), Some(hub)) = (wanted, this.hub.clone()) {
+                        hub.update(cx, |h, cx| h.offer_jdk(&root, major, cx));
+                    }
                 }
                 cx.notify();
             });
@@ -755,6 +763,9 @@ fn run_sync(dist: &Path, root: &Path, out: &Path, jdk: Option<&Path>) -> Result<
     }
     if let Some(jdk) = jdk {
         c.arg("--java-home").arg(jdk);
+    }
+    for extra in crate::lang::java::downloaded_jdks() {
+        c.arg("--jdk").arg(extra.home);
     }
     c.status().map_err(|e| format!("snout-engine did not start: {e}"))?;
     // A build that fails does not stop the others: the model is written all the same.

@@ -11,10 +11,8 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::DropdownMenu as _;
 use gpui_component::scroll::ScrollableElement as _;
 
-use crate::model::{Action, Model};
-use crate::projects::open_items;
+use crate::model::Model;
 use crate::theme::palette;
-use snout_core::art::Glyph;
 
 /// Implements the dock traits for a panel holding a `focus` handle.
 macro_rules! panel {
@@ -170,74 +168,7 @@ impl Render for SidePanel {
     }
 }
 
-/// The center's first tab while no repository is open: what to do first.
-pub struct WelcomePanel {
-    model: Entity<Model>,
-    focus: FocusHandle,
-}
-
-impl WelcomePanel {
-    pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&model, |_, _, cx| cx.notify()).detach();
-        Self { model, focus: cx.focus_handle() }
-    }
-}
-
-panel!(WelcomePanel, "Welcome", |_, _| "Welcome".into(), true);
-
-impl Render for WelcomePanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
-        let model = self.model.clone();
-        let recent: Vec<_> = self.model.read(cx).recent_projects().into_iter().take(8).collect();
-        let button = |id: &'static str, g: Glyph, label: &'static str, action: Action| {
-            let model = model.clone();
-            crate::look::glyph_button(id, g, label, true, &p).w(px(300.)).h(px(36.)).on_click(move |_, _, cx| {
-                let action = action.clone();
-                model.update(cx, |m, cx| m.handle(action, cx));
-            })
-        };
-        div()
-            .id("welcome")
-            .size_full()
-            .bg(p.panel)
-            .overflow_y_scrollbar()
-            .flex()
-            .flex_col()
-            .items_center()
-            .pt(px(60.))
-            .gap(px(8.))
-            .child(div().text_size(px(40.)).font_weight(FontWeight::BOLD).child("SnoutCode"))
-            .child(
-                div().text_color(p.fg_dim).text_size(px(15.)).child("See what changed, read the diff, commit, ship."),
-            )
-            .child(div().h(px(14.)))
-            .child(button("welcome-open", Glyph::Open, "Open local repository…", Action::PickFolder))
-            .child(button("welcome-find", Glyph::Fetch, "Find repositories in folder…", Action::PickScanFolder))
-            .child(button("welcome-clone", Glyph::Pull, "Clone from GitHub…", Action::ShowClone))
-            .when(!recent.is_empty(), |d| {
-                d.child(div().h(px(18.))).child(div().text_size(px(11.)).text_color(p.fg_dim).child("RECENT")).children(
-                    recent.into_iter().enumerate().map(|(i, path)| {
-                        let model = model.clone();
-                        let name = Model::dir_name(&path);
-                        Button::new(("recent", i))
-                            .debug_selector(move || format!("welcome-recent-{i}"))
-                            .link()
-                            .label(name)
-                            .tooltip(path.display().to_string())
-                            .on_click(move |_, _, cx| {
-                                let a = Action::OpenRepo(path.clone());
-                                model.update(cx, |m, cx| m.handle(a, cx));
-                            })
-                    }),
-                )
-            })
-            .child(Button::new("welcome-more").ghost().small().label("More").dropdown_menu({
-                let model = model.clone();
-                move |menu, _, _| open_items(menu, &model)
-            }))
-    }
-}
+pub use crate::welcome::WelcomePanel;
 
 /// The bottom dock's Output tab: what Git said.
 pub struct OutputPanel {
