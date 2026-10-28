@@ -43,6 +43,11 @@ import java.util.TreeMap;
  * }
  * </pre>
  *
+ * A definition check with {@code "single": true} passes only with exactly one result. A references
+ * check passes with at least {@code min} results, at most {@code max} when given, and with
+ * {@code "distinct": true} only when no location is listed twice; {@code "listAll": true} puts
+ * every location in the report.
+ *
  * Files are relative to the project directory unless absolute. A position is the start of the
  * {@code occurrence}-th match of {@code find} in the file, plus {@code offset} characters.
  */
@@ -284,7 +289,8 @@ public final class Driver {
                 JsonElement result = client.request("textDocument/definition", params, Duration.ofMinutes(2));
                 List<String> uris = locations(result);
                 out.add("results", new GsonBuilder().create().toJsonTree(uris));
-                pass = !uris.isEmpty() && (expect == null || uris.stream().anyMatch(u -> u.contains(expect)));
+                pass = !uris.isEmpty() && (expect == null || uris.stream().anyMatch(u -> u.contains(expect)))
+                    && (!flag(check, "single") || uris.size() == 1);
                 if (!uris.isEmpty() && uris.get(0).startsWith("jdt://")) {
                     JsonObject uri = new JsonObject();
                     uri.addProperty("uri", uris.get(0).replaceAll("#.*", ""));
@@ -312,8 +318,11 @@ public final class Driver {
                 params.add("context", context);
                 JsonElement result = client.request("textDocument/references", params, Duration.ofMinutes(5));
                 List<String> uris = locations(result);
-                Set<String> files = new LinkedHashSet<>(uris);
+                Set<String> distinct = new LinkedHashSet<>(uris);
+                Set<String> files = new LinkedHashSet<>();
+                uris.forEach(u -> files.add(u.replaceAll("#.*", "")));
                 out.addProperty("count", uris.size());
+                out.addProperty("distinct", distinct.size());
                 out.addProperty("files", files.size());
                 List<String> sample = new ArrayList<>();
                 for (String u : files) {
@@ -322,14 +331,24 @@ public final class Driver {
                     }
                 }
                 out.add("sample", new GsonBuilder().create().toJsonTree(sample));
+                if (flag(check, "listAll")) {
+                    List<String> all = new ArrayList<>();
+                    uris.forEach(u -> all.add(shortUri(u)));
+                    out.add("all", new GsonBuilder().create().toJsonTree(all));
+                }
                 int min = check.has("min") ? check.get("min").getAsInt() : 1;
-                pass = uris.size() >= min;
+                int max = check.has("max") ? check.get("max").getAsInt() : Integer.MAX_VALUE;
+                pass = uris.size() >= min && uris.size() <= max && (!flag(check, "distinct") || distinct.size() == uris.size());
             }
             default -> throw new IllegalArgumentException("unknown check kind " + kind);
         }
         out.addProperty("millis", (System.nanoTime() - start) / 1_000_000);
         out.addProperty("pass", pass);
         return out;
+    }
+
+    private static boolean flag(JsonObject check, String name) {
+        return check.has(name) && check.get(name).getAsBoolean();
     }
 
     private static List<String> locations(JsonElement result) {
@@ -345,7 +364,8 @@ public final class Driver {
             JsonObject location = e.getAsJsonObject();
             String uri = location.has("uri") ? location.get("uri").getAsString() : location.get("targetUri").getAsString();
             JsonObject range = location.has("range") ? location.getAsJsonObject("range") : location.getAsJsonObject("targetRange");
-            out.add(uri + "#" + (range.getAsJsonObject("start").get("line").getAsInt() + 1));
+            JsonObject start = range.getAsJsonObject("start");
+            out.add(uri + "#" + (start.get("line").getAsInt() + 1) + ":" + (start.get("character").getAsInt() + 1));
         }
         return out;
     }

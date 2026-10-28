@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,7 @@ final class ScalaClassFolder {
      */
     static List<Folder> mirror(Path classes, Path mirrorRoot, List<Path> sourceRoots) throws IOException {
         Map<String, Set<Path>> wanted = new TreeMap<>();
+        ScalaFilesByName byName = new ScalaFilesByName(sourceRoots);
         List<Path> files;
         try (Stream<Path> walk = Files.walk(classes)) {
             files = walk.filter(p -> p.toString().endsWith(".class")).toList();
@@ -62,6 +64,14 @@ final class ScalaClassFolder {
                     break;
                 }
             }
+            if (group.equals("other")) {
+                // Scala does not tie a file's folder to its package: find the file by name, when
+                // exactly one root has a file of that name.
+                int only = byName.rootOf(source);
+                if (only >= 0) {
+                    group = Integer.toString(only);
+                }
+            }
             wanted.computeIfAbsent(group, g -> new HashSet<>()).add(relative);
             link(file, mirrorRoot.resolve(group).resolve(relative.toString()));
         }
@@ -72,6 +82,35 @@ final class ScalaClassFolder {
             out.add(new Folder(mirrorRoot.resolve(e.getKey()), sourceDir, e.getValue().size()));
         }
         return out;
+    }
+
+    /** The roots that hold a {@code .scala} file of a given name, read once, when first asked. */
+    private static final class ScalaFilesByName {
+        private final List<Path> roots;
+        private Map<String, Set<Integer>> index;
+
+        ScalaFilesByName(List<Path> roots) {
+            this.roots = roots;
+        }
+
+        /** The one root holding a file of this name, or -1 for none or several. */
+        int rootOf(String fileName) throws IOException {
+            if (index == null) {
+                index = new HashMap<>();
+                for (int i = 0; i < roots.size(); i++) {
+                    if (!Files.isDirectory(roots.get(i))) {
+                        continue;
+                    }
+                    int root = i;
+                    try (Stream<Path> walk = Files.walk(roots.get(i))) {
+                        walk.filter(p -> p.toString().endsWith(".scala"))
+                            .forEach(p -> index.computeIfAbsent(p.getFileName().toString(), k -> new HashSet<>()).add(root));
+                    }
+                }
+            }
+            Set<Integer> found = index.get(fileName);
+            return found != null && found.size() == 1 ? found.iterator().next() : -1;
+        }
     }
 
     private static void link(Path file, Path target) throws IOException {

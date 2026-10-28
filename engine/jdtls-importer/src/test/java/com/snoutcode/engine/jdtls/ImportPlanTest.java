@@ -171,6 +171,96 @@ class ImportPlanTest {
         assertTrue(plan.projects.isEmpty());
     }
 
+    /**
+     * Two independent builds that both compile {@code core/src/main/java}, which belongs to
+     * neither, each through a different Gradle build: the folder gets a project of its own.
+     */
+    private JsonObject twoBuildsSharingAFolder() throws IOException {
+        for (String d : List.of("one/src/main/java", "two/src/main/java", "core/src/main/java", "bridge/one-core", "bridge/two-core",
+            "bridge/one-own")) {
+            Files.createDirectories(dir.resolve(d));
+        }
+        for (String f : List.of("repo/lib-1.0.jar", "repo/lib-1.2.jar", "repo/only-two.jar", "repo/test-only.jar")) {
+            Files.writeString(dir.resolve(f), "");
+        }
+        String json = """
+            { "modelVersion": 2, "rootDir": "%1$s", "gradleBuilds": [
+              { "id": "one", "status": "synced", "rootDir": "%1$s/one", "gradleJavaHome": "/jdk/17", "builds": [
+                { "name": "one", "kind": "root", "rootDir": "%1$s/one", "projects": [
+                  { "path": ":", "name": "one", "projectDir": "%1$s/one",
+                    "java": { "sourceCompatibility": "11" },
+                    "sourceSets": [ { "name": "main",
+                      "javaSourceDirs": ["%1$s/one/src/main/java", "%1$s/one/../core/src/main/java"], "roots": [],
+                      "scalaBridge": { "folders": [
+                        { "classesDir": "%1$s/bridge/one-own", "sourceDir": "%1$s/one/src/main/java" },
+                        { "classesDir": "%1$s/bridge/one-core", "sourceDir": "%1$s/core/src/main/java" } ] },
+                      "compileClasspath": [
+                        { "kind": "module", "group": "g", "name": "lib", "version": "1.0", "file": "%1$s/repo/lib-1.0.jar" },
+                        { "kind": "project", "build": ":", "path": ":", "files": [] } ] } ] } ] } ] },
+              { "id": "two", "status": "synced", "rootDir": "%1$s/two", "gradleJavaHome": "/jdk/21", "builds": [
+                { "name": "two", "kind": "root", "rootDir": "%1$s/two", "projects": [
+                  { "path": ":", "name": "two", "projectDir": "%1$s/two",
+                    "java": { "sourceCompatibility": "21" },
+                    "sourceSets": [ { "name": "main",
+                      "javaSourceDirs": ["%1$s/two/src/main/java", "%1$s/core/src/main/java"], "roots": [],
+                      "scalaBridge": { "folders": [
+                        { "classesDir": "%1$s/bridge/two-core", "sourceDir": "%1$s/core/src/main/java" } ] },
+                      "compileClasspath": [
+                        { "kind": "module", "group": "g", "name": "lib", "version": "1.2", "file": "%1$s/repo/lib-1.2.jar" },
+                        { "kind": "file", "file": "%1$s/repo/only-two.jar" } ] },
+                      { "name": "test", "javaSourceDirs": [], "roots": [],
+                        "compileClasspath": [ { "kind": "file", "file": "%1$s/repo/test-only.jar" } ] } ] } ] } ] },
+              { "id": "old", "status": "failed", "rootDir": "%1$s/old", "builds": [], "error": "boom" }
+            ] }""".formatted(p(""));
+        return JsonParser.parseString(json).getAsJsonObject();
+    }
+
+    @Test
+    void givesASharedFolderOneProjectThatItsUsersDependOn() throws IOException {
+        ImportPlan plan = ImportPlan.from(twoBuildsSharingAFolder());
+        assertEquals(List.of("one", "two", "core"), plan.projects.stream().map(p -> p.name).toList());
+        ImportPlan.Project core = project(plan, "core");
+        assertEquals(List.of("src-main-java"), core.sources.stream().map(s -> s.link).toList());
+        assertEquals(dir.resolve("core/src/main/java").toFile(), core.sources.get(0).dir);
+        for (String user : List.of("one", "two")) {
+            ImportPlan.Project p = project(plan, user);
+            assertEquals(List.of("src-main-java"), p.sources.stream().map(s -> s.link).toList(), user + " drops the shared folder");
+            assertTrue(p.dependencies.stream().anyMatch(d -> "core".equals(d.project) && !d.test), user + " depends on core");
+            assertTrue(p.dependencies.stream().noneMatch(d -> d.file != null && d.file.getName().endsWith("-core")),
+                user + " drops its Scala classes of the shared folder");
+        }
+        assertTrue(project(plan, "one").dependencies.stream().anyMatch(d -> d.file != null && d.file.getName().equals("one-own")),
+            "a user keeps the Scala classes of its own folders");
+
+        List<String> deps = core.dependencies.stream().map(d -> d.project != null ? "project " + d.project
+            : d.file.getName() + (d.exported ? " exported" : "") + (d.test ? " test" : "")).toList();
+        assertEquals(List.of("one-core exported", "lib-1.2.jar", "only-two.jar", "test-only.jar test"), deps,
+            "the union of the users' libraries, the newest version of each, and one set of Scala classes");
+        assertEquals("21", core.java.source, "the newest language level of its users");
+        assertEquals("/jdk/21", core.java.javaHome);
+        assertTrue(plan.projectDirs.contains(dir.resolve("old").toFile()), "a failed build is claimed too");
+    }
+
+    @Test
+    void aFolderInsideAProjectThatCompilesItBelongsToThatProject() {
+        // app compiles lib's folder too; lib owns it, and app depends on lib (as it already did).
+        JsonObject model = model();
+        JsonObject app = model.getAsJsonArray("builds").get(0).getAsJsonObject().getAsJsonArray("projects").get(1).getAsJsonObject();
+        app.getAsJsonArray("sourceSets").get(1).getAsJsonObject().getAsJsonArray("javaSourceDirs").add(p("demo/lib/src/main/java"));
+        ImportPlan plan = ImportPlan.from(model);
+        assertEquals(List.of("app", "lib", "tools"), plan.projects.stream().map(x -> x.name).toList());
+        assertTrue(project(plan, "app").sources.stream().noneMatch(s -> s.dir.toString().endsWith("lib/src/main/java")));
+        assertEquals(1, project(plan, "app").dependencies.stream().filter(d -> "lib".equals(d.project)).count());
+    }
+
+    @Test
+    void comparesVersionsPartByPart() {
+        assertTrue(ImportPlan.compareVersions("2.10", "2.9") > 0);
+        assertTrue(ImportPlan.compareVersions("1.0.1", "1.0") > 0);
+        assertTrue(ImportPlan.compareVersions("1.0", "1.0-rc1") > 0);
+        assertEquals(0, ImportPlan.compareVersions("3.1.1", "3.1.1"));
+    }
+
     @Test
     void relatesRootFoldersBothWays() {
         File a = root.toFile();

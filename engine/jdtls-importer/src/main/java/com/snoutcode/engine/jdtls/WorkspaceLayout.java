@@ -16,6 +16,7 @@ import org.eclipse.jdt.core.IClasspathAttribute;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
 
 import java.io.File;
 import java.net.URI;
@@ -39,6 +40,9 @@ final class WorkspaceLayout {
     /** Output folders, {@code bin/<sourceSet>}, inside the workspace project. */
     static final String OUTPUT_FOLDER = "bin";
 
+    /** JDT's hidden project that links class folders outside the workspace. */
+    private static final String EXTERNAL_FOLDERS_PROJECT = ".org.eclipse.jdt.core.external.folders";
+
     /** The Gradle root directory a project was imported from, to tell stale projects apart. */
     static final QualifiedName ROOT_DIR = new QualifiedName(SnoutNature.BUNDLE_ID, "rootDir");
 
@@ -48,7 +52,7 @@ final class WorkspaceLayout {
     static void apply(ImportPlan plan, IProgressMonitor monitor) throws CoreException {
         IWorkspace workspace = ResourcesPlugin.getWorkspace();
         IWorkspaceRoot root = workspace.getRoot();
-        SubMonitor progress = SubMonitor.convert(monitor, "Importing " + plan.rootDir.getName(), plan.projects.size() * 10 + 1);
+        SubMonitor progress = SubMonitor.convert(monitor, "Importing " + plan.rootDir.getName(), plan.projects.size() * 10 + 2);
 
         Set<String> wanted = new LinkedHashSet<>();
         for (ImportPlan.Project spec : plan.projects) {
@@ -69,6 +73,25 @@ final class WorkspaceLayout {
         }
         for (ImportPlan.Project spec : plan.projects) {
             configure(workspace, plan, spec, progress.split(7));
+        }
+        refreshExternalFolders(root, progress.split(1));
+    }
+
+    /**
+     * JDT reaches class folders outside the workspace (the Scala bridge's) through links in a
+     * hidden project, and reads them through the resource tree, which does not see files that
+     * appeared since the last session: a Scala recompile adds classes to a folder JDT already
+     * knows. Refreshing the links makes JDT see the folders as they are now.
+     */
+    private static void refreshExternalFolders(IWorkspaceRoot root, IProgressMonitor monitor) {
+        IProject external = root.getProject(EXTERNAL_FOLDERS_PROJECT);
+        if (!external.exists()) {
+            return;
+        }
+        try {
+            external.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+        } catch (CoreException e) {
+            JavaLanguageServerPlugin.logException("SnoutCode: could not refresh the external class folders", e);
         }
     }
 

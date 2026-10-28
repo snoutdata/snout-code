@@ -1,0 +1,9 @@
+// Compiles the shared folder into itself through its Scala source set, Java and all.
+plugins {
+    id 'scala'
+}
+
+sourceSets.main.java.srcDirs = []
+sourceSets.main.scala.srcDirs = ['src/main/java', '../shared/src/main/java']
+
+apply from: '../shared-deps.gradle'

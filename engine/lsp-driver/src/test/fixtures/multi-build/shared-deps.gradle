@@ -1,0 +1,5 @@
+// The libraries the shared folder needs. It is not a Gradle project, so every build that
+// compiles it applies this script.
+dependencies {
+    implementation files("${rootDir}/../libs/helper.jar")
+}

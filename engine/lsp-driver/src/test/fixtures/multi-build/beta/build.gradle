@@ -1,0 +1,7 @@
+plugins {
+    id 'java'
+}
+
+sourceSets.main.java.srcDir '../shared/src/main/java'
+
+apply from: '../shared-deps.gradle'

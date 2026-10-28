@@ -2,7 +2,9 @@ package com.snoutcode.engine.cli;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import java.io.File;
 import java.io.IOException;
@@ -17,14 +19,16 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 import java.util.stream.Stream;
 
 /**
- * {@code snout-engine lsp <projectDir>}: syncs the Gradle model, compiles the Scala the Java code
- * needs, then runs jdtls with the SnoutCode importer bundle and hands it this process's stdin and
+ * {@code snout-engine lsp <folder>}: syncs the Gradle builds of the folder into one model (see
+ * {@link ProjectSync}), compiles the Scala the Java code needs, then runs jdtls with the SnoutCode importer bundle and hands it this process's stdin and
  * stdout, so the caller talks LSP to jdtls directly.
  *
  * <p>Nothing is written into the project: Gradle's build directories and project cache, the
@@ -33,13 +37,13 @@ import java.util.stream.Stream;
  *
  * <pre>
  *   build/&lt;hash&gt;/          Gradle build directories (the Scala classes)
- *   gradle/&lt;hash&gt;/         Gradle project cache (.gradle)
+ *   gradle/&lt;hash&gt;/&lt;build&gt;/ Gradle project caches (.gradle), one per build
  *   jdtls/&lt;hash&gt;/model.json   the synced model the importer reads
  *   jdtls/&lt;hash&gt;/config/  OSGi configuration
  *   jdtls/&lt;hash&gt;/workspace/  jdtls workspace data: JDT projects, indexes, output folders
  * </pre>
  *
- * where the hash identifies the project directory.
+ * where the hash identifies the folder.
  */
 final class Lsp {
     /** Options of {@code snout-engine lsp}. */
@@ -58,6 +62,8 @@ final class Lsp {
         boolean verbose;
         String maxHeap = "2G";
         final List<String> jvmArgs = new ArrayList<>();
+        final List<File> jdks = new ArrayList<>();
+        int parallel;
     }
 
     private Lsp() {
@@ -76,7 +82,8 @@ final class Lsp {
         File java = javaExecutable(options.jdtlsJavaHome);
         checkJava(java, options.jdtlsJavaHome);
 
-        Sync.Options sync = new Sync.Options();
+        ProjectSync.Options project = new ProjectSync.Options();
+        Sync.Options sync = project.sync;
         sync.projectDir = projectDir;
         sync.javaHome = options.javaHome;
         sync.gradleUserHome = options.gradleUserHome;
@@ -86,35 +93,39 @@ final class Lsp {
         sync.projectCacheDir = cache.resolve("gradle").resolve(hash).toFile();
         sync.buildRoot = cache.resolve("build").resolve(hash).toFile();
         sync.gradleOutput = options.verbose ? log : OutputStream.nullOutputStream();
+        project.jdks.addAll(options.jdks);
+        project.cacheDir = cache;
+        project.log = log;
+        if (options.parallel > 0) {
+            project.parallel = options.parallel;
+        }
 
         JsonObject model;
         // Each stage announces itself on stderr, for a client that shows progress.
         log.println("snout-engine: syncing " + projectDir);
         try {
-            model = Sync.run(sync);
-            log.println("snout-engine: synced " + projectDir + " in " + model.get("syncMillis").getAsLong() + " ms");
-            if (options.scalaBridge) {
-                if (hasScala(model)) {
-                    log.println("snout-engine: compiling Scala");
-                }
-                ScalaBridge.Result scala = ScalaBridge.compile(model, sync);
-                if (!scala.tasks.isEmpty()) {
-                    log.println("snout-engine: compiled Scala (" + String.join(" ", scala.tasks) + ") in " + scala.millis
-                        + " ms; " + scala.sourceSets + " class folder(s) for jdtls"
-                        + (scala.error == null ? "" : "; the compile failed: " + scala.error));
-                }
+            List<ProjectSync.Plan> plans = ProjectSync.plan(project);
+            model = ProjectSync.sync(project, plans);
+            // A broken build file must not cost the user the editor: a build that fails now keeps
+            // its model from the last sync that worked.
+            int stale = keepLastGood(model, modelFile);
+            if (stale > 0) {
+                log.println("snout-engine: using the last good model for " + stale + " build(s) that failed");
             }
-        } catch (RuntimeException e) {
-            // A broken build file must not cost the user the editor: keep the last good model.
+            log.println("snout-engine: " + SnoutEngine.summary(model));
+            if (options.scalaBridge) {
+                compileScala(model, plans, project.parallel, log);
+            }
+        } catch (IOException | RuntimeException e) {
             log.println("snout-engine: sync failed: " + SnoutEngine.describe(e));
             if (Files.isRegularFile(modelFile)) {
                 log.println("snout-engine: using the model from the last sync");
                 model = null;
             } else {
                 model = new JsonObject();
-                model.addProperty("modelVersion", 1);
+                model.addProperty("modelVersion", ProjectSync.MODEL_VERSION);
                 model.addProperty("rootDir", projectDir.getAbsolutePath());
-                model.add("builds", new JsonArray());
+                model.add("gradleBuilds", new JsonArray());
                 model.addProperty("syncError", SnoutEngine.describe(e));
             }
         }
@@ -164,7 +175,88 @@ final class Lsp {
         return exit;
     }
 
-    /** Whether any source set of the model has Scala sources for the bridge to compile. */
+    /**
+     * Runs the Scala bridge for every build that synced and has Scala, several builds at once,
+     * each with the JDK and caches its sync used.
+     */
+    private static void compileScala(JsonObject model, List<ProjectSync.Plan> plans, int parallel, PrintStream log)
+        throws IOException {
+        Map<String, JsonObject> entries = new HashMap<>();
+        for (JsonElement g : model.getAsJsonArray("gradleBuilds")) {
+            JsonObject entry = g.getAsJsonObject();
+            if ("synced".equals(entry.get("status").getAsString()) && hasScala(entry)) {
+                entries.put(entry.get("id").getAsString(), entry);
+            }
+        }
+        List<ProjectSync.Plan> scala = plans.stream().filter(p -> entries.containsKey(p.id())).toList();
+        if (scala.isEmpty()) {
+            return;
+        }
+        log.println("snout-engine: compiling Scala in " + scala.size() + " build(s)");
+        long start = System.nanoTime();
+        List<ScalaBridge.Result> results = ProjectSync.parallel(scala, parallel, plan -> {
+            try {
+                ScalaBridge.Result r = ScalaBridge.compile(entries.get(plan.id()), plan.options());
+                log.println("snout-engine: compiled Scala in " + plan.id() + " (" + String.join(" ", r.tasks) + ") in "
+                    + r.millis + " ms; " + r.sourceSets + " class folder(s) for jdtls"
+                    + (r.error == null ? "" : "; the compile failed: " + r.error));
+                return r;
+            } catch (IOException | RuntimeException e) {
+                ScalaBridge.Result r = new ScalaBridge.Result();
+                r.error = SnoutEngine.describe(e);
+                log.println("snout-engine: could not compile Scala in " + plan.id() + ": " + r.error);
+                return r;
+            }
+        });
+        int folders = results.stream().mapToInt(r -> r.sourceSets).sum();
+        long failed = results.stream().filter(r -> r.error != null).count();
+        log.println("snout-engine: compiled Scala in " + scala.size() + " build(s) in " + (System.nanoTime() - start) / 1_000_000
+            + " ms; " + folders + " class folder(s) for jdtls" + (failed == 0 ? "" : "; " + failed + " build(s) failed to compile"));
+    }
+
+    /**
+     * Replaces each failed build of the model with its entry from the last model written, when
+     * that sync worked, marked stale and carrying the new error. Returns how many it replaced.
+     */
+    static int keepLastGood(JsonObject model, Path lastModel) {
+        if (!Files.isRegularFile(lastModel)) {
+            return 0;
+        }
+        Map<String, JsonObject> previous = new HashMap<>();
+        try {
+            JsonObject last = JsonParser.parseString(Files.readString(lastModel)).getAsJsonObject();
+            for (JsonElement g : last.has("gradleBuilds") ? last.getAsJsonArray("gradleBuilds") : new JsonArray()) {
+                JsonObject entry = g.getAsJsonObject();
+                if (entry.has("status") && !"failed".equals(entry.get("status").getAsString()) && entry.has("rootDir")) {
+                    previous.put(entry.get("rootDir").getAsString(), entry);
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            return 0;
+        }
+        int replaced = 0;
+        JsonArray builds = model.getAsJsonArray("gradleBuilds");
+        for (int i = 0; i < builds.size(); i++) {
+            JsonObject entry = builds.get(i).getAsJsonObject();
+            JsonObject last = previous.get(entry.get("rootDir").getAsString());
+            if (!"failed".equals(entry.get("status").getAsString()) || last == null) {
+                continue;
+            }
+            JsonObject stale = last.deepCopy();
+            stale.addProperty("id", entry.get("id").getAsString());
+            stale.addProperty("status", "stale");
+            stale.add("error", entry.get("error"));
+            stale.add("reason", entry.get("reason"));
+            builds.set(i, stale);
+            replaced++;
+        }
+        if (replaced > 0) {
+            ProjectModel.assemble(model);
+        }
+        return replaced;
+    }
+
+    /** Whether any source set of a Gradle build's model has Scala sources for the bridge to compile. */
     static boolean hasScala(JsonObject model) {
         for (var b : model.getAsJsonArray("builds")) {
             for (var p : b.getAsJsonObject().getAsJsonArray("projects")) {

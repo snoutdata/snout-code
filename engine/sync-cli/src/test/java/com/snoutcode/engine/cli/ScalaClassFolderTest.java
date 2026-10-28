@@ -95,6 +95,25 @@ class ScalaClassFolderTest {
     }
 
     @Test
+    void findsAScalaFileOutsideItsPackageFolderByName() throws IOException {
+        compiledClass("Qux", "Qux.scala");
+        compiledClass("Twice", "Twice.scala");
+        Path roots0 = dir.resolve("src0");
+        Path roots1 = dir.resolve("src1");
+        // Scala lets a file declare package a.b from any folder.
+        Files.createDirectories(roots1.resolve("elsewhere"));
+        Files.writeString(roots1.resolve("elsewhere/Qux.scala"), "package a.b\nclass Qux\n");
+        Files.createDirectories(roots0.resolve("x"));
+        Files.writeString(roots0.resolve("x/Twice.scala"), "package a.b\nclass Twice\n");
+        Files.writeString(roots1.resolve("elsewhere/Twice.scala"), "package a.b\nclass Twice\n");
+
+        Path mirror = dir.resolve("mirror");
+        ScalaClassFolder.mirror(dir.resolve("classes"), mirror, List.of(roots0, roots1));
+        assertEquals(List.of("1/a/b/Qux.class", "other/a/b/Twice.class"), files(mirror),
+            "a name found in one root only goes to that root");
+    }
+
+    @Test
     void readsTheSourceFileAttribute() throws IOException {
         compiledClass("Bar", "Bar.java");
         assertEquals("Bar.java", ScalaClassFolder.sourceFile(Files.readAllBytes(dir.resolve("classes/a/b/Bar.class"))));

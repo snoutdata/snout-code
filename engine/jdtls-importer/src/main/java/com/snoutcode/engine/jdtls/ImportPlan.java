@@ -22,12 +22,15 @@ import java.util.Set;
 
 /**
  * What to create in the JDT workspace for one model written by {@code snout-engine sync}: one Java
- * project per Gradle project that has Java sources. It uses no Eclipse API, so it can be tested on
- * its own.
+ * project per Gradle project that has Java sources, across every Gradle build of the folder. It
+ * uses no Eclipse API, so it can be tested on its own.
  *
  * <p>Each Gradle project becomes one JDT project, the way Buildship maps them: the source sets
  * share it, and test source sets, and the libraries only they use, carry JDT's {@code test}
  * attribute so main code cannot see them.
+ *
+ * <p>A source folder that several Gradle projects compile is owned by one JDT project only, so
+ * that search, references and navigation see each file once (see {@link #shareDuplicateRoots}).
  */
 public final class ImportPlan {
     /** The Gradle root build directory the model describes. */
@@ -49,6 +52,11 @@ public final class ImportPlan {
         /** Libraries and project references, in Gradle's classpath order. */
         public final List<Dependency> dependencies = new ArrayList<>();
         public final JavaSettings java = new JavaSettings();
+        /**
+         * For a project made for shared source folders, the projects that compile them; empty for
+         * a project made from a Gradle project.
+         */
+        public final List<Project> sharedBy = new ArrayList<>();
     }
 
     /** A source directory, linked into the workspace project as a folder named {@link #link}. */
@@ -71,6 +79,9 @@ public final class ImportPlan {
         public boolean test;
         /** Re-exported to projects that depend on this one (the Scala class folders). */
         public boolean exported;
+        /** {@code group:name} of a module dependency, to merge classpaths by; null for a file. */
+        public String coordinates;
+        public String version;
 
         @Override
         public String toString() {
@@ -102,41 +113,55 @@ public final class ImportPlan {
     public static ImportPlan from(JsonObject model) {
         ImportPlan plan = new ImportPlan(new File(string(model, "rootDir")));
         plan.syncError = string(model, "syncError");
-        String gradleJavaHome = string(model, "gradleJavaHome");
-        JsonArray builds = array(model, "builds");
+        // Model version 2 holds many Gradle builds; version 1 was the model of one.
+        JsonArray gradleBuilds = model.has("gradleBuilds") ? array(model, "gradleBuilds") : legacy(model);
 
         // Name every project first, so classpath entries can refer to any of them.
         Map<String, Project> byBuildAndPath = new HashMap<>();
         Map<String, Project> byOutputDir = new HashMap<>();
         Map<JsonObject, Project> byModel = new LinkedHashMap<>();
+        Map<JsonObject, String> gradleBuildOf = new HashMap<>();
+        Map<JsonObject, String> javaHomeOf = new HashMap<>();
         Set<String> names = new LinkedHashSet<>();
-        for (JsonElement b : builds) {
-            JsonObject build = b.getAsJsonObject();
-            String buildName = string(build, "name");
-            for (JsonElement p : array(build, "projects")) {
-                JsonObject project = p.getAsJsonObject();
-                File projectDir = new File(string(project, "projectDir"));
-                plan.projectDirs.add(projectDir);
-                if (!hasJavaSources(project)) {
-                    continue;
-                }
-                Project out = new Project();
-                out.buildName = buildName;
-                out.gradlePath = string(project, "path");
-                out.projectDir = projectDir;
-                out.name = uniqueName(names, string(project, "name"), buildName, out.gradlePath);
-                byModel.put(project, out);
-                for (String key : buildKeys(build, buildName)) {
-                    byBuildAndPath.putIfAbsent(key + "|" + out.gradlePath, out);
-                }
-                for (JsonElement s : array(project, "sourceSets")) {
-                    JsonObject output = object(s.getAsJsonObject(), "output");
-                    for (String dir : strings(output, "classesDirs")) {
-                        byOutputDir.put(dir, out);
+        Set<String> projectDirs = new LinkedHashSet<>();
+        for (int g = 0; g < gradleBuilds.size(); g++) {
+            JsonObject gradleBuild = gradleBuilds.get(g).getAsJsonObject();
+            String gradleRoot = string(gradleBuild, "rootDir");
+            if (gradleRoot != null && projectDirs.add(normalize(new File(gradleRoot)))) {
+                plan.projectDirs.add(new File(gradleRoot)); // a failed build is claimed too
+            }
+            for (JsonElement b : array(gradleBuild, "builds")) {
+                JsonObject build = b.getAsJsonObject();
+                String buildName = string(build, "name");
+                for (JsonElement p : array(build, "projects")) {
+                    JsonObject project = p.getAsJsonObject();
+                    File projectDir = new File(string(project, "projectDir"));
+                    if (projectDirs.add(normalize(projectDir))) {
+                        plan.projectDirs.add(projectDir);
                     }
-                    String resources = string(output, "resourcesDir");
-                    if (resources != null) {
-                        byOutputDir.put(resources, out);
+                    if (!hasJavaSources(project)) {
+                        continue;
+                    }
+                    Project out = new Project();
+                    out.buildName = buildName;
+                    out.gradlePath = string(project, "path");
+                    out.projectDir = projectDir;
+                    out.name = uniqueName(names, string(project, "name"), buildName, out.gradlePath);
+                    byModel.put(project, out);
+                    gradleBuildOf.put(project, String.valueOf(g));
+                    javaHomeOf.put(project, string(gradleBuild, "gradleJavaHome"));
+                    for (String key : buildKeys(build, buildName)) {
+                        byBuildAndPath.putIfAbsent(g + "|" + key + "|" + out.gradlePath, out);
+                    }
+                    for (JsonElement s : array(project, "sourceSets")) {
+                        JsonObject output = object(s.getAsJsonObject(), "output");
+                        for (String dir : strings(output, "classesDirs")) {
+                            byOutputDir.put(dir, out);
+                        }
+                        String resources = string(output, "resourcesDir");
+                        if (resources != null) {
+                            byOutputDir.put(resources, out);
+                        }
                     }
                 }
             }
@@ -148,11 +173,292 @@ public final class ImportPlan {
             List<JsonObject> sourceSets = sourceSetsMainFirst(project);
             Set<String> testSets = testSourceSets(project);
             addSources(out, sourceSets, testSets);
-            addDependencies(out, sourceSets, testSets, byBuildAndPath, byOutputDir);
-            readJavaSettings(out, project, sourceSets, gradleJavaHome);
+            addDependencies(out, sourceSets, testSets, gradleBuildOf.get(project), byBuildAndPath, byOutputDir);
+            readJavaSettings(out, project, sourceSets, javaHomeOf.get(project));
             plan.projects.add(out);
         }
+        shareDuplicateRoots(plan, names);
         return plan;
+    }
+
+    /** A version 1 model, of one Gradle build, as the one entry of a version 2 model's builds. */
+    private static JsonArray legacy(JsonObject model) {
+        JsonObject entry = new JsonObject();
+        entry.add("rootDir", model.get("rootDir"));
+        entry.add("gradleJavaHome", model.get("gradleJavaHome"));
+        entry.add("builds", array(model, "builds"));
+        JsonArray out = new JsonArray();
+        out.add(entry);
+        return out;
+    }
+
+    // ---- source folders that several projects compile
+
+    /**
+     * Gives every source folder that more than one project compiles a single owner, because JDT
+     * cannot sensibly hold the same files in several projects: each copy is indexed, searched and
+     * compiled again, so references list every use once per copy and navigation picks one at
+     * random.
+     *
+     * <ul>
+     *   <li>When the folder lies in a project that compiles it ({@code app} compiling
+     *       {@code ../lib/src/main/java}), that project owns it.</li>
+     *   <li>Otherwise (a shared folder outside every project, like a {@code core/src/main/java}
+     *       that services compile into themselves) a project is made for the folder's tree, named
+     *       after it: {@code core}. Its classpath is the union of its users' libraries, the newest
+     *       version of each, and its JDK the newest its users compile for.</li>
+     * </ul>
+     *
+     * The other projects drop the folder and depend on the owner instead, and drop their Scala
+     * bridge folders for it: the owner exports one.
+     */
+    static void shareDuplicateRoots(ImportPlan plan, Set<String> names) {
+        Map<String, List<Project>> users = new LinkedHashMap<>();
+        for (Project p : plan.projects) {
+            for (SourceRoot r : p.sources) {
+                List<Project> list = users.computeIfAbsent(normalize(r.dir), k -> new ArrayList<>());
+                if (!list.contains(p)) {
+                    list.add(p);
+                }
+            }
+        }
+        Map<Path, Project> sharedByBase = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Project>> e : users.entrySet()) {
+            if (e.getValue().size() < 2) {
+                continue;
+            }
+            Path dir = Path.of(e.getKey());
+            Project owner = null;
+            for (Project p : plan.projects) {
+                Path projectDir = p.projectDir.toPath().toAbsolutePath().normalize();
+                if (dir.startsWith(projectDir)
+                    && (owner == null || projectDir.getNameCount() > owner.projectDir.toPath().toAbsolutePath().normalize().getNameCount())) {
+                    owner = p;
+                }
+            }
+            if (owner == null || !e.getValue().contains(owner)) {
+                Path base = sharedBase(dir);
+                Project shared = sharedByBase.computeIfAbsent(base, b -> sharedProject(b, names));
+                SourceRoot template = root(e.getValue().get(0), e.getKey());
+                SourceRoot root = new SourceRoot();
+                root.dir = new File(e.getKey());
+                root.sourceSet = template.sourceSet;
+                root.generated = template.generated;
+                root.test = e.getValue().stream().allMatch(u -> root(u, e.getKey()).test);
+                root.link = uniqueLink(links(shared), linkName(shared.projectDir, root.dir));
+                shared.sources.add(root);
+                for (Project u : e.getValue()) {
+                    if (!shared.sharedBy.contains(u)) {
+                        shared.sharedBy.add(u);
+                    }
+                }
+                owner = shared;
+            }
+            for (Project user : e.getValue()) {
+                if (user == owner) {
+                    continue;
+                }
+                SourceRoot dropped = root(user, e.getKey());
+                user.sources.remove(dropped);
+                dependOn(user, owner, dropped.test);
+            }
+        }
+        for (Project shared : sharedByBase.values()) {
+            fillSharedProject(plan, shared);
+            plan.projects.add(shared);
+        }
+        // A user's Scala bridge folder for a folder it no longer compiles duplicates the owner's.
+        for (Project p : plan.projects) {
+            Set<String> own = new LinkedHashSet<>();
+            p.sources.forEach(r -> own.add(normalize(r.dir)));
+            p.dependencies.removeIf(d -> d.exported && d.file != null && d.sources != null
+                && users.containsKey(normalize(d.sources)) && !own.contains(normalize(d.sources)));
+        }
+    }
+
+    private static Project sharedProject(Path base, Set<String> names) {
+        Project shared = new Project();
+        shared.projectDir = base.toFile();
+        shared.buildName = "shared";
+        shared.gradlePath = base.toString();
+        shared.name = uniqueName(names, base.getFileName() == null ? "shared" : base.getFileName().toString(), "shared", ":");
+        return shared;
+    }
+
+    /**
+     * The shared project's classpath and compiler settings, from its users: their libraries, the
+     * newest version of each, test-only where every user has it test-only; the projects they
+     * depend on that do not lead back to a user; the Scala bridge folders for the shared folders;
+     * and the compiler settings of the user with the newest language level.
+     */
+    private static void fillSharedProject(ImportPlan plan, Project shared) {
+        Set<String> sharedDirs = new LinkedHashSet<>();
+        shared.sources.forEach(r -> sharedDirs.add(normalize(r.dir)));
+        Map<String, Project> byName = new HashMap<>();
+        plan.projects.forEach(p -> byName.put(p.name, p));
+        Map<String, Dependency> byKey = new LinkedHashMap<>();
+        Set<String> bridged = new LinkedHashSet<>();
+        Project newest = null;
+        for (Project user : shared.sharedBy) {
+            for (Dependency d : user.dependencies) {
+                if (d.exported && d.file != null) {
+                    String source = d.sources == null ? null : normalize(d.sources);
+                    if (source != null && sharedDirs.contains(source) && bridged.add(source)) {
+                        Dependency bridge = copy(d);
+                        bridge.test = false;
+                        byKey.put("bridge:" + source, bridge);
+                    }
+                    continue;
+                }
+                if (d.project != null) {
+                    Project target = byName.get(d.project);
+                    if (target == null || target == shared || shared.sharedBy.contains(target)
+                        || reaches(target, shared.sharedBy, byName, new LinkedHashSet<>())) {
+                        continue;
+                    }
+                }
+                String key = d.project != null ? "project:" + d.project
+                    : d.coordinates != null ? "module:" + d.coordinates : "file:" + normalize(d.file);
+                Dependency existing = byKey.get(key);
+                if (existing == null) {
+                    byKey.put(key, copy(d));
+                } else {
+                    existing.test &= d.test;
+                    if (d.version != null && compareVersions(d.version, existing.version) > 0) {
+                        existing.file = d.file;
+                        existing.sources = d.sources;
+                        existing.version = d.version;
+                    } else if (existing.sources == null && d.file != null && d.file.equals(existing.file)) {
+                        existing.sources = d.sources;
+                    }
+                }
+            }
+            if (newest == null || level(user.java) > level(newest.java)) {
+                newest = user;
+            }
+        }
+        shared.dependencies.addAll(byKey.values());
+        if (newest != null) {
+            JavaSettings from = newest.java;
+            shared.java.javaHome = from.javaHome;
+            shared.java.source = from.source;
+            shared.java.target = from.target;
+            shared.java.release = from.release;
+            shared.java.encoding = from.encoding;
+            shared.java.parameters = from.parameters;
+            shared.java.preview = from.preview;
+        }
+    }
+
+    /** Whether a project depends, directly or through others, on any of the given projects. */
+    private static boolean reaches(Project from, List<Project> targets, Map<String, Project> byName, Set<String> seen) {
+        if (!seen.add(from.name)) {
+            return false;
+        }
+        for (Dependency d : from.dependencies) {
+            Project next = d.project == null ? null : byName.get(d.project);
+            if (next != null && (targets.contains(next) || reaches(next, targets, byName, seen))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void dependOn(Project user, Project owner, boolean test) {
+        for (Dependency d : user.dependencies) {
+            if (owner.name.equals(d.project)) {
+                d.test &= test;
+                return;
+            }
+        }
+        Dependency d = new Dependency();
+        d.project = owner.name;
+        d.test = test;
+        user.dependencies.add(d);
+    }
+
+    private static SourceRoot root(Project p, String normalizedDir) {
+        for (SourceRoot r : p.sources) {
+            if (normalize(r.dir).equals(normalizedDir)) {
+                return r;
+            }
+        }
+        throw new IllegalStateException(p.name + " has no source root " + normalizedDir);
+    }
+
+    private static Set<String> links(Project p) {
+        Set<String> links = new LinkedHashSet<>();
+        links.add(WorkspaceLayout.OUTPUT_FOLDER);
+        p.sources.forEach(r -> links.add(r.link.toLowerCase(Locale.ROOT)));
+        return links;
+    }
+
+    private static Dependency copy(Dependency d) {
+        Dependency c = new Dependency();
+        c.file = d.file;
+        c.sources = d.sources;
+        c.project = d.project;
+        c.test = d.test;
+        c.exported = d.exported;
+        c.coordinates = d.coordinates;
+        c.version = d.version;
+        return c;
+    }
+
+    /**
+     * The folder a shared source folder belongs to, which names its project:
+     * {@code core/src/main/java} belongs to {@code core}.
+     */
+    static Path sharedBase(Path dir) {
+        Path p = dir;
+        for (int up = 0; up < 3 && p != null; up++, p = p.getParent()) {
+            if (p.getFileName() != null && p.getFileName().toString().equals("src")) {
+                return p.getParent() != null ? p.getParent() : dir;
+            }
+        }
+        return dir;
+    }
+
+    /** A Java level as a number: {@code 1.8} is 8, {@code 17} is 17; 0 when unknown. */
+    static int level(JavaSettings java) {
+        String l = java.release != null ? java.release : java.source;
+        if (l == null) {
+            return 0;
+        }
+        String n = l.trim().replace("VERSION_", "").replace('_', '.');
+        try {
+            return n.startsWith("1.") ? Integer.parseInt(n.substring(2).split("\\.")[0]) : Integer.parseInt(n.split("\\.")[0]);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** Compares versions part by part, numbers as numbers: {@code 2.10 > 2.9}. */
+    static int compareVersions(String a, String b) {
+        if (b == null) {
+            return a == null ? 0 : 1;
+        }
+        if (a == null) {
+            return -1;
+        }
+        String[] x = a.split("[.\\-+_]");
+        String[] y = b.split("[.\\-+_]");
+        for (int i = 0; i < Math.max(x.length, y.length); i++) {
+            String p = i < x.length ? x[i] : "";
+            String q = i < y.length ? y[i] : "";
+            int c;
+            if (p.matches("\\d+") && q.matches("\\d+")) {
+                c = Long.compare(Long.parseLong(p), Long.parseLong(q));
+            } else if (p.isEmpty() || q.isEmpty()) {
+                c = p.isEmpty() ? (q.matches("\\d+") ? -1 : 1) : (p.matches("\\d+") ? 1 : -1); // 1.0 < 1.0.1, 1.0-rc < 1.0
+            } else {
+                c = p.compareTo(q);
+            }
+            if (c != 0) {
+                return c;
+            }
+        }
+        return 0;
     }
 
     // ---- sources
@@ -242,7 +548,7 @@ public final class ImportPlan {
         return name.length() == 0 ? "src" : name.toString();
     }
 
-    private static String uniqueLink(Set<String> taken, String name) {
+    static String uniqueLink(Set<String> taken, String name) {
         String candidate = name;
         for (int i = 2; taken.contains(candidate.toLowerCase(Locale.ROOT)) || candidate.startsWith("."); i++) {
             candidate = name.replaceFirst("^\\.+", "") + "-" + i;
@@ -253,7 +559,7 @@ public final class ImportPlan {
 
     // ---- classpath
 
-    private static void addDependencies(Project out, List<JsonObject> sourceSets, Set<String> testSets,
+    private static void addDependencies(Project out, List<JsonObject> sourceSets, Set<String> testSets, String gradleBuild,
                                         Map<String, Project> byBuildAndPath, Map<String, Project> byOutputDir) {
         Map<String, Dependency> byKey = new LinkedHashMap<>();
         Set<String> usedByMain = new LinkedHashSet<>();
@@ -284,7 +590,7 @@ public final class ImportPlan {
                     continue; // another source set of this same project
                 }
                 if ("project".equals(kind)) {
-                    Project target = byBuildAndPath.get(string(entry, "build") + "|" + string(entry, "path"));
+                    Project target = byBuildAndPath.get(gradleBuild + "|" + string(entry, "build") + "|" + string(entry, "path"));
                     if (target == null) {
                         target = projectOwning(strings(entry, "files"), byOutputDir);
                     }
@@ -315,7 +621,11 @@ public final class ImportPlan {
                     continue;
                 }
                 String sources = string(entry, "sources");
-                addFile(byKey, usedByMain, new File(file), sources == null ? null : new File(sources), test);
+                Dependency d = addFile(byKey, usedByMain, new File(file), sources == null ? null : new File(sources), test);
+                if (d != null && "module".equals(kind) && string(entry, "group") != null && string(entry, "name") != null) {
+                    d.coordinates = string(entry, "group") + ":" + string(entry, "name");
+                    d.version = string(entry, "version");
+                }
             }
         }
         for (Map.Entry<String, Dependency> e : byKey.entrySet()) {
@@ -324,14 +634,16 @@ public final class ImportPlan {
         }
     }
 
-    private static void addFile(Map<String, Dependency> byKey, Set<String> usedByMain, File file, File sources, boolean test) {
+    private static Dependency addFile(Map<String, Dependency> byKey, Set<String> usedByMain, File file, File sources, boolean test) {
         if (!file.exists()) {
-            return; // JDT would report a missing library as an error on the project
+            return null; // JDT would report a missing library as an error on the project
         }
         Dependency d = new Dependency();
         d.file = file;
         d.sources = sources != null && sources.exists() ? sources : null;
-        add(byKey, usedByMain, "file:" + normalize(file), d, test);
+        String key = "file:" + normalize(file);
+        add(byKey, usedByMain, key, d, test);
+        return byKey.get(key);
     }
 
     private static void add(Map<String, Dependency> byKey, Set<String> usedByMain, String key, Dependency d, boolean test) {

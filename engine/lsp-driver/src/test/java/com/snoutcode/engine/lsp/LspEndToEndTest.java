@@ -104,17 +104,24 @@ class LspEndToEndTest {
 
     @Test
     void syncsOnTheGivenJdk() throws IOException {
-        assertEquals(Path.of(gradleJavaHome()).toRealPath(), Path.of(model().get("gradleJavaHome").getAsString()).toRealPath());
+        assertEquals(Path.of(gradleJavaHome()).toRealPath(), Path.of(gradleBuild().get("gradleJavaHome").getAsString()).toRealPath());
     }
 
     @Test
     void movesBuildDirectoriesIntoTheCache() throws IOException {
         Path cache = project.getParent().getParent().resolve("cache");
-        JsonObject build = model().getAsJsonArray("builds").get(0).getAsJsonObject();
+        JsonObject build = gradleBuild().getAsJsonArray("builds").get(0).getAsJsonObject();
         for (JsonElement p : build.getAsJsonArray("projects")) {
             String buildDir = p.getAsJsonObject().get("buildDir").getAsString();
             assertTrue(Path.of(buildDir).startsWith(cache.resolve("build")), buildDir);
         }
+    }
+
+    /** The fixture's one Gradle build in the model. */
+    private JsonObject gradleBuild() throws IOException {
+        JsonArray builds = model().getAsJsonArray("gradleBuilds");
+        assertEquals(1, builds.size(), builds.toString());
+        return builds.get(0).getAsJsonObject();
     }
 
     private JsonObject model() throws IOException {
@@ -125,17 +132,17 @@ class LspEndToEndTest {
         }
     }
 
-    private static List<String> listing(Path dir) throws IOException {
+    static List<String> listing(Path dir) throws IOException {
         try (Stream<Path> files = Files.walk(dir)) {
             return files.map(p -> dir.relativize(p).toString()).sorted().toList();
         }
     }
 
-    private static String json(String s) {
+    static String json(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    private static void copy(Path from, Path to) throws IOException {
+    static void copy(Path from, Path to) throws IOException {
         try (Stream<Path> files = Files.walk(from)) {
             for (Path source : files.toList()) {
                 Path target = to.resolve(from.relativize(source).toString());
