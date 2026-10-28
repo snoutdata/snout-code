@@ -99,12 +99,15 @@ pub struct Drawing {
     /// Line width in drawing units.
     pub line_width: f32,
     pub parts: Vec<Part>,
+    /// Sparks that twinkle: centre and scale, in drawing units. A front end draws them
+    /// last, turned and shrunk by [`twinkle`] as time goes on.
+    pub sparks: Vec<(Pos2, f32)>,
     xf: [f32; 6],
 }
 
 impl Drawing {
     fn new(w: f32, h: f32, line_width: f32) -> Self {
-        Self { size: vec2(w, h), line_width, parts: Vec::new(), xf: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] }
+        Self { size: vec2(w, h), line_width, parts: Vec::new(), sparks: Vec::new(), xf: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] }
     }
 
     // ----- Building ------------------------------------------------------------------
@@ -245,6 +248,31 @@ impl Drawing {
             y - a
         );
         self.shape(&d, Fill::Ink)
+    }
+
+    /// A spark that twinkles (see [`twinkle`]).
+    fn twinkling_spark(&mut self, x: f32, y: f32, s: f32) -> &mut Self {
+        let c = self.map(pos2(x, y));
+        self.sparks.push((c, s));
+        self
+    }
+
+    /// A gear: `teeth` teeth round `(cx, cy)`, outer radius `r`, a hole in the middle.
+    fn gear(&mut self, cx: f32, cy: f32, r: f32, teeth: usize, fill: Fill) -> &mut Self {
+        let inner = r * 0.78;
+        let mut d = String::new();
+        for i in 0..teeth {
+            let a0 = i as f32 / teeth as f32 * std::f32::consts::TAU;
+            let step = std::f32::consts::TAU / teeth as f32;
+            for (k, (frac, rad)) in [(0.0, inner), (0.18, r), (0.5, r), (0.68, inner)].into_iter().enumerate() {
+                let a = a0 + step * frac;
+                let (x, y) = (cx + rad * a.cos(), cy + rad * a.sin());
+                d.push_str(&format!("{}{x} {y}", if i == 0 && k == 0 { "M" } else { "L" }));
+            }
+        }
+        d.push('Z');
+        self.path(&d, fill);
+        self.circle(cx, cy, r * 0.32, Fill::Paper)
     }
 
     /// One wing pair of the brand butterfly, on the left of the body (website `Wings`).
@@ -691,6 +719,62 @@ pub fn welcome() -> &'static Drawing {
     &D
 }
 
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) 2026 SNOUTDATA INC. All rights reserved.
+ *  Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+// Ported from Studio's art (`Illustrations.tsx` and the `ill-twinkle` keyframes in its
+// styles.css): a spark twinkles over 4.8 s, easing in and out, down to 70 % of its size and
+// a quarter turn round at the middle; every other spark runs half a period behind. Reduced
+// motion stops it (the front end passes no time then).
+
+/// How the `index`th spark of a drawing stands `secs` seconds in: its scale and its turn in
+/// degrees.
+pub fn twinkle(index: usize, secs: f32) -> (f32, f32) {
+    const PERIOD: f32 = 4.8;
+    let t = (secs + if index % 2 == 1 { PERIOD / 2.0 } else { 0.0 }).rem_euclid(PERIOD) / PERIOD;
+    // 0 → 1 → 0 over the period, eased in and out at both ends.
+    let half = if t < 0.5 { t * 2.0 } else { (1.0 - t) * 2.0 };
+    let eased = half * half * (3.0 - 2.0 * half);
+    (1.0 - 0.3 * eased, 45.0 * eased)
+}
+
+/// The four-point spark's outline at `(x, y)`, scale `s`, turned `deg` degrees: for a
+/// front end drawing a twinkling spark.
+pub fn spark_outline(x: f32, y: f32, s: f32, deg: f32) -> Vec<Pos2> {
+    let (a, b) = (7.0 * s, 1.4 * s);
+    let d = format!("M0 {}Q{b} {} {a} 0Q{b} {b} 0 {a}Q{} {b} {} 0Q{} {} 0 {}Z", -a, -b, -b, -a, -b, -b, -a);
+    let (sin, cos) = deg.to_radians().sin_cos();
+    parse_path(&d)
+        .into_iter()
+        .next()
+        .map(|(pts, _)| pts.into_iter().map(|p| pos2(x + p.x * cos - p.y * sin, y + p.x * sin + p.y * cos)).collect())
+        .unwrap_or_default()
+}
+
+/// The splash and the background tasks: SnoutCode building. A laptop with code on its
+/// screen, and the gear it turns (the green, it is what the picture is about) with a smaller
+/// one beside it, under twinkling sparks. A `0 0 240 160` spot box.
+pub fn building() -> &'static Drawing {
+    static D: LazyLock<Drawing> = LazyLock::new(|| {
+        let mut d = Drawing::new(240.0, 160.0, 2.5);
+        spot(&mut d);
+        d.rotated(-2.0, 100.0, 90.0, |d| {
+            d.rect(44.0, 50.0, 112.0, 74.0, 6.0, Fill::Paper);
+            d.path("M44 62V56Q44 50 50 50H150Q156 50 156 56V62Z", Fill::Tint);
+            d.dot(52.0, 56.0, 1.6).dot(59.0, 56.0, 1.6);
+            d.line("M56 76H92").line("M64 88H124").line("M64 100H110").line("M56 112H80");
+        });
+        d.path("M34 126H166L178 140H22Z", Fill::Paper);
+        d.line("M88 133H112");
+        d.gear(178.0, 70.0, 22.0, 9, Fill::Accent);
+        d.gear(204.0, 104.0, 14.0, 7, Fill::Tint);
+        d.twinkling_spark(36.0, 34.0, 0.8).twinkling_spark(214.0, 30.0, 0.65).twinkling_spark(130.0, 26.0, 0.5);
+        d
+    });
+    &D
+}
+
 /// The house spark on its own, `0 0 24 24`, for ornaments.
 pub fn sparkle() -> &'static Drawing {
     static D: LazyLock<Drawing> = LazyLock::new(|| {
@@ -825,11 +909,22 @@ mod tests {
     }
 
     #[test]
+    fn sparks_twinkle_half_a_period_apart() {
+        assert_eq!(twinkle(0, 0.0), (1.0, 0.0));
+        let (scale, turn) = twinkle(0, 2.4);
+        assert!((scale - 0.7).abs() < 1e-4 && (turn - 45.0).abs() < 1e-3, "{scale} {turn}");
+        assert_eq!(twinkle(1, 0.0), twinkle(0, 2.4));
+        assert_eq!(twinkle(0, 4.8), twinkle(0, 0.0));
+        assert_eq!(spark_outline(10.0, 10.0, 1.0, 0.0).first().copied(), Some(pos2(10.0, 3.0)));
+        assert_eq!(building().sparks.len(), 3);
+    }
+
+    #[test]
     fn every_drawing_builds() {
         for g in Glyph::ALL {
             assert!(!g.drawing().parts.is_empty(), "{g:?}");
         }
-        for d in [welcome(), mark(), about(), clean(), pick(), seed(), sparkle()] {
+        for d in [welcome(), mark(), about(), clean(), pick(), seed(), sparkle(), building()] {
             assert!(d.parts.iter().any(|p| !p.tris.is_empty()));
         }
     }
