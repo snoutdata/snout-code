@@ -64,12 +64,14 @@ pub enum Activity {
 pub struct SidePanel {
     pub activity: Activity,
     pub projects: AnyView,
+    /// The open repository's files, under the repository list.
+    pub files: Entity<crate::files::FileTree>,
     focus: FocusHandle,
 }
 
 impl SidePanel {
-    pub fn new(projects: AnyView, cx: &mut Context<Self>) -> Self {
-        Self { activity: Activity::Git, projects, focus: cx.focus_handle() }
+    pub fn new(projects: AnyView, files: Entity<crate::files::FileTree>, cx: &mut Context<Self>) -> Self {
+        Self { activity: Activity::Git, projects, files, focus: cx.focus_handle() }
     }
 }
 
@@ -86,7 +88,15 @@ panel!(
 impl Render for SidePanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        div().size_full().bg(p.panel).p(px(8.)).child(self.projects.clone())
+        div()
+            .size_full()
+            .bg(p.panel)
+            .p(px(8.))
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(div().flex_none().h(px(200.)).child(self.projects.clone()))
+            .child(div().flex_1().min_h_0().child(self.files.clone()))
     }
 }
 

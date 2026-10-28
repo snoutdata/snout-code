@@ -4,6 +4,7 @@ pub mod art;
 pub mod console;
 pub mod dialogs;
 pub mod editor;
+pub mod files;
 pub mod git_view;
 pub mod look;
 pub mod menus;

@@ -601,3 +601,48 @@ fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext
     assert!(layout.to_string().contains("application.yml"), "{layout}");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut TestAppContext) {
+    use gpui::Modifiers;
+    let repo = demo_repo("tree");
+    std::fs::write(repo.join(".gitignore"), "build/\n").unwrap();
+    std::fs::create_dir_all(repo.join("build")).unwrap();
+    std::fs::write(repo.join("build/out.class"), "x").unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
+    cx.run_until_parked();
+    let tree = cx.update(|_, cx| ws.read(cx).side.read(cx).files.clone());
+    let names = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            tree.update(cx, |t, _| t.rows())
+                .into_iter()
+                .map(|(e, depth)| format!("{}{}", "  ".repeat(depth), e.path.file_name().unwrap().to_string_lossy()))
+                .collect::<Vec<_>>()
+        })
+    };
+    let top = names(cx);
+    assert_eq!(top[0], "src", "folders first: {top:?}");
+    assert!(top.contains(&"status.rs".to_owned()) && top.contains(&".gitignore".to_owned()), "{top:?}");
+    assert!(!top.iter().any(|n| n == "build" || n == ".git"), "ignored and .git stay out: {top:?}");
+    // A click on a folder opens it; one on a file opens an editor tab.
+    let src = cx.debug_bounds("file-src").expect("the src row is drawn").center();
+    cx.simulate_click(src, Modifiers::none());
+    assert!(names(cx).contains(&"  main.rs".to_owned()));
+    let main = cx.debug_bounds("file-main.rs").expect("the main.rs row is drawn").center();
+    cx.simulate_click(main, Modifiers::none());
+    cx.update(|_, cx| assert!(ws.read(cx).editors().iter().any(|e| e.read(cx).path == repo.join("src/main.rs"))));
+    // A file made elsewhere shows up once the watcher reports it.
+    std::fs::write(repo.join("src/lib.rs"), "").unwrap();
+    for _ in 0..100 {
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        cx.executor().advance_clock(std::time::Duration::from_millis(200));
+        cx.run_until_parked();
+        if names(cx).contains(&"  lib.rs".to_owned()) {
+            break;
+        }
+    }
+    assert!(names(cx).contains(&"  lib.rs".to_owned()), "{:?}", names(cx));
+    let _ = model;
+    let _ = std::fs::remove_dir_all(repo);
+}

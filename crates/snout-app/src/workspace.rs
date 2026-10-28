@@ -139,7 +139,8 @@ fn restore_layout(
 impl Workspace {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
-        let side = cx.new(|cx| SidePanel::new(projects.clone().into(), cx));
+        let files = cx.new(|cx| crate::files::FileTree::new(model.clone(), cx));
+        let side = cx.new(|cx| SidePanel::new(projects.clone().into(), files, cx));
         let welcome = cx.new(|cx| WelcomePanel::new(model.clone(), cx));
         let output = cx.new(|cx| OutputPanel::new(model.clone(), cx));
         let console = crate::console::build(&model, window, cx);
