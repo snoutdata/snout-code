@@ -13,6 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 snout-remote-proto.workspace = true
+# Walking a tree as .gitignore says, finding text, and the machine's processes: the same
+# code the app uses on the Mac.
+snout-host.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 notify.workspace = true

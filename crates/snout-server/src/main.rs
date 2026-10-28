@@ -20,6 +20,7 @@
 mod daemon;
 mod fsops;
 mod handler;
+mod loginenv;
 mod procs;
 mod proxy;
 mod tcp;

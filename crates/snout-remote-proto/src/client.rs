@@ -109,13 +109,68 @@ impl Client {
         String::from_utf8(self.read(path)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
+    /// Up to `len` bytes from `offset` on.
+    pub fn read_range(&self, path: impl Into<PathBuf>, offset: u64, len: u64) -> io::Result<Vec<u8>> {
+        Ok(self.call::<()>(&Request::ReadRange { path: path.into(), offset, len }, Vec::new())?.1)
+    }
+
     /// Atomic: readers see the old contents or the new, never a part.
     pub fn write(&self, path: impl Into<PathBuf>, contents: impl Into<Vec<u8>>) -> io::Result<()> {
-        self.call::<()>(&Request::Write { path: path.into() }, contents.into()).map(|_| ())
+        self.write_mode(path, contents, None)
+    }
+
+    /// [`Self::write`], the file getting the permission bits `mode` (else the ones it had).
+    pub fn write_mode(
+        &self,
+        path: impl Into<PathBuf>,
+        contents: impl Into<Vec<u8>>,
+        mode: Option<u32>,
+    ) -> io::Result<()> {
+        self.call::<()>(&Request::Write { path: path.into(), mode }, contents.into()).map(|_| ())
+    }
+
+    /// Add `contents` to the end of `path` (made if missing).
+    pub fn append(&self, path: impl Into<PathBuf>, contents: impl Into<Vec<u8>>) -> io::Result<()> {
+        self.call::<()>(&Request::Append { path: path.into() }, contents.into()).map(|_| ())
     }
 
     pub fn create_dir_all(&self, path: impl Into<PathBuf>) -> io::Result<()> {
-        self.get(Request::CreateDirAll { path: path.into() })
+        self.create_dir_all_mode(path, None)
+    }
+
+    pub fn create_dir_all_mode(&self, path: impl Into<PathBuf>, mode: Option<u32>) -> io::Result<()> {
+        self.get(Request::CreateDirAll { path: path.into(), mode })
+    }
+
+    pub fn walk(&self, root: impl Into<PathBuf>, options: WalkOptions) -> io::Result<Vec<WalkEntry>> {
+        self.get(Request::Walk { root: root.into(), options })
+    }
+
+    pub fn find_text(
+        &self,
+        root: impl Into<PathBuf>,
+        files: Vec<String>,
+        needle: impl Into<String>,
+        limit: usize,
+    ) -> io::Result<Vec<TextHit>> {
+        self.get(Request::FindText { root: root.into(), files, needle: needle.into(), limit })
+    }
+
+    pub fn system_processes(&self, cpu: bool) -> io::Result<Vec<SystemProcess>> {
+        self.get(Request::SystemProcesses { cpu })
+    }
+
+    pub fn stop_processes(&self, targets: Vec<(u32, u64)>, grace: Duration) -> io::Result<usize> {
+        self.get(Request::StopProcesses { targets, grace_ms: grace.as_millis() as u64 })
+    }
+
+    pub fn process_alive(&self, pid: u32) -> io::Result<bool> {
+        self.get(Request::ProcessAlive { pid })
+    }
+
+    /// The login shell's environment on the server.
+    pub fn login_env(&self) -> io::Result<std::collections::BTreeMap<String, String>> {
+        self.get(Request::LoginEnv)
     }
 
     pub fn remove(&self, path: impl Into<PathBuf>, recursive: bool) -> io::Result<()> {
@@ -206,6 +261,11 @@ impl Client {
 
     pub fn resize(&self, id: ProcessId, size: PtySize) -> io::Result<()> {
         self.get(Request::Resize { id, size })
+    }
+
+    /// Whether the process exited (it is not forgotten).
+    pub fn status(&self, id: ProcessId) -> io::Result<Option<ExitStatus>> {
+        self.get(Request::Status { id })
     }
 
     pub fn release(&self, id: ProcessId) -> io::Result<()> {

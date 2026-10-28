@@ -44,7 +44,7 @@ use std::io::{self, Read, Write};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The wire protocol revision, raised on any incompatible change.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// The first frame each side sends.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

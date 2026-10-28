@@ -1,7 +1,8 @@
 //! The machine a SnoutCode workspace lives on, behind one interface: its files, a watch on
 //! them, the processes and terminals that run there, connections to its ports, and what it
 //! is (system, home, environment). [`LocalHost`] is this Mac; a remote host (a server on
-//! another machine, spoken to over SSH) implements the same [`Host`].
+//! another machine, spoken to over SSH: `snout_remote::RemoteHost`) implements the same
+//! [`Host`].
 //!
 //! The app reaches the workspace only through a [`Host`]: project files and the file tree,
 //! the editor's loads and saves, diffs, the file watcher, Git, the Java engine and its

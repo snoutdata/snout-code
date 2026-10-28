@@ -8,7 +8,7 @@ use snout_remote_proto::frame::CHUNK;
 use snout_remote_proto::{
     Channel, ExitStatus, Mux, ProcessId, ProcessInfo, PtyRequest, PtySize, Signal, SpawnRequest, Spawned, Stdio,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::Command;
@@ -272,19 +272,28 @@ impl Procs {
         self.next.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    pub fn spawn(&self, mux: &Mux, req: SpawnRequest) -> io::Result<Spawned> {
+    pub fn spawn(&self, mux: &Mux, req: SpawnRequest, base_env: &BTreeMap<String, String>) -> io::Result<Spawned> {
         let open = |id: Option<u32>| id.map(|id| mux.register_channel(id)).transpose();
         let (stdin_ch, stdout_ch, stderr_ch) =
             (open(req.stdio.stdin)?, open(req.stdio.stdout)?, open(req.stdio.stderr)?);
         let pipe = |on: bool| if on { std::process::Stdio::piped() } else { std::process::Stdio::null() };
+        let output = |on: bool, file: &Option<std::path::PathBuf>| -> io::Result<std::process::Stdio> {
+            Ok(match file {
+                Some(f) => std::fs::File::create(f)
+                    .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", f.display())))?
+                    .into(),
+                None => pipe(on),
+            })
+        };
         let mut cmd = Command::new(&req.program);
         cmd.args(&req.args)
             .stdin(pipe(stdin_ch.is_some()))
-            .stdout(pipe(stdout_ch.is_some()))
-            .stderr(pipe(stderr_ch.is_some()))
+            .stdout(output(stdout_ch.is_some(), &req.stdout_file)?)
+            .stderr(output(stderr_ch.is_some(), &req.stderr_file)?)
             .process_group(0);
-        if req.env_clear {
-            cmd.env_clear();
+        cmd.env_clear();
+        if !req.env_clear {
+            cmd.envs(base_env);
         }
         for k in &req.env_remove {
             cmd.env_remove(k);
@@ -338,7 +347,7 @@ impl Procs {
         }
     }
 
-    pub fn spawn_pty(&self, mux: &Mux, req: PtyRequest) -> io::Result<Spawned> {
+    pub fn spawn_pty(&self, mux: &Mux, req: PtyRequest, base_env: &BTreeMap<String, String>) -> io::Result<Spawned> {
         let channel = mux.register_channel(req.channel)?;
         let other = |e: anyhow::Error| io::Error::other(e.to_string());
         let pair = native_pty_system()
@@ -346,8 +355,15 @@ impl Procs {
             .map_err(other)?;
         let mut cmd = CommandBuilder::new(&req.program);
         cmd.args(&req.args);
+        cmd.env_clear();
+        for (k, v) in base_env {
+            cmd.env(k, v);
+        }
         if !req.env.iter().any(|(k, _)| k == "TERM") {
             cmd.env("TERM", "xterm-256color");
+        }
+        for k in &req.env_remove {
+            cmd.env_remove(k);
         }
         for (k, v) in &req.env {
             cmd.env(k, v);
@@ -438,6 +454,11 @@ impl Procs {
         drop(exit);
         lock(&self.table).remove(&id);
         Ok(status)
+    }
+
+    /// How it ended, if it has; it is not forgotten.
+    pub fn status(&self, id: ProcessId) -> io::Result<Option<ExitStatus>> {
+        Ok(*lock(&self.get(id)?.exit))
     }
 
     pub fn release(&self, id: ProcessId) -> io::Result<()> {

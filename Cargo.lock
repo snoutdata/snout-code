@@ -7489,6 +7489,7 @@ name = "snout-remote"
 version = "1.0.0"
 dependencies = [
  "sha2 0.10.9",
+ "snout-host",
  "snout-remote-proto",
 ]
 
@@ -7511,6 +7512,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "snout-host",
  "snout-remote",
  "snout-remote-proto",
  "tempfile",

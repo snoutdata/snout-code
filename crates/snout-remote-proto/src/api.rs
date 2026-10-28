@@ -34,11 +34,24 @@ pub enum Request {
     Info,
     /// Reply `()`, the contents as the blob.
     Read { path: PathBuf },
+    /// Up to `len` bytes from `offset` on. Reply `()`, the bytes as the blob.
+    ReadRange { path: PathBuf, offset: u64, len: u64 },
     /// Atomic: the contents (the blob) go to a temporary file in the same folder, which then
-    /// replaces `path`, keeping its permissions. Reply `()`.
-    Write { path: PathBuf },
+    /// replaces `path`, with the permission bits `mode`, else the ones it had. Reply `()`.
+    Write {
+        path: PathBuf,
+        #[serde(default)]
+        mode: Option<u32>,
+    },
+    /// Add the blob to the end of `path`, made if missing (a large upload, in pieces).
     /// Reply `()`.
-    CreateDirAll { path: PathBuf },
+    Append { path: PathBuf },
+    /// Reply `()`. The folders it makes get the permission bits `mode`, when given.
+    CreateDirAll {
+        path: PathBuf,
+        #[serde(default)]
+        mode: Option<u32>,
+    },
     /// A file, a symlink, an empty folder, or with `recursive` any folder. Reply `()`.
     Remove { path: PathBuf, recursive: bool },
     /// Reply `()`.
@@ -73,8 +86,25 @@ pub enum Request {
     Wait { id: ProcessId },
     /// Forget a process (it keeps running if it still is). Reply `()`.
     Release { id: ProcessId },
+    /// Whether the process exited, without waiting or forgetting it. Reply
+    /// `Option<ExitStatus>`.
+    Status { id: ProcessId },
     /// Reply `Vec<ProcessInfo>`.
     ListProcesses,
+    /// The entries under `root`. Reply `Vec<WalkEntry>`.
+    Walk { root: PathBuf, options: WalkOptions },
+    /// The lines of `files` (relative to `root`) holding `needle`. Reply `Vec<TextHit>`.
+    FindText { root: PathBuf, files: Vec<String>, needle: String, limit: usize },
+    /// Every process of the machine (not only the server's). Reply `Vec<SystemProcess>`.
+    SystemProcesses { cpu: bool },
+    /// Stop the processes `(pid, start time)`, killing what is left after `grace_ms`.
+    /// Reply `usize`, how many it asked.
+    StopProcesses { targets: Vec<(u32, u64)>, grace_ms: u64 },
+    /// Reply `bool`.
+    ProcessAlive { pid: u32 },
+    /// The environment a login shell of the user sets up (`PATH`, `JAVA_HOME`, …), taken
+    /// once and kept. Reply `BTreeMap<String, String>`.
+    LoginEnv,
     /// Connect to `host` (default 127.0.0.1) and `port` from the server, and carry the
     /// connection's bytes on `channel`. Reply `()`.
     ConnectTcp { host: Option<String>, port: u16, channel: ChannelId },
@@ -101,6 +131,12 @@ pub struct SpawnRequest {
     pub env_clear: bool,
     pub cwd: Option<PathBuf>,
     pub stdio: Stdio,
+    /// stdout to this file (made empty first) instead of a channel.
+    #[serde(default)]
+    pub stdout_file: Option<PathBuf>,
+    /// stderr to this file (made empty first) instead of a channel.
+    #[serde(default)]
+    pub stderr_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +144,8 @@ pub struct PtyRequest {
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    #[serde(default)]
+    pub env_remove: Vec<String>,
     pub cwd: Option<PathBuf>,
     pub size: PtySize,
     /// Carries the terminal's output from the server and its input to it.
@@ -183,6 +221,46 @@ pub struct HostInfo {
     pub env: BTreeMap<String, String>,
     pub server_version: String,
     pub server_pid: u32,
+    /// The server's executable.
+    #[serde(default)]
+    pub exe: Option<PathBuf>,
+}
+
+/// How [`Request::Walk`] goes through a tree (as `snout_host::WalkOptions`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalkOptions {
+    pub max_depth: Option<usize>,
+    pub hidden: bool,
+    pub gitignore: bool,
+    pub skip: Vec<String>,
+    pub files_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalkEntry {
+    pub path: PathBuf,
+    pub depth: usize,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TextHit {
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    pub text: String,
+}
+
+/// A process of the machine, as [`Request::SystemProcesses`] lists it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SystemProcess {
+    pub pid: u32,
+    pub parent: Option<u32>,
+    pub name: String,
+    pub cmd: Vec<String>,
+    pub memory: u64,
+    pub cpu: f32,
+    pub start: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

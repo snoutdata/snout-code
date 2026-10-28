@@ -9,4 +9,5 @@ repository.workspace = true
 
 [dependencies]
 snout-remote-proto.workspace = true
+snout-host.workspace = true
 sha2.workspace = true

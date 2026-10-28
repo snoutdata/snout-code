@@ -21,7 +21,7 @@ fn kind_of(t: fs::FileType) -> FileKind {
 
 /// Write `data` to a temporary file beside `path`, then rename it over `path`, keeping the
 /// permissions `path` had. A symlink is followed: its target gets the new contents.
-pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
+pub fn write_atomic(path: &Path, data: &[u8], mode: Option<u32>) -> io::Result<()> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let target = match fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_symlink() => fs::canonicalize(path)?,
@@ -42,8 +42,10 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
     let result = (|| {
         let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(data)?;
-        if let Some(m) = &existing {
-            f.set_permissions(m.permissions())?;
+        match (mode, &existing) {
+            (Some(mode), _) => f.set_permissions(fs::Permissions::from_mode(mode))?,
+            (None, Some(m)) => f.set_permissions(m.permissions())?,
+            (None, None) => {}
         }
         f.sync_all()?;
         fs::rename(&tmp, &target)
@@ -52,6 +54,11 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+pub fn append(path: &Path, data: &[u8]) -> io::Result<()> {
+    let mut f = fs::OpenOptions::new().append(true).create(true).open(path)?;
+    f.write_all(data)
 }
 
 pub fn remove(path: &Path, recursive: bool) -> io::Result<()> {
@@ -144,6 +151,7 @@ pub fn info() -> HostInfo {
         env: std::env::vars().collect(),
         server_version: snout_remote_proto::VERSION.into(),
         server_pid: std::process::id(),
+        exe: std::env::current_exe().ok(),
     }
 }
 
@@ -155,20 +163,20 @@ mod tests {
     fn atomic_writes_replace_and_keep_permissions() {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("a.txt");
-        write_atomic(&f, b"one").unwrap();
+        write_atomic(&f, b"one", None).unwrap();
         fs::set_permissions(&f, fs::Permissions::from_mode(0o741)).unwrap();
-        write_atomic(&f, b"two").unwrap();
+        write_atomic(&f, b"two", None).unwrap();
         assert_eq!(fs::read(&f).unwrap(), b"two");
         assert_eq!(fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o741);
         // Through a symlink: the target changes, the link stays.
         let link = dir.path().join("link");
         std::os::unix::fs::symlink(&f, &link).unwrap();
-        write_atomic(&link, b"three").unwrap();
+        write_atomic(&link, b"three", None).unwrap();
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
         assert_eq!(fs::read(&f).unwrap(), b"three");
         // Nothing left behind.
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
-        assert_eq!(write_atomic(dir.path(), b"x").unwrap_err().kind(), io::ErrorKind::IsADirectory);
+        assert_eq!(write_atomic(dir.path(), b"x", None).unwrap_err().kind(), io::ErrorKind::IsADirectory);
     }
 
     #[test]

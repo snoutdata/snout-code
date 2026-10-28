@@ -5,6 +5,7 @@ use crate::handler::ServerHandler;
 use crate::procs::Procs;
 use crate::proxy::socket_path;
 use snout_remote_proto::{Handler, Mux, Role, server_handshake};
+use std::collections::BTreeMap;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -16,6 +17,10 @@ use std::time::{Duration, Instant};
 
 pub struct Daemon {
     pub procs: Procs,
+    /// This machine, for the requests the app's own host code answers.
+    pub local: Arc<snout_host::LocalHost>,
+    /// The login shell's environment, read on first use.
+    login_env: OnceLock<BTreeMap<String, String>>,
     dir: PathBuf,
     idle: Duration,
     /// Connected clients, and when the count last changed.
@@ -73,6 +78,8 @@ pub fn run(opts: &Options) -> io::Result<()> {
     ));
     let daemon = Arc::new(Daemon {
         procs: Procs::default(),
+        local: Arc::new(snout_host::LocalHost::new()),
+        login_env: OnceLock::new(),
         dir: opts.dir.clone(),
         idle: opts.idle,
         clients: Mutex::new((0, Instant::now())),
@@ -134,6 +141,17 @@ fn catch_signals() -> io::Result<std::fs::File> {
 }
 
 impl Daemon {
+    /// The environment processes start with: the login shell's.
+    pub fn login_env(&self) -> BTreeMap<String, String> {
+        self.login_env
+            .get_or_init(|| {
+                let env = crate::loginenv::read();
+                log(format!("the login environment has {} variables", env.len()));
+                env
+            })
+            .clone()
+    }
+
     fn wait_for_signal(self: Arc<Self>, mut pipe: std::fs::File) {
         use std::io::Read;
         let mut sig = [0u8; 1];
@@ -161,7 +179,7 @@ impl Daemon {
             *c = (c.0 + 1, Instant::now());
             log(format!("a client connected ({} now)", c.0));
         }
-        let handler: Arc<dyn Handler> = Arc::new(ServerHandler { daemon: self.clone() });
+        let handler: Arc<dyn Handler> = Arc::new(ServerHandler { daemon: self.clone(), local: self.local.clone() });
         let closer = stream.try_clone()?;
         let mux = Mux::start(r, w, Role::Server, Some(handler), move || {
             let _ = closer.shutdown(std::net::Shutdown::Both);

@@ -15,8 +15,10 @@
 //! [`RemoteSession::client`] reconnects, [`Client::list_processes`] shows them and
 //! [`Client::attach`] / [`Client::attach_pty`] take up their streams again.
 
+mod host;
 mod ssh;
 
+pub use host::{Connector, RemoteHost, Status};
 pub use snout_remote_proto as proto;
 pub use snout_remote_proto::Client;
 pub use ssh::{Installed, SshTarget, connect, install, platform_binary};
@@ -99,24 +101,28 @@ impl RemoteSession {
         Ok(c)
     }
 
+    /// One attempt: connect to the installed server, installing it again if it is gone
+    /// from the host (a wiped home).
+    fn connect_once(&self) -> io::Result<Client> {
+        let installed = self.installed();
+        connect(&self.target, &installed).or_else(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                let again = install(&self.target, &self.binaries)?;
+                *self.installed.lock().unwrap() = again.clone();
+                connect(&self.target, &again)
+            } else {
+                Err(e)
+            }
+        })
+    }
+
     fn reconnect_locked(&self) -> io::Result<Client> {
         let start = Instant::now();
         let mut delay = self.backoff.first;
         // A shared ssh connection may be hanging on to a dead link: start afresh.
         self.target.close_master();
         loop {
-            let installed = self.installed();
-            let attempt = connect(&self.target, &installed).or_else(|e| {
-                // The server may be gone from the host (a wiped home): install it again.
-                if e.kind() == io::ErrorKind::NotFound {
-                    let again = install(&self.target, &self.binaries)?;
-                    *self.installed.lock().unwrap() = again.clone();
-                    connect(&self.target, &again)
-                } else {
-                    Err(e)
-                }
-            });
-            match attempt {
+            match self.connect_once() {
                 Ok(c) => return Ok(c),
                 Err(e) if start.elapsed() + delay > self.backoff.give_up_after => return Err(e),
                 Err(_) => {
@@ -126,5 +132,19 @@ impl RemoteSession {
                 }
             }
         }
+    }
+}
+
+impl Connector for RemoteSession {
+    fn connect(&self) -> io::Result<Client> {
+        self.connect_once()
+    }
+
+    fn reset(&self) {
+        self.target.close_master();
+    }
+
+    fn name(&self) -> String {
+        self.target.host.clone()
     }
 }
