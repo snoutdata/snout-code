@@ -1,0 +1,22 @@
+[package]
+name = "snout-host"
+description = "The machine a SnoutCode workspace lives on: its files, processes, terminals and watchers, behind one interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The local host's file watcher.
+notify = "8"
+# Walking a tree the way `.gitignore` says, and finding text in files.
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+# Terminals.
+portable-pty.workspace = true
+# The processes of the machine (the Processes window), and stopping them.
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+libc = "0.2"

@@ -7462,6 +7462,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "snout-host"
+version = "1.0.0"
+dependencies = [
+ "grep-matcher",
+ "grep-regex",
+ "grep-searcher",
+ "ignore",
+ "libc",
+ "notify",
+ "portable-pty",
+ "sysinfo",
+]
+
+[[package]]
 name = "snout-lang"
 version = "1.0.0"
 dependencies = [
