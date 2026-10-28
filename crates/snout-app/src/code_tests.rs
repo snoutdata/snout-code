@@ -652,3 +652,119 @@ fn a_command_line_path_may_name_a_line_and_column() {
     assert_eq!(split_line_suffix("/a/B.java:12:5"), Some(("/a/B.java".into(), (11, 4))));
     assert_eq!(split_line_suffix("/a/B.java"), None);
 }
+
+/// Providers that count the editor's questions: a hover answers after `HOVER_TAKES`, as
+/// a busy server does; a definition at once, in another file.
+struct Probe {
+    hovers: std::rc::Rc<std::cell::Cell<usize>>,
+    definitions: std::rc::Rc<std::cell::Cell<usize>>,
+    cache: crate::lang::providers::HoverCache,
+}
+
+const HOVER_TAKES: std::time::Duration = std::time::Duration::from_millis(1000);
+
+impl gpui_component::input::HoverProvider for Probe {
+    fn hover(
+        &self,
+        text: &gpui_component::input::Rope,
+        offset: usize,
+        _: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) -> gpui::Task<anyhow::Result<Option<lsp_types::Hover>>> {
+        let hovers = self.hovers.clone();
+        self.cache.hover(text, offset, cx, |cx| {
+            hovers.set(hovers.get() + 1);
+            let timer = cx.background_executor().timer(HOVER_TAKES);
+            cx.background_executor().spawn(async move {
+                timer.await;
+                Ok(Some(lsp_types::Hover {
+                    contents: lsp_types::HoverContents::Scalar(lsp_types::MarkedString::String("probe".into())),
+                    range: None,
+                }))
+            })
+        })
+    }
+}
+
+impl gpui_component::input::DefinitionProvider for Probe {
+    fn definitions(
+        &self,
+        _: &gpui_component::input::Rope,
+        _: usize,
+        _: &mut gpui::Window,
+        _: &mut gpui::App,
+    ) -> gpui::Task<anyhow::Result<Vec<lsp_types::LocationLink>>> {
+        self.definitions.set(self.definitions.get() + 1);
+        let range = lsp_types::Range::default();
+        let uri: lsp_types::Uri = "file:///elsewhere/Other.java".parse().unwrap();
+        gpui::Task::ready(Ok(vec![lsp_types::LocationLink {
+            origin_selection_range: None,
+            target_uri: uri,
+            target_range: range,
+            target_selection_range: range,
+        }]))
+    }
+}
+
+/// Hover and ⌘-click driven by pointer events through the window, as a hand gives them:
+/// a click in the text first, a pointer that keeps moving a little over a word while the
+/// server is slow, and a ⌘-click while the hover shows.
+#[gpui::test]
+fn hover_and_command_click_answer_the_pointer(cx: &mut TestAppContext) {
+    use std::time::Duration;
+    let text = "class A {\n    void greet() { helper(1); }\n}\n";
+    let (repo, _, ws, editor, cx) = open_text("A.txt", text, (0, 0), cx);
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    let hovers = std::rc::Rc::new(std::cell::Cell::new(0));
+    let definitions = std::rc::Rc::new(std::cell::Cell::new(0));
+    let shown = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let probe =
+        std::rc::Rc::new(Probe { hovers: hovers.clone(), definitions: definitions.clone(), cache: Default::default() });
+    cx.update(|_, cx| {
+        let state = editor.read(cx).state.clone();
+        let shown = shown.clone();
+        state.update(cx, |s, _| {
+            let lsp = s.lsp_mut();
+            lsp.hover_provider = Some(probe.clone());
+            lsp.definition_provider = Some(probe.clone());
+            lsp.show_document = Some(std::rc::Rc::new(move |params, _, _| {
+                shown.borrow_mut().push(params.uri.to_string());
+                true
+            }));
+        });
+    });
+    cx.run_until_parked();
+    let point_at = |cx: &mut VisualTestContext, at: usize| {
+        cx.update(|_, cx| editor.read(cx).state.read(cx).range_to_bounds(&(at..at + 1)).map(|b| b.center()).unwrap())
+    };
+    let helper = text.find("helper").unwrap();
+    let a = point_at(cx, helper + 1);
+    let b = point_at(cx, helper + 3);
+    let greet = point_at(cx, text.find("greet").unwrap());
+    cx.simulate_click(greet, Modifiers::none());
+    // The pointer comes to rest on `helper` for a moment, long enough to ask, then moves
+    // within the word now and then while the answer is on its way.
+    let popover =
+        |cx: &mut VisualTestContext| cx.update(|_, cx| editor.read(cx).state.read(cx).hover_popover().is_some());
+    for (i, at) in [a, b, a, b].into_iter().enumerate() {
+        cx.simulate_mouse_move(at, None, Modifiers::none());
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        assert!(!popover(cx), "no answer yet after {i} moves");
+    }
+    cx.executor().advance_clock(HOVER_TAKES);
+    cx.run_until_parked();
+    assert!(popover(cx), "the hover shows once the server answers");
+    assert_eq!(hovers.get(), 1, "one request for the word, however often the pointer moved");
+
+    // ⌘-click on the word while the hover shows: its definition opens.
+    cx.simulate_click(b, Modifiers::command());
+    cx.run_until_parked();
+    assert_eq!(definitions.get(), 1);
+    assert_eq!(*shown.borrow(), ["file:///elsewhere/Other.java"], "the definition's file is shown");
+    // A plain click only moves the caret.
+    cx.simulate_click(a, Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(definitions.get(), 1);
+    let _ = std::fs::remove_dir_all(repo);
+}

@@ -159,6 +159,36 @@ impl EditorPanel {
         self.go_to(pos.line, pos.character, window, cx);
     }
 
+    /// ⌘-click: go to the definition of the symbol under the pointer. GPUI Kit does this
+    /// only for a symbol the pointer rested on with ⌘ held, and an open hover popover
+    /// forgets that symbol on any press outside it (in the capture phase, before the
+    /// editor sees the press). So the press is taken here, before either: the caret goes
+    /// under the pointer and the editor's own go to definition runs from there.
+    pub(super) fn command_click(
+        &mut self,
+        e: &gpui::MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if e.button != gpui::MouseButton::Left || !e.modifiers.secondary(cx) || e.modifiers.alt {
+            return false;
+        }
+        let state = self.state.clone();
+        if !state.update(cx, |s, _| s.lsp_mut().definition_provider.is_some()) {
+            return false;
+        }
+        let Some(at) = offset_at(state.read(cx), e.position) else {
+            return false;
+        };
+        state.update(cx, |s, cx| {
+            s.dismiss_lsp_overlays(cx);
+            s.set_selected_range(at..at, cx);
+            s.focus(window, cx);
+        });
+        window.dispatch_action(Box::new(gpui_component::input::GoToDefinition), cx);
+        true
+    }
+
     /// The word at the caret and the caret as a protocol position.
     fn at_caret(&self, cx: &App) -> (lsp_types::Position, String, Rope) {
         let s = self.state.read(cx);
@@ -472,6 +502,28 @@ pub fn class_file_name(uri: &Uri) -> String {
 /// Whether `path` is a class file tab's made-up path.
 pub fn is_class_file_path(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "class") && !path.is_absolute()
+}
+
+/// The text offset of the character under `point` (window coordinates), from the
+/// editor's last layout: the visible lines are searched, a character at a time.
+pub fn offset_at(state: &gpui_component::input::EditorState, point: gpui::Point<gpui::Pixels>) -> Option<usize> {
+    let rows = state.visible_row_range()?;
+    let text = state.text();
+    let map = state.display_map();
+    let first = map.display_row_to_buffer_line(rows.start);
+    let last = (map.display_row_to_buffer_line(rows.end.saturating_sub(1).max(rows.start)) + 1).min(text.lines_len());
+    for line in first..last {
+        let (start, end) = (text.line_start_offset(line), text.line_end_offset(line));
+        let mut at = start;
+        for c in text.slice(start..end).chars() {
+            let next = at + c.len_utf8();
+            if state.range_to_bounds(&(at..next)).is_some_and(|b| b.contains(&point)) {
+                return Some(at);
+            }
+            at = next;
+        }
+    }
+    None
 }
 
 fn emit(link: &DocLink, event: HubEvent, cx: &mut App) {

@@ -7383,6 +7383,7 @@ dependencies = [
  "anyhow",
  "dekobon-tree-sitter-groovy",
  "epaint_default_fonts",
+ "futures",
  "fuzzy-matcher",
  "gpui-base",
  "gpui-component",

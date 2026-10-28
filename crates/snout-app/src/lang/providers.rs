@@ -58,12 +58,51 @@ impl DocLink {
     }
 }
 
+/// What the server answers about a hover, shared by every ask for the same word.
+type HoverAnswer = futures::future::Shared<Task<std::result::Result<Option<Hover>, String>>>;
+
+/// The hover request of the word last asked about.
+#[derive(Default)]
+pub struct HoverCache(RefCell<Option<(Rope, Range<usize>, HoverAnswer)>>);
+
+impl HoverCache {
+    /// GPUI Kit asks again after every pointer move and drops the ask before it, so a
+    /// hand that keeps the pointer moving a little cancelled every request a server took
+    /// longer than that to answer. Here one request per word (and text) runs to its end
+    /// whatever drops it, and every ask for the same word waits for that one; `ask`
+    /// starts the request.
+    pub fn hover(
+        &self,
+        text: &Rope,
+        offset: usize,
+        cx: &mut App,
+        ask: impl FnOnce(&mut App) -> Task<std::result::Result<Option<Hover>, String>>,
+    ) -> Task<Result<Option<Hover>>> {
+        let word = text.word_range(offset).unwrap_or(offset..offset + 1);
+        let cached = self.0.borrow().as_ref().and_then(|(rope, range, answer)| {
+            (range == &word && rope.len() == text.len() && rope == text).then(|| answer.clone())
+        });
+        let answer = cached.unwrap_or_else(|| {
+            let answer = futures::FutureExt::shared(ask(cx));
+            *self.0.borrow_mut() = Some((text.clone(), word, answer.clone()));
+            answer
+        });
+        cx.background_executor().spawn(async move { answer.await.map_err(|e| anyhow::anyhow!(e)) })
+    }
+}
+
 /// The providers of one Java editor.
-pub struct JavaProviders(pub Rc<DocLink>);
+pub struct JavaProviders(pub Rc<DocLink>, HoverCache);
+
+impl JavaProviders {
+    pub fn new(link: Rc<DocLink>) -> Self {
+        Self(link, HoverCache::default())
+    }
+}
 
 /// Put the providers on `state`, and the hook that opens definitions in other files.
 pub fn install(link: &Rc<DocLink>, state: &Entity<EditorState>, cx: &mut App) {
-    let providers = Rc::new(JavaProviders(link.clone()));
+    let providers = Rc::new(JavaProviders::new(link.clone()));
     let open_link = link.clone();
     state.update(cx, |s, cx| {
         let lsp = s.lsp_mut();
@@ -99,19 +138,22 @@ pub fn uninstall(state: &Entity<EditorState>, cx: &mut App) {
 
 impl HoverProvider for JavaProviders {
     fn hover(&self, text: &Rope, offset: usize, _: &mut Window, cx: &mut App) -> Task<Result<Option<Hover>>> {
-        let call = self.0.ask(text, "textDocument/hover", self.0.at(text, offset), cx);
-        let rope = text.clone();
-        cx.background_executor().spawn(async move {
-            let v = call.await?;
-            if v.is_null() {
-                return Ok(None);
-            }
-            let mut hover: Hover = serde_json::from_value(v)?;
-            if hover_is_empty(&hover) {
-                return Ok(None);
-            }
-            hover.range = hover.range.map(|r| text::range_to_kit(&rope, r));
-            Ok(Some(hover))
+        let link = self.0.clone();
+        self.1.hover(text, offset, cx, |cx| {
+            let call = link.ask(text, "textDocument/hover", link.at(text, offset), cx);
+            let rope = text.clone();
+            cx.background_executor().spawn(async move {
+                let v = call.await.map_err(|e| e.to_string())?;
+                if v.is_null() {
+                    return Ok(None);
+                }
+                let mut hover: Hover = serde_json::from_value(v).map_err(|e| e.to_string())?;
+                if hover_is_empty(&hover) {
+                    return Ok(None);
+                }
+                hover.range = hover.range.map(|r| text::range_to_kit(&rope, r));
+                Ok(Some(hover))
+            })
         })
     }
 }

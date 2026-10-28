@@ -858,6 +858,12 @@ impl Render for EditorPanel {
                     .min_h_0()
                     .relative()
                     .font_family(look::MONO)
+                    .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
+                        if this.command_click(e, window, cx) {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        }
+                    }))
                     .child(Editor::new(&self.state).appearance(false).h_full().text_size(px(font_size(cx))))
                     .child(self.gutter(cx))
                     .child(self.problem_marks(cx))

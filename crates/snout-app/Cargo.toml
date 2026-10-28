@@ -19,6 +19,8 @@ lsp-types = { version = "0.97", features = ["proposed"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+# Shared futures: one hover request answers every ask for the same word.
+futures = "0.3"
 gpui.workspace = true
 gpui-component.workspace = true
 # GPUI Kit's foundation, the release GPUI Kit pins: the dock's resize-handle context, so
