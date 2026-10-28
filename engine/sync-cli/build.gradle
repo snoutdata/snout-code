@@ -48,3 +48,74 @@ tasks.named('test') {
     systemProperty 'snout.test.fixtures', file('src/test/fixtures').absolutePath
     systemProperty 'snout.test.scratch', layout.buildDirectory.dir('test-scratch').get().asFile.absolutePath
 }
+
+// The self-contained distribution the app runs: the installed CLI with jdtls and the importer
+// bundle, plus a jlink'd Java 21 runtime in runtime/, so the app needs no JDK of its own to
+// start the engine. The runtime is linked from the JDK running this build (JAVA_HOME), which
+// must be 21: jdtls 1.61 runs on Java 21.
+//
+//   engine/build/dist/
+//     runtime/           java for snout-engine and jdtls
+//     lib/ jdtls/ jdtls-plugins/
+//     bin/snout-engine   a launcher that uses runtime/
+//     dist.properties    what was built, for staleness checks
+
+def runtimeDir = rootProject.layout.buildDirectory.dir('runtime')
+
+def jlinkRuntime = tasks.register('jlinkRuntime') {
+    description = 'Links a Java 21 runtime from the JDK running the build.'
+    def javaHome = file(System.getProperty('java.home'))
+    inputs.property('javaVersion', System.getProperty('java.version'))
+    inputs.property('javaHome', javaHome.absolutePath)
+    outputs.dir(runtimeDir)
+    doLast {
+        int feature = Runtime.version().feature()
+        if (feature != 21) {
+            throw new GradleException("The engine distribution needs JDK 21 (JAVA_HOME); this build runs on Java ${feature} at ${javaHome}.")
+        }
+        File jmods = new File(javaHome, 'jmods')
+        if (!jmods.isDirectory()) {
+            throw new GradleException("${javaHome} has no jmods folder to link a runtime from; use a full JDK 21.")
+        }
+        File out = runtimeDir.get().asFile
+        out.deleteDir()
+        def jlink = new ProcessBuilder(new File(javaHome, 'bin/jlink').absolutePath,
+            '--module-path', jmods.absolutePath,
+            '--add-modules', 'ALL-MODULE-PATH',
+            '--strip-debug', '--no-man-pages', '--no-header-files', '--compress=zip-6',
+            '--output', out.absolutePath).redirectErrorStream(true).start()
+        String output = jlink.inputStream.text
+        if (jlink.waitFor() != 0) {
+            throw new GradleException("jlink failed:\n${output}")
+        }
+    }
+}
+
+tasks.register('snoutDist', Sync) {
+    description = 'Assembles the self-contained engine distribution in engine/build/dist.'
+    group = 'distribution'
+    // The CLI's own launcher scripts look for JAVA_HOME; bin/snout-engine uses the bundled runtime.
+    from(tasks.named('installDist')) {
+        exclude 'bin/**'
+    }
+    from(jlinkRuntime) {
+        into 'runtime'
+        // jlink writes the legal notices read only, which a later sync could not replace.
+        eachFile { it.permissions { user { write = true } } }
+    }
+    into rootProject.layout.buildDirectory.dir('dist')
+    doLast {
+        File dist = destinationDir
+        File bin = new File(dist, 'bin')
+        bin.mkdirs()
+        File launcher = new File(bin, 'snout-engine')
+        launcher.text = '''#!/bin/sh
+# snout-engine on the bundled Java runtime.
+here="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$here/runtime/bin/java" -cp "$here/lib/*" com.snoutcode.engine.cli.SnoutEngine "$@"
+'''
+        launcher.setExecutable(true, false)
+        new File(dist, 'dist.properties').text =
+            "version=${project.version}\njava=${System.getProperty('java.version')}\n"
+    }
+}

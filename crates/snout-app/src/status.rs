@@ -2,6 +2,7 @@
 //! the editor tab in front, the caret's line and column, how much is selected, the
 //! indentation, line endings, encoding and language, then the branch.
 
+use gpui::StatefulInteractiveElement as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
@@ -20,6 +21,10 @@ use crate::theme::palette;
 pub struct StatusBar {
     model: Entity<Model>,
     editor: Option<WeakEntity<EditorPanel>>,
+    /// The Java engine is not there: Java files get no language features.
+    pub java_missing: bool,
+    /// The note saying why is open.
+    pub java_note: bool,
     _watch: Vec<Subscription>,
 }
 
@@ -59,7 +64,8 @@ impl EditorStatus {
 impl StatusBar {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         let watch = vec![cx.observe(&model, |_, _, cx| cx.notify())];
-        Self { model, editor: None, _watch: watch }
+        let java_missing = crate::lang::java::engine_dist().is_none();
+        Self { model, editor: None, java_missing, java_note: false, _watch: watch }
     }
 
     /// Follow `editor` (the tab in front), or no editor.
@@ -86,6 +92,17 @@ impl StatusBar {
         self.editor.as_ref().and_then(|e| e.upgrade())
     }
 
+    /// Whether to say Java support is missing: the engine is not there, and a Java file is
+    /// in front or the project is a Gradle build.
+    pub fn shows_java_missing(&self, cx: &gpui::App) -> bool {
+        if !self.java_missing {
+            return false;
+        }
+        let java_file = self.editor().is_some_and(|e| crate::editor::language_for(&e.read(cx).path) == "java");
+        let gradle = self.model.read(cx).repo.as_ref().is_some_and(|r| crate::lang::java::is_gradle_root(r.root()));
+        java_file || gradle
+    }
+
     /// What it says about the editor in front, if one is.
     pub fn editor_status(&self, cx: &gpui::App) -> Option<EditorStatus> {
         self.editor().map(|e| EditorStatus::of(e.read(cx), cx))
@@ -95,6 +112,7 @@ impl StatusBar {
 impl Render for StatusBar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        let java_item = self.shows_java_missing(cx).then(|| self.java_missing_item(cx));
         let m = self.model.read(cx);
         let status = self.editor_status(cx);
         let hover_bg = p.button_hover;
@@ -128,6 +146,7 @@ impl Render for StatusBar {
                 div().text_color(p.fg).whitespace_nowrap().overflow_hidden().text_ellipsis().child(m.message.clone()),
             )
             .child(div().flex_1())
+            .children(java_item)
             .when_some(status, |d, s| {
                 d.child(item("status-position", s.position.into()))
                     .when_some(s.selection, |d, sel| d.child(item("status-selection", sel.into())))
@@ -147,5 +166,68 @@ impl Render for StatusBar {
                         .child(div().whitespace_nowrap().child(s)),
                 )
             })
+    }
+}
+
+/// Why Java support is missing, and how to get it.
+pub const JAVA_MISSING_NOTE: &str = "Java support needs SnoutCode's Java engine, which is not built. \
+Run ./snout.sh again: it builds the engine with JDK 21, and downloads one when none is installed \
+(or set SNOUT_JDK21 to a JDK 21 folder). Then restart SnoutCode.";
+
+impl StatusBar {
+    /// The quiet "Java support unavailable" item; a click opens the note saying why.
+    fn java_missing_item(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let p = palette(cx);
+        let hover_bg = p.button_hover;
+        div()
+            .relative()
+            .flex_none()
+            .child(
+                div()
+                    .id("status-java-missing")
+                    .debug_selector(|| "status-java-missing".into())
+                    .h(px(20.))
+                    .px(px(6.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.))
+                    .whitespace_nowrap()
+                    .cursor_pointer()
+                    .text_color(p.fg_dim)
+                    .hover(move |s| s.bg(hover_bg))
+                    .child("Java support unavailable")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.java_note = !this.java_note;
+                        cx.notify();
+                    })),
+            )
+            .when(self.java_note, |d| {
+                d.child(
+                    gpui::deferred(
+                        gpui::anchored().anchor(gpui::Anchor::BottomRight).child(
+                            div()
+                                .id("java-missing-note")
+                                .debug_selector(|| "java-missing-note".into())
+                                .mb(px(26.))
+                                .w(px(360.))
+                                .p(px(12.))
+                                .rounded(px(8.))
+                                .bg(p.card)
+                                .border_1()
+                                .border_color(p.border)
+                                .shadow_lg()
+                                .text_size(px(12.5))
+                                .text_color(p.fg)
+                                .child(JAVA_MISSING_NOTE)
+                                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                    this.java_note = false;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .with_priority(1),
+                )
+            })
+            .into_any_element()
     }
 }

@@ -88,10 +88,15 @@ final class Lsp {
         sync.gradleOutput = options.verbose ? log : OutputStream.nullOutputStream();
 
         JsonObject model;
+        // Each stage announces itself on stderr, for a client that shows progress.
+        log.println("snout-engine: syncing " + projectDir);
         try {
             model = Sync.run(sync);
             log.println("snout-engine: synced " + projectDir + " in " + model.get("syncMillis").getAsLong() + " ms");
             if (options.scalaBridge) {
+                if (hasScala(model)) {
+                    log.println("snout-engine: compiling Scala");
+                }
                 ScalaBridge.Result scala = ScalaBridge.compile(model, sync);
                 if (!scala.tasks.isEmpty()) {
                     log.println("snout-engine: compiled Scala (" + String.join(" ", scala.tasks) + ") in " + scala.millis
@@ -146,6 +151,7 @@ final class Lsp {
         command.add("-data");
         command.add(home.resolve("workspace").toString());
 
+        log.println("snout-engine: starting jdtls");
         Process process = new ProcessBuilder(command).inheritIO().start();
         Thread stop = new Thread(process::destroy, "stop-jdtls");
         Runtime.getRuntime().addShutdownHook(stop);
@@ -156,6 +162,25 @@ final class Lsp {
             // already shutting down
         }
         return exit;
+    }
+
+    /** Whether any source set of the model has Scala sources for the bridge to compile. */
+    static boolean hasScala(JsonObject model) {
+        for (var b : model.getAsJsonArray("builds")) {
+            for (var p : b.getAsJsonObject().getAsJsonArray("projects")) {
+                JsonObject project = p.getAsJsonObject();
+                if (!project.has("sourceSets")) {
+                    continue;
+                }
+                for (var s : project.getAsJsonArray("sourceSets")) {
+                    JsonObject sources = s.getAsJsonObject().getAsJsonObject("sources");
+                    if (sources != null && sources.has("scala")) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /** {@code ~/Library/Caches/SnoutCode} on macOS, the XDG cache or LOCALAPPDATA elsewhere. */

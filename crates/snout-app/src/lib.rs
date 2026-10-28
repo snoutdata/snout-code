@@ -8,6 +8,7 @@ pub mod editor;
 pub mod files;
 pub mod git_view;
 pub mod icons;
+pub mod lang;
 pub mod look;
 pub mod menus;
 pub mod model;

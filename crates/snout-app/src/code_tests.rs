@@ -618,3 +618,29 @@ fn close_project_closes_its_tabs_and_returns_to_the_welcome_page(cx: &mut TestAp
     assert!(cx.debug_bounds("welcome-recent-0").is_some(), "with the project in its recent list");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn without_the_java_engine_the_status_bar_says_so_quietly_and_explains(cx: &mut TestAppContext) {
+    let repo = demo_repo("no-engine");
+    std::fs::write(repo.join("build.gradle"), "plugins { id 'java' }\n").unwrap();
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    let status = cx.update(|_, cx| ws.read(cx).status.clone());
+    cx.update(|_, cx| {
+        status.update(cx, |s, cx| {
+            s.java_missing = true;
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    let item = cx.debug_bounds("status-java-missing").expect("the item shows for a Gradle project");
+    assert!(cx.debug_bounds("java-missing-note").is_none());
+    cx.simulate_click(item.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("java-missing-note").is_some(), "a click explains why and how to fix it");
+    cx.update(|_, cx| status.update(cx, |s, _| s.java_missing = false));
+    cx.update(|_, cx| status.update(cx, |_, cx| cx.notify()));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("status-java-missing").is_none(), "with the engine there is nothing to say");
+    let _ = std::fs::remove_dir_all(repo);
+}
