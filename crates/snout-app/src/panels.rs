@@ -4,7 +4,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyView, App, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, SharedString, Styled as _, Window, div, px,
+    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use gpui_component::Sizable as _;
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -14,7 +14,7 @@ use gpui_component::scroll::ScrollableElement as _;
 use crate::model::{Action, Model};
 use crate::projects::open_items;
 use crate::theme::palette;
-use crate::ui::{icon, icons};
+use snout_core::art::Glyph;
 
 /// Implements the dock traits for a panel holding a `focus` handle.
 macro_rules! panel {
@@ -110,9 +110,9 @@ impl Render for WelcomePanel {
         let p = palette(cx);
         let model = self.model.clone();
         let recent: Vec<_> = self.model.read(cx).settings.repos.iter().rev().take(8).cloned().collect();
-        let button = |id: &'static str, glyph: &'static str, label: &'static str, action: Action| {
+        let button = |id: &'static str, g: Glyph, label: &'static str, action: Action| {
             let model = model.clone();
-            Button::new(id).icon(icon(glyph)).label(label).w(px(300.)).on_click(move |_, _, cx| {
+            crate::look::glyph_button(id, g, label, true, &p).w(px(300.)).h(px(36.)).on_click(move |_, _, cx| {
                 let action = action.clone();
                 model.update(cx, |m, cx| m.handle(action, cx));
             })
@@ -132,9 +132,9 @@ impl Render for WelcomePanel {
                 div().text_color(p.fg_dim).text_size(px(15.)).child("See what changed, read the diff, commit, ship."),
             )
             .child(div().h(px(14.)))
-            .child(button("welcome-open", icons::OPEN, "Open local repository…", Action::PickFolder))
-            .child(button("welcome-find", icons::SEARCH, "Find repositories in folder…", Action::PickScanFolder))
-            .child(button("welcome-clone", icons::PULL, "Clone from GitHub…", Action::ShowClone))
+            .child(button("welcome-open", Glyph::Open, "Open local repository…", Action::PickFolder))
+            .child(button("welcome-find", Glyph::Fetch, "Find repositories in folder…", Action::PickScanFolder))
+            .child(button("welcome-clone", Glyph::Pull, "Clone from GitHub…", Action::ShowClone))
             .when(!recent.is_empty(), |d| {
                 d.child(div().h(px(18.))).child(div().text_size(px(11.)).text_color(p.fg_dim).child("RECENT")).children(
                     recent.into_iter().enumerate().map(|(i, path)| {

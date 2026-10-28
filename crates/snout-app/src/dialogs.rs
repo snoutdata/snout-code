@@ -17,9 +17,11 @@ use snout_core::groups::{dir_name, group_name_problem};
 use snout_core::{BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, branch_name_problem, repo_dir_name};
 
 use crate::menus::{SOURCE_URL, WEBSITE_URL};
+use snout_core::art::Glyph;
+
 use crate::model::{Action, Dialog, Model, Mood};
 use crate::theme::palette;
-use crate::ui::{chip, icons, state_color};
+use crate::ui::{chip, state_color};
 
 /// Put up the dialog the model is waiting with.
 pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
@@ -285,7 +287,7 @@ impl Render for DialogBody {
                 $b.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.act(action.clone(), w, cx)))
             }};
         }
-        let choice = |id: &'static str, glyph: &'static str, title: &str, detail: &str| {
+        let choice = |id: &'static str, g: Glyph, title: &str, detail: &str| {
             div()
                 .id(id)
                 .flex()
@@ -295,7 +297,7 @@ impl Render for DialogBody {
                 .border_1()
                 .border_color(p.border)
                 .hover(|s| s.bg(p.button_hover))
-                .child(crate::ui::icon(glyph))
+                .child(crate::art::glyph(g, 20., p.fg))
                 .child(
                     div()
                         .flex()
@@ -377,14 +379,14 @@ impl Render for DialogBody {
                 body.push(dim("You have uncommitted changes. What should happen to them?".into()).into_any_element());
                 let (t1, t2) = (target.clone(), target.clone());
                 body.push(
-                    choice("stash", icons::DISCARD, "Stash, check out, re-apply", "Put the changes aside, switch, then bring them back. Works even if they touch files that differ on the target.")
+                    choice("stash", Glyph::Stage, "Stash, check out, re-apply", "Put the changes aside, switch, then bring them back. Works even if they touch files that differ on the target.")
                         .on_click(cx.listener(move |this, _, w, cx| this.act(Action::Checkout(t1.clone(), LocalChanges::Stash), w, cx)))
                         .into_any_element(),
                 );
                 body.push(
                     choice(
                         "keep",
-                        icons::SWITCH,
+                        Glyph::Switch,
                         "Check out, keep changes",
                         "Carry the changes across as they are. Git refuses if they would be overwritten.",
                     )
@@ -406,7 +408,7 @@ impl Render for DialogBody {
                 body.push(
                     choice(
                         "merge",
-                        icons::COMMIT,
+                        Glyph::Commit,
                         "Merge",
                         "Join both histories with a merge commit. Nothing is rewritten.",
                     )
@@ -416,7 +418,7 @@ impl Render for DialogBody {
                 body.push(
                     choice(
                         "rebase",
-                        icons::BRANCH,
+                        Glyph::Branch,
                         "Rebase",
                         "Replay your commits on top of the remote ones, for a straight history.",
                     )
@@ -448,7 +450,7 @@ impl Render for DialogBody {
                 body.push(
                     choice(
                         "find",
-                        icons::SEARCH,
+                        Glyph::Search,
                         "Find repositories inside",
                         "Look through its subfolders and add every repository found.",
                     )
@@ -458,7 +460,7 @@ impl Render for DialogBody {
                 body.push(
                     choice(
                         "init",
-                        icons::SPARK,
+                        Glyph::Spark,
                         "Initialize a repository here",
                         "Start a fresh history in this folder with git init.",
                     )
