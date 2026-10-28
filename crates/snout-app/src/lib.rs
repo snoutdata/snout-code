@@ -12,6 +12,7 @@ pub mod files;
 pub mod git_view;
 pub mod glyphs;
 pub mod icons;
+pub mod keymap;
 pub mod lang;
 pub mod look;
 pub mod menus;
@@ -72,7 +73,7 @@ pub fn init(settings: &Settings, cx: &mut App) {
     }
     theme::set_fonts(settings, cx);
     theme::apply(settings.theme, None, cx);
-    menus::bind_keys(cx);
+    keymap::init(&settings.keymap, cx);
     editor::register_languages();
     workspace::app_actions(cx);
     cx.set_menus(menus::bar(settings, &model::recent_projects(settings)));

@@ -4,7 +4,7 @@
 //! would do something, so GPUI greys the items out otherwise; check marks follow the
 //! settings because the bar is rebuilt when they change.
 
-use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SharedString, SystemMenuType, actions};
+use gpui::{Menu, MenuItem, OsAction, SharedString, SystemMenuType, actions};
 use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 use crate::settings::{Settings, ThemeChoice};
@@ -196,82 +196,6 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
 pub const SOURCE_URL: &str = "https://github.com/snoutdata/snout-code";
 pub const ISSUES_URL: &str = "https://github.com/snoutdata/snout-code/issues";
 pub const WEBSITE_URL: &str = "https://snoutdata.com";
-
-pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-o", Open, None),
-        KeyBinding::new("cmd-j", ToggleConsole, None),
-        KeyBinding::new("cmd-r", Refresh, None),
-        KeyBinding::new("f5", Refresh, None),
-        KeyBinding::new("cmd-shift-o", Checkout, None),
-        KeyBinding::new("cmd-1", ShowProject, None),
-        KeyBinding::new("cmd-2", ShowGit, None),
-        // Outside text fields, which take these keys first: ⌘⌫ moves the selected files to
-        // the Trash, as in Finder, Esc leaves the commit view, and ↑ ↓ step through the
-        // Journal while it shows.
-        KeyBinding::new("cmd-backspace", Trash, Some("Workspace")),
-        KeyBinding::new("escape", Back, Some("Workspace")),
-        KeyBinding::new("up", PrevCommit, Some("Workspace")),
-        KeyBinding::new("down", NextCommit, Some("Workspace")),
-        KeyBinding::new("cmd-a", SelectAll, Some("Workspace")),
-        KeyBinding::new("cmd-s", crate::editor::Save, Some("EditorPanel")),
-        KeyBinding::new("cmd-p", GoToFile, None),
-        KeyBinding::new("cmd-shift-a", SearchEverywhere, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("escape", crate::search::SearchClose, Some("BranchPopup")),
-        KeyBinding::new("escape", crate::search::SearchClose, Some("Settings")),
-        KeyBinding::new("cmd-shift-f", FindInFiles, None),
-        // GPUI Kit's editor takes ⇧⌘F for replace; here it stays find in files, and
-        // replace is ⌥⌘F. ⌘F finds in the file.
-        KeyBinding::new("cmd-shift-f", FindInFiles, Some("EditorPanel > Input")),
-        KeyBinding::new("cmd-alt-f", gpui_component::input::Replace, Some("EditorPanel > Input")),
-        KeyBinding::new("cmd-l", GoToLine, None),
-        KeyBinding::new("cmd-shift-p", CommandPalette, None),
-        // Language features, in a Java editor.
-        KeyBinding::new("f12", gpui_component::input::GoToDefinition, Some("EditorPanel > Input")),
-        KeyBinding::new("shift-f12", crate::editor::FindReferences, Some("EditorPanel")),
-        KeyBinding::new("f2", crate::editor::RenameSymbol, Some("EditorPanel")),
-        KeyBinding::new("shift-alt-f", crate::editor::FormatDocument, Some("EditorPanel")),
-        KeyBinding::new("shift-alt-o", crate::editor::OrganizeImports, Some("EditorPanel")),
-        KeyBinding::new("cmd-shift-space", crate::editor::ShowSignature, Some("EditorPanel")),
-        KeyBinding::new("ctrl-space", gpui_component::input::ShowCompletions, Some("EditorPanel > Input")),
-        KeyBinding::new("escape", crate::editor::CancelRename, Some("RenameBox > Input")),
-        KeyBinding::new("cmd-t", GoToSymbol, None),
-        // In an editor ⇧⌘O lists the file's symbols; elsewhere it stays Check Out.
-        KeyBinding::new("cmd-shift-o", GoToSymbolInFile, Some("EditorPanel > Input")),
-        KeyBinding::new("cmd-shift-m", ShowProblems, None),
-        // Running and debugging.
-        KeyBinding::new("ctrl-r", RunSelected, None),
-        KeyBinding::new("ctrl-d", DebugSelected, Some("Workspace")),
-        KeyBinding::new("cmd-f2", StopRuns, None),
-        KeyBinding::new("f8", StepOver, None),
-        KeyBinding::new("f7", StepInto, None),
-        KeyBinding::new("shift-f8", StepOut, None),
-        KeyBinding::new("f9", Resume, None),
-        KeyBinding::new("cmd-\\", SplitRight, None),
-        KeyBinding::new("cmd-w", CloseTab, Some("Workspace")),
-        KeyBinding::new("cmd-=", ZoomIn, None),
-        KeyBinding::new("cmd-+", ZoomIn, None),
-        KeyBinding::new("cmd--", ZoomOut, None),
-        KeyBinding::new("cmd-0", ZoomReset, None),
-        KeyBinding::new("cmd-/", crate::editor::ToggleComment, Some("EditorPanel")),
-        KeyBinding::new("cmd-d", crate::editor::DuplicateLine, Some("EditorPanel")),
-        KeyBinding::new("alt-up", crate::editor::MoveLineUp, Some("EditorPanel > Input")),
-        KeyBinding::new("alt-down", crate::editor::MoveLineDown, Some("EditorPanel > Input")),
-        KeyBinding::new("alt-z", crate::editor::ToggleSoftWrap, Some("EditorPanel")),
-        // In the go-to box the arrows pick and Esc closes, ahead of the field's own keys.
-        KeyBinding::new("up", crate::search::SearchUp, Some("SearchBox > Input")),
-        KeyBinding::new("down", crate::search::SearchDown, Some("SearchBox > Input")),
-        KeyBinding::new("escape", crate::search::SearchClose, Some("SearchBox > Input")),
-        // A change Claude Code proposes: ⌘↩ accepts it, Esc (once the editor has nothing
-        // of its own to dismiss) rejects it.
-        KeyBinding::new("cmd-enter", crate::editor::AcceptChanges, Some("ClaudeReview")),
-        KeyBinding::new("cmd-enter", crate::editor::AcceptChanges, Some("ClaudeReview > Input")),
-        KeyBinding::new("escape", crate::editor::RejectChanges, Some("ClaudeReview")),
-        KeyBinding::new("cmd-alt-k", crate::editor::SendToClaude, Some("EditorPanel")),
-    ]);
-}
 
 /// File ▸ Open Recent: the recent projects, most recent first, then Clear Recent.
 fn recent_items(recent: &[std::path::PathBuf]) -> Vec<MenuItem> {

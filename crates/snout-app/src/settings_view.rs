@@ -99,8 +99,13 @@ pub struct SettingsView {
     jdks: Vec<Jdk>,
     /// The Gradle builds the Gradle page lists.
     builds: Vec<PathBuf>,
-    /// The keymap: each command and its keys.
-    keys: Vec<(SharedString, String)>,
+    /// The Keymap page's search box.
+    pub key_search: Entity<InputState>,
+    /// The command whose new shortcut is being pressed, and what catches the keys.
+    pub recording: Option<(String, gpui::Subscription)>,
+    /// What the last shortcut recorded took from other commands: the command it went to,
+    /// its keys, and the commands that had them.
+    pub taken: Option<(String, String, Vec<String>)>,
     focus: FocusHandle,
 }
 
@@ -117,7 +122,6 @@ impl SettingsView {
         model: Entity<Model>,
         builds: Vec<PathBuf>,
         jdks: Vec<Jdk>,
-        keys: Vec<(SharedString, String)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -147,7 +151,26 @@ impl SettingsView {
             }
         })
         .detach();
-        Self { model, draft, page: Page::Appearance, search, claude, jdks, builds, keys, focus: cx.focus_handle() }
+        let key_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search commands or shortcuts"));
+        cx.subscribe(&key_search, |_, _, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        Self {
+            model,
+            draft,
+            page: Page::Appearance,
+            search,
+            claude,
+            jdks,
+            builds,
+            key_search,
+            recording: None,
+            taken: None,
+            focus: cx.focus_handle(),
+        }
     }
 
     /// The settings differ from those in use.
@@ -170,6 +193,7 @@ impl SettingsView {
         next.fetch_minutes = d.fetch_minutes;
         next.claude_path = d.claude_path.clone();
         next.project_jdks = d.project_jdks.clone();
+        next.keymap = d.keymap.clone();
         self.draft = next.clone();
         cx.emit(SettingsEvent::Apply(Box::new(next), close));
     }
@@ -371,19 +395,7 @@ impl SettingsView {
                     ))
                     .into_any_element()
             }
-            Page::Keymap => body
-                .child(section("Shortcuts (read only for now)", &p))
-                .children(self.keys.iter().map(|(name, keys)| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .h(px(26.))
-                        .border_b_1()
-                        .border_color(mix(p.border, 0.5, p.card))
-                        .child(div().flex_1().child(name.clone()))
-                        .child(div().text_color(p.fg_dim).font_family(look::mono_font(cx)).child(keys.clone()))
-                }))
-                .into_any_element(),
+            Page::Keymap => body.child(self.keymap_page(cx)).into_any_element(),
             Page::Editor => {
                 let view = cx.entity();
                 body.child(section("Indentation", &p))
@@ -528,6 +540,243 @@ impl SettingsView {
                 )
                 .into_any_element(),
         }
+    }
+
+    /// Wait for the keys of a new shortcut for `action`; Esc stops waiting.
+    pub fn record(&mut self, action: String, cx: &mut Context<Self>) {
+        let view = cx.weak_entity();
+        let catch = cx.intercept_keystrokes(move |e, _, cx| {
+            let keystroke = e.keystroke.clone();
+            if view.update(cx, |v, cx| v.recorded(keystroke, cx)).is_ok() {
+                cx.stop_propagation();
+            }
+        });
+        self.taken = None;
+        self.recording = Some((action, catch));
+        cx.notify();
+    }
+
+    /// The keys pressed for the shortcut being recorded.
+    fn recorded(&mut self, keystroke: gpui::Keystroke, cx: &mut Context<Self>) {
+        let Some((action, _)) = self.recording.take() else { return };
+        let plain = !keystroke.modifiers.modified();
+        if plain && keystroke.key == "escape" {
+            cx.notify();
+            return;
+        }
+        let keys = keystroke.unparse(cx.platform_info().os);
+        let entries = crate::keymap::entries(&self.draft.keymap, cx);
+        let Some(entry) = entries.into_iter().find(|e| e.action == action) else { return };
+        let mut list = entry.keys.clone();
+        if !list.contains(&keys) {
+            list.push(keys.clone());
+        }
+        crate::keymap::set(&mut self.draft.keymap, &entry, list);
+        let conflicts = crate::keymap::Conflicts::new(&self.draft.keymap, cx);
+        let others = conflicts.others(&keys, entry.context.as_deref(), &action);
+        self.taken = (!others.is_empty()).then_some((action, keys, others));
+        cx.notify();
+    }
+
+    /// Take `keys` away from the commands that had them before the last recording.
+    fn take_from_others(&mut self, cx: &mut Context<Self>) {
+        let Some((_, keys, others)) = self.taken.take() else { return };
+        for entry in crate::keymap::entries(&self.draft.keymap, cx) {
+            if others.contains(&entry.action) {
+                let list: Vec<String> = entry.keys.iter().filter(|k| **k != keys).cloned().collect();
+                crate::keymap::set(&mut self.draft.keymap, &entry, list);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Keymap page: every command and its shortcuts, searchable; + records another
+    /// shortcut, × removes one, Reset brings back the defaults.
+    fn keymap_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let query = self.key_search.read(cx).value().to_string();
+        let entries = crate::keymap::entries(&self.draft.keymap, cx);
+        let conflicts = crate::keymap::Conflicts::new(&self.draft.keymap, cx);
+        let recording = self.recording.as_ref().map(|(a, _)| a.clone());
+        let hover = p.button_hover;
+        let line = mix(p.border, 0.5, p.card);
+        let mono = look::mono_font(cx);
+        let chip = |text: String, warn: bool| {
+            div()
+                .h(px(20.))
+                .px(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .rounded(px(4.))
+                .border_1()
+                .border_color(if warn { p.warn } else { p.border })
+                .bg(p.input)
+                .font_family(mono.clone())
+                .text_size(px(12.))
+                .text_color(if warn { p.warn } else { p.fg })
+                .child(text)
+        };
+        let small = |id: SharedString, text: &'static str| {
+            let sel = id.to_string();
+            div()
+                .id(id)
+                .debug_selector(move || sel.clone())
+                .h(px(20.))
+                .min_w(px(20.))
+                .px(px(4.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(4.))
+                .cursor_pointer()
+                .text_color(p.fg_dim)
+                .hover(move |s| s.bg(hover))
+                .child(text)
+        };
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (ix, entry) in entries.iter().enumerate().filter(|(_, e)| e.matches(&query, cx)) {
+            let mut keys = div().flex().flex_wrap().items_center().gap(px(4.));
+            let mut clash: Vec<String> = Vec::new();
+            for (k, key) in entry.keys.iter().enumerate() {
+                let others = conflicts.others(key, entry.context.as_deref(), &entry.action);
+                for o in &others {
+                    let name = conflicts.name(o);
+                    if !clash.contains(&name) {
+                        clash.push(name);
+                    }
+                }
+                let (action, key2) = (entry.clone(), key.clone());
+                keys = keys.child(chip(crate::keymap::display(key, cx), !others.is_empty()).child(
+                    small(format!("keymap-remove-{ix}-{k}").into(), "×").on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            let list: Vec<String> = action.keys.iter().filter(|x| **x != key2).cloned().collect();
+                            crate::keymap::set(&mut this.draft.keymap, &action, list);
+                            this.taken = None;
+                            cx.notify();
+                        },
+                    )),
+                ));
+            }
+            if recording.as_deref() == Some(entry.action.as_str()) {
+                keys = keys.child(
+                    div()
+                        .id(("keymap-recording", ix))
+                        .debug_selector(|| "keymap-recording".into())
+                        .h(px(20.))
+                        .px(px(8.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(4.))
+                        .border_1()
+                        .border_color(p.accent)
+                        .text_size(px(12.))
+                        .text_color(p.accent)
+                        .child("Press the keys, or Esc"),
+                );
+            } else if entry.keys.is_empty() {
+                keys = keys.child(div().text_size(px(12.)).text_color(p.fg_dim).child("None"));
+            }
+            let action = entry.action.clone();
+            let add = small(format!("keymap-add-{ix}").into(), "+")
+                .on_click(cx.listener(move |this, _, _, cx| this.record(action.clone(), cx)));
+            let reset = entry.changed().then(|| {
+                let action = entry.action.clone();
+                small(format!("keymap-reset-{ix}").into(), "Reset").on_click(cx.listener(move |this, _, _, cx| {
+                    this.draft.keymap.remove(&action);
+                    this.taken = None;
+                    cx.notify();
+                }))
+            });
+            let mut row = div()
+                .id(("keymap-row", ix))
+                .debug_selector(move || format!("keymap-row-{ix}"))
+                .py(px(4.))
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .border_b_1()
+                .border_color(line)
+                .child(
+                    div()
+                        .min_h(px(24.))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .when(entry.changed(), |d| d.font_weight(FontWeight::MEDIUM))
+                                .child(entry.name.clone()),
+                        )
+                        .child(keys)
+                        .child(add)
+                        .children(reset),
+                );
+            if !clash.is_empty() {
+                row = row.child(
+                    div().text_size(px(12.)).text_color(p.warn).child(format!("Also bound to {}", clash.join(", "))),
+                );
+            }
+            if let Some((taken_for, keys, others)) = &self.taken
+                && *taken_for == entry.action
+            {
+                let names: Vec<String> = others.iter().map(|o| conflicts.name(o)).collect();
+                row = row.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child(format!(
+                            "{} was the shortcut of {}. Here it now runs this command.",
+                            crate::keymap::display(keys, cx),
+                            names.join(", ")
+                        ))
+                        .child(
+                            look::small_button("keymap-take", "Remove It There", &p)
+                                .on_click(cx.listener(|this, _, _, cx| this.take_from_others(cx))),
+                        ),
+                );
+            }
+            rows.push(row.into_any_element());
+        }
+        if rows.is_empty() {
+            rows.push(div().py(px(12.)).text_color(p.fg_dim).child("No command matches.").into_any_element());
+        }
+        let any_changed = !self.draft.keymap.is_empty();
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .pt(px(10.))
+                    .pb(px(8.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(div().flex_1().child(look::field(&self.key_search, true, None, &p)))
+                    .when(any_changed, |d| {
+                        d.child(look::small_button("keymap-reset-all", "Reset All", &p).on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.draft.keymap.clear();
+                                this.taken = None;
+                                cx.notify();
+                            },
+                        )))
+                    }),
+            )
+            .child(
+                div()
+                    .pb(px(6.))
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child("+ adds a shortcut: press its keys. Changes apply with Apply or OK."),
+            )
+            .children(rows)
+            .into_any_element()
     }
 
     fn tree(&self, cx: &mut Context<Self>) -> AnyElement {

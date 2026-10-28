@@ -123,6 +123,8 @@ In the background, logs go to `$TMPDIR/snout.log`.
 
 On Windows and Linux, use Ctrl in place of ⌘.
 
+Every shortcut can be changed in Settings, under Keymap: search for a command or its keys, press + and then the new keys, or × to take a shortcut away. Keys another command already uses are shown, with a button to take them from it. The changes are kept in `settings.json` (under `keymap`) and work at once.
+
 ## How it is built
 
 ```

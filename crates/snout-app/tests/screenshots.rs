@@ -110,6 +110,8 @@ mod shots {
         Gradle,
         /// Spring, on the engine's `spring-app` fixture with the answers it recorded.
         Spring(SpringShot),
+        /// The Keymap page with Go to File moved onto Settings' keys.
+        Keymap,
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -285,6 +287,21 @@ mod shots {
                     let sheet = ws.read(cx).settings_sheet.clone().unwrap();
                     sheet.update(cx, |s, cx| {
                         s.page = page;
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::Keymap) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.open_settings(window, cx));
+                    let sheet = ws.read(cx).settings_sheet.clone().unwrap();
+                    sheet.update(cx, |s, cx| {
+                        s.page = snout_app::settings_view::Page::Keymap;
+                        s.draft.keymap.insert("snout::GoToFile".into(), vec!["cmd-p".into(), "cmd-,".into()]);
+                        s.draft.keymap.insert("snout::ToggleConsole".into(), vec![]);
+                        s.taken = Some(("snout::GoToFile".into(), "cmd-,".into(), vec!["snout::OpenSettings".into()]));
+                        s.key_search.update(cx, |i, cx| i.set_value("go", window, cx));
                         cx.notify();
                     });
                 })
@@ -1355,6 +1372,8 @@ mod shots {
         use snout_app::settings_view::Page;
         shot("settings-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Appearance)));
         shot("settings-light", ThemeChoice::Light, Activity::Project, Some(Select::Settings(Page::Editor)));
+        shot("keymap-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Keymap));
+        shot("keymap-light", ThemeChoice::Light, Activity::Project, Some(Select::Keymap));
         shot("tasks-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Tasks));
         shot("tasks-light", ThemeChoice::Light, Activity::Project, Some(Select::Tasks));
         shot("review-streaming-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(Some(0.45))));

@@ -81,6 +81,8 @@ pub struct Settings {
     /// Each recent project's editor tabs as it left them (the center of the dock layout),
     /// to open them again with the project.
     pub sessions: std::collections::BTreeMap<PathBuf, serde_json::Value>,
+    /// The shortcuts changed from the defaults (see [`crate::keymap`]).
+    pub keymap: crate::keymap::Overrides,
 }
 
 impl Default for Settings {
@@ -111,6 +113,7 @@ impl Default for Settings {
             plain_files: false,
             opened: Default::default(),
             sessions: Default::default(),
+            keymap: Default::default(),
         }
     }
 }

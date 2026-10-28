@@ -1051,16 +1051,6 @@ impl Workspace {
         if self.settings_sheet.is_some() {
             return;
         }
-        let os = cx.platform_info().os;
-        let recent = self.model.read(cx).recent_projects();
-        let keys: Vec<(gpui::SharedString, String)> = menus::commands(&recent)
-            .into_iter()
-            .filter_map(|(name, action)| {
-                let b = window.highest_precedence_binding_for_action(&*action)?;
-                let keys = b.keystrokes().iter().map(|k| k.display(os).to_string()).collect::<Vec<_>>().join(" ");
-                Some((name, keys))
-            })
-            .collect();
         let mut builds: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
         if let Some(root) = self.model.read(cx).project_root().filter(|r| crate::project_model::has_gradle(r))
             && !builds.contains(&root)
@@ -1070,7 +1060,7 @@ impl Workspace {
         builds.sort();
         let jdks = crate::lang::java::discover(&self.hub.read(cx).home);
         let model = self.model.clone();
-        let sheet = cx.new(|cx| SettingsView::new(model, builds, jdks, keys, window, cx));
+        let sheet = cx.new(|cx| SettingsView::new(model, builds, jdks, window, cx));
         cx.subscribe_in(&sheet, window, |this, _, e: &SettingsEvent, window, cx| {
             let close = match e {
                 SettingsEvent::Apply(next, close) => {
@@ -1110,6 +1100,11 @@ impl Workspace {
         ));
         let defaults = crate::editor::EditorDefaults::of(&next);
         cx.set_global(defaults);
+        if before.keymap != next.keymap {
+            crate::keymap::apply(&next.keymap, cx);
+            // The menus show the shortcuts: they are made again.
+            self.menu_checks = None;
+        }
         let wrap_changed = (before.soft_wrap, before.show_whitespace) != (next.soft_wrap, next.show_whitespace);
         for editor in self.editors(cx) {
             editor.update(cx, |e, cx| {

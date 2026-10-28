@@ -901,3 +901,43 @@ fn background_tasks_show_in_the_status_bar_and_its_popover(cx: &mut TestAppConte
     assert!(cx.debug_bounds("tasks-popover").is_some(), "a click lists them");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_keymap_page_rebinds_a_command_by_its_keys(cx: &mut TestAppContext) {
+    let repo = demo_repo("keymap");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.dispatch_action(crate::menus::OpenSettings);
+    cx.run_until_parked();
+    let click = |cx: &mut VisualTestContext, id: &str| {
+        let id: &'static str = Box::leak(id.to_owned().into_boxed_str());
+        let at = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id} is drawn")).center();
+        cx.simulate_click(at, gpui::Modifiers::none());
+        cx.run_until_parked();
+    };
+    click(cx, "settings-page-keymap");
+    let sheet = cx.update(|_, cx| ws.read(cx).settings_sheet.clone().unwrap());
+    let ix = cx.update(|_, cx| {
+        crate::keymap::entries(&Default::default(), cx).iter().position(|e| e.action == "snout::GoToFile").unwrap()
+    });
+    // + waits for keys; ⌘K is taken for Go to File, not run.
+    click(cx, &format!("keymap-add-{ix}"));
+    assert!(cx.debug_bounds("keymap-recording").is_some(), "the row waits for the keys");
+    cx.simulate_keystrokes("cmd-k");
+    cx.update(|_, cx| {
+        let s = sheet.read(cx);
+        assert!(s.recording.is_none());
+        assert_eq!(s.draft.keymap.get("snout::GoToFile"), Some(&vec!["cmd-p".to_owned(), "cmd-k".to_owned()]));
+    });
+    // × takes ⌘P away; OK puts it in force at once and saves it.
+    click(cx, &format!("keymap-remove-{ix}-0"));
+    click(cx, "settings-ok");
+    cx.update(|_, cx| {
+        assert_eq!(model.read(cx).settings.keymap.get("snout::GoToFile"), Some(&vec!["cmd-k".to_owned()]));
+        assert!(ws.read(cx).search.is_none());
+    });
+    cx.simulate_keystrokes("cmd-p");
+    cx.update(|_, cx| assert!(ws.read(cx).search.is_none(), "⌘P no longer goes to a file"));
+    cx.simulate_keystrokes("cmd-k");
+    cx.update(|_, cx| assert!(ws.read(cx).search.is_some(), "⌘K does"));
+    let _ = std::fs::remove_dir_all(repo);
+}
