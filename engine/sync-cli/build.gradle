@@ -103,20 +103,36 @@ def jlinkRuntime = tasks.register('jlinkRuntime') {
     }
 }
 
-tasks.register('snoutDist', Sync) {
+// The distribution is built in a fresh folder and swapped in whole, never written over: macOS
+// keeps a binary's code signature per file, and kills a binary that was rewritten in place
+// (runtime/bin/java exiting with 137 on its next launch).
+def distDir = rootProject.layout.buildDirectory.dir('dist')
+
+tasks.register('snoutDist') {
     description = 'Assembles the self-contained engine distribution in engine/build/dist.'
     group = 'distribution'
-    // The CLI's own launcher scripts look for JAVA_HOME; bin/snout-engine uses the bundled runtime.
-    from(tasks.named('installDist')) {
-        exclude 'bin/**'
-    }
-    from(jlinkRuntime) {
-        into 'runtime'
-    }
-    into rootProject.layout.buildDirectory.dir('dist')
+    def install = tasks.named('installDist')
+    inputs.files(install)
+    inputs.files(jlinkRuntime)
+    inputs.property('version', project.version.toString())
+    outputs.dir(distDir)
     doLast {
-        File dist = destinationDir
-        File bin = new File(dist, 'bin')
+        File dist = distDir.get().asFile
+        File parent = dist.parentFile
+        File staging = new File(parent, 'dist.new')
+        File old = new File(parent, 'dist.old')
+        project.delete(staging, old)
+        // The CLI's own launcher scripts look for JAVA_HOME; bin/snout-engine uses the bundled runtime.
+        project.copy {
+            from(install.get().destinationDir) {
+                exclude 'bin/**'
+            }
+            from(runtimeDir) {
+                into 'runtime'
+            }
+            into staging
+        }
+        File bin = new File(staging, 'bin')
         bin.mkdirs()
         File launcher = new File(bin, 'snout-engine')
         launcher.text = '''#!/bin/sh
@@ -125,7 +141,39 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 exec "$here/runtime/bin/java" -cp "$here/lib/*" com.snoutcode.engine.cli.SnoutEngine "$@"
 '''
         launcher.setExecutable(true, false)
-        new File(dist, 'dist.properties').text =
+        new File(staging, 'dist.properties').text =
             "version=${project.version}\njava=${System.getProperty('java.version')}\n"
+        File java = new File(staging, 'runtime/bin/java')
+        if (System.getProperty('os.name').toLowerCase().contains('mac')) {
+            // An unsigned or broken signature gets the binary killed: sign it ad hoc when needed.
+            def verify = new ProcessBuilder('codesign', '--verify', java.absolutePath).redirectErrorStream(true).start()
+            verify.inputStream.text
+            if (verify.waitFor() != 0) {
+                def sign = new ProcessBuilder('codesign', '--force', '--sign', '-', java.absolutePath).redirectErrorStream(true).start()
+                String out = sign.inputStream.text
+                if (sign.waitFor() != 0) {
+                    throw new GradleException("could not sign ${java}:\n${out}")
+                }
+            }
+        }
+        // Swap: the old distribution moves aside, the new one takes its name, the old one goes.
+        if (dist.exists() && !dist.renameTo(old)) {
+            throw new GradleException("could not move ${dist} aside")
+        }
+        if (!staging.renameTo(dist)) {
+            throw new GradleException("could not move ${staging} to ${dist}")
+        }
+        project.delete(old)
+        checkRuntime(new File(dist, 'runtime/bin/java'))
+    }
+}
+
+/** Fails the build unless the runtime starts: {@code java -version}. */
+static void checkRuntime(File java) {
+    def check = new ProcessBuilder(java.absolutePath, '-version').redirectErrorStream(true).start()
+    String out = check.inputStream.text
+    int exit = check.waitFor()
+    if (exit != 0) {
+        throw new GradleException("${java} -version failed with exit code ${exit}:\n${out}")
     }
 }
