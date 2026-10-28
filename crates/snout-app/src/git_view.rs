@@ -1197,8 +1197,8 @@ impl GitView {
 
         let differs = (&d.committer, &d.committer_email) != (&d.author, &d.email) || d.committer_date != d.date;
         // egui's grid: the keys' column is as wide as its widest key.
-        let key_w = if differs { 66. } else { 41. };
-        let key = |k: &str| div().w(px(key_w)).flex_none().text_color(p.fg_dim).child(k.to_owned());
+        let key_w = if differs { 72. } else { 46. };
+        let key = |k: &str| div().w(px(key_w)).flex_none().whitespace_nowrap().text_color(p.fg_dim).child(k.to_owned());
         let fact = |k: &str, v: AnyElement| div().h(px(22.)).flex().items_center().gap(px(14.)).child(key(k)).child(v);
         let parents: Vec<AnyElement> = d
             .parents

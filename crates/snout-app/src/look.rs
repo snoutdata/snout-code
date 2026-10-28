@@ -1,6 +1,7 @@
-//! The egui app's look in GPUI: its typefaces and sizes, the pane frame, the separators,
-//! and its buttons (glyph, chip, icon, toggle and pill buttons), measured against the egui
-//! app's screenshots. The Git view is built from these.
+//! The Git view's pieces, in the window's design language: its typefaces and sizes, the
+//! pane frame, the separators, and its buttons (glyph, chip, icon, toggle and primary),
+//! quiet until the pointer is on them, with line icons. The layout keeps the egui app's
+//! measures.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -11,7 +12,7 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::tooltip::Tooltip;
 use snout_core::art::Glyph;
 
-use crate::art::glyph;
+use crate::art::outline_glyph;
 use crate::theme::{Palette, mix, palette};
 
 /// The interface's typeface (Inter, bundled) and the editor's (Hack).
@@ -64,7 +65,7 @@ pub fn pane(p: &Palette) -> Div {
         .bg(p.panel)
         .border_1()
         .border_color(p.border)
-        .rounded(px(10.))
+        .rounded(px(6.))
         .flex()
         .flex_col()
         .overflow_hidden()
@@ -94,7 +95,7 @@ fn tip(text: SharedString) -> impl Fn(&mut gpui::Window, &mut App) -> gpui::AnyV
     move |w, cx| Tooltip::new(text.clone()).build(w, cx)
 }
 
-/// A framed button with a leading glyph (egui's `glyph_button`).
+/// A toolbar button: a line icon and its label, quiet until the pointer is on it.
 pub fn glyph_button(
     id: impl Into<ElementId>,
     g: Glyph,
@@ -103,8 +104,9 @@ pub fn glyph_button(
     p: &Palette,
 ) -> Stateful<Div> {
     let text: SharedString = text.into();
-    let ink = if enabled { p.fg } else { p.fg_dim.opacity(0.7) };
-    let (hover_bg, hover_line) = (p.button_hover, mix(p.fg, 0.25, p.button_hover));
+    let ink = if enabled { p.fg } else { p.fg_dim.opacity(0.6) };
+    let icon_ink = if enabled { mix(p.fg, 0.8, p.ground) } else { ink };
+    let hover_bg = p.button_hover;
     div()
         .id(id)
         .flex_none()
@@ -114,18 +116,11 @@ pub fn glyph_button(
         .gap(px(if text.is_empty() { 0. } else { 6. }))
         .h(px(26.))
         .px(px(8.))
-        .rounded(px(6.))
-        .border_1()
+        .rounded(px(5.))
         .text_color(ink)
         .whitespace_nowrap()
-        .when(enabled, |d| {
-            d.bg(p.button)
-                .border_color(mix(p.fg, 0.08, p.button))
-                .cursor_pointer()
-                .hover(move |s| s.bg(hover_bg).border_color(hover_line))
-        })
-        .when(!enabled, |d| d.border_color(gpui::transparent_black()))
-        .child(glyph(g, 16., ink))
+        .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover_bg)))
+        .child(outline_glyph(g, 15., icon_ink))
         .when(!text.is_empty(), |d| d.child(text))
 }
 
@@ -153,7 +148,7 @@ pub fn chip_button(
         .text_color(ink)
         .whitespace_nowrap()
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover_bg).border_color(border)))
-        .child(glyph(g, 14., ink))
+        .child(outline_glyph(g, 14., ink))
         .child(text.into())
 }
 
@@ -175,7 +170,7 @@ pub fn icon_button(
         .rounded(px(5.))
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover_bg)))
         .tooltip(tip(tooltip.into()))
-        .child(glyph(g, 16., ink))
+        .child(outline_glyph(g, 16., ink))
 }
 
 /// egui's selectable label: filled with the selection colour when on.
