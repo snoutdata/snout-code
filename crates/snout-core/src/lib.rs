@@ -18,6 +18,7 @@ mod git;
 mod github;
 pub mod graph;
 pub mod groups;
+pub mod gutter;
 mod log;
 pub mod pty;
 mod pull;

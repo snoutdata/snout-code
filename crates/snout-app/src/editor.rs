@@ -5,8 +5,10 @@
 //! click in the file tree is a preview: the next preview takes its place until it is
 //! edited or double-clicked.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use gpui::prelude::FluentBuilder as _;
@@ -15,11 +17,13 @@ use gpui::{
     ParentElement as _, PromptLevel, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
     Task, Window, actions, div, px,
 };
+use gpui::{Bounds, Hsla, Pixels, canvas, point, size};
 use gpui_component::dock::{PanelInfo, PanelState};
 use gpui_component::input::{
     Editor, EditorState, InputEvent, Position, RangeDecoration, RangeDecorationCollection, RangeDecorationStyle,
     RopeExt as _, TabSize,
 };
+use snout_core::gutter::{LineChange, LineChangeKind};
 
 use crate::editing::{self, Edit};
 use crate::look;
@@ -155,6 +159,13 @@ pub struct EditorPanel {
     /// What the brackets were found for: the caret and the text's revision.
     seen: (usize, u64),
     revision: u64,
+    /// The file as the last commit has it (none for a file Git does not track).
+    head: Option<Arc<String>>,
+    /// The lines added, changed and removed since the last commit, for the gutter.
+    pub changes: Arc<Vec<LineChange>>,
+    /// The gutter marks drawn on the last frame, in window coordinates.
+    pub painted: Rc<RefCell<Vec<GutterMark>>>,
+    _diff: Option<Task<()>>,
     focus: FocusHandle,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -178,6 +189,7 @@ impl EditorPanel {
                     if dirty != this.dirty {
                         this.dirty = dirty;
                     }
+                    this.diff_soon(cx);
                     cx.notify();
                 }
                 InputEvent::Focus => cx.emit(EditorEvent::Focused),
@@ -212,6 +224,10 @@ impl EditorPanel {
             bracket_pair: None,
             seen: (usize::MAX, 0),
             revision: 0,
+            head: None,
+            changes: Arc::new(Vec::new()),
+            painted: Rc::new(RefCell::new(Vec::new())),
+            _diff: None,
             focus: cx.focus_handle(),
             _poll: poll,
             _subscriptions: subscriptions,
@@ -241,7 +257,60 @@ impl EditorPanel {
         self.dirty = false;
         self.conflict = false;
         self.error = error;
+        self.head = None;
+        self.changes = Arc::new(Vec::new());
+        self.refresh_head(cx);
         cx.notify();
+    }
+
+    /// Read the file as the last commit has it, then mark the gutter again.
+    pub fn refresh_head(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else { return };
+        let Ok(rel) = self.path.strip_prefix(&root).map(|p| p.to_string_lossy().replace('\\', "/")) else { return };
+        let path = self.path.clone();
+        self._diff = Some(cx.spawn(async move |this, cx| {
+            let head = cx.background_executor().spawn(async move { snout_core::gutter::head_text(&root, &rel) }).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.path == path {
+                    this.head = head.map(Arc::new);
+                    this.diff_now(cx);
+                }
+            });
+        }));
+    }
+
+    /// Mark the gutter again once typing pauses.
+    fn diff_soon(&mut self, cx: &mut Context<Self>) {
+        if self.head.is_none() && self.changes.is_empty() {
+            return;
+        }
+        self._diff = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(120)).await;
+            let _ = this.update(cx, |this, cx| this.diff_now(cx));
+        }));
+    }
+
+    /// Diff the text against the commit (off the main thread) and mark the gutter.
+    fn diff_now(&mut self, cx: &mut Context<Self>) {
+        let Some(head) = self.head.clone() else {
+            if !self.changes.is_empty() {
+                self.changes = Arc::new(Vec::new());
+                cx.notify();
+            }
+            return;
+        };
+        let text = self.state.read(cx).text().to_string();
+        let revision = self.revision;
+        self._diff = Some(cx.spawn(async move |this, cx| {
+            let changes =
+                cx.background_executor().spawn(async move { snout_core::gutter::line_changes(&head, &text) }).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.revision == revision {
+                    this.changes = Arc::new(changes);
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     /// Read the file again, keeping the caret where it was.
@@ -483,6 +552,93 @@ impl EditorPanel {
     }
 }
 
+impl EditorPanel {
+    /// The Git marks in the gutter, drawn over the editor beside the line numbers and
+    /// placed from the editor's own line layout, so they follow scrolling, folding and
+    /// wrapping.
+    fn gutter(&self, cx: &App) -> impl IntoElement {
+        let p = palette(cx);
+        let colors = [p.ok, if p.dark { p.accent } else { p.warn }, p.error];
+        let (state, changes, painted) = (self.state.clone(), self.changes.clone(), self.painted.clone());
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, cx| {
+                let marks = gutter_marks(state.read(cx), &changes);
+                for (kind, b) in &marks {
+                    let color = match kind {
+                        LineChangeKind::Added => colors[0],
+                        LineChangeKind::Modified => colors[1],
+                        LineChangeKind::Deleted => colors[2],
+                    };
+                    paint_mark(*kind, *b, color, window);
+                }
+                *painted.borrow_mut() = marks;
+            },
+        )
+        .absolute()
+        .inset_0()
+    }
+}
+
+/// A mark in the gutter: what changed, and where it is drawn.
+pub type GutterMark = (LineChangeKind, Bounds<Pixels>);
+
+/// Width of a gutter mark, and how far left of the code it sits.
+const MARK_W: f32 = 3.;
+const MARK_GAP: f32 = 6.;
+
+/// Where the gutter marks of `changes` go in the editor's last layout: one bar per run
+/// of visible changed lines, and a small wedge where lines were removed.
+pub fn gutter_marks(state: &EditorState, changes: &[LineChange]) -> Vec<GutterMark> {
+    let Some(rows) = state.visible_row_range() else { return Vec::new() };
+    let Some(line_height) = state.line_height() else { return Vec::new() };
+    let text = state.text();
+    let lines = text.lines_len();
+    let map = state.display_map();
+    let first = map.display_row_to_buffer_line(rows.start);
+    let last = (map.display_row_to_buffer_line(rows.end.saturating_sub(1).max(rows.start)) + 1).min(lines);
+    let scroll_x = state.scroll_offset().x.min(px(0.));
+    let top_of = |line: usize| -> Option<(Pixels, Pixels)> {
+        let at = text.line_start_offset(line.min(lines.saturating_sub(1)));
+        let b = state.range_to_bounds(&(at..at))?;
+        let x = b.left() - scroll_x - px(MARK_GAP + MARK_W);
+        Some(if line >= lines { (x, b.top() + line_height) } else { (x, b.top()) })
+    };
+    let mut out = Vec::new();
+    for c in changes {
+        if c.kind == LineChangeKind::Deleted {
+            if (first..=last).contains(&c.lines.start)
+                && let Some((x, y)) = top_of(c.lines.start)
+            {
+                out.push((c.kind, Bounds::new(point(x - px(1.), y - px(4.)), size(px(6.), px(8.)))));
+            }
+            continue;
+        }
+        let (a, b) = (c.lines.start.max(first), c.lines.end.min(last));
+        if a >= b {
+            continue;
+        }
+        let (Some((x, top)), Some((_, bottom))) = (top_of(a), top_of(b - 1)) else { continue };
+        out.push((c.kind, Bounds::new(point(x, top), size(px(MARK_W), bottom + line_height - top))));
+    }
+    out
+}
+
+fn paint_mark(kind: LineChangeKind, b: Bounds<Pixels>, color: Hsla, window: &mut Window) {
+    if kind == LineChangeKind::Deleted {
+        let mut path = gpui::PathBuilder::fill();
+        path.move_to(b.origin);
+        path.line_to(point(b.right(), b.center().y));
+        path.line_to(b.bottom_left());
+        path.close();
+        if let Ok(path) = path.build() {
+            window.paint_path(path, color);
+        }
+    } else {
+        window.paint_quad(gpui::fill(b, color).corner_radii(px(1.5)));
+    }
+}
+
 /// A file's modification time and length, to notice changes made elsewhere.
 fn disk_stamp(path: &Path) -> Option<(SystemTime, u64)> {
     let m = std::fs::metadata(path).ok()?;
@@ -554,8 +710,10 @@ impl Render for EditorPanel {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .relative()
                     .font_family(look::MONO)
-                    .child(Editor::new(&self.state).appearance(false).h_full().text_size(px(font_size(cx)))),
+                    .child(Editor::new(&self.state).appearance(false).h_full().text_size(px(font_size(cx))))
+                    .child(self.gutter(cx)),
             )
     }
 }

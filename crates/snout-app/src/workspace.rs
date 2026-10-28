@@ -54,6 +54,8 @@ pub struct Workspace {
     pub search: Option<Entity<SearchView>>,
     /// The editor tabs, to find the one a file already has.
     editors: Vec<gpui::WeakEntity<EditorPanel>>,
+    /// The commit HEAD was at, to notice when it moves.
+    head: Option<String>,
     /// The status bar under the docks; it follows the editor in front.
     pub status: Entity<StatusBar>,
     _save_layout: Option<Task<()>>,
@@ -186,7 +188,17 @@ impl Workspace {
         });
 
         let subscriptions = vec![
-            cx.observe(&model, |_, _, cx| cx.notify()),
+            cx.observe(&model, |this, model, cx| {
+                // A new commit (or another branch): the editors' gutters compare with it.
+                let head = model.read(cx).log.first().map(|c| c.id.clone());
+                if head != this.head {
+                    this.head = head;
+                    for editor in this.editors(cx) {
+                        editor.update(cx, |e, cx| e.refresh_head(cx));
+                    }
+                }
+                cx.notify()
+            }),
             cx.subscribe(&dock, |this, _, e: &DockEvent, cx| {
                 if matches!(e, DockEvent::LayoutChanged) {
                     this.save_layout_soon(cx);
@@ -227,6 +239,7 @@ impl Workspace {
             title: String::new(),
             search: None,
             editors: Vec::new(),
+            head: None,
             status,
             _save_layout: None,
             _subscriptions: subscriptions,

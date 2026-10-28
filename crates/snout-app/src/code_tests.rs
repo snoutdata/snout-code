@@ -324,3 +324,64 @@ fn a_file_changed_on_disk_reloads_or_warns(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert!(!editor.read(cx).conflict && !editor.read(cx).dirty));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_gutter_marks_lines_changed_since_the_commit(cx: &mut TestAppContext) {
+    use snout_core::gutter::LineChangeKind::*;
+    let repo = demo_repo("gutter");
+    let body: String = (1..=80).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(repo.join("long.txt"), &body).unwrap();
+    crate::tests::git(&repo, &["add", "long.txt"]);
+    crate::tests::git(&repo, &["commit", "-qm", "Add a long file"]);
+    let edited = body.replace("line 3\n", "line three\n").replace("line 6\n", "").replace("line 8\n", "line 8\nnew\n");
+    std::fs::write(repo.join("long.txt"), &edited).unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    act(&model, cx, Action::OpenFile(repo.join("long.txt"), Some((0, 0))));
+    let editor = editor_for(&ws, &repo.join("long.txt"), cx);
+    let settle = |cx: &mut VisualTestContext| {
+        for _ in 0..5 {
+            cx.executor().advance_clock(std::time::Duration::from_millis(200));
+            cx.run_until_parked();
+            cx.update(|w, cx| w.draw(cx).clear(cx));
+        }
+    };
+    settle(cx);
+    let changes =
+        cx.update(|_, cx| editor.read(cx).changes.iter().map(|c| (c.kind, c.lines.clone())).collect::<Vec<_>>());
+    assert_eq!(changes, [(Modified, 2..3), (Deleted, 5..5), (Added, 7..8)]);
+    // Each mark is drawn beside its line, left of the code, from the editor's layout.
+    let marks = cx.update(|_, cx| editor.read(cx).painted.borrow().clone());
+    assert_eq!(marks.iter().map(|m| m.0).collect::<Vec<_>>(), [Modified, Deleted, Added]);
+    let line_top = |line: usize, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let s = editor.read(cx).state.read(cx);
+            let at = gpui_component::input::RopeExt::line_start_offset(s.text(), line);
+            s.range_to_bounds(&(at..at)).unwrap()
+        })
+    };
+    let third = line_top(2, cx);
+    assert_eq!(marks[0].1.top(), third.top());
+    assert!(marks[0].1.right() < third.left(), "the mark sits left of the code");
+    // Typing a line marks it at once (after a short pause).
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
+    cx.simulate_keystrokes("x enter");
+    settle(cx);
+    let changes = cx.update(|_, cx| editor.read(cx).changes.iter().map(|c| c.kind).collect::<Vec<_>>());
+    assert_eq!(changes, [Added, Modified, Deleted, Added]);
+    // Scrolled down, the marks move with the lines.
+    cx.update(|_, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, cx| s.set_scroll_offset(gpui::point(gpui::px(0.), gpui::px(-60.)), cx));
+    });
+    settle(cx);
+    let before = marks[0].1.top();
+    let after = cx.update(|_, cx| editor.read(cx).painted.borrow().iter().find(|m| m.0 == Modified).map(|m| m.1.top()));
+    assert!(after.is_some_and(|y| y < before), "{after:?} should be above {before:?}");
+    // Once the change is committed, the gutter is clean.
+    cx.simulate_keystrokes("cmd-s");
+    crate::tests::git(&repo, &["commit", "-qam", "Edit the long file"]);
+    act(&model, cx, Action::Refresh);
+    settle(cx);
+    cx.update(|_, cx| assert!(editor.read(cx).changes.is_empty()));
+    let _ = std::fs::remove_dir_all(repo);
+}
