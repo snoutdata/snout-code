@@ -1,0 +1,28 @@
+[package]
+name = "snout-app"
+description = "SnoutCode: the GPUI app (activity bar, docks and the Git Panel)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "snout-code"
+path = "src/main.rs"
+
+[dependencies]
+snout-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+gpui-platform.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui-component = { workspace = true, features = ["test-support"] }
+gpui-platform = { workspace = true, features = ["test-support"] }
+# The LSP types GPUI Kit's editor speaks (its own version).
+lsp-types = { version = "0.97", features = ["proposed"] }

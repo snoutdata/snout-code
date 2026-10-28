@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/snout-core", "crates/snout-gui"]
+members = ["crates/snout-core", "crates/snout-gui", "crates/snout-app"]
 
 [workspace.package]
 version = "0.1.0"
@@ -32,3 +32,10 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow"] }
 # Paste from the Edit menu (egui-winit already links it).
 arboard = { version = "3", default-features = false }
+# The GPUI app. GPUI is pinned to exactly the release GPUI Kit (gpui-component) pins.
+gpui = { package = "gpui-pre", version = "=0.3.10" }
+# GPUI Kit's styled components, and the platform layer of the same GPUI release. (The
+# gpui-kit facade crate cannot join this workspace: its optional gpui-fast backend pins a
+# unicode-properties that egui's epaint rules out.)
+gpui-platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "runtime_shaders"] }
+gpui-component = { version = "=0.8.1", features = ["tree-sitter-java"] }
