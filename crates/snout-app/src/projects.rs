@@ -214,6 +214,7 @@ impl Render for ProjectsView {
             });
         div()
             .id("projects")
+            .debug_selector(|| "repo-list".into())
             .size_full()
             .flex()
             .flex_col()

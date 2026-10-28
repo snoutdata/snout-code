@@ -11,6 +11,12 @@ use crate::theme::{Palette, palette};
 
 /// Paint `d` fitted into `bounds` (keeping its proportions, centred), its line in `ink`.
 pub fn paint(d: &Drawing, bounds: Bounds<Pixels>, ink: Hsla, p: &Palette, window: &mut Window) {
+    paint_with(d, bounds, ink, p, false, window)
+}
+
+/// Paint `d` as [`paint`] does; `outline` leaves out the coloured fills, for an icon drawn
+/// in one ink (the activity bar's).
+fn paint_with(d: &Drawing, bounds: Bounds<Pixels>, ink: Hsla, p: &Palette, outline: bool, window: &mut Window) {
     let scale = (f32::from(bounds.size.width) / d.size.x).min(f32::from(bounds.size.height) / d.size.y);
     let c = bounds.center();
     let origin = point(c.x - px(d.size.x * scale / 2.0), c.y - px(d.size.y * scale / 2.0));
@@ -27,7 +33,7 @@ pub fn paint(d: &Drawing, bounds: Bounds<Pixels>, ink: Hsla, p: &Palette, window
             Fill::Clay => p.ill_clay,
             Fill::Ink => ink,
         };
-        if part.fill != Fill::None {
+        if part.fill != Fill::None && !(outline && part.fill != Fill::Ink) {
             for (pts, _) in &part.outlines {
                 let mut path = PathBuilder::fill();
                 for (i, &q) in pts.iter().enumerate() {
@@ -84,4 +90,19 @@ pub fn drawing(d: &'static Drawing, w: f32, h: f32, ink: Option<Hsla>) -> impl I
 /// An icon, `size` square, in `ink`.
 pub fn glyph(g: Glyph, size: f32, ink: Hsla) -> impl IntoElement {
     drawing(g.drawing(), size, size, Some(ink))
+}
+
+/// An icon, `size` square, its lines alone in `ink`: no coloured fills.
+pub fn outline_glyph(g: Glyph, size: f32, ink: Hsla) -> impl IntoElement {
+    let d = g.drawing();
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, cx: &mut App| {
+            let p = palette(cx);
+            paint_with(d, bounds, ink, &p, true, window);
+        },
+    )
+    .flex_none()
+    .w(px(size))
+    .h(px(size))
 }

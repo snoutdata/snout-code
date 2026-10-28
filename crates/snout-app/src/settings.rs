@@ -49,6 +49,10 @@ pub struct Settings {
     pub editor_font_size: f32,
     /// The activity the window showed last, to open on it again.
     pub activity: Option<crate::panels::Activity>,
+    /// The projects opened, most recent first, for File ▸ Open Recent and the Welcome
+    /// page. Unset until a project opens or the list is cleared: then the repository list
+    /// stands in, newest first.
+    pub recent: Option<Vec<PathBuf>>,
 }
 
 impl Default for Settings {
@@ -65,6 +69,7 @@ impl Default for Settings {
             dock: None,
             editor_font_size: crate::look::MONO_SIZE,
             activity: None,
+            recent: None,
         }
     }
 }

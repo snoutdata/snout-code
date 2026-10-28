@@ -83,7 +83,7 @@ fn the_window_opens_on_the_welcome_page_without_a_repository(cx: &mut TestAppCon
     let (model, ws, cx) = open(cx, Settings::default());
     cx.update(|_, cx| {
         assert!(model.read(cx).repo.is_none());
-        assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git, "the Git view comes first");
+        assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project, "the project comes first");
         assert_eq!(model.read(cx).title(), "SnoutCode");
     });
 }
@@ -95,7 +95,7 @@ fn projects_groups_hold_repositories_and_the_tree_narrows_the_files(cx: &mut Tes
     let mut settings = with_repo(&a);
     settings.repos.push(b.clone());
     let (model, ws, cx) = open(cx, settings);
-    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
 
     act(&model, cx, Action::SaveGroup { rename: None, name: "Work".into(), repo: Some(b.clone()) });
     cx.update(|_, cx| {
@@ -137,16 +137,18 @@ fn the_activity_bar_switches_between_the_git_view_and_the_docks(cx: &mut TestApp
     let left_open = |cx: &mut VisualTestContext| {
         cx.update(|_, cx| ws.read(cx).dock.read(cx).is_dock_open(gpui_component::dock::DockPlacement::Left))
     };
-    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Projects, w, cx)));
-    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Projects));
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project, "the first launch"));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Project, w, cx)));
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project));
     assert!(left_open(cx));
-    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Projects, w, cx)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Project, w, cx)));
     assert!(!left_open(cx), "the active item closes the dock");
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
     cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git));
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
     cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git, "Git stays"));
-    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
     assert!(left_open(cx));
 }
 
@@ -399,8 +401,11 @@ fn claude_console_runs_in_the_repo_and_refreshes_git(cx: &mut TestAppContext) {
 fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
     let repo = demo_repo("keys");
     let (model, ws, cx) = open(cx, with_repo(&repo));
-    cx.simulate_keystrokes("cmd-0");
-    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git));
+    cx.simulate_keystrokes("cmd-2");
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git, "⌘2 is Git"));
+    cx.simulate_keystrokes("cmd-1");
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project, "⌘1 is the project"));
+    cx.simulate_keystrokes("cmd-2");
     cx.simulate_keystrokes("cmd-a");
     cx.update(|_, cx| assert_eq!(model.read(cx).selected.len(), 3, "⌘A selects every listed file"));
     let first = cx.update(|_, cx| model.read(cx).log[1].id.clone());
@@ -534,6 +539,8 @@ fn the_git_view_sorts_switches_tabs_and_resizes_with_the_pointer(cx: &mut TestAp
     use gpui::{Modifiers, MouseButton, point, px};
     let repo = demo_repo("git-view");
     let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
     let git = cx.update(|_, cx| ws.read(cx).git.clone());
     // A click on a column header sorts by it; a second click flips the order.
     let state = cx.debug_bounds("sort-1").expect("the State header is drawn").center();
@@ -583,7 +590,7 @@ fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext
     }
     cx.update(|_, cx| {
         assert_eq!(ws.read(cx).editors(cx).len(), files.len());
-        assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Projects, "the docks come forward");
+        assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project, "the docks come forward");
     });
     // Opening a file again brings its tab forward instead of a second one.
     act(&model, cx, Action::OpenFile(repo.join("build.gradle"), Some((0, 6))));
@@ -611,7 +618,7 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
     std::fs::create_dir_all(repo.join("build")).unwrap();
     std::fs::write(repo.join("build/out.class"), "x").unwrap();
     let (model, ws, cx) = open(cx, with_repo(&repo));
-    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
     cx.run_until_parked();
     let tree = cx.update(|_, cx| ws.read(cx).side.read(cx).files.clone());
     let names = |cx: &mut VisualTestContext| {
@@ -719,7 +726,7 @@ fn the_terminal_tab_runs_a_shell_in_the_repository(cx: &mut TestAppContext) {
     // Show the docks, open the bottom dock and bring the terminal forward.
     cx.update(|w, cx| {
         ws.update(cx, |ws, cx| {
-            ws.show_activity(Activity::Projects, w, cx);
+            ws.show_activity(Activity::Project, w, cx);
             let id = ws.tabs.terminal;
             ws.dock.update(cx, |d, cx| {
                 if !d.is_dock_open(DockPlacement::Bottom) {

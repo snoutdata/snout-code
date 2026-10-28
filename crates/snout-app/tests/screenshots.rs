@@ -229,9 +229,9 @@ mod shots {
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
         shot("welcome-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
-        shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
-        shot("editor-dark", ThemeChoice::Dark, Activity::Projects, Some(Select::Editor));
-        shot("editor-light", ThemeChoice::Light, Activity::Projects, Some(Select::Editor));
-        shot("palette-dark", ThemeChoice::Dark, Activity::Projects, Some(Select::Editor));
+        shot("project-dark", ThemeChoice::Dark, Activity::Project, None);
+        shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
+        shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
+        shot("palette-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
     }
 }

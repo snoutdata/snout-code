@@ -19,7 +19,7 @@ use gpui_component::dock::{
 };
 use snout_core::{FileEntry, PullMode, on_disk, stage_paths, unstage_paths};
 
-use crate::art::glyph;
+use crate::art::outline_glyph;
 use crate::editor::{EditorEvent, EditorPanel};
 use crate::git_view::GitView;
 use crate::menus::{self, *};
@@ -46,7 +46,7 @@ pub struct Workspace {
     /// The Git view: the whole area right of the activity bar while Git is picked.
     pub git: Entity<GitView>,
     pub tabs: Tabs,
-    menu_checks: Option<(bool, bool, bool, ThemeChoice)>,
+    menu_checks: Option<menus::MenuState>,
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
     focus: gpui::FocusHandle,
     title: String,
@@ -148,7 +148,7 @@ impl Workspace {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
         let files = cx.new(|cx| crate::files::FileTree::new(model.clone(), cx));
-        let side = cx.new(|cx| SidePanel::new(projects.clone().into(), files, cx));
+        let side = cx.new(|cx| SidePanel::new(files, cx));
         let welcome = cx.new(|cx| WelcomePanel::new(model.clone(), cx));
         let output = cx.new(|cx| OutputPanel::new(model.clone(), cx));
         let console = crate::console::build(&model, window, cx);
@@ -342,6 +342,69 @@ impl Workspace {
         false
     }
 
+    /// File ▸ Close Project: ask about unsaved changes first, then close every editor tab
+    /// and the project, and show the Welcome page.
+    pub fn close_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.model.read(cx).repo.is_none() {
+            return;
+        }
+        let dirty: Vec<Entity<EditorPanel>> = self.editors(cx).into_iter().filter(|e| e.read(cx).dirty).collect();
+        if dirty.is_empty() {
+            return self.send(Action::CloseRepo, cx);
+        }
+        let message = match dirty.as_slice() {
+            [one] => format!("Do you want to save the changes you made to {}?", one.read(cx).name()),
+            many => format!("Do you want to save the changes you made to {} files?", many.len()),
+        };
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &message,
+            Some("Your changes are lost if you don't save them."),
+            &["Save", "Don't Save", "Cancel"],
+            cx,
+        );
+        let this = cx.weak_entity();
+        window
+            .spawn(cx, async move |cx| {
+                let Ok(answer) = answer.await else { return };
+                let _ = cx.update(|_, cx| {
+                    match answer {
+                        0 => {
+                            for e in &dirty {
+                                e.update(cx, |e, cx| e.save(cx));
+                            }
+                            if dirty.iter().any(|e| e.read(cx).dirty) {
+                                return;
+                            }
+                        }
+                        1 => {
+                            for e in &dirty {
+                                e.update(cx, |e, cx| e.discard(cx));
+                            }
+                        }
+                        _ => return,
+                    }
+                    let _ = this.update(cx, |this, cx| this.send(Action::CloseRepo, cx));
+                });
+            })
+            .detach();
+    }
+
+    /// The project closed: its editor tabs go, and the Welcome page comes forward.
+    fn after_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let editors = self.editors(cx);
+        let welcome = self.tabs.welcome;
+        self.dock.update(cx, |d, cx| {
+            for e in editors {
+                d.remove_panel(e, window, cx);
+            }
+            d.select_panel(welcome, window, cx);
+        });
+        self.editors.clear();
+        self.set_active_editor(None, cx);
+        cx.notify();
+    }
+
     /// Keep `editor` among the tabs, and follow it when it gets the keyboard.
     fn track_editor(&mut self, editor: &Entity<EditorPanel>, window: &mut Window, cx: &mut Context<Self>) {
         self.editors.push(editor.downgrade());
@@ -407,7 +470,8 @@ impl Workspace {
     pub fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let before = window.focused(cx);
         let os = cx.platform_info().os;
-        let commands: Vec<crate::search::Command> = menus::commands()
+        let recent = self.model.read(cx).recent_projects();
+        let commands: Vec<crate::search::Command> = menus::commands(&recent)
             .into_iter()
             .map(|(name, action)| {
                 let binding = match &before {
@@ -417,7 +481,7 @@ impl Workspace {
                 .or_else(|| window.highest_precedence_binding_for_action(&*action));
                 let keys = binding
                     .map(|b| b.keystrokes().iter().map(|k| k.display(os).to_string()).collect::<Vec<_>>().join(" "));
-                crate::search::Command { name: name.into(), action, keys }
+                crate::search::Command { name, action, keys }
             })
             .collect();
         let model = self.model.clone();
@@ -483,6 +547,7 @@ impl Workspace {
             // The commit and the diff show in the Git view.
             ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
             ModelEvent::Message => {}
+            ModelEvent::Closed => self.after_close(window, cx),
             ModelEvent::OpenFile(path, at, preview) => self.open_file(path.clone(), *at, *preview, window, cx),
         }
     }
@@ -583,7 +648,7 @@ impl Workspace {
         };
         self.set_active_editor(Some(&editor), cx);
         if self.side.read(cx).activity == Activity::Git {
-            self.show_activity(Activity::Projects, window, cx);
+            self.show_activity(Activity::Project, window, cx);
         }
         let id = PanelId::from(editor.entity_id());
         self.dock.update(cx, |d, cx| d.select_panel(id, window, cx));
@@ -672,9 +737,10 @@ impl Workspace {
             window.set_window_title(&title);
             self.title = title;
         }
-        let checks = menus::checks(&m.settings);
-        if self.menu_checks != Some(checks) {
-            cx.set_menus(menus::bar(&m.settings));
+        let recent = m.recent_projects();
+        let checks = menus::checks(&m.settings, &recent);
+        if self.menu_checks.as_ref() != Some(&checks) {
+            cx.set_menus(menus::bar(&m.settings, &recent));
             self.menu_checks = Some(checks);
         }
     }
@@ -685,20 +751,23 @@ impl Workspace {
         let open = current == Activity::Git || self.dock.read(cx).is_dock_open(DockPlacement::Left);
         let changed = self.model.read(cx).status.files.len();
         let hover_bg = p.button_hover;
+        // Plain outline glyphs in the quiet ink; the picked one white on an accent square.
         let item = |id: &'static str, g: Glyph, tip: &'static str, on: bool| {
+            let ink = if on { gpui::white() } else { p.fg_dim };
             div()
                 .id(id)
+                .debug_selector(move || id.to_owned())
                 .flex_none()
                 .size(px(32.))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(6.))
+                .rounded(px(8.))
                 .cursor_pointer()
-                .when(on, |d| d.bg(p.selection()))
+                .when(on, |d| d.bg(p.accent))
                 .when(!on, |d| d.hover(move |s| s.bg(hover_bg)))
                 .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
-                .child(glyph(g, 20., p.fg))
+                .child(outline_glyph(g, 20., ink))
         };
         let pick = |a: Activity| cx.listener(move |this, _, w, cx| this.set_activity(a, w, cx));
         div()
@@ -713,27 +782,29 @@ impl Workspace {
             .border_r_1()
             .border_color(p.border)
             .child(
-                item("act-git", Glyph::Branch, "Git (⌘0)", open && current == Activity::Git)
+                item("act-project", Glyph::Folder, "Project (⌘1)", open && current == Activity::Project)
+                    .on_click(pick(Activity::Project)),
+            )
+            .child(
+                item("act-git", Glyph::Branch, "Git (⌘2)", open && current == Activity::Git)
                     .relative()
                     .on_click(pick(Activity::Git))
                     .when(changed > 0, |d| {
                         d.child(
                             div()
                                 .absolute()
-                                .top(px(-2.))
-                                .right(px(-4.))
+                                .top(px(-4.))
+                                .right(px(-6.))
                                 .px(px(4.))
-                                .rounded(px(7.))
+                                .rounded(px(8.))
+                                .border_2()
+                                .border_color(p.ground)
                                 .bg(p.accent)
                                 .text_color(p.on_accent)
                                 .text_size(px(10.))
                                 .child(changed.to_string()),
                         )
                     }),
-            )
-            .child(
-                item("act-projects", Glyph::Repo, "Projects (⌘1)", open && current == Activity::Projects)
-                    .on_click(pick(Activity::Projects)),
             )
             .child(div().flex_1())
             .child(
@@ -783,7 +854,7 @@ impl Render for Workspace {
             .bg(p.ground)
             .text_color(p.fg)
             .font_family(Theme::global(cx).font_family.clone())
-            .on_action(cx.listener(|this, _: &ShowProjects, w, cx| this.show_activity(Activity::Projects, w, cx)))
+            .on_action(cx.listener(|this, _: &ShowProject, w, cx| this.show_activity(Activity::Project, w, cx)))
             .on_action(cx.listener(|this, _: &ShowGit, w, cx| this.show_activity(Activity::Git, w, cx)))
             .on_action(cx.listener(|this, _: &ToggleConsole, _, cx| this.send(Action::ToggleConsole, cx)))
             .on_action(cx.listener(|this, _: &About, _, cx| {
@@ -823,6 +894,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToLine, w, cx| this.open_search(Mode::GoToLine, w, cx)))
             .on_action(cx.listener(|this, _: &CommandPalette, w, cx| this.open_palette(w, cx)))
             .on_action(cx.listener(|this, _: &SplitRight, w, cx| this.split_right(w, cx)))
+            .on_action(cx.listener(|this, _: &CloseProject, w, cx| this.close_project(w, cx)))
+            .on_action(cx.listener(|this, _: &ClearRecent, _, cx| this.send(Action::ClearRecent, cx)))
+            .on_action(cx.listener(|this, a: &OpenRecent, _, cx| this.send(Action::OpenRepo(a.0.clone()), cx)))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(Some(1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(Some(-1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(None, cx)))

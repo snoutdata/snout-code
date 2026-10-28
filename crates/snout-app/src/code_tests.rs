@@ -87,6 +87,10 @@ fn a_single_click_previews_and_editing_or_a_double_click_keeps_the_tab(cx: &mut 
     let _ = std::fs::remove_dir_all(repo);
 }
 
+fn model_recent(ws: &Entity<Workspace>, cx: &gpui::App) -> Vec<std::path::PathBuf> {
+    ws.read(cx).model.read(cx).recent_projects()
+}
+
 fn editor_for_app(ws: &Entity<Workspace>, path: &Path, cx: &gpui::App) -> Entity<EditorPanel> {
     ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == path).unwrap()
 }
@@ -111,7 +115,7 @@ fn the_status_bar_follows_the_editor_in_front(cx: &mut TestAppContext) {
     let repo = demo_repo("status-bar");
     std::fs::write(repo.join("App.java"), "class App {\r\n\tint x;\r\n}\r\n").unwrap();
     let (model, ws, cx) = open(cx, with_repo(&repo));
-    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
     act(&model, cx, Action::OpenFile(repo.join("App.java"), Some((1, 1))));
     let status = cx.update(|_, cx| ws.read(cx).status.read(cx).editor_status(cx)).expect("an editor is in front");
     assert_eq!(status.position, "Ln 2, Col 2");
@@ -255,8 +259,8 @@ fn the_font_zooms_for_every_editor_and_is_remembered(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert_eq!(model.read(cx).settings.editor_font_size, crate::look::MONO_SIZE + 2.));
     cx.simulate_keystrokes("cmd--");
     assert_eq!(size(cx), crate::look::MONO_SIZE + 1.);
-    cx.simulate_keystrokes("cmd-alt-0");
-    assert_eq!(size(cx), crate::look::MONO_SIZE, "⌥⌘0 (⌘0 is the Git view) resets it");
+    cx.simulate_keystrokes("cmd-0");
+    assert_eq!(size(cx), crate::look::MONO_SIZE, "⌘0 resets it");
     let _ = std::fs::remove_dir_all(repo);
 }
 
@@ -394,7 +398,8 @@ fn the_command_palette_lists_every_command_with_its_keys_and_runs_one(cx: &mut T
     cx.update(|_, cx| {
         let p = palette.read(cx);
         assert_eq!(p.mode, crate::search::Mode::Commands);
-        assert_eq!(p.items.len(), crate::menus::commands().len(), "every command is listed");
+        let recent = model_recent(&ws, cx);
+        assert_eq!(p.items.len(), crate::menus::commands(&recent).len(), "every command is listed");
         let keys = |name: &str| p.items.iter().find(|i| i.path == name).and_then(|i| i.keys.clone());
         assert_eq!(keys("Toggle Comment").as_deref(), Some("⌘/"), "with the keys it has in the editor");
         assert_eq!(keys("Go to File…").as_deref(), Some("⌘P"));
@@ -436,9 +441,9 @@ fn split_right_shows_the_file_twice_and_keeps_both_in_step(cx: &mut TestAppConte
 fn the_window_opens_on_the_activity_it_showed_last(cx: &mut TestAppContext) {
     let repo = demo_repo("activity");
     let (model, ws, vcx) = open(cx, with_repo(&repo));
-    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Projects, w, cx)));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
     let saved = vcx.update(|_, cx| model.read(cx).settings.clone());
-    assert_eq!(saved.activity, Some(Activity::Projects));
+    assert_eq!(saved.activity, Some(Activity::Project));
     let model2 = cx.update(|cx| gpui::AppContext::new(cx, |cx| crate::model::Model::new(saved.clone(), None, cx)));
     let mut ws2 = None;
     let (_, vcx2) = cx.add_window_view(|window, cx| {
@@ -447,7 +452,7 @@ fn the_window_opens_on_the_activity_it_showed_last(cx: &mut TestAppContext) {
         gpui_component::Root::new(view, window, cx)
     });
     vcx2.run_until_parked();
-    vcx2.update(|_, cx| assert_eq!(ws2.unwrap().read(cx).side.read(cx).activity, Activity::Projects));
+    vcx2.update(|_, cx| assert_eq!(ws2.unwrap().read(cx).side.read(cx).activity, Activity::Project));
     let _ = std::fs::remove_dir_all(repo);
 }
 
@@ -515,5 +520,101 @@ fn typing_and_scrolling_a_large_java_file_stay_quick(cx: &mut TestAppContext) {
     assert!(typing < limit, "typing takes {typing:?} a keystroke");
     assert!(scrolling < limit, "scrolling takes {scrolling:?} a frame");
     assert_eq!(text_of(&editor, cx).len(), text.len() + 40);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_project_view_shows_only_the_file_tree_under_the_project_name(cx: &mut TestAppContext) {
+    let repo = demo_repo("code-side");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("file-README.md").is_some(), "the file tree shows");
+    assert!(cx.debug_bounds("repo-list").is_none(), "the repository list does not");
+    let side = cx.update(|_, cx| ws.read(cx).side.read(cx).activity);
+    assert_eq!(side, Activity::Project);
+    // The activity bar: the project first, then Git.
+    let (project, git) = (cx.debug_bounds("act-project").unwrap(), cx.debug_bounds("act-git").unwrap());
+    assert!(project.top() < git.top(), "the project's item is above Git's");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn file_menu_open_recent_lists_projects_newest_first_and_opens_one(cx: &mut TestAppContext) {
+    use crate::menus::{ClearRecent, OpenRecent};
+    let a = crate::tests::demo_repo("recent-a");
+    let b = crate::tests::demo_repo("recent-b");
+    let (model, ws, cx) = open(cx, with_repo(&a));
+    act(&model, cx, Action::OpenRepo(b.clone()));
+    let recent = cx.update(|_, cx| model.read(cx).recent_projects());
+    assert_eq!(recent, [b.clone(), a.clone()], "most recent first");
+    // The menu bar's File ▸ Open Recent, and the palette, list the same.
+    let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects()));
+    let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
+    let names: Vec<String> = file.items.iter().filter_map(menu_item_name).collect();
+    assert!(names.starts_with(&["Open Project…".into(), "Open Recent".into(), "Close Project".into()]), "{names:?}");
+    let sub = file
+        .items
+        .iter()
+        .find_map(|i| match i {
+            gpui::MenuItem::Submenu(m) if m.name == "Open Recent" => Some(m),
+            _ => None,
+        })
+        .expect("an Open Recent submenu");
+    let sub_names: Vec<String> = sub.items.iter().filter_map(menu_item_name).collect();
+    let (na, nb) = (crate::model::Model::dir_name(&a), crate::model::Model::dir_name(&b));
+    assert_eq!(sub_names, [nb.clone(), na.clone(), "Clear Recent".into()]);
+    let palette: Vec<String> = crate::menus::commands(&recent).into_iter().map(|(n, _)| n.to_string()).collect();
+    for name in ["Open Project…", "Close Project", "Clear Recent Projects"] {
+        assert!(palette.iter().any(|n| n == name), "the palette has {name}");
+    }
+    assert!(palette.contains(&format!("Open Recent: {na}")));
+    // Choosing one opens it.
+    cx.update(|w, cx| w.dispatch_action(Box::new(OpenRecent(a.clone())), cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(model.read(cx).repo.as_ref().map(|r| r.root().to_owned()), Some(a.clone())));
+    // Clear Recent empties the list; the repositories stay in the Git view's list.
+    cx.update(|w, cx| w.dispatch_action(Box::new(ClearRecent), cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(model.read(cx).recent_projects().is_empty());
+        assert_eq!(model.read(cx).settings.repos.len(), 2);
+    });
+    let _ = ws;
+    let _ = std::fs::remove_dir_all(a);
+    let _ = std::fs::remove_dir_all(b);
+}
+
+fn menu_item_name(item: &gpui::MenuItem) -> Option<String> {
+    match item {
+        gpui::MenuItem::Action { name, .. } => Some(name.to_string()),
+        gpui::MenuItem::Submenu(m) => Some(m.name.to_string()),
+        _ => None,
+    }
+}
+
+#[gpui::test]
+fn close_project_closes_its_tabs_and_returns_to_the_welcome_page(cx: &mut TestAppContext) {
+    use crate::menus::CloseProject;
+    let repo = demo_repo("close-project");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    assert_eq!(tab_names(&ws, cx), ["README.md"]);
+    cx.update(|w, cx| w.dispatch_action(Box::new(CloseProject), cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(model.read(cx).repo.is_none(), "no project is open");
+        assert_eq!(model.read(cx).title(), "SnoutCode");
+        assert_eq!(model.read(cx).recent_projects(), std::slice::from_ref(&repo), "it stays recent");
+    });
+    assert!(tab_names(&ws, cx).is_empty(), "its tabs closed");
+    let welcome = cx.update(|_, cx| {
+        let ws = ws.read(cx);
+        let id = ws.tabs.welcome;
+        ws.dock.read(cx).panel(id).is_some()
+    });
+    assert!(welcome, "the Welcome page is there");
+    assert!(cx.debug_bounds("welcome-recent-0").is_some(), "with the project in its recent list");
     let _ = std::fs::remove_dir_all(repo);
 }

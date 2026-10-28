@@ -429,7 +429,7 @@ impl Render for FileTree {
                     .child(title(name.clone().unwrap_or_else(|| "Files".into()))),
             )
             .child(separator(&p))
-            .when(name.is_none(), |d| d.child(look::weak("Open a repository to see its files", &p)))
+            .when(name.is_none(), |d| d.child(look::weak("Open a project to see its files", &p)))
             .child(div().id("file-tree").flex_1().min_h_0().flex().flex_col().overflow_y_scrollbar().children(items))
     }
 }

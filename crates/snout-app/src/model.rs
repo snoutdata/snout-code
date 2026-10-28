@@ -22,6 +22,16 @@ use crate::settings::{Settings, Store, ThemeChoice};
 pub const LOG_LIMIT: usize = 300;
 /// How deep "Find repositories in folder…" searches.
 pub const SCAN_DEPTH: usize = 4;
+/// The projects opened lately, most recent first.
+pub fn recent_projects(settings: &crate::settings::Settings) -> Vec<PathBuf> {
+    match &settings.recent {
+        Some(recent) => recent.clone(),
+        None => settings.repos.iter().rev().take(RECENT_LIMIT).cloned().collect(),
+    }
+}
+
+/// How many projects File ▸ Open Recent lists.
+pub const RECENT_LIMIT: usize = 12;
 
 /// A branch on a remote: `origin` and `feature/x` for `origin/feature/x`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +158,10 @@ pub enum Action {
     OpenFile(PathBuf, Option<(u32, u32)>),
     /// Show a file in the preview tab, which the next preview replaces until it is kept.
     PreviewFile(PathBuf),
+    /// Close the open project: no repository is open afterwards.
+    CloseRepo,
+    /// Empty the recent projects list.
+    ClearRecent,
 }
 
 /// What the workspace should do in response to the model.
@@ -165,6 +179,8 @@ pub enum ModelEvent {
     Message,
     /// Open a file in an editor tab (the preview tab when the flag says so).
     OpenFile(PathBuf, Option<(u32, u32)>, bool),
+    /// The project was closed.
+    Closed,
 }
 
 pub struct OutputLine {
@@ -523,6 +539,31 @@ impl Model {
         if !self.settings.repos.iter().any(|p| p == root) {
             self.settings.repos.push(root.to_owned());
         }
+        let mut recent = self.recent_projects();
+        recent.retain(|p| p != root);
+        recent.insert(0, root.to_owned());
+        recent.truncate(RECENT_LIMIT);
+        self.settings.recent = Some(recent);
+    }
+
+    /// The projects opened lately, most recent first.
+    pub fn recent_projects(&self) -> Vec<PathBuf> {
+        recent_projects(&self.settings)
+    }
+
+    /// Close the open project.
+    fn close_repo(&mut self, cx: &mut Context<Self>) {
+        let Some(repo) = self.repo.take() else { return };
+        self.settings.current = None;
+        self.github_url = None;
+        self.selected.clear();
+        self.anchor = None;
+        self.dir_filter = None;
+        self.commit_view = None;
+        self.draft = None;
+        self.refresh();
+        self.message = format!("Closed {}", repo.root().display());
+        cx.emit(ModelEvent::Closed);
     }
 
     pub fn refresh(&mut self) {
@@ -835,7 +876,9 @@ impl Model {
                 self.survey(true, cx);
             }
             Action::OpenRepo(path) => self.open_repo(&path, cx),
-            Action::PickFolder => self.pick_folder("Open local repository", Action::OpenPath, cx),
+            Action::CloseRepo => self.close_repo(cx),
+            Action::ClearRecent => self.settings.recent = Some(Vec::new()),
+            Action::PickFolder => self.pick_folder("Open project", Action::OpenPath, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
             Action::InitRepo(path) => match Repo::init(&path) {
                 Ok(repo) => {

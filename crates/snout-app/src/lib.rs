@@ -42,7 +42,7 @@ pub fn init(settings: &Settings, cx: &mut App) {
     menus::bind_keys(cx);
     editor::register_languages();
     workspace::app_actions(cx);
-    cx.set_menus(menus::bar(settings));
+    cx.set_menus(menus::bar(settings, &model::recent_projects(settings)));
 }
 
 /// The model over the settings in `store`, opening `open` (a path from the command line).

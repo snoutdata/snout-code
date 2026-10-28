@@ -4,7 +4,7 @@
 //! would do something, so GPUI greys the items out otherwise; check marks follow the
 //! settings because the bar is rebuilt when they change.
 
-use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, actions};
+use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SharedString, SystemMenuType, actions};
 use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 use crate::settings::{Settings, ThemeChoice};
@@ -44,7 +44,7 @@ actions!(
         Website,
         Minimize,
         Zoom,
-        ShowProjects,
+        ShowProject,
         ShowGit,
         Back,
         PrevCommit,
@@ -58,14 +58,37 @@ actions!(
         ZoomReset,
         CommandPalette,
         SplitRight,
+        CloseProject,
+        ClearRecent,
     ]
 );
 
-/// Every command, by the name the command palette lists it under.
-pub fn commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
+/// File ▸ Open Recent: open this project.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct OpenRecent(pub std::path::PathBuf);
+
+/// Every command, by the name the command palette lists it under; `recent` are the
+/// recent projects, each a command of its own.
+pub fn commands(recent: &[std::path::PathBuf]) -> Vec<(SharedString, Box<dyn gpui::Action>)> {
+    let mut all: Vec<(SharedString, Box<dyn gpui::Action>)> =
+        fixed_commands().into_iter().map(|(name, action)| (name.into(), action)).collect();
+    let at = all.iter().position(|(n, _)| n == "Close Project").map_or(all.len(), |i| i + 1);
+    let opens = recent.iter().map(|path| {
+        let name = format!("Open Recent: {}", crate::model::Model::dir_name(path));
+        (SharedString::from(name), Box::new(OpenRecent(path.clone())) as Box<dyn gpui::Action>)
+    });
+    all.splice(at..at, opens);
+    all
+}
+
+fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
     use crate::editor as e;
     use gpui_component::input as i;
     vec![
+        ("Open Project…", Box::new(Open)),
+        ("Close Project", Box::new(CloseProject)),
+        ("Clear Recent Projects", Box::new(ClearRecent)),
         ("Go to File…", Box::new(GoToFile)),
         ("Go to Line…", Box::new(GoToLine)),
         ("Find in Files…", Box::new(FindInFiles)),
@@ -84,10 +107,9 @@ pub fn commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Zoom In", Box::new(ZoomIn)),
         ("Zoom Out", Box::new(ZoomOut)),
         ("Actual Size", Box::new(ZoomReset)),
-        ("Show Projects", Box::new(ShowProjects)),
+        ("Show Project", Box::new(ShowProject)),
         ("Show Git", Box::new(ShowGit)),
         ("Toggle Claude Code Console", Box::new(ToggleConsole)),
-        ("Open Local Repository…", Box::new(Open)),
         ("Find Repositories in Folder…", Box::new(FindRepos)),
         ("Clone from GitHub…", Box::new(CloneRepo)),
         ("New Group…", Box::new(NewGroup)),
@@ -127,8 +149,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-r", Refresh, None),
         KeyBinding::new("f5", Refresh, None),
         KeyBinding::new("cmd-shift-o", Checkout, None),
-        KeyBinding::new("cmd-1", ShowProjects, None),
-        KeyBinding::new("cmd-0", ShowGit, None),
+        KeyBinding::new("cmd-1", ShowProject, None),
+        KeyBinding::new("cmd-2", ShowGit, None),
         // Outside text fields, which take these keys first: ⌘⌫ moves the selected files to
         // the Trash, as in Finder, Esc leaves the commit view, and ↑ ↓ step through the
         // Journal while it shows.
@@ -151,8 +173,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-=", ZoomIn, None),
         KeyBinding::new("cmd-+", ZoomIn, None),
         KeyBinding::new("cmd--", ZoomOut, None),
-        // ⌘0 is the Git view, so the reset takes ⌥⌘0.
-        KeyBinding::new("cmd-alt-0", ZoomReset, None),
+        KeyBinding::new("cmd-0", ZoomReset, None),
         KeyBinding::new("cmd-/", crate::editor::ToggleComment, Some("EditorPanel")),
         KeyBinding::new("cmd-d", crate::editor::DuplicateLine, Some("EditorPanel")),
         KeyBinding::new("alt-up", crate::editor::MoveLineUp, Some("EditorPanel > Input")),
@@ -165,8 +186,21 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
-/// The whole bar, its check marks taken from `s`.
-pub fn bar(s: &Settings) -> Vec<Menu> {
+/// File ▸ Open Recent: the recent projects, most recent first, then Clear Recent.
+fn recent_items(recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
+    let mut items: Vec<MenuItem> = recent
+        .iter()
+        .map(|path| MenuItem::action(crate::model::Model::dir_name(path), OpenRecent(path.clone())))
+        .collect();
+    if !items.is_empty() {
+        items.push(MenuItem::separator());
+    }
+    items.push(MenuItem::action("Clear Recent", ClearRecent));
+    items
+}
+
+/// The whole bar, its check marks taken from `s`; `recent` fills File ▸ Open Recent.
+pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
     let check = |item: MenuItem, on: bool| item.checked(on);
     vec![
         Menu::new("SnoutCode").items([
@@ -177,7 +211,10 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             MenuItem::action("Quit SnoutCode", Quit),
         ]),
         Menu::new("File").items([
-            MenuItem::action("Open Local Repository…", Open),
+            MenuItem::action("Open Project…", Open),
+            MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent))),
+            MenuItem::action("Close Project", CloseProject),
+            MenuItem::separator(),
             MenuItem::action("Find Repositories in Folder…", FindRepos),
             MenuItem::action("Clone from GitHub…", CloneRepo),
             MenuItem::separator(),
@@ -209,7 +246,7 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
             MenuItem::action("Move Line Down", crate::editor::MoveLineDown),
         ]),
         Menu::new("View").items([
-            MenuItem::action("Projects", ShowProjects),
+            MenuItem::action("Project", ShowProject),
             MenuItem::action("Git", ShowGit),
             check(MenuItem::action("Claude Code Console", ToggleConsole), s.console_open),
             MenuItem::separator(),
@@ -260,6 +297,8 @@ pub fn bar(s: &Settings) -> Vec<Menu> {
 }
 
 /// What the bar shows that can change, to rebuild it only then.
-pub fn checks(s: &Settings) -> (bool, bool, bool, ThemeChoice) {
-    (s.console_open, s.side_by_side, s.compact, s.theme)
+pub type MenuState = (bool, bool, bool, ThemeChoice, Vec<std::path::PathBuf>);
+
+pub fn checks(s: &Settings, recent: &[std::path::PathBuf]) -> MenuState {
+    (s.console_open, s.side_by_side, s.compact, s.theme, recent.to_vec())
 }
