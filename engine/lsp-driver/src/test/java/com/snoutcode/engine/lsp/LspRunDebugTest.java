@@ -91,6 +91,7 @@ class LspRunDebugTest {
         resolved.getAsJsonArray("classpath").forEach(e -> classpath.add(e.getAsString()));
         assertTrue(classpath.stream().anyMatch(p -> p.contains("workspace") && p.endsWith("bin/main")), classpath.toString());
         assertTrue(classpath.stream().anyMatch(p -> p.endsWith("app/src/main/resources")), classpath.toString());
+        assertTrue(classpath.stream().anyMatch(p -> p.endsWith("opentest4j-1.3.0.jar")), "runtimeOnly: " + classpath);
         assertTrue(resolved.get("java").getAsString().endsWith("bin/java"), resolved.toString());
         assertFalse(resolved.get("projectName").isJsonNull(), resolved.toString());
     }

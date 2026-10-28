@@ -41,6 +41,19 @@ class RunConfigurationsTest {
     }
 
     @Test
+    void theRunClasspathTakesTheRuntimeLibraries() {
+        com.google.gson.JsonArray runtime = com.google.gson.JsonParser.parseString("""
+            [ { "kind": "project", "path": ":lib", "files": ["/b/lib/build/libs/lib.jar"] },
+              { "kind": "module", "group": "com.mysql", "name": "mysql-connector-j", "file": "/m/mysql.jar" },
+              { "kind": "module", "group": "x", "name": "unresolved" },
+              { "kind": "file", "file": "/w/libs/extra.jar" },
+              { "kind": "module", "group": "com.mysql", "name": "mysql-connector-j", "file": "/m/mysql.jar" } ]
+            """).getAsJsonArray();
+        assertEquals(List.of("/m/mysql.jar", "/w/libs/extra.jar"), Launches.runtimeLibraries(runtime));
+        assertEquals(List.of(), Launches.runtimeLibraries(null));
+    }
+
+    @Test
     void methodNamesDropParametersAndIndexes() {
         assertEquals("adds", GradleRuns.methodName("adds()"));
         assertEquals("many", GradleRuns.methodName("many(int)[2]"));

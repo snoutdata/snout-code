@@ -31,7 +31,8 @@ import java.util.function.Consumer;
  * class's project, classpath and Java, from the JDT projects the importer built, so the code
  * runs as jdtls compiled it, with the Scala bridge classes and the libraries of the model. The
  * resource folders of the module and the modules it depends on go on the classpath too, as
- * jdtls does not copy resources.
+ * jdtls does not copy resources, and the libraries are those of the module's runtime classpath
+ * as Gradle resolved it ({@code runtimeOnly} ones too, compile only ones not).
  *
  * <p>In debug mode the JVM starts with a JDWP agent that waits for the debugger, and java-debug
  * opens a DAP session ({@code vscode.java.startDebugSession}); the app connects to its port and
@@ -207,6 +208,7 @@ final class Launches {
             projectName = projectFor(engine, mainClass, module);
         }
         insertResources(engine, module, classpath);
+        useRuntimeLibraries(module, classpath);
 
         String java = null;
         try {
@@ -301,6 +303,54 @@ final class Launches {
             at++;
         }
         classpath.addAll(at, dirs);
+    }
+
+    /**
+     * Makes the libraries those of the main source set's runtime classpath, in Gradle's order and
+     * versions: jdtls gives the compile classpath, which lacks {@code runtimeOnly} libraries (a
+     * JDBC driver) and has {@code compileOnly} ones. The folders jdtls gives (class and resource
+     * folders, the Scala bridge's) stay ahead of them; projects are among those folders.
+     */
+    static void useRuntimeLibraries(Modules.Ref module, List<String> classpath) {
+        if (module == null) {
+            return;
+        }
+        JsonArray runtime = null;
+        for (JsonObject set : module.sourceSets()) {
+            if ("main".equals(Engine.string(set, "name"))) {
+                runtime = Engine.array(set, "runtimeClasspath");
+            }
+        }
+        List<String> libraries = runtimeLibraries(runtime);
+        if (libraries.isEmpty()) {
+            return;
+        }
+        List<String> out = new ArrayList<>();
+        for (String entry : classpath) {
+            if (Files.isDirectory(Path.of(entry)) && !libraries.contains(entry)) {
+                out.add(entry);
+            }
+        }
+        out.addAll(libraries);
+        classpath.clear();
+        classpath.addAll(out);
+    }
+
+    /** The files of a model classpath's libraries ({@code module} and {@code file} entries), in order. */
+    static List<String> runtimeLibraries(JsonArray runtime) {
+        List<String> out = new ArrayList<>();
+        if (runtime == null) {
+            return out;
+        }
+        for (JsonElement e : runtime) {
+            JsonObject entry = e.getAsJsonObject();
+            String kind = Engine.string(entry, "kind");
+            String file = Engine.string(entry, "file");
+            if (("module".equals(kind) || "file".equals(kind)) && file != null && !out.contains(file)) {
+                out.add(file);
+            }
+        }
+        return out;
     }
 
     private static void addResources(Engine engine, Modules.Ref module, Set<String> out, Set<String> seen) {
