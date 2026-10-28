@@ -106,6 +106,9 @@ final class SpringBootReader {
         if (value == null) {
             value = Reflect.call(task, "getMainClassName");
         }
+        if (value == null) {
+            value = Reflect.call(task, "getMain"); // JavaExec before Gradle 6.4 (Spring Boot 1.x bootRun)
+        }
         try {
             Object v = Reflect.unwrap(value);
             return v == null ? null : v.toString();
