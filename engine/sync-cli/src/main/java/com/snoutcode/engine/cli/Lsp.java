@@ -245,7 +245,7 @@ final class Lsp {
         }
         Thread stop = new Thread(() -> {
             engine.shutdown();
-            process.destroy();
+            stopProcess(process, 5);
         }, "stop-jdtls");
         Runtime.getRuntime().addShutdownHook(stop);
         int exit = proxy.run();
@@ -259,6 +259,35 @@ final class Lsp {
             // already shutting down
         }
         return exit;
+    }
+
+    /**
+     * End this engine when the process that started it (the app) ends, however it ends: killed,
+     * crashed, or quit before it could say so. The shutdown hook then stops jdtls and the runs.
+     * Without this, an engine still syncing (not yet reading its stdin) would outlive the app.
+     */
+    static void exitWithParent(PrintStream log) {
+        ProcessHandle parent = ProcessHandle.current().parent().orElse(null);
+        if (parent == null || parent.pid() <= 1) {
+            return;
+        }
+        parent.onExit().thenRun(() -> {
+            log.println("snout-engine: the app (pid " + parent.pid() + ") is gone; stopping");
+            System.exit(0);
+        });
+    }
+
+    /** Ask {@code process} to end (SIGTERM), and make it after {@code graceSeconds}. */
+    static void stopProcess(Process process, int graceSeconds) {
+        process.destroy();
+        try {
+            if (!process.waitFor(graceSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** The model written last, or null when there is none or it is of another format. */

@@ -100,6 +100,10 @@ pub fn run() {
         let store = Store::for_user();
         let settings = store.as_ref().map(Store::load).unwrap_or_default();
         init(&settings, cx);
+        quit_on_signals(cx);
+        // One window is the app: closing it quits, so the engines stop with it rather than
+        // run on behind an app with no window to show.
+        cx.set_quit_mode(gpui::QuitMode::LastWindowClosed);
         // Language servers start in the app (tests opt in).
         cx.set_global(lang::hub::LangEnabled(true));
         // So does the server Claude Code connects to (tests use a scratch folder).
@@ -115,6 +119,36 @@ pub fn run() {
         })
         .detach();
     });
+}
+
+/// SIGTERM, SIGINT and SIGHUP quit the app as ⌘Q does, without asking about unsaved tabs:
+/// the quit handlers stop the engines (and with them jdtls, the Gradle runs and the programs
+/// being run or debugged) instead of leaving them behind. A second signal while that runs
+/// ends the app at once.
+fn quit_on_signals(cx: &mut App) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SIGNALLED: AtomicBool = AtomicBool::new(false);
+    extern "C" fn on_signal(_: libc::c_int) {
+        if SIGNALLED.swap(true, Ordering::SeqCst) {
+            // SAFETY: `_exit` is async-signal-safe.
+            unsafe { libc::_exit(130) };
+        }
+    }
+    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+        // SAFETY: the handler only touches an atomic, or calls `_exit`.
+        unsafe { libc::signal(signal, on_signal as *const () as libc::sighandler_t) };
+    }
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
+            if SIGNALLED.load(Ordering::SeqCst) {
+                eprintln!("Quitting on a signal");
+                cx.update(|cx| cx.quit());
+                return;
+            }
+        }
+    })
+    .detach();
 }
 
 /// The main window, on the project last open; the splash closes, and the heavy work starts,

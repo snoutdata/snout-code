@@ -59,6 +59,8 @@ public final class SnoutEngine {
     }
 
     public static void main(String[] args) {
+        // The engine works for the process that started it (the app): it ends with it.
+        Lsp.exitWithParent(System.err);
         System.exit(run(args, System.out, System.err));
     }
 

@@ -108,6 +108,15 @@ final class LspProxy implements Engine.Jdtls {
         } catch (IOException e) {
             // jdtls is gone too
         }
+        // jdtls ends once its input closes; should it not, it is stopped.
+        try {
+            if (!jdtls.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.println("snout-engine: jdtls did not end with its input; stopping it");
+                Lsp.stopProcess(jdtls, 5);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void toJdtls(JsonObject message) throws IOException {
