@@ -208,7 +208,7 @@ public final class Sync {
     }
 
     /** Writes a script under a content-hashed name, once, so Gradle's script cache stays warm. */
-    private static Path writeScript(String prefix, String text) throws IOException {
+    static Path writeScript(String prefix, String text) throws IOException {
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
         Path dir = Path.of(System.getProperty("java.io.tmpdir"), "snout-engine");
         Files.createDirectories(dir);

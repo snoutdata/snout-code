@@ -7,6 +7,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.File;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -54,6 +56,8 @@ final class Lsp {
         File cacheDir;
         File jdtlsHome;
         File bundle;
+        File debugBundle;
+        boolean debugger = true;
         File gradleUserHome;
         String gradleVersion;
         boolean scalaBridge = true;
@@ -70,6 +74,9 @@ final class Lsp {
     }
 
     static int run(Options options, PrintStream log) throws IOException, InterruptedException {
+        // Standard output carries LSP alone: keep anything else that prints off it.
+        OutputStream appOut = new FileOutputStream(FileDescriptor.out);
+        System.setOut(log);
         File projectDir = options.projectDir.getCanonicalFile();
         String hash = Sync.sha256(projectDir.getAbsolutePath().getBytes(StandardCharsets.UTF_8)).substring(0, 16);
         Path cache = (options.cacheDir != null ? options.cacheDir.toPath() : defaultCacheDir()).toAbsolutePath();
@@ -79,6 +86,7 @@ final class Lsp {
 
         File jdtls = options.jdtlsHome != null ? options.jdtlsHome : installed("jdtls");
         File bundle = options.bundle != null ? options.bundle : installedBundle();
+        File debugBundle = !options.debugger ? null : options.debugBundle != null ? options.debugBundle : installedDebugBundle();
         File java = javaExecutable(options.jdtlsJavaHome);
         checkJava(java, options.jdtlsJavaHome);
 
@@ -101,10 +109,11 @@ final class Lsp {
         }
 
         JsonObject model;
+        List<ProjectSync.Plan> plans = List.of();
         // Each stage announces itself on stderr, for a client that shows progress.
         log.println("snout-engine: syncing " + projectDir);
         try {
-            List<ProjectSync.Plan> plans = ProjectSync.plan(project);
+            plans = ProjectSync.plan(project);
             model = ProjectSync.sync(project, plans);
             // A broken build file must not cost the user the editor: a build that fails now keeps
             // its model from the last sync that worked.
@@ -131,9 +140,16 @@ final class Lsp {
         }
         if (model != null) {
             writeAtomically(modelFile, new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(model));
+        } else {
+            model = JsonParser.parseString(Files.readString(modelFile)).getAsJsonObject();
         }
 
-        Path config = prepareConfiguration(home.resolve("config"), jdtls.toPath(), bundle.toPath());
+        List<Path> bundles = new ArrayList<>();
+        bundles.add(bundle.toPath());
+        if (debugBundle != null) {
+            bundles.add(debugBundle.toPath());
+        }
+        Path config = prepareConfiguration(home.resolve("config"), jdtls.toPath(), bundles);
         List<String> command = new ArrayList<>();
         command.add(java.getAbsolutePath());
         command.add("-Declipse.application=org.eclipse.jdt.ls.core.id1");
@@ -163,10 +179,18 @@ final class Lsp {
         command.add(home.resolve("workspace").toString());
 
         log.println("snout-engine: starting jdtls");
-        Process process = new ProcessBuilder(command).inheritIO().start();
-        Thread stop = new Thread(process::destroy, "stop-jdtls");
+        Process process = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.INHERIT).start();
+        LspProxy proxy = new LspProxy(System.in, appOut, process, log);
+        Engine engine = new Engine(model, plans, proxy::toApp, log, home.resolve("runs"));
+        engine.attach(proxy);
+        proxy.attach(engine);
+        Thread stop = new Thread(() -> {
+            engine.shutdown();
+            process.destroy();
+        }, "stop-jdtls");
         Runtime.getRuntime().addShutdownHook(stop);
-        int exit = process.waitFor();
+        int exit = proxy.run();
+        engine.shutdown();
         try {
             Runtime.getRuntime().removeShutdownHook(stop);
         } catch (IllegalStateException e) {
@@ -295,20 +319,23 @@ final class Lsp {
      * bundle added to {@code osgi.bundles}. Rebuilt from scratch when jdtls or the bundle changes,
      * since Equinox caches the bundles it installed.
      */
-    static Path prepareConfiguration(Path dir, Path jdtls, Path bundle) throws IOException {
+    static Path prepareConfiguration(Path dir, Path jdtls, List<Path> bundles) throws IOException {
         Path template = jdtls.resolve(platformConfigDir()).resolve("config.ini");
         Properties ini = new Properties();
         try (Reader reader = Files.newBufferedReader(template, StandardCharsets.ISO_8859_1)) {
             ini.load(reader);
         }
-        String reference = "reference:file:" + bundle.toAbsolutePath() + "@4";
-        ini.setProperty("osgi.bundles", ini.getProperty("osgi.bundles") + "," + reference);
+        StringBuilder osgiBundles = new StringBuilder(ini.getProperty("osgi.bundles"));
+        StringBuilder stamp = new StringBuilder(template.toAbsolutePath() + "\n" + Files.getLastModifiedTime(template) + "\n");
+        for (Path bundle : bundles) {
+            osgiBundles.append(",reference:file:").append(bundle.toAbsolutePath()).append("@4");
+            stamp.append(bundle.toAbsolutePath()).append('\n').append(Files.getLastModifiedTime(bundle)).append('\n')
+                .append(Files.size(bundle)).append('\n');
+        }
+        ini.setProperty("osgi.bundles", osgiBundles.toString());
         ini.setProperty("osgi.checkConfiguration", "true");
-
-        String stamp = template.toAbsolutePath() + "\n" + Files.getLastModifiedTime(template) + "\n"
-            + bundle.toAbsolutePath() + "\n" + Files.getLastModifiedTime(bundle) + "\n" + Files.size(bundle) + "\n";
         Path stampFile = dir.resolve("snout.stamp");
-        if (Files.isRegularFile(stampFile) && Files.readString(stampFile).equals(stamp)) {
+        if (Files.isRegularFile(stampFile) && Files.readString(stampFile).equals(stamp.toString())) {
             return dir;
         }
         deleteTree(dir);
@@ -316,7 +343,7 @@ final class Lsp {
         try (Writer writer = Files.newBufferedWriter(dir.resolve("config.ini"), StandardCharsets.ISO_8859_1)) {
             ini.store(writer, "Generated by snout-engine from " + template);
         }
-        Files.writeString(stampFile, stamp);
+        Files.writeString(stampFile, stamp.toString());
         return dir;
     }
 
@@ -361,6 +388,12 @@ final class Lsp {
             throw new IllegalStateException("expected one importer bundle in " + installed("jdtls-plugins"));
         }
         return jars[0];
+    }
+
+    /** java-debug's bundle, when the distribution carries it; null otherwise (no debugger). */
+    private static File installedDebugBundle() {
+        File[] jars = installed("jdtls-plugins").listFiles((d, n) -> n.startsWith("com.microsoft.java.debug.plugin-") && n.endsWith(".jar"));
+        return jars == null || jars.length == 0 ? null : jars[0];
     }
 
     private static File javaExecutable(File javaHome) {

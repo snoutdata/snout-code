@@ -35,8 +35,10 @@ public final class SnoutEngine {
         "  --offline                   run Gradle offline",
         "  --verbose                   show Gradle's output on stderr",
         "",
-        "lsp: syncs the model, compiles the Scala that Java code uses, then runs jdtls on stdin and",
-        "stdout with the SnoutCode importer. Nothing is written into the project directory.",
+        "lsp: syncs the model, compiles the Scala that Java code uses, then runs jdtls with the SnoutCode",
+        "importer and java-debug, and speaks LSP on stdin and stdout: jdtls's methods, and the engine's",
+        "own snout/ methods (Gradle tasks, tests, run configurations, launching and debugging, Scala).",
+        "Nothing is written into the project directory.",
         "",
         "options: --java-home, --jdk, --parallel, --gradle-user-home, --gradle-version, --no-sources,",
         "--offline and --verbose as for sync, and:",
@@ -44,6 +46,8 @@ public final class SnoutEngine {
         "  --jdtls-java-home <dir>     Java 21+ for jdtls (default: this JVM)",
         "  --jdtls <dir>               jdtls installation (default: the bundled one)",
         "  --bundle <jar>              importer bundle (default: the bundled one)",
+        "  --debug-bundle <jar>        java-debug bundle (default: the bundled one)",
+        "  --no-debugger               do not load java-debug into jdtls",
         "  --no-scala-bridge           do not compile Scala for jdtls",
         "  --max-heap <size>           jdtls heap limit (default: 2G)",
         "  --jvm-arg <arg>             an extra JVM argument for jdtls (repeatable)");
@@ -141,6 +145,8 @@ public final class SnoutEngine {
                     case "--jdtls-java-home" -> options.jdtlsJavaHome = new File(args[++i]);
                     case "--jdtls" -> options.jdtlsHome = new File(args[++i]);
                     case "--bundle" -> options.bundle = new File(args[++i]);
+                    case "--debug-bundle" -> options.debugBundle = new File(args[++i]);
+                    case "--no-debugger" -> options.debugger = false;
                     case "--no-scala-bridge" -> options.scalaBridge = false;
                     case "--max-heap" -> options.maxHeap = args[++i];
                     case "--jvm-arg" -> options.jvmArgs.add(args[++i]);

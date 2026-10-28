@@ -3,6 +3,8 @@
 //
 // The build also fetches the pinned jdtls release (EPL-2.0) from download.eclipse.org into
 // build/jdtls: the bundle compiles against its plugins, and sync-cli ships it in the distribution.
+// It fetches the pinned java-debug bundle (EPL-1.0) from Maven Central the same way, for the
+// debugger; sync-cli ships it next to this bundle.
 
 plugins {
     id 'java'
@@ -14,6 +16,9 @@ ext {
     jdtlsVersion = '1.61.0'
     jdtlsTimestamp = '202609031315'
     jdtlsSha256 = '338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64'
+    // microsoft/java-debug's jdtls plugin, as published to Maven Central (signed by Microsoft).
+    javaDebugVersion = '0.53.1'
+    javaDebugSha256 = '4f4778d452a6a0665536f43ce4e32403a24be6593336b80dc85a322912859e24'
 }
 
 def jdtlsName = "jdt-language-server-${jdtlsVersion}-${jdtlsTimestamp}"
@@ -98,5 +103,16 @@ jar {
     }
 }
 
+def downloadJavaDebug = tasks.register('downloadJavaDebug', DownloadVerified) {
+    description = "Downloads the java-debug ${javaDebugVersion} jdtls bundle from Maven Central."
+    def name = "com.microsoft.java.debug.plugin-${javaDebugVersion}.jar"
+    url = "https://repo1.maven.org/maven2/com/microsoft/java/com.microsoft.java.debug.plugin/${javaDebugVersion}/${name}"
+    sha256 = javaDebugSha256
+    destination = layout.buildDirectory.file("downloads/${name}")
+}
+
 /** The unpacked jdtls, for the distribution in sync-cli. */
 ext.jdtlsHome = unpackJdtls
+
+/** The java-debug bundle, for the distribution in sync-cli. */
+ext.javaDebugBundle = downloadJavaDebug

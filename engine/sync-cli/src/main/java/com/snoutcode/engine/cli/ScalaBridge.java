@@ -38,6 +38,8 @@ public final class ScalaBridge {
         public final List<String> tasks = new ArrayList<>();
         public int sourceSets;
         public long millis;
+        /** The Gradle run alone, without reading the class folders. */
+        public long compileMillis;
         public String error;
     }
 
@@ -50,6 +52,17 @@ public final class ScalaBridge {
      * classes from an earlier compile are better than none.
      */
     public static Result compile(JsonObject model, Sync.Options options) throws IOException {
+        return compile(model, options, options.gradleOutput);
+    }
+
+    /**
+     * As {@link #compile(JsonObject, Sync.Options)}, with Gradle's output going to {@code output}.
+     *
+     * <p>The build directories persist under the build root, Zinc's analysis with them, so a
+     * compile after the first is incremental: Gradle's Scala compile recompiles the changed
+     * files and those that depend on what changed, and the mirrors relink only changed classes.
+     */
+    public static Result compile(JsonObject model, Sync.Options options, OutputStream output) throws IOException {
         long start = System.nanoTime();
         Result result = new Result();
         Map<String, JsonObject> classesDirs = new LinkedHashMap<>();
@@ -91,14 +104,16 @@ public final class ScalaBridge {
                 if (options.javaHome != null) {
                     launcher.setJavaHome(options.javaHome);
                 }
-                OutputStream out = options.gradleOutput != null ? options.gradleOutput : OutputStream.nullOutputStream();
+                OutputStream out = output != null ? output : OutputStream.nullOutputStream();
                 launcher.setStandardOutput(out);
                 launcher.setStandardError(out);
+                launcher.setColorOutput(false);
                 launcher.run();
             } catch (BuildException e) {
                 result.error = SnoutEngine.describe(e);
             }
         }
+        result.compileMillis = (System.nanoTime() - start) / 1_000_000;
         for (Map.Entry<String, JsonObject> e : classesDirs.entrySet()) {
             Path compiled = Path.of(e.getKey());
             if (!Files.isDirectory(compiled)) {
@@ -126,6 +141,63 @@ public final class ScalaBridge {
         }
         result.millis = (System.nanoTime() - start) / 1_000_000;
         return result;
+    }
+
+    /** Whether any of these files lies in a Scala source folder of the build's model. */
+    static boolean holdsAny(JsonObject model, List<Path> files) {
+        for (JsonObject scala : scalaSources(model)) {
+            for (JsonElement d : scala.getAsJsonArray("srcDirs")) {
+                Path dir = Path.of(d.getAsString()).toAbsolutePath().normalize();
+                for (Path f : files) {
+                    if (f.toAbsolutePath().normalize().startsWith(dir)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /** The class folders the last compile recorded for jdtls, across the build. */
+    static List<String> classFolders(JsonObject model) {
+        List<String> out = new ArrayList<>();
+        for (JsonElement b : model.getAsJsonArray("builds")) {
+            for (JsonElement p : b.getAsJsonObject().getAsJsonArray("projects")) {
+                JsonObject project = p.getAsJsonObject();
+                if (!project.has("sourceSets")) {
+                    continue;
+                }
+                for (JsonElement s : project.getAsJsonArray("sourceSets")) {
+                    JsonObject bridge = object(s.getAsJsonObject(), "scalaBridge");
+                    if (bridge == null || !bridge.has("folders")) {
+                        continue;
+                    }
+                    for (JsonElement f : bridge.getAsJsonArray("folders")) {
+                        out.add(f.getAsJsonObject().get("classesDir").getAsString());
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static List<JsonObject> scalaSources(JsonObject model) {
+        List<JsonObject> out = new ArrayList<>();
+        for (JsonElement b : model.getAsJsonArray("builds")) {
+            for (JsonElement p : b.getAsJsonObject().getAsJsonArray("projects")) {
+                JsonObject project = p.getAsJsonObject();
+                if (!project.has("sourceSets")) {
+                    continue;
+                }
+                for (JsonElement s : project.getAsJsonArray("sourceSets")) {
+                    JsonObject scala = object(object(s.getAsJsonObject(), "sources"), "scala");
+                    if (scala != null && scala.has("srcDirs")) {
+                        out.add(scala);
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     private static boolean hasScalaFiles(JsonObject scala) {

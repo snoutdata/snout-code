@@ -1,0 +1,33 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+application {
+    mainClass = 'demo.app.Main'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.register('hello') {
+    group = 'demo'
+    description = 'Says hello.'
+    doLast {
+        println 'hello from the hello task'
+    }
+}

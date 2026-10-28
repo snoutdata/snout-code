@@ -14,6 +14,12 @@
             order="200"
             class="com.snoutcode.engine.jdtls.SnoutBuildSupport"/>
    </extension>
+   <!-- Commands snout-engine sends through workspace/executeCommand. -->
+   <extension point="org.eclipse.jdt.ls.core.delegateCommandHandler">
+      <delegateCommandHandler class="com.snoutcode.engine.jdtls.SnoutCommands">
+         <command id="snout.refreshClassFolders"/>
+      </delegateCommandHandler>
+   </extension>
    <!-- Marks the projects this bundle owns: com.snoutcode.engine.jdtls.nature -->
    <extension id="nature" name="SnoutCode Gradle project" point="org.eclipse.core.resources.natures">
       <runtime>

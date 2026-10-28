@@ -67,6 +67,7 @@ public final class ProjectModelBuilder implements ToolingModelBuilder {
         }
         section(out, errors, "testTasks", () -> TestTaskReader.read(project, errors));
         section(out, errors, "springBoot", () -> SpringBootReader.read(project, errors));
+        section(out, errors, "application", () -> application(project));
 
         out.put("errors", errors);
         out.put("buildMillis", (System.nanoTime() - start) / 1_000_000);
@@ -216,6 +217,30 @@ public final class ProjectModelBuilder implements ToolingModelBuilder {
         }
         out.put("scripts", scripts);
         out.put("source", source);
+        return out;
+    }
+
+    /**
+     * The {@code application} plugin's main class and run task. {@code mainClass} is a property
+     * from Gradle 6.4; before that, {@code mainClassName} on the project convention.
+     */
+    private static Map<String, Object> application(Project project) {
+        if (!project.getPluginManager().hasPlugin("application")) {
+            return null;
+        }
+        Object extension = project.getExtensions().findByName("application");
+        Object mainClass = Reflect.unwrap(Reflect.property(extension, "mainClass"));
+        if (mainClass == null) {
+            mainClass = Reflect.unwrap(project.findProperty("mainClassName"));
+        }
+        Object module = Reflect.unwrap(Reflect.property(extension, "mainModule"));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("mainClass", mainClass == null ? null : mainClass.toString());
+        out.put("mainModule", module == null ? null : module.toString());
+        out.put("applicationName", Reflect.string(Reflect.property(extension, "applicationName")));
+        out.put("jvmArgs", Reflect.strings(Reflect.property(extension, "applicationDefaultJvmArgs")));
+        org.gradle.api.Task run = project.getTasks().findByName("run");
+        out.put("runTask", run == null ? null : run.getPath());
         return out;
     }
 

@@ -36,7 +36,9 @@ tasks.named('test') {
     systemProperty 'snout.test.engine', engine.get().destinationDir.toPath().resolve('bin/snout-engine').toString()
     systemProperty 'snout.test.gradleVersion', gradle.gradleVersion
     systemProperty 'snout.test.fixtures', file('src/test/fixtures').absolutePath
+    systemProperty 'snout.test.engineFixtures', project(':sync-cli').file('src/test/fixtures').absolutePath
     systemProperty 'snout.test.scratch', layout.buildDirectory.dir('test-scratch').get().asFile.absolutePath
     inputs.files(engine)
     inputs.dir('src/test/fixtures')
+    inputs.dir(project(':sync-cli').file('src/test/fixtures'))
 }

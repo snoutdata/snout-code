@@ -52,6 +52,8 @@ public final class LspClient implements AutoCloseable {
     /** jdtls's {@code language/status} messages, as {@code type: message}. */
     public final List<String> statuses = new CopyOnWriteArrayList<>();
     public final List<String> logMessages = new CopyOnWriteArrayList<>();
+    /** The engine's own notifications ({@code snout/...}), each as {@code {method, params}}, in order. */
+    public final List<JsonObject> snoutNotifications = new CopyOnWriteArrayList<>();
     public final CompletableFuture<Void> serviceReady = new CompletableFuture<>();
     public final long startNanos;
     private final AtomicLong lastDiagnosticsNanos = new AtomicLong();
@@ -175,6 +177,41 @@ public final class LspClient implements AutoCloseable {
         }
     }
 
+    /** The params of the engine's notifications of one method, for one run when {@code runId} is given. */
+    public List<JsonObject> notifications(String method, String runId) {
+        List<JsonObject> out = new ArrayList<>();
+        for (JsonObject n : snoutNotifications) {
+            JsonObject params = n.getAsJsonObject("params");
+            if (method.equals(n.get("method").getAsString())
+                && (runId == null || (params.has("runId") && runId.equals(params.get("runId").getAsString())))) {
+                out.add(params);
+            }
+        }
+        return out;
+    }
+
+    /** Waits for an engine notification that matches. */
+    public JsonObject awaitNotification(String method, String runId, java.util.function.Predicate<JsonObject> match, Duration timeout)
+        throws IOException, InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            for (JsonObject p : notifications(method, runId)) {
+                if (match.test(p)) {
+                    return p;
+                }
+            }
+            Thread.sleep(50);
+        }
+        throw new IOException("no " + method + " for " + runId + " within " + timeout);
+    }
+
+    /** The output lines of a run, as the engine reported them. */
+    public List<String> outputLines(String runId) {
+        List<String> out = new ArrayList<>();
+        notifications("snout/taskOutput", runId).forEach(p -> out.add(p.get("line").getAsString()));
+        return out;
+    }
+
     public long peakJdtlsRssKb() {
         return peakJdtlsRssKb.get();
     }
@@ -285,6 +322,12 @@ public final class LspClient implements AutoCloseable {
             }
             case "window/logMessage" -> logMessages.add(params.has("message") ? params.get("message").getAsString() : "");
             default -> {
+                if (method.startsWith("snout/")) {
+                    JsonObject n = new JsonObject();
+                    n.addProperty("method", method);
+                    n.add("params", params);
+                    snoutNotifications.add(n);
+                }
             }
         }
     }

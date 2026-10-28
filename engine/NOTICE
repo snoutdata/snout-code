@@ -32,6 +32,16 @@ https://download.eclipse.org/jdtls/milestones/1.61.0/jdt-language-server-1.61.0-
 repository. Its source is available from the project page above. The bundles inside it carry their
 own license and about files.
 
+The snout-engine distribution includes the Java Debug Server plugin for jdtls (java-debug) 0.53.1
+(https://github.com/microsoft/java-debug), Copyright (c) Microsoft Corporation, licensed under the
+Eclipse Public License 1.0 (https://www.eclipse.org/legal/epl-v10.html). The build downloads the
+unmodified, Microsoft-signed bundle
+https://repo1.maven.org/maven2/com/microsoft/java/com.microsoft.java.debug.plugin/0.53.1/com.microsoft.java.debug.plugin-0.53.1.jar
+(SHA-256 4f4778d452a6a0665536f43ce4e32403a24be6593336b80dc85a322912859e24); it is not part of this
+repository. Its source is available from the project page above. The bundle embeds
+com.microsoft.java.debug.core (EPL 1.0), RxJava 2.2.21 and Apache Commons IO 2.11.0 (Apache License
+2.0), and Reactive Streams 1.0.4 (MIT No Attribution).
+
 jdtls-importer is an OSGi bundle that runs inside jdtls. It uses jdtls's public extension points
 and is not derived from jdtls source code.
 

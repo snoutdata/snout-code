@@ -162,7 +162,7 @@ class SyncIntegrationTest {
         }
     }
 
-    private static void copy(Path from, Path to) throws IOException {
+    static void copy(Path from, Path to) throws IOException {
         try (Stream<Path> files = Files.walk(from)) {
             for (Path source : (Iterable<Path>) files::iterator) {
                 Path target = to.resolve(from.relativize(source).toString());
