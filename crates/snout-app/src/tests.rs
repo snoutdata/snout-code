@@ -243,3 +243,38 @@ fn claude_drafts_the_commit_message_from_the_patch(cx: &mut TestAppContext) {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[gpui::test]
+fn background_fetch_counts_what_there_is_to_pull(cx: &mut TestAppContext) {
+    let work = demo_repo("fetch");
+    // A remote with one commit more than the working copy knows about.
+    let remote = scratch_dir("fetch-remote").join("remote.git");
+    let (w, r) = (work.to_str().unwrap(), remote.to_str().unwrap());
+    git(work.parent().unwrap(), &["clone", "-q", "--bare", w, r]);
+    git(&work, &["remote", "add", "up", r]);
+    git(&work, &["fetch", "-q", "up"]);
+    git(&work, &["branch", "-q", "--set-upstream-to=up/main"]);
+    let other = scratch_dir("fetch-other");
+    git(&other, &["clone", "-q", r, "."]);
+    let who = ["-c", "user.name=O", "-c", "user.email=o@example.com"];
+    git(&other, &[&who[..], &["commit", "-q", "--allow-empty", "-m", "Upstream"]].concat());
+    git(&other, &["push", "-q", "origin", "main"]);
+
+    let (model, _, cx) = open(cx, with_repo(&work));
+    cx.update(|_, cx| {
+        model.update(cx, |m, cx| {
+            m.fetch_every = Some(std::time::Duration::ZERO);
+            m.survey(false, cx);
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        let t = m.tracking.get(&work).copied().flatten().expect("counted");
+        assert_eq!((t.ahead, t.behind), (0, 1), "the fetch saw the new upstream commit");
+        assert_eq!(m.status.branch.behind, 1, "the open repository was re-read after fetching");
+    });
+    for dir in [work, remote.parent().unwrap().to_owned(), other] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

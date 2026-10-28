@@ -84,8 +84,21 @@ impl Workspace {
             dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Bottom, window, cx));
         }
 
-        let subscriptions =
-            vec![cx.observe(&model, |_, _, cx| cx.notify()), cx.subscribe_in(&model, window, Self::on_model_event)];
+        let subscriptions = vec![
+            cx.observe(&model, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&model, window, Self::on_model_event),
+            // Coming back to the window, re-read the repository and count again, so
+            // changes made elsewhere (terminal, editor, an agent) show up at once.
+            cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() && this.model.read(cx).job.is_none() {
+                    this.model.update(cx, |m, cx| {
+                        m.refresh();
+                        m.survey(true, cx);
+                        cx.notify();
+                    });
+                }
+            }),
+        ];
         let mut this =
             Self { model, dock, side, tabs, menu_checks: None, title: String::new(), _subscriptions: subscriptions };
         this.show_repo_tabs(window, cx);
