@@ -3,6 +3,7 @@
 //! console and Output in the bottom dock), and a status bar.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
@@ -20,6 +21,7 @@ use gpui_component::{Sizable as _, Theme};
 use snout_core::{FileEntry, PullMode, on_disk, stage_paths, unstage_paths};
 
 use crate::art::glyph;
+use crate::editor::EditorPanel;
 use crate::git_view::GitView;
 use crate::menus::{self, *};
 use crate::model::{Action, Dialog, Model, ModelEvent};
@@ -46,6 +48,8 @@ pub struct Workspace {
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
     focus: gpui::FocusHandle,
     title: String,
+    /// The editor tabs, to find the one a file already has.
+    editors: Vec<gpui::WeakEntity<EditorPanel>>,
     _save_layout: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -57,7 +61,7 @@ pub const ACTIVITY_W: f32 = 44.;
 const LAYOUT_VERSION: usize = 2;
 
 /// The panels of the window being restored, by name, for the dock's panel registry.
-struct PanelPool(HashMap<&'static str, Arc<dyn BasePanelView>>);
+struct PanelPool(HashMap<&'static str, Arc<dyn BasePanelView>>, Vec<Entity<EditorPanel>>);
 
 impl Global for PanelPool {}
 
@@ -93,28 +97,34 @@ fn default_layout(
 
 /// Put back the layout saved last time, with the panels this window already made; a
 /// panel the saved layout lacks (one added since) goes to its usual place. False when
-/// the saved layout cannot be used.
+/// the saved layout cannot be used. Editor tabs open their files again; they come back too.
 fn restore_layout(
     dock: &Entity<DockArea>,
     state: serde_json::Value,
     panels: &[(Arc<dyn BasePanelView>, DockPlacement)],
     window: &mut Window,
     cx: &mut App,
-) -> bool {
-    let Ok(state) = serde_json::from_value::<DockAreaState>(state) else { return false };
+) -> (bool, Vec<Entity<EditorPanel>>) {
+    let Ok(state) = serde_json::from_value::<DockAreaState>(state) else { return (false, Vec::new()) };
     if state.version != Some(LAYOUT_VERSION) {
-        return false;
+        return (false, Vec::new());
     }
     let pool: HashMap<&'static str, Arc<dyn BasePanelView>> =
         panels.iter().map(|(view, _)| (view.panel_name(cx), view.clone())).collect();
     for name in pool.keys().copied() {
         register_panel(cx, name, move |_, _, cx| cx.global::<PanelPool>().0[name].clone());
     }
-    cx.set_global(PanelPool(pool));
+    register_panel(cx, crate::editor::PANEL_NAME, |ctx, window, cx| {
+        let path = crate::editor::saved_path(ctx.state()).unwrap_or_default();
+        let editor = cx.new(|cx| EditorPanel::open(path, window, cx));
+        cx.global_mut::<PanelPool>().1.push(editor.clone());
+        panel_handle(editor)
+    });
+    cx.set_global(PanelPool(pool, Vec::new()));
     let loaded = dock.update(cx, |d, cx| d.load(state, window, cx));
-    cx.remove_global::<PanelPool>();
+    let editors = cx.remove_global::<PanelPool>().1;
     if loaded.is_err() {
-        return false;
+        return (false, Vec::new());
     }
     dock.update(cx, |d, cx| {
         for (view, place) in panels {
@@ -123,7 +133,7 @@ fn restore_layout(
             }
         }
     });
-    true
+    (true, editors)
 }
 
 impl Workspace {
@@ -150,8 +160,11 @@ impl Workspace {
         panels.push((panel_handle(output.clone()), DockPlacement::Bottom));
 
         let saved = model.read(cx).settings.dock.clone();
-        let restored = saved.is_some_and(|state| restore_layout(&dock, state, &panels, window, cx));
-        if !restored {
+        let restored = match saved {
+            Some(state) => restore_layout(&dock, state, &panels, window, cx),
+            None => (false, Vec::new()),
+        };
+        if !restored.0 {
             default_layout(&dock, &panels, window, cx);
         }
         let open = model.read(cx).settings.console_open;
@@ -201,6 +214,7 @@ impl Workspace {
             menu_checks: None,
             focus: cx.focus_handle(),
             title: String::new(),
+            editors: restored.1.iter().map(|e| e.downgrade()).collect(),
             _save_layout: None,
             _subscriptions: subscriptions,
         };
@@ -229,6 +243,7 @@ impl Workspace {
             // The commit and the diff show in the Git view.
             ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
             ModelEvent::Message => {}
+            ModelEvent::OpenFile(path, at) => self.open_file(path.clone(), *at, window, cx),
         }
     }
 
@@ -273,6 +288,38 @@ impl Workspace {
             return;
         }
         self.model.update(cx, |m, cx| m.step_commit(up, cx));
+    }
+
+    /// Open `path` in an editor tab (or bring its tab forward), the caret at `at`. The
+    /// docks come forward if the Git view was showing.
+    pub fn open_file(&mut self, path: PathBuf, at: Option<(u32, u32)>, window: &mut Window, cx: &mut Context<Self>) {
+        self.editors.retain(|e| e.upgrade().is_some());
+        let open = self.editors.iter().filter_map(|e| e.upgrade()).find(|e| e.read(cx).path == path);
+        let editor = match open {
+            Some(editor) => editor,
+            None => {
+                let editor = cx.new(|cx| EditorPanel::open(path, window, cx));
+                self.editors.push(editor.downgrade());
+                let view = panel_handle(editor.clone());
+                self.dock.update(cx, |d, cx| d.add_panel_view(view, DockPlacement::Center, None, window, cx));
+                editor
+            }
+        };
+        if self.side.read(cx).activity == Activity::Git {
+            self.show_activity(Activity::Projects, window, cx);
+        }
+        let id = PanelId::from(editor.entity_id());
+        self.dock.update(cx, |d, cx| d.select_panel(id, window, cx));
+        editor.update(cx, |e, cx| match at {
+            Some((line, column)) => e.go_to(line, column, window, cx),
+            None => e.state.update(cx, |s, cx| s.focus(window, cx)),
+        });
+        cx.notify();
+    }
+
+    /// The editor tabs open now.
+    pub fn editors(&self) -> Vec<Entity<EditorPanel>> {
+        self.editors.iter().filter_map(|e| e.upgrade()).collect()
     }
 
     /// Save the dock layout once it has stopped changing for a moment (a drag resizes it

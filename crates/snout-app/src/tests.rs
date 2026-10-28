@@ -555,3 +555,49 @@ fn the_git_view_sorts_switches_tabs_and_resizes_with_the_pointer(cx: &mut TestAp
     cx.update(|_, cx| assert_eq!(git.read(cx).commit_width(), before + 40.));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext) {
+    use crate::editor::language_for;
+    use gpui_component::highlighter::LanguageRegistry;
+    let repo = demo_repo("editor");
+    let files = [
+        ("src/App.java", "class App {}\n", "java"),
+        ("build.gradle.kts", "plugins { java }\n", "kotlin"),
+        ("build.gradle", "apply plugin: 'java'\n", "groovy"),
+        ("application.yml", "server:\n  port: 8080\n", "yaml"),
+        ("gradle.properties", "org.gradle.jvmargs=-Xmx2g\n", "properties"),
+    ];
+    for (name, text, _) in files {
+        std::fs::write(repo.join(name), text).unwrap();
+    }
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    for (name, text, language) in files {
+        assert_eq!(language_for(&repo.join(name)), language);
+        assert!(LanguageRegistry::singleton().language(language).is_some(), "{language} is registered");
+        act(&model, cx, Action::OpenFile(repo.join(name), None));
+        let editor = cx.update(|_, cx| ws.read(cx).editors().into_iter().find(|e| e.read(cx).path == repo.join(name)));
+        let editor = editor.expect("the file has a tab");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).text(cx), text));
+    }
+    cx.update(|_, cx| {
+        assert_eq!(ws.read(cx).editors().len(), files.len());
+        assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Projects, "the docks come forward");
+    });
+    // Opening a file again brings its tab forward instead of a second one.
+    act(&model, cx, Action::OpenFile(repo.join("build.gradle"), Some((0, 6))));
+    cx.update(|_, cx| assert_eq!(ws.read(cx).editors().len(), files.len()));
+    // Type, then ⌘S saves.
+    act(&model, cx, Action::OpenFile(repo.join("src/App.java"), Some((0, 0))));
+    let editor = cx.update(|_, cx| ws.read(cx).editors()[0].clone());
+    cx.simulate_keystrokes("x");
+    cx.update(|_, cx| assert!(editor.read(cx).dirty, "typing marks the tab"));
+    cx.simulate_keystrokes("cmd-s");
+    assert_eq!(std::fs::read_to_string(repo.join("src/App.java")).unwrap(), "xclass App {}\n");
+    cx.update(|_, cx| assert!(!editor.read(cx).dirty));
+    // The tabs are part of the saved layout and come back with their files.
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.save_layout(cx)));
+    let layout = cx.update(|_, cx| model.read(cx).settings.dock.clone()).unwrap();
+    assert!(layout.to_string().contains("application.yml"), "{layout}");
+    let _ = std::fs::remove_dir_all(repo);
+}

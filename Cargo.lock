@@ -1442,6 +1442,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
+name = "dekobon-tree-sitter-groovy"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad65fc9637f84f0baf90c88ac337ab068dd7a9260390e473d9496e380685e2d9"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2759,6 +2769,8 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-java",
  "tree-sitter-json",
+ "tree-sitter-kotlin-sg",
+ "tree-sitter-yaml",
  "unicode-segmentation",
  "unicode-width",
  "uuid",
@@ -7323,6 +7335,7 @@ name = "snout-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dekobon-tree-sitter-groovy",
  "epaint_default_fonts",
  "gpui-component",
  "gpui-kit-assets",
@@ -7333,6 +7346,8 @@ dependencies = [
  "serde",
  "serde_json",
  "snout-core",
+ "tree-sitter",
+ "tree-sitter-properties",
 ]
 
 [[package]]
@@ -8032,10 +8047,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-kotlin-sg"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c06ec43ae3c12165d4ac08afe4e1f5fc6757ffe274fa7bd5af9007ef11ba4319"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-language"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0af592be68c579aa78a16846bd19422978c3c52e438523d45ff5d1bff1f9d4a"
+
+[[package]]
+name = "tree-sitter-properties"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a6c2f38dea68abd782573bb6ec3dbd14175cce2953f693055743925d785ceeb"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-yaml"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53c223db85f05e34794f065454843b0668ebc15d240ada63e2b5939f43ce7c97"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree_magic_mini"

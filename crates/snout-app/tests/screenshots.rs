@@ -87,6 +87,8 @@ mod shots {
         Console,
         /// No repository open: the welcome page.
         Nothing,
+        /// A Java file in an editor tab.
+        Editor,
     }
 
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
@@ -140,6 +142,12 @@ mod shots {
                 cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
             }
+            Some(Select::Editor) => {
+                let file = repo.join("src/Greeter.java");
+                let java = "package demo;\n\n/** Says hello. */\npublic class Greeter {\n    private final String name;\n\n    public Greeter(String name) {\n        this.name = name;\n    }\n\n    // The greeting.\n    public String greet() {\n        return \"Hello, \" + name + \"!\";\n    }\n}\n";
+                std::fs::write(&file, java).unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file, None), cx)));
+            }
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -175,5 +183,6 @@ mod shots {
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
         shot("welcome-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
         shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
+        shot("editor-dark", ThemeChoice::Dark, Activity::Projects, Some(Select::Editor));
     }
 }

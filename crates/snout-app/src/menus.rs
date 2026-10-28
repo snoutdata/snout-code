@@ -74,6 +74,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", PrevCommit, Some("Workspace")),
         KeyBinding::new("down", NextCommit, Some("Workspace")),
         KeyBinding::new("cmd-a", SelectAll, Some("Workspace")),
+        KeyBinding::new("cmd-s", crate::editor::Save, Some("EditorPanel")),
     ]);
 }
 

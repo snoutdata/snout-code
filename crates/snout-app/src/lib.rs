@@ -3,6 +3,7 @@
 pub mod art;
 pub mod console;
 pub mod dialogs;
+pub mod editor;
 pub mod git_view;
 pub mod look;
 pub mod menus;
@@ -31,6 +32,7 @@ pub fn init(settings: &Settings, cx: &mut App) {
     }
     theme::apply(settings.theme, None, cx);
     menus::bind_keys(cx);
+    editor::register_languages();
     workspace::app_actions(cx);
     cx.set_menus(menus::bar(settings));
 }
