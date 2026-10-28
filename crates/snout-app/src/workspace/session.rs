@@ -19,6 +19,8 @@ pub struct Keep<'a> {
     pub editor: &'a str,
     /// The open project: editor tabs of files outside it go. None: no editor tab stays.
     pub project: Option<&'a Path>,
+    /// The host the project is on, where an editor tab's file must still be.
+    pub host: &'a dyn snout_host::Host,
 }
 
 impl Keep<'_> {
@@ -32,7 +34,7 @@ impl Keep<'_> {
                 r.starts_with(project) || project.starts_with(r)
             });
         }
-        path.is_file() && path.starts_with(project)
+        path.starts_with(project) && self.host.is_file(path)
     }
 }
 
@@ -177,7 +179,7 @@ mod tests {
             "panel": tabs(vec![leaf("Output", Value::Null), leaf("Output", Value::Null)], 1),
             "placement": "bottom", "size": 200.0, "open": true } });
         let panels: HashSet<String> = ["Welcome", "Output"].into_iter().map(String::from).collect();
-        let keep = Keep { panels: &panels, editor: "Editor", project: Some(&dir) };
+        let keep = Keep { panels: &panels, editor: "Editor", project: Some(&dir), host: &*snout_host::local() };
         let out = sanitize(state.clone(), &keep);
         let group = &out["center"]["children"];
         assert_eq!(group.as_array().unwrap().len(), 1, "the emptied group goes");
@@ -189,7 +191,7 @@ mod tests {
         assert_eq!(out["bottom_dock"]["panel"]["children"].as_array().unwrap().len(), 1, "no panel twice");
 
         // Without a project no editor tab stays; the files can still be read out.
-        let keep = Keep { panels: &panels, editor: "Editor", project: None };
+        let keep = Keep { panels: &panels, editor: "Editor", project: None, host: &*snout_host::local() };
         let out = sanitize(state.clone(), &keep);
         assert!(!out.to_string().contains("A.java"));
         assert_eq!(editor_files(&state, "Editor").len(), 3);

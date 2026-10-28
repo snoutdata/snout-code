@@ -179,14 +179,15 @@ fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Conte
             reply.ok(tools::json_text(&json!({ "success": true, "folders": folders, "rootPath": root_path })));
         }
         "getDiagnostics" => {
-            let only = a.get("uri").and_then(Value::as_str).map(tools::path_of);
+            let only =
+                a.get("uri").and_then(Value::as_str).map(|u| tools::path_of(u, &crate::host::host(cx).info().home));
             reply.ok(tools::json_text(&diagnostics(ws, only.as_deref(), cx)));
         }
         "checkDocumentDirty" => {
             let Some(file) = a.get("filePath").and_then(Value::as_str) else {
                 return reply.error(INVALID_PARAMS, "Invalid params", Some("Missing filePath parameter".into()));
             };
-            let v = match editor_for(ws, &tools::path_of(file), cx) {
+            let v = match editor_for(ws, &tools::path_of(file, &crate::host::host(cx).info().home), cx) {
                 Some(e) => {
                     json!({ "success": true, "filePath": file, "isDirty": e.read(cx).dirty, "isUntitled": false })
                 }
@@ -198,7 +199,7 @@ fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Conte
             let Some(file) = a.get("filePath").and_then(Value::as_str) else {
                 return reply.error(INVALID_PARAMS, "Invalid params", Some("Missing filePath parameter".into()));
             };
-            let v = match editor_for(ws, &tools::path_of(file), cx) {
+            let v = match editor_for(ws, &tools::path_of(file, &crate::host::host(cx).info().home), cx) {
                 Some(e) => {
                     e.update(cx, |e, cx| e.save(cx));
                     match e.read(cx).dirty {
@@ -248,7 +249,7 @@ fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Conte
 
 /// The editor tab of `path`, if one is open.
 fn editor_for(ws: &Workspace, path: &Path, cx: &App) -> Option<Entity<EditorPanel>> {
-    let canonical = path.canonicalize().ok();
+    let canonical = crate::host::host(cx).canonicalize(path).ok();
     ws.editors(cx).into_iter().find(|e| {
         let p = &e.read(cx).path;
         p == path || canonical.as_deref().is_some_and(|c| c == p)
@@ -316,6 +317,8 @@ fn open_editors(ws: &Workspace, window: &Window, cx: &App) -> Value {
 fn diagnostics(ws: &Workspace, only: Option<&Path>, cx: &App) -> Value {
     use std::str::FromStr as _;
     let hub = ws.hub.read(cx);
+    let host = crate::host::host(cx);
+    let mut only_canonical: Option<Option<PathBuf>> = None;
     let mut files: Vec<Value> = Vec::new();
     for server in hub.servers.values() {
         for (uri, list) in &server.diagnostics {
@@ -324,8 +327,10 @@ fn diagnostics(ws: &Workspace, only: Option<&Path>, cx: &App) -> Value {
             }
             if let Some(only) = only {
                 let path = lsp_types::Uri::from_str(uri).ok().and_then(|u| snout_lang::uri::to_path(&u));
-                let same =
-                    path.as_deref().is_some_and(|p| p == only || only.canonicalize().ok().is_some_and(|c| c == p));
+                let same = path.as_deref().is_some_and(|p| {
+                    p == only
+                        || only_canonical.get_or_insert_with(|| host.canonicalize(only).ok()).as_deref() == Some(p)
+                });
                 if !same {
                     continue;
                 }
@@ -358,8 +363,8 @@ fn open_file(ws: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, c
     let Some(file) = a.get("filePath").and_then(Value::as_str) else {
         return reply.error(INVALID_PARAMS, "Invalid params", Some("Missing filePath parameter".into()));
     };
-    let path = tools::path_of(file);
-    if !path.is_file() {
+    let path = tools::path_of(file, &crate::host::host(cx).info().home);
+    if !crate::host::host(cx).is_file(&path) {
         return reply.error(TOOL_ERROR, "File operation error", Some(format!("File not found: {}", path.display())));
     }
     let flag = |k: &str| a.get(k).and_then(Value::as_bool);
@@ -437,7 +442,7 @@ fn open_diff(ws: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, c
         }
     }
     let [_, new_path, contents, tab]: [String; 4] = args.try_into().expect("four arguments");
-    let path = tools::path_of(&new_path);
+    let path = tools::path_of(&new_path, &crate::host::host(cx).info().home);
     let editor = ws.reveal_file(path, false, true, window, cx);
     let name = tab.clone();
     let answer: Answer = Box::new(move |outcome| match outcome {

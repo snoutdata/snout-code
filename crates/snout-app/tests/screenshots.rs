@@ -913,7 +913,9 @@ mod shots {
             cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(path, Some(at)), cx)))
         };
         let java = repo.join("src/main/java/demo");
-        let marks = |name: &str| snout_app::spring::FileSpring::parse(&f["injections"][name], &endpoints);
+        let marks = |name: &str| {
+            snout_app::spring::FileSpring::parse(&*snout_app::host::local(), &f["injections"][name], &endpoints)
+        };
         let feed = |cx: &mut HeadlessAppContext, name: &str, marks: snout_app::spring::FileSpring| {
             let editor = editor_named(ws, name, cx);
             cx.update(|cx| {
@@ -1016,7 +1018,11 @@ mod shots {
                 // The application class's bean mark, as the engine marks it.
                 let app = r#"{"uri":"","lines":[{"line":8,"injections":[],"beans":[{"name":"demoApplication","type":"demo.DemoApplication","kind":"configuration","stereotype":"org.springframework.boot.autoconfigure.SpringBootApplication","declaringType":"demo.DemoApplication","language":"java","injectedInto":[]}]}]}"#;
                 let app: serde_json::Value = serde_json::from_str(app).unwrap();
-                feed(cx, "DemoApplication.java", snout_app::spring::FileSpring::parse(&app, &[]));
+                feed(
+                    cx,
+                    "DemoApplication.java",
+                    snout_app::spring::FileSpring::parse(&*snout_app::host::local(), &app, &[]),
+                );
                 let win = cx.update(|cx| ws.read(cx).spring_window.clone());
                 cx.update(|cx| {
                     win.update(cx, |w, cx| {

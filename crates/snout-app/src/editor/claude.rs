@@ -129,7 +129,7 @@ impl EditorPanel {
 
     fn start_review(&mut self, mut p: Proposal, window: &mut Window, cx: &mut Context<Self>) {
         let original = self.text(cx);
-        let new_file = !self.path.exists();
+        let new_file = !crate::host::host(cx).exists(&self.path);
         if new_file {
             self.error = None;
         }
@@ -250,7 +250,7 @@ impl EditorPanel {
         if r.new_file
             && let Some(dir) = self.path.parent()
         {
-            let _ = std::fs::create_dir_all(dir);
+            let _ = crate::host::host(cx).create_dir_all(dir);
         }
         let text = self.text(cx);
         self.save(cx);

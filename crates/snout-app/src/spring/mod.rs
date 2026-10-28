@@ -382,12 +382,13 @@ pub struct FileSpring {
 }
 
 impl FileSpring {
-    /// From `springInjections`' answer, with the endpoints whose handlers are in `uri`.
-    pub fn parse(v: &Value, endpoints: &[Endpoint]) -> Self {
+    /// From `springInjections`' answer, with the endpoints whose handlers are in `uri` (two
+    /// spellings of one file on `host` are one).
+    pub fn parse(host: &dyn snout_host::Host, v: &Value, endpoints: &[Endpoint]) -> Self {
         let mut lines: Vec<SpringLine> =
             v.get("lines").and_then(|l| serde_json::from_value(l.clone()).ok()).unwrap_or_default();
         let uri = v.get("uri").and_then(Value::as_str).unwrap_or_default();
-        for e in endpoints.iter().filter(|e| e.uri.as_deref().is_some_and(|u| same_uri(u, uri))) {
+        for e in endpoints.iter().filter(|e| e.uri.as_deref().is_some_and(|u| same_uri(&*host, u, uri))) {
             let Some(line) = e.range.map(|r| r.start.line) else { continue };
             match lines.iter_mut().find(|l| l.line == line) {
                 Some(l) => l.endpoints.push(e.clone()),
@@ -404,14 +405,16 @@ impl FileSpring {
     }
 }
 
-/// Two URIs of one file (the engine may spell the path differently).
-fn same_uri(a: &str, b: &str) -> bool {
+/// Two URIs of one file on `host` (the engine may spell the path differently).
+fn same_uri(host: &dyn snout_host::Host, a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
     let path = |u: &str| u.parse::<lsp_types::Uri>().ok().and_then(|u| snout_lang::uri::to_path(&u));
     match (path(a), path(b)) {
-        (Some(a), Some(b)) => a == b || a.canonicalize().ok().zip(b.canonicalize().ok()).is_some_and(|(a, b)| a == b),
+        (Some(a), Some(b)) => {
+            a == b || host.canonicalize(&a).ok().zip(host.canonicalize(&b).ok()).is_some_and(|(a, b)| a == b)
+        }
         _ => false,
     }
 }
@@ -582,9 +585,10 @@ impl Spring {
         }
         let call = self.runs.read(cx).request("snout/springInjections", json!({ "path": path }), cx);
         let endpoints = self.endpoints.clone();
+        let host = crate::host::host(cx);
         cx.background_executor().spawn(async move {
             match call.await {
-                Ok(v) => Some(FileSpring::parse(&v, &endpoints)),
+                Ok(v) => Some(FileSpring::parse(&*host, &v, &endpoints)),
                 Err(e) => {
                     eprintln!("[spring] injections: {e}");
                     None

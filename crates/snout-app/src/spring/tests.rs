@@ -51,7 +51,7 @@ fn reads_the_beans_and_the_endpoints() {
 fn marks_a_files_beans_injections_and_endpoints_by_line() {
     let f = fixture(root());
     let endpoints = parse_endpoints(&f["endpoints"]);
-    let file = FileSpring::parse(&f["injections"]["GreetingController"], &endpoints);
+    let file = FileSpring::parse(&*snout_host::local(), &f["injections"]["GreetingController"], &endpoints);
     let marks: Vec<(u32, MarkKind)> = file.lines.iter().map(|l| (l.line, l.mark().unwrap())).collect();
     assert_eq!(
         marks,
@@ -74,7 +74,7 @@ fn marks_a_files_beans_injections_and_endpoints_by_line() {
 fn a_marks_menu_offers_the_places_to_go() {
     let f = fixture(root());
     let endpoints = parse_endpoints(&f["endpoints"]);
-    let controller = FileSpring::parse(&f["injections"]["GreetingController"], &endpoints);
+    let controller = FileSpring::parse(&*snout_host::local(), &f["injections"]["GreetingController"], &endpoints);
     // The ambiguous constructor parameter: a chooser of both greetings (and the clock and
     // the properties, which resolve to one each).
     let items = spring_items(controller.line(32).unwrap());
@@ -99,7 +99,7 @@ fn a_marks_menu_offers_the_places_to_go() {
         ]
     );
     // A @Bean method: where it is injected; its parameter, the library's ObjectMapper.
-    let config = FileSpring::parse(&f["injections"]["AppConfig"], &endpoints);
+    let config = FileSpring::parse(&*snout_host::local(), &f["injections"]["AppConfig"], &endpoints);
     let items = spring_items(config.line(11).unwrap());
     assert_eq!(items[0], SpringItem::Heading("Bean 'clock' is injected into".into()));
     let SpringItem::Go { label, detail, target } = &items[1] else { panic!("{items:?}") };

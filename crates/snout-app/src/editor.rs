@@ -429,7 +429,8 @@ impl EditorPanel {
 
     /// Show the file at `path` in this tab instead (a preview tab moving on).
     pub fn load(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let (text, error) = match std::fs::read_to_string(&path) {
+        let host = crate::host::host(cx);
+        let (text, error) = match host.read_to_string(&path) {
             Ok(text) => (text, None),
             Err(e) => (String::new(), Some(format!("Could not read {}: {e}", path.display()))),
         };
@@ -442,8 +443,8 @@ impl EditorPanel {
             s.set_tab_size(TabSize { tab_size: info.width, hard_tabs: info.tabs }, cx);
             s.set_value(text.clone(), window, cx);
         });
-        self.root = path.ancestors().skip(1).find(|d| d.join(".git").exists()).map(Path::to_owned);
-        self.disk = disk_stamp(&path);
+        self.root = path.ancestors().skip(1).find(|d| host.exists(&d.join(".git"))).map(Path::to_owned);
+        self.disk = disk_stamp(&*host, &path);
         self.path = path;
         self.saved = text;
         self.dirty = false;
@@ -525,7 +526,7 @@ impl EditorPanel {
     /// Keep this tab's text over what changed on disk; saving writes it.
     pub fn keep_mine(&mut self, cx: &mut Context<Self>) {
         self.conflict = false;
-        self.disk = disk_stamp(&self.path);
+        self.disk = disk_stamp(&*crate::host::host(cx), &self.path);
         cx.notify();
     }
 
@@ -535,12 +536,13 @@ impl EditorPanel {
         if self.class_file.is_some() {
             return;
         }
-        let now = disk_stamp(&self.path);
+        let host = crate::host::host(cx);
+        let now = disk_stamp(&*host, &self.path);
         if now.is_none() || now == self.disk || self.conflict {
             return;
         }
         self.disk = now;
-        let Ok(text) = std::fs::read_to_string(&self.path) else { return };
+        let Ok(text) = host.read_to_string(&self.path) else { return };
         if text == self.saved {
             return;
         }
@@ -651,9 +653,10 @@ impl EditorPanel {
             return;
         }
         let text = self.state.read(cx).value().to_string();
-        match std::fs::write(&self.path, &text) {
+        let host = crate::host::host(cx);
+        match host.write(&self.path, text.as_bytes()) {
             Ok(()) => {
-                self.disk = disk_stamp(&self.path);
+                self.disk = disk_stamp(&*host, &self.path);
                 self.conflict = false;
                 if let Some(link) = &self.lang
                     && let Some(hub) = link.hub.upgrade()
@@ -719,7 +722,7 @@ impl EditorPanel {
     /// The other view of this file saved it: this one is saved too.
     pub fn mark_saved(&mut self, cx: &mut Context<Self>) {
         self.saved = self.text(cx);
-        self.disk = disk_stamp(&self.path);
+        self.disk = disk_stamp(&*crate::host::host(cx), &self.path);
         self.dirty = false;
         self.conflict = false;
         cx.notify();
@@ -906,9 +909,9 @@ fn paint_mark(kind: LineChangeKind, b: Bounds<Pixels>, color: Hsla, window: &mut
 }
 
 /// A file's modification time and length, to notice changes made elsewhere.
-fn disk_stamp(path: &Path) -> Option<(SystemTime, u64)> {
-    let m = std::fs::metadata(path).ok()?;
-    Some((m.modified().ok()?, m.len()))
+fn disk_stamp(host: &dyn snout_host::Host, path: &Path) -> Option<(SystemTime, u64)> {
+    let m = host.metadata(path).ok()?;
+    Some((m.modified?, m.len))
 }
 
 impl gpui_component::dock::BasePanel for EditorPanel {

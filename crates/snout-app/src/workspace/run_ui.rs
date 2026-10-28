@@ -81,7 +81,7 @@ impl Workspace {
         let line = link.line().saturating_sub(1);
         let path = match &link {
             Link::Path { path, column, .. } => {
-                if path.is_file() {
+                if crate::host::host(cx).is_file(path) {
                     return self.open_file(path.clone(), Some((line, column.saturating_sub(1))), false, window, cx);
                 }
                 None
@@ -105,9 +105,10 @@ impl Workspace {
         let model = crate::project_model::store(cx)?.read(cx).current.clone()?;
         let roots =
             model.modules.iter().flat_map(|m| m.roots.iter()).chain(model.shared.iter().flat_map(|s| s.roots.iter()));
+        let host = crate::host::host(cx);
         for root in roots {
             let candidate = root.dir.join(rel);
-            if candidate.is_file() {
+            if host.is_file(&candidate) {
                 return Some(candidate);
             }
         }

@@ -65,10 +65,10 @@ fn text_edit(e: OneOf<TextEdit, lsp_types::AnnotatedTextEdit>) -> TextEdit {
     }
 }
 
-/// Apply `edits` to a file no editor has open.
-pub fn edit_file(path: &std::path::Path, edits: &[TextEdit]) -> std::io::Result<()> {
-    let text = std::fs::read_to_string(path)?;
-    std::fs::write(path, super::text::apply_to_string(&text, edits))
+/// Apply `edits` to a file on `host` no editor has open.
+pub fn edit_file(host: &dyn snout_host::Host, path: &std::path::Path, edits: &[TextEdit]) -> std::io::Result<()> {
+    let text = host.read_to_string(path)?;
+    host.write(path, super::text::apply_to_string(&text, edits).as_bytes())
 }
 
 #[cfg(test)]

@@ -404,10 +404,9 @@ fn letter_badge(text: &'static str, color: Hsla, p: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-/// "~/dev/shop" for a folder in the home folder.
-fn short_path(path: &Path) -> String {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
+/// "~/dev/shop" for a folder in the home folder (`home`).
+fn short_path(path: &Path, home: &Path) -> String {
+    match path.strip_prefix(home).ok().filter(|_| !home.as_os_str().is_empty()) {
         Some(rest) => format!("~/{}", rest.display()),
         None => path.display().to_string(),
     }
@@ -477,6 +476,7 @@ impl Render for ProjectView {
                 .into_any_element();
         };
         let rows = self.rows(cx);
+        let home = crate::host::host(cx).info().home.clone();
         let m = self.model.read(cx);
         let marks = match m.repo_root() {
             Some(repo) => git_marks(&repo, &m.status.files),
@@ -489,7 +489,7 @@ impl Render for ProjectView {
             .into_iter()
             .enumerate()
             .map(|(i, row)| {
-                let look = row_look(&row, &model, &marks, &p, (green, warm, blue, violet));
+                let look = row_look(&row, &model, &marks, &p, (green, warm, blue, violet), &home);
                 self.row(i, row, look, active.as_ref(), guide, &p, cx)
             })
             .collect();
@@ -511,6 +511,7 @@ fn row_look(
     marks: &HashMap<PathBuf, GitMark>,
     p: &Palette,
     (green, warm, blue, violet): (Hsla, Hsla, Hsla, Hsla),
+    home: &Path,
 ) -> Look {
     let folder = |g: Icon, c: Hsla| icon(g, 15., c).into_any_element();
     let mut look = Look {
@@ -531,7 +532,7 @@ fn row_look(
             look.label = model.name.clone();
             look.bold = true;
             look.glyph = folder(if module.is_some() { Icon::Module } else { Icon::Folder }, blue);
-            look.note = Some(short_path(&model.root));
+            look.note = Some(short_path(&model.root, home));
             look.path = Some(model.root.clone());
             if let Some(m) = module.map(|i| &model.modules[i]) {
                 if !m.uses.is_empty() {
@@ -659,7 +660,7 @@ fn row_look(
             let jdk = &model.jdks[*i];
             look.label = jdk.label();
             look.glyph = icon(Icon::Jdk, 14., warm).into_any_element();
-            look.note = Some(short_path(&jdk.home));
+            look.note = Some(short_path(&jdk.home, home));
             look.tip = Some(jdk.home.display().to_string());
             look.path = Some(jdk.home.clone());
         }

@@ -179,7 +179,8 @@ fn restore_layout(
     let pool: HashMap<&'static str, Arc<dyn BasePanelView>> =
         panels.iter().map(|(view, _)| (view.panel_name(cx), view.clone())).collect();
     let names: std::collections::HashSet<String> = pool.keys().map(|n| n.to_string()).collect();
-    let keep = session::Keep { panels: &names, editor: crate::editor::PANEL_NAME, project };
+    let host = crate::host::host(cx);
+    let keep = session::Keep { panels: &names, editor: crate::editor::PANEL_NAME, project, host: &*host };
     let Ok(state) = serde_json::from_value::<DockAreaState>(session::sanitize(state, &keep)) else {
         return (false, Vec::new());
     };
@@ -319,7 +320,8 @@ impl Workspace {
             default_layout(&dock, &panels, window, cx);
             if let (Some(saved), Some(root)) = (&saved, &root) {
                 reopen = session::editor_files(saved, crate::editor::PANEL_NAME);
-                reopen.retain(|p| p.is_file() && p.starts_with(root));
+                let host = crate::host::host(cx);
+                reopen.retain(|p| p.starts_with(root) && host.is_file(p));
             }
         }
         let open = model.read(cx).settings.console_open;
@@ -1110,8 +1112,7 @@ impl Workspace {
             .recent_projects()
             .first()
             .and_then(|p| p.parent().map(PathBuf::from))
-            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-            .unwrap_or_default();
+            .unwrap_or_else(|| crate::host::host(cx).info().home.clone());
         let cache = m.support_dir().map(|d| d.join("start-spring-io.json"));
         let view = cx.new(|cx| NewProjectView::new(location, cache, window, cx));
         cx.subscribe_in(&view, window, |this, _, e: &NewProjectEvent, window, cx| {

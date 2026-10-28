@@ -545,7 +545,7 @@ impl Model {
     /// False when the workspace is asked first (another project is open).
     fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
         if self.confirm_switch && self.repo.is_some() {
-            let project = path.canonicalize().unwrap_or_else(|_| path.to_owned());
+            let project = self.host.canonicalize(path).unwrap_or_else(|_| path.to_owned());
             if self.project.as_ref() != Some(&project) && Repo::open(&self.host, path).is_ok() {
                 cx.emit(ModelEvent::Switch(path.to_owned()));
                 return false;
@@ -556,7 +556,7 @@ impl Model {
                 let root = repo.root().to_owned();
                 // The folder as opened, in the form Git gives the root (symbolic links
                 // resolved), so paths under the project and under the repository compare.
-                let project = path.canonicalize().unwrap_or_else(|_| path.to_owned());
+                let project = self.host.canonicalize(path).unwrap_or_else(|_| path.to_owned());
                 self.remember(&root, &project);
                 self.settings.current = Some(project.clone());
                 self.project = Some(project);
@@ -595,9 +595,9 @@ impl Model {
     /// Open `path` as the command line names it: `File.java:12` or `File.java:12:5` puts the
     /// caret on that line (and column), from 1.
     pub fn open_arg(&mut self, arg: &Path, cx: &mut Context<Self>) {
-        if !arg.exists()
+        if !self.host.exists(arg)
             && let Some((path, at)) = split_line_suffix(&arg.to_string_lossy())
-            && path.is_file()
+            && self.host.is_file(&path)
         {
             self.open_path(&path, cx);
             if let Some(pending) = self.pending_file.as_mut() {
@@ -609,20 +609,21 @@ impl Model {
     }
 
     fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let dir = if path.is_file() { path.parent().unwrap_or(path) } else { path };
+        let is_file = self.host.is_file(path);
+        let dir = if is_file { path.parent().unwrap_or(path) } else { path };
         if let Ok(repo) = Repo::open(&self.host, dir) {
             // A folder is the project as it is; a file opens in its repository.
-            let project = if path.is_file() { repo.root().to_owned() } else { dir.to_owned() };
+            let project = if is_file { repo.root().to_owned() } else { dir.to_owned() };
             let opened = self.open_repo(&project, cx);
             // A file opens in a tab of its repository (once the window is there, or once
             // the switch to its project is done).
-            if path.is_file() {
+            if is_file {
                 self.pending_file = Some((path.to_owned(), None));
                 if opened {
                     cx.emit(ModelEvent::OpenFile(path.to_owned(), None, false));
                 }
             }
-        } else if dir.is_dir() {
+        } else if self.host.is_dir(dir) {
             self.ask(Dialog::InitRepo(dir.to_owned()), cx);
         } else {
             self.fail(format!("{} does not exist", dir.display()), cx);

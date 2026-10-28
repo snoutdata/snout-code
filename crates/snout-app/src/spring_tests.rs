@@ -49,7 +49,7 @@ fn feed(ws: &Entity<Workspace>, repo: &Path, editor: &Entity<EditorPanel>, file:
     let f = spring::tests::fixture(repo);
     let modules = spring::parse_beans(&f["beans"]);
     let endpoints = spring::parse_endpoints(&f["endpoints"]);
-    let marks = FileSpring::parse(&f["injections"][file], &endpoints);
+    let marks = FileSpring::parse(&*snout_host::local(), &f["injections"][file], &endpoints);
     let model = cx.update(|_, cx| ws.read(cx).spring.clone());
     cx.update(|_, cx| model.update(cx, |s, cx| s.set_model(modules, endpoints, cx)));
     cx.run_until_parked();

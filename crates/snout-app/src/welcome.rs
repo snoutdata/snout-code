@@ -52,18 +52,18 @@ impl WelcomePanel {
 
 crate::panels::panel!(WelcomePanel, "Welcome", |_, _| "Welcome".into(), true);
 
-/// The branch checked out in the repository holding `dir`, read from its `HEAD`.
-pub fn branch_of(dir: &Path) -> Option<String> {
-    let repo = dir.ancestors().find(|d| d.join(".git").exists())?;
-    let dot_git = repo.join(".git");
-    let git_dir = if dot_git.is_file() {
-        let text = std::fs::read_to_string(&dot_git).ok()?;
+/// The branch checked out in the repository holding `dir` on `host`, read from its `HEAD`.
+pub fn branch_of(host: &dyn snout_host::Host, dir: &Path) -> Option<String> {
+    let (repo, dot_git) =
+        dir.ancestors().find_map(|d| host.metadata(&d.join(".git")).ok().map(|m| (d, m.is_file())))?;
+    let git_dir = if dot_git {
+        let text = host.read_to_string(&repo.join(".git")).ok()?;
         let rel = text.trim().strip_prefix("gitdir:")?.trim().to_owned();
         repo.join(rel)
     } else {
-        dot_git
+        repo.join(".git")
     };
-    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let head = host.read_to_string(&git_dir.join("HEAD")).ok()?;
     let head = head.trim();
     match head.strip_prefix("ref: refs/heads/") {
         Some(branch) => Some(branch.to_owned()),
@@ -86,13 +86,12 @@ pub fn ago(secs: u64, now: u64) -> String {
     }
 }
 
-/// `path` with the home folder as `~`.
-fn tilde(path: &Path) -> String {
-    match std::env::var_os("HOME").map(PathBuf::from) {
-        Some(home) if path.starts_with(&home) && !home.as_os_str().is_empty() => {
-            format!("~/{}", path.strip_prefix(&home).unwrap_or(path).display())
-        }
-        _ => path.display().to_string(),
+/// `path` with the home folder (`home`) as `~`.
+fn tilde(path: &Path, home: &Path) -> String {
+    if path.starts_with(home) && !home.as_os_str().is_empty() {
+        format!("~/{}", path.strip_prefix(home).unwrap_or(path).display())
+    } else {
+        path.display().to_string()
     }
 }
 
@@ -105,6 +104,7 @@ impl Render for WelcomePanel {
         let opened = self.model.read(cx).settings.opened.clone();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let hover = p.button_hover;
+        let host = crate::host::host(cx);
 
         let action = |id: &'static str, g: Icon, title: &'static str, note: &'static str, a: Option<Action>| {
             let model = model.clone();
@@ -192,7 +192,7 @@ impl Render for WelcomePanel {
             .enumerate()
             .map(|(i, path)| {
                 let name = Model::dir_name(path);
-                let branch = branch_of(path);
+                let branch = branch_of(&*host, path);
                 let when = opened.get(path).map(|t| ago(*t, now));
                 let model = model.clone();
                 let target = path.clone();
@@ -235,7 +235,7 @@ impl Render for WelcomePanel {
                                     .whitespace_nowrap()
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(tilde(path)),
+                                    .child(tilde(path, &host.info().home)),
                             ),
                     )
                     .children(branch.map(|b| {
@@ -327,9 +327,9 @@ mod tests {
         std::fs::create_dir_all(dir.join(".git")).unwrap();
         std::fs::create_dir_all(dir.join("app")).unwrap();
         std::fs::write(dir.join(".git/HEAD"), "ref: refs/heads/feature/x\n").unwrap();
-        assert_eq!(branch_of(&dir.join("app")).as_deref(), Some("feature/x"));
+        assert_eq!(branch_of(&*snout_host::local(), &dir.join("app")).as_deref(), Some("feature/x"));
         std::fs::write(dir.join(".git/HEAD"), "0123456789abcdef\n").unwrap();
-        assert_eq!(branch_of(&dir).as_deref(), Some("01234567"));
+        assert_eq!(branch_of(&*snout_host::local(), &dir).as_deref(), Some("01234567"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

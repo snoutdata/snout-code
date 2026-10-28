@@ -386,6 +386,7 @@ impl Runs {
     fn refresh_stack(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(dap) = self.dap_of(id) else { return };
         let thread = self.dbg(id).and_then(|d| d.thread);
+        let host = crate::host::host(cx);
         cx.spawn(async move |this, cx| {
             let threads = dap.request("threads", json!({})).await.unwrap_or_default();
             let threads: Vec<(i64, String)> = threads
@@ -405,19 +406,29 @@ impl Runs {
                     .unwrap_or_default(),
                 None => Value::Null,
             };
-            let frames: Vec<Frame> = frames
-                .get("stackFrames")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .map(|f| Frame {
-                    id: f.get("id").and_then(Value::as_i64).unwrap_or(0),
-                    name: f.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(),
-                    path: f.pointer("/source/path").and_then(Value::as_str).map(PathBuf::from).filter(|p| p.is_file()),
-                    source: f.pointer("/source/name").and_then(Value::as_str).map(str::to_owned),
-                    line: f.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
+            // Which frames' files are there: asked of the host, off the UI thread.
+            let frames: Vec<Frame> = cx
+                .background_executor()
+                .spawn(async move {
+                    frames
+                        .get("stackFrames")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .map(|f| Frame {
+                            id: f.get("id").and_then(Value::as_i64).unwrap_or(0),
+                            name: f.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                            path: f
+                                .pointer("/source/path")
+                                .and_then(Value::as_str)
+                                .map(PathBuf::from)
+                                .filter(|p| host.is_file(p)),
+                            source: f.pointer("/source/name").and_then(Value::as_str).map(str::to_owned),
+                            line: f.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
+                        })
+                        .collect()
                 })
-                .collect();
+                .await;
             let _ = this.update(cx, |this, cx| {
                 let Some(d) = this.dbg(id) else { return };
                 d.threads = threads;

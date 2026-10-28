@@ -149,8 +149,8 @@ pub fn file_url(path: &std::path::Path) -> String {
     snout_lang::uri::from_path(path).as_str().to_owned()
 }
 
-/// The path a `file://` URI (or a bare path) names.
-pub fn path_of(uri_or_path: &str) -> std::path::PathBuf {
+/// The path a `file://` URI (or a bare path, `~/` in `home`) names.
+pub fn path_of(uri_or_path: &str, home: &std::path::Path) -> std::path::PathBuf {
     use std::str::FromStr as _;
     if uri_or_path.starts_with("file://")
         && let Ok(uri) = lsp_types::Uri::from_str(uri_or_path)
@@ -158,14 +158,14 @@ pub fn path_of(uri_or_path: &str) -> std::path::PathBuf {
     {
         return path;
     }
-    expand_tilde(uri_or_path)
+    expand_tilde(uri_or_path, home)
 }
 
-/// `~/x` as the home folder's `x`.
-pub fn expand_tilde(path: &str) -> std::path::PathBuf {
+/// `~/x` as the home folder's `x` (the home on the host Claude Code runs on).
+pub fn expand_tilde(path: &str, home: &std::path::Path) -> std::path::PathBuf {
     match path.strip_prefix("~/") {
-        Some(rest) => std::env::var_os("HOME").map_or_else(|| path.into(), |h| std::path::Path::new(&h).join(rest)),
-        None => path.into(),
+        Some(rest) if !home.as_os_str().is_empty() => home.join(rest),
+        _ => path.into(),
     }
 }
 
@@ -222,7 +222,9 @@ mod tests {
         let p = std::path::Path::new("/tmp/a b/C.java");
         let url = file_url(p);
         assert!(url.starts_with("file:///tmp/a"));
-        assert_eq!(path_of(&url), p);
-        assert_eq!(path_of("/x/y.rs"), std::path::Path::new("/x/y.rs"));
+        let home = std::path::Path::new("/home/me");
+        assert_eq!(path_of(&url, home), p);
+        assert_eq!(path_of("/x/y.rs", home), std::path::Path::new("/x/y.rs"));
+        assert_eq!(path_of("~/y.rs", home), std::path::Path::new("/home/me/y.rs"));
     }
 }

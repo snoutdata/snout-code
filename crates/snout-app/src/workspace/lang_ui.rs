@@ -176,11 +176,12 @@ impl Workspace {
     pub fn apply_edit(&mut self, edit: WorkspaceEdit, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let mut ok = true;
         let mut on_disk: Vec<PathBuf> = Vec::new();
+        let host = crate::host::host(cx);
         for step in edits::steps(edit) {
             match step {
                 Step::Edit(path, list) => match self.editors(cx).into_iter().find(|e| e.read(cx).path == path) {
                     Some(editor) => editor.update(cx, |e, cx| e.apply_lsp_edits(&list, window, cx)),
-                    None => match edits::edit_file(&path, &list) {
+                    None => match edits::edit_file(&*host, &path, &list) {
                         Ok(()) => on_disk.push(path),
                         Err(e) => {
                             ok = false;
@@ -189,16 +190,16 @@ impl Workspace {
                     },
                 },
                 Step::Create(path) => {
-                    if !path.exists() {
+                    if !host.exists(&path) {
                         if let Some(dir) = path.parent() {
-                            let _ = std::fs::create_dir_all(dir);
+                            let _ = host.create_dir_all(dir);
                         }
-                        ok &= std::fs::write(&path, "").is_ok();
+                        ok &= host.write(&path, b"").is_ok();
                         on_disk.push(path);
                     }
                 }
                 Step::Rename(from, to) => {
-                    if std::fs::rename(&from, &to).is_ok() {
+                    if host.rename(&from, &to).is_ok() {
                         let moved: Vec<Entity<EditorPanel>> =
                             self.editors(cx).into_iter().filter(|e| e.read(cx).path == from).collect();
                         for editor in moved {
@@ -215,7 +216,7 @@ impl Workspace {
                     }
                 }
                 Step::Delete(path) => {
-                    ok &= std::fs::remove_file(&path).is_ok();
+                    ok &= host.remove_file(&path).is_ok();
                     on_disk.push(path);
                 }
             }

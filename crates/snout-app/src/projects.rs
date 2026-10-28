@@ -277,7 +277,7 @@ impl ProjectsView {
         let model = self.model.clone();
         let name = dir_name(path);
         let current = m.repo.as_ref().is_some_and(|r| r.root() == path);
-        let missing = !path.is_dir();
+        let missing = !crate::host::host(cx).is_dir(path);
         let mut chips = Vec::new();
         if missing {
             chips.push(("missing".to_owned(), p.error));

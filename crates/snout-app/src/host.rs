@@ -2,7 +2,7 @@
 //! with `SNOUT_HOST_LATENCY_MS`. Everything of the workspace goes through it, off the UI thread.
 
 use gpui::{App, Global};
-pub use snout_host::{Host, HostRef};
+pub use snout_host::{Host, HostRef, local};
 
 /// The app's host.
 pub struct HostGlobal(pub HostRef);

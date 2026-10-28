@@ -177,6 +177,7 @@ impl ReferencesPanel {
     /// Show `locations`, each with its line of code.
     pub fn show(&mut self, title: String, locations: Vec<Location>, cx: &mut Context<Self>) {
         let roots: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
+        let host = crate::host::host(cx);
         let mut files: HashMap<PathBuf, Vec<String>> = HashMap::new();
         let mut locations = locations;
         locations.sort_by(|a, b| (a.uri.as_str(), a.range.start.line).cmp(&(b.uri.as_str(), b.range.start.line)));
@@ -188,7 +189,7 @@ impl ReferencesPanel {
                     .as_ref()
                     .and_then(|p| {
                         let lines = files.entry(p.clone()).or_insert_with(|| {
-                            std::fs::read_to_string(p).unwrap_or_default().lines().map(str::to_owned).collect()
+                            host.read_to_string(p).unwrap_or_default().lines().map(str::to_owned).collect()
                         });
                         lines.get(l.range.start.line as usize).cloned()
                     })
