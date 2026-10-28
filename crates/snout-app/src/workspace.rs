@@ -4,8 +4,8 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    Styled as _, Subscription, Window, div, px,
+    App, AppContext as _, Context, Entity, ExternalPaths, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, Styled as _, Subscription, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{DockArea, DockLayout, DockPlacement, DockSkin, PanelId, panel_handle};
@@ -471,6 +471,24 @@ impl Render for Workspace {
             }))
         });
 
+        // Folders dropped from Finder open; while they hover, the window says so.
+        let root = root.relative().on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+            for path in paths.paths() {
+                this.send(Action::OpenPath(path.clone()), cx);
+            }
+        }));
+        let drop_hint = div()
+            .id("drop-hint")
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(24.))
+            .text_color(gpui::transparent_black())
+            .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(gpui::black().opacity(0.6)).text_color(gpui::white()))
+            .child("Drop a folder to open it");
+
         root.child(self.toolbar(cx))
             .child(
                 div()
@@ -481,6 +499,7 @@ impl Render for Workspace {
                     .child(div().flex_1().min_w_0().h_full().child(self.dock.clone())),
             )
             .child(self.status_bar(cx))
+            .child(drop_hint)
     }
 }
 

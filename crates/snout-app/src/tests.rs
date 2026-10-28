@@ -449,3 +449,25 @@ fn the_changed_files_sort_by_the_clicked_column(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert_eq!(model.read(cx).selected.len(), 2));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn a_folder_dropped_on_the_window_opens(cx: &mut TestAppContext) {
+    use gpui::{ExternalPaths, FileDropEvent, point, px};
+    let a = demo_repo("drop-a");
+    let b = demo_repo("drop-b");
+    let (model, _, cx) = open(cx, with_repo(&a));
+    let position = point(px(600.), px(400.));
+    let paths = ExternalPaths(vec![b.clone()].into());
+    cx.simulate_event(FileDropEvent::Entered { position, paths });
+    cx.simulate_event(FileDropEvent::Pending { position });
+    cx.simulate_event(FileDropEvent::Submit { position });
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.settings.current.as_deref(), Some(b.as_path()));
+        assert!(m.settings.repos.contains(&b), "the dropped repository joins the list");
+    });
+    for dir in [a, b] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
