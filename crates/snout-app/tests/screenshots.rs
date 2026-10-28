@@ -61,7 +61,12 @@ mod shots {
         dir
     }
 
-    fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<&str>) {
+    pub enum Select {
+        File(&'static str),
+        Commit(usize),
+    }
+
+    fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
         let repo = demo_repo(name);
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
@@ -75,9 +80,6 @@ mod shots {
             let settings = settings.clone();
             cx.new(|cx| snout_app::model::Model::new(settings, None, cx))
         });
-        if let Some(path) = select {
-            cx.update(|cx| model.update(cx, |m, cx| m.click_file(path, false, false, cx)));
-        }
         let mut ws = None;
         let handle = cx
             .open_window(size(px(1400.), px(900.)), |window, cx| {
@@ -92,6 +94,14 @@ mod shots {
         })
         .unwrap();
         cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+        match select {
+            Some(Select::File(path)) => cx.update(|cx| model.update(cx, |m, cx| m.click_file(path, false, false, cx))),
+            Some(Select::Commit(back)) => cx.update(|cx| {
+                let id = model.read(cx).log[back].id.clone();
+                model.update(cx, |m, cx| m.handle(Action::ShowCommit(id), cx))
+            }),
+            None => {}
+        }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
         cx.allow_parking();
         for _ in 0..6 {
@@ -117,7 +127,8 @@ mod shots {
 
     pub fn run() {
         shot("projects-dark", ThemeChoice::Dark, Activity::Projects, None);
-        shot("git-light", ThemeChoice::Light, Activity::Git, Some("status.rs"));
-        shot("git-dark", ThemeChoice::Dark, Activity::Git, Some("src/main.rs"));
+        shot("diff-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
+        shot("diff-dark", ThemeChoice::Dark, Activity::Git, Some(Select::File("src/main.rs")));
+        shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit(1)));
     }
 }

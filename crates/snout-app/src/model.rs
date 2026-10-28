@@ -162,7 +162,7 @@ pub struct OutputLine {
 pub struct CommitView {
     pub details: Result<CommitDetails, String>,
     pub selected: Option<String>,
-    pub diff: Option<Result<DiffLayout, String>>,
+    pub diff: Option<Result<std::rc::Rc<DiffLayout>, String>>,
 }
 
 impl CommitView {
@@ -199,7 +199,7 @@ pub struct Model {
     pub selected: BTreeSet<String>,
     pub anchor: Option<String>,
     pub filter: String,
-    pub diff: Option<Result<DiffLayout, String>>,
+    pub diff: Option<Result<std::rc::Rc<DiffLayout>, String>>,
     diff_key: Option<(String, snout_core::DiffBase, bool)>,
     pub commit_msg: String,
     pub amend: bool,
@@ -536,7 +536,7 @@ impl Model {
         let Some(repo) = &self.repo else { return };
         self.diff = Some(
             repo.file_diff(entry, self.settings.diff_base)
-                .map(|d| DiffLayout::new(d, self.settings.compact))
+                .map(|d| std::rc::Rc::new(DiffLayout::new(d, self.settings.compact)))
                 .map_err(|e| e.to_string()),
         );
         self.diff_key = Some(key);
@@ -553,7 +553,7 @@ impl Model {
         let parent = details.parents.first().map(String::as_str);
         view.diff = Some(
             repo.commit_file_diff(&details.id, parent, &file)
-                .map(|d| DiffLayout::new(d, compact))
+                .map(|d| std::rc::Rc::new(DiffLayout::new(d, compact)))
                 .map_err(|e| e.to_string()),
         );
     }

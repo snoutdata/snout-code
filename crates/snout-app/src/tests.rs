@@ -278,3 +278,69 @@ fn background_fetch_counts_what_there_is_to_pull(cx: &mut TestAppContext) {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[gpui::test]
+fn the_diff_tab_follows_the_selection_and_its_options(cx: &mut TestAppContext) {
+    use snout_core::DiffBase;
+    let repo = demo_repo("diff");
+    let (model, _, cx) = open(cx, with_repo(&repo));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("status.rs", false, false, cx)));
+    cx.run_until_parked();
+    let lines = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let m = model.read(cx);
+            let d = m.diff.as_ref().unwrap().as_ref().unwrap();
+            assert_eq!(d.diff.path, "status.rs");
+            d.len(m.settings.side_by_side)
+        })
+    };
+    let compact = lines(cx);
+    cx.update(|_, cx| model.update(cx, |m, cx| m.set_diff_options(None, Some(false), cx)));
+    cx.run_until_parked();
+    assert!(lines(cx) > compact, "the whole file shows without Compact");
+    // Comparing HEAD with the index: status.rs is not staged, so nothing differs.
+    cx.update(|_, cx| model.update(cx, |m, cx| m.set_diff_base(DiffBase::HeadToIndex, cx)));
+    cx.update(|_, cx| assert!(model.read(cx).diff.as_ref().unwrap().as_ref().unwrap().diff.is_identical()));
+    // Two files selected: no diff, the tab says how many.
+    cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("NOTES.md", false, true, cx)));
+    cx.update(|_, cx| assert!(model.read(cx).diff.is_none() && model.read(cx).selected.len() == 2));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_journal_filters_and_opens_commits_in_the_commit_tab(cx: &mut TestAppContext) {
+    let repo = demo_repo("journal");
+    let (model, _, cx) = open(cx, with_repo(&repo));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.log.len(), 2);
+        assert_eq!(m.graph.len(), 2);
+    });
+    cx.update(|_, cx| model.update(cx, |m, _| m.journal_filter = "initial".into()));
+    cx.update(|_, cx| assert_eq!(model.read(cx).journal_rows(), [1]));
+    cx.update(|_, cx| model.update(cx, |m, _| m.journal_filter = "v0.1".into()));
+    cx.update(|_, cx| assert_eq!(model.read(cx).journal_rows(), [1]));
+    cx.update(|_, cx| model.update(cx, |m, _| m.journal_filter.clear()));
+
+    let first = cx.update(|_, cx| model.read(cx).log[1].id.clone());
+    act(&model, cx, Action::ShowCommit(first.clone()));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        let view = m.commit_view.as_ref().unwrap();
+        assert_eq!(view.id(), Some(first.as_str()));
+        let d = view.details.as_ref().unwrap();
+        assert_eq!(d.summary(), "Initial import");
+        assert!(d.parents.is_empty());
+        assert_eq!(view.selected.as_deref(), Some(d.files[0].path.as_str()));
+        assert!(view.diff.as_ref().unwrap().is_ok(), "the first file's diff shows");
+        assert!(m.commit_scope() != snout_core::Scope::Nothing, "the working tree is untouched");
+    });
+    cx.update(|_, cx| model.update(cx, |m, cx| m.select_commit_file("status.rs".into(), cx)));
+    cx.update(|_, cx| {
+        let view = model.read(cx).commit_view.as_ref().unwrap();
+        assert_eq!(view.diff.as_ref().unwrap().as_ref().unwrap().diff.path, "status.rs");
+    });
+    act(&model, cx, Action::CloseCommit);
+    cx.update(|_, cx| assert!(model.read(cx).commit_view.is_none()));
+    let _ = std::fs::remove_dir_all(repo);
+}
