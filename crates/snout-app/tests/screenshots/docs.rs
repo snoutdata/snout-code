@@ -741,11 +741,20 @@ fn claude(projects: &Path) {
             }
             e2.update(cx, |e, cx| match step {
                 Step::Strike | Step::Typing => {
-                    e.animate_edit(&v2c, true, window, cx);
+                    e.animate_edit(
+                        &v2c,
+                        true,
+                        Some(snout_app::editor::Writer {
+                            name: "Claude".into(),
+                            color: snout_app::theme::palette(cx).claude().mark,
+                        }),
+                        window,
+                        cx,
+                    );
                     e.hold_live_at(if step == Step::Strike { 0. } else { 0.55 }, window, cx);
                 }
                 _ => {
-                    e.animate_edit(&v2c, false, window, cx);
+                    e.animate_edit(&v2c, false, None, window, cx);
                 }
             });
             if matches!(step, Step::Fade | Step::Inline) {

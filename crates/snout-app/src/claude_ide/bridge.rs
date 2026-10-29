@@ -670,6 +670,16 @@ fn open_diff(ws: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, c
 
 fn tick(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     track_console_turn(ws, cx);
+    // The tabs' note of who writes now, and whether they follow.
+    let settings = &ws.model.read(cx).settings;
+    let watching = watched_agent(ws, cx).map(|id| agents::Agent::of(id, settings));
+    let follow = settings.follow_claude;
+    if cx.try_global::<agents::Watching>().is_none_or(|w| w.0 != watching) {
+        cx.set_global(agents::Watching(watching));
+    }
+    if cx.try_global::<agents::Following>().is_none_or(|f| f.0 != follow) {
+        cx.set_global(agents::Following(follow));
+    }
     track_selection(ws, window, cx);
     follow_watched(ws, window, cx);
     // The lock file names the project open now.
@@ -878,7 +888,8 @@ pub fn followed_reload(
     if left_to_hooks(ws, &path) {
         return;
     }
-    let after = editor.read(cx).text(cx);
+    // The file's text (the tab may still be playing the change out).
+    let after = editor.read(cx).saved_text().to_owned();
     let lines = changed_lines(before, &after);
     if lines.is_empty() {
         return;
@@ -888,10 +899,10 @@ pub fn followed_reload(
     changes_of(ws, cx).update(cx, |c, cx| {
         c.record(path, Some(Arc::new(after.clone())), base, String::new(), Source::Watcher, agent, cx)
     });
+    // The tab plays the change out itself, in the agent's colour.
     if ws.model.read(cx).settings.follow_claude {
         let (path, preview) = (editor.read(cx).path.clone(), editor.read(cx).preview);
         ws.reveal_file(path, preview, true, window, cx);
-        editor.update(cx, |e, cx| e.flash(lines, window, cx));
     } else {
         editor.update(cx, |e, cx| {
             e.touched = true;
@@ -1034,9 +1045,9 @@ fn follow_changed(
         if !follow {
             continue;
         }
-        let lines = changed_lines(&before, &text);
+        let writer = agent.map(|id| writer_of(ws, id, cx));
         let editor = ws.reveal_file(path, true, true, window, cx);
-        editor.update(cx, |e, cx| e.after_load(move |e, window, cx| e.flash(lines, window, cx), window, cx));
+        editor.update(cx, |e, cx| e.animate_from(&before, &text, writer, window, cx));
     }
 }
 
@@ -1172,7 +1183,8 @@ fn show_edit(
                 note_reveal(ws);
             }
             let visible = front || active;
-            let shown = editor.update(cx, |e, cx| e.animate_edit(&after, visible, window, cx));
+            let writer = Some(writer_of(ws, agents::CLAUDE, cx));
+            let shown = editor.update(cx, |e, cx| e.animate_edit(&after, visible, writer, window, cx));
             if shown && !visible {
                 editor.update(cx, |e, cx| {
                     e.touched = true;
@@ -1184,10 +1196,16 @@ fn show_edit(
             let editor = ws.reveal_file(path.to_owned(), true, true, window, cx);
             note_reveal(ws);
             let before = before.map(|b| b.as_str().to_owned()).unwrap_or_default();
-            editor.update(cx, |e, cx| e.animate_from(&before, &after, window, cx));
+            let writer = Some(writer_of(ws, agents::CLAUDE, cx));
+            editor.update(cx, |e, cx| e.animate_from(&before, &after, writer, window, cx));
         }
         None => {}
     }
+}
+
+/// How `agent` writes in a tab: its name on the caret's flag, its colour.
+fn writer_of(ws: &Workspace, agent: &str, cx: &App) -> crate::editor::Writer {
+    crate::editor::Writer::of(&agents::Agent::of(agent, &ws.model.read(cx).settings), &palette(cx))
 }
 
 fn note_reveal(ws: &mut Workspace) {
@@ -1215,7 +1233,14 @@ fn reveal_queued(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Works
     note_reveal(ws);
     editor.update(cx, |e, cx| {
         e.touched = false;
-        e.after_load(move |e, window, cx| e.flash(lines, window, cx), window, cx)
+        e.after_load(
+            move |e, window, cx| {
+                let color = e.agent_color_of(lines.first().map_or(0, |l| l.start), cx);
+                e.light_in(lines, color, window, cx)
+            },
+            window,
+            cx,
+        )
     });
 }
 
@@ -1228,9 +1253,18 @@ fn empty() -> Arc<String> {
 /// Every open tab marks the changes waiting for review in its file.
 pub fn sync_bases(ws: &mut Workspace, cx: &mut Context<Workspace>) {
     let changes = changes_of(ws, cx);
+    let settings = ws.model.read(cx).settings.clone();
     for editor in ws.editors(cx) {
-        let base = changes.read(cx).set.file(&editor.read(cx).path).map(|f| f.base.clone().unwrap_or_else(empty));
-        editor.update(cx, |e, cx| e.set_claude_base(base, cx));
+        let file = changes.read(cx).set.file(&editor.read(cx).path).cloned();
+        let base = file.as_ref().map(|f| f.base.clone().unwrap_or_else(empty));
+        let agent = file.map(|f| agents::Agent::of(f.agent, &settings));
+        editor.update(cx, |e, cx| {
+            if e.claude_agent != agent {
+                e.claude_agent = agent;
+                cx.notify();
+            }
+            e.set_claude_base(base, cx)
+        });
     }
 }
 
@@ -1305,7 +1339,7 @@ fn restore(ws: &mut Workspace, r: Restore, window: &mut Window, cx: &mut Context
             match (&r.text, editor) {
                 (Some(text), Some(editor)) => {
                     editor.update(cx, |e, cx| {
-                        e.animate_edit(text, false, window, cx);
+                        e.animate_edit(text, false, None, window, cx);
                     });
                 }
                 (None, Some(editor)) => {

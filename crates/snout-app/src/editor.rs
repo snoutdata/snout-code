@@ -38,7 +38,7 @@ pub mod settings_lang;
 mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
-pub use claude::{Answer, ClaudeRequest, LIVE_TICK, Outcome, Proposal, Review, STREAM_TICK};
+pub use claude::{Answer, ClaudeRequest, LIVE_TICK, Outcome, Presence, Proposal, Review, STREAM_TICK, Writer};
 pub use inlay::{ParamHint, argument_at, hint_label, is_param_hint};
 pub use lang_features::{class_file_name, is_class_file_path};
 pub use refactor::{Refactoring, new_name};
@@ -285,15 +285,22 @@ pub struct EditorPanel {
     /// A change Claude proposes, under review, and the ones waiting after it.
     pub review: Option<Review>,
     pub queue: VecDeque<Proposal>,
-    /// Claude changed the file while the editor did not follow: a dot on the tab.
+    /// An agent changed the file while the editor did not follow: a dot on the tab.
     pub touched: bool,
+    /// The agent behind the changes waiting for review here, for their colour.
+    pub claude_agent: Option<crate::agents::Agent>,
+    /// The agent writing here (or that just stopped): its caret and flag.
+    pub presence: Option<claude::Presence>,
+    /// Lines an agent wrote, fading from its colour: the line, when, the colour.
+    pub fades: Vec<(usize, Instant, Hsla)>,
+    _fade_task: Option<Task<()>>,
+    /// Where the agent's caret was drawn, gliding.
+    glide: Rc<RefCell<claude::Glide>>,
     /// Lines of a followed change, fading.
     pub flash: Option<claude::Flash>,
     /// An edit Claude made on its own, playing out: struck, typed in, lit.
     pub live: Option<claude::Live>,
     _live_task: Option<Task<()>>,
-    /// The struck text of a live edit.
-    struck: Option<gpui_component::input::TextDecorationCollection>,
     /// Claude is about to change the file: the disk check waits for its report.
     pub claude_hold: Option<Instant>,
     /// The file before Claude's unreviewed changes (empty for a file Claude made), and
@@ -487,10 +494,14 @@ impl EditorPanel {
             review: None,
             queue: VecDeque::new(),
             touched: false,
+            claude_agent: None,
+            presence: None,
+            fades: Vec::new(),
+            _fade_task: None,
+            glide: Default::default(),
             flash: None,
             live: None,
             _live_task: None,
-            struck: None,
             claude_hold: None,
             claude_base: None,
             claude_hunks: Arc::new(Vec::new()),
@@ -815,18 +826,22 @@ impl EditorPanel {
                     cx.notify();
                     return;
                 }
-                let before = std::mem::take(&mut this.saved);
-                let at = this.state.read(cx).cursor_position();
-                let loaded = Loaded {
-                    path: this.path.clone(),
-                    text: Ok(text),
-                    root: this.root.clone(),
-                    disk: now,
-                    build: this.build_root.clone(),
-                };
-                this.loading = true;
-                this.pending_caret = Some((at, false));
-                this.show_loaded(loaded, window, cx);
+                // Only what changed goes into the tab: setting the whole text afresh would drop
+                // its highlighting and the language server's colours and marks, and repaint
+                // every line (a blink on each change made elsewhere). An agent at work plays
+                // its change out, in its colour; otherwise the text simply takes it.
+                let before = this.text(cx);
+                let writer = cx
+                    .try_global::<crate::agents::Watching>()
+                    .and_then(|w| w.0.clone())
+                    .map(|a| claude::Writer::of(&a, &palette(cx)));
+                if writer.is_some() {
+                    this.animate_edit(&text, true, writer, window, cx);
+                } else {
+                    this.saved = text.clone();
+                    this.write_quietly(&text, window, cx);
+                }
+                this.disk = now;
                 cx.emit(EditorEvent::Reloaded(before));
             });
         })
@@ -917,6 +932,11 @@ impl EditorPanel {
         let wrap = self.soft_wrap;
         self.state.update(cx, |s, cx| s.set_soft_wrap(wrap, window, cx));
         cx.notify();
+    }
+
+    /// The text as the file on disk has it (as last read or written).
+    pub fn saved_text(&self) -> &str {
+        &self.saved
     }
 
     /// The number of lines in the file.
@@ -1384,6 +1404,7 @@ impl Render for EditorPanel {
             r.at_line(line).map(crate::run::Target::menu_label)
         });
         let this = cx.weak_entity();
+        let chip = self.presence_chip(cx);
         div()
             .size_full()
             .flex()
@@ -1484,6 +1505,7 @@ impl Render for EditorPanel {
                     .children(self.rename_box(cx))
                     .children(self.hint_popup(cx))
                     .children(self.choices_popup(cx))
+                    .children(chip)
                     .children(self.context.render(cx)),
             )
     }

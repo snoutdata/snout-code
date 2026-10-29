@@ -1,12 +1,15 @@
-//! Claude Code in an editor tab. A change it proposes types itself into the tab, hunk by
-//! hunk, and waits there for Accept (⌘↩) or Reject (Esc): new lines lit green, removed
-//! ones marked red where they were. A change it makes on its own plays out live: the
-//! lines it removes show struck through in red, the new text types itself in, then its
-//! green band fades; the gutter marks the lines until the change is reviewed.
+//! Coding agents in an editor tab. A change Claude proposes types itself into the tab, hunk
+//! by hunk, and waits there for Accept (⌘↩) or Reject (Esc): new lines lit green, removed
+//! ones marked red where they were. A change an agent makes on its own plays out live, as
+//! a collaborator's would: its caret, in the agent's colour with a flag of its name, moves
+//! through the text as it types in, and the new text fades from the agent's colour to
+//! normal over a second. Only the lines being written change; the rest of the tab stays as
+//! it is (its colours, its view, its marks). An edit off screen shows a chip at the edge
+//! and a mark on the scrollbar; the gutter marks the lines until the change is reviewed.
 
 use std::ops::Range;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -28,8 +31,16 @@ pub const FLASH_TICK: Duration = Duration::from_millis(50);
 const FLASH_STEPS: u32 = 60;
 /// One step of a live edit.
 pub const LIVE_TICK: Duration = Duration::from_millis(16);
-/// How long the text an edit removes shows struck through before the new text comes.
-const STRIKE_TIME: Duration = Duration::from_millis(420);
+/// How long new text takes to fade from the agent's colour to normal.
+pub const FADE: Duration = Duration::from_millis(1_000);
+/// How long the agent's caret stays where it stopped writing, fading over the last part.
+pub const LINGER: Duration = Duration::from_millis(1_600);
+/// How long the caret takes to glide to where the typing is.
+const GLIDE: Duration = Duration::from_millis(90);
+/// One step of the fading.
+const FADE_TICK: Duration = Duration::from_millis(33);
+/// The new text's band at its strongest.
+const FADE_ALPHA: f32 = 0.24;
 /// How long the disk check waits for Claude's report of an edit it announced.
 pub const HOLD: Duration = Duration::from_secs(10);
 /// Past these, an edit is not typed in: it shows at once and lights up.
@@ -54,25 +65,91 @@ pub enum ClaudeRequest {
     PrevFile,
 }
 
-/// An edit Claude made on its own, playing out in the tab.
+/// Who writes in a tab: the agent's name as its caret's flag says it, and its colour.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Writer {
+    pub name: gpui::SharedString,
+    pub color: gpui::Hsla,
+}
+
+impl Writer {
+    pub fn of(agent: &crate::agents::Agent, p: &crate::theme::Palette) -> Self {
+        Self { name: agent.short.clone(), color: agent.color(p) }
+    }
+}
+
+/// An edit an agent made on its own, playing out in the tab.
 pub struct Live {
     plan: Stream,
     pub original: String,
     pub proposed: String,
     pub frame: Frame,
     tick: u32,
-    /// Steps of the struck text alone, then of the typing.
-    strike: u32,
     ticks: u32,
     /// Held where it is (a screenshot).
     paused: bool,
+    pub writer: Writer,
+    /// The lines typed so far, and when each was last written to.
+    lit: Vec<(usize, Instant)>,
 }
 
-impl Live {
-    /// Still showing the struck text, before the typing.
-    pub fn striking(&self) -> bool {
-        self.tick < self.strike
+/// An agent's caret in the tab: where it writes (or stopped writing), and since when it
+/// has stopped.
+#[derive(Clone, Debug)]
+pub struct Presence {
+    pub writer: Writer,
+    pub at: usize,
+    pub left: Option<Instant>,
+}
+
+impl Presence {
+    /// How much of it shows: all while it writes, fading out at the end of its linger.
+    pub fn strength(&self) -> f32 {
+        match self.left {
+            None => 1.,
+            Some(t) => {
+                let e = t.elapsed().as_secs_f32() / LINGER.as_secs_f32();
+                ((1. - e) * 2.5).clamp(0., 1.)
+            }
+        }
     }
+
+    pub fn gone(&self) -> bool {
+        self.left.is_some_and(|t| t.elapsed() >= LINGER)
+    }
+}
+
+/// Where the agent's caret was drawn, gliding to where the typing is.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Glide {
+    from: Option<gpui::Point<gpui::Pixels>>,
+    to: Option<gpui::Point<gpui::Pixels>>,
+    since: Option<Instant>,
+}
+
+impl Glide {
+    /// The caret's place now, heading for `target`.
+    fn toward(&mut self, target: gpui::Point<gpui::Pixels>) -> gpui::Point<gpui::Pixels> {
+        if self.to != Some(target) {
+            self.from = Some(self.now().unwrap_or(target));
+            self.to = Some(target);
+            self.since = Some(Instant::now());
+        }
+        self.now().unwrap_or(target)
+    }
+
+    fn now(&self) -> Option<gpui::Point<gpui::Pixels>> {
+        let (from, to, since) = (self.from?, self.to?, self.since?);
+        let t = (since.elapsed().as_secs_f32() / GLIDE.as_secs_f32()).clamp(0., 1.);
+        let t = 1. - (1. - t) * (1. - t);
+        Some(gpui::point(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t))
+    }
+}
+
+/// How strong the band of a line written at `at` is now.
+fn fade(at: Instant) -> f32 {
+    let t = (at.elapsed().as_secs_f32() / FADE.as_secs_f32()).clamp(0., 1.);
+    FADE_ALPHA * (1. - t) * (1. - t)
 }
 
 /// How a review ended.
@@ -303,6 +380,13 @@ impl EditorPanel {
         });
     }
 
+    /// Take `text` from elsewhere (the file changed on disk): only what differs, the caret
+    /// and the view kept, the tab no longer differing from the file.
+    pub fn write_quietly(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.write_text(text, false, window, cx);
+        self.settle(cx, window);
+    }
+
     /// Recount the marks after the text changed.
     pub(super) fn review_changed(&mut self, cx: &mut Context<Self>) {
         let now = self.text(cx);
@@ -424,12 +508,35 @@ impl EditorPanel {
         Some(out)
     }
 
-    /// The bands over the text: new lines green, a red rule where lines went (with how
-    /// many), and the fading light of a followed edit. A live edit: its struck lines red,
-    /// the lines typed so far green, a caret where the typing is.
+    /// The bands over the text: a proposed change's new lines green, a red rule where lines
+    /// went (with how many), the fading light of a followed edit. An agent at work: the
+    /// lines it writes in its colour, fading to normal, and its caret with the flag of its
+    /// name gliding to where the typing is; marks on the scrollbar where it is.
     pub(super) fn claude_overlay(&self, cx: &App) -> Option<impl IntoElement + use<>> {
         let inline = self.review.is_none() && self.claude_diff && self.claude_base.is_some();
-        if self.review.is_none() && self.flash.is_none() && self.live.is_none() && !inline {
+        let presence = self.presence.clone().filter(|p| !p.gone());
+        // The lines written: the live edit's (the one being typed on at full strength), and
+        // those still fading after it.
+        let mut written: Vec<(usize, f32, gpui::Hsla)> =
+            self.fades.iter().map(|(l, at, c)| (*l, fade(*at), *c)).filter(|(_, a, _)| *a > 0.004).collect();
+        if let Some(live) = self.live.as_ref() {
+            let caret_line = presence.as_ref().map(|p| {
+                let t = &live.frame.text;
+                t[..p.at.min(t.len())].matches('\n').count()
+            });
+            for (l, at) in &live.lit {
+                let a = if Some(*l) == caret_line { FADE_ALPHA } else { fade(*at) };
+                written.push((*l, a, live.writer.color));
+            }
+        }
+        let tint = self.agent_tint(cx);
+        if self.review.is_none()
+            && self.flash.is_none()
+            && presence.is_none()
+            && written.is_empty()
+            && tint.is_empty()
+            && !inline
+        {
             return None;
         }
         let p = palette(cx);
@@ -444,21 +551,19 @@ impl EditorPanel {
             None => Vec::new(),
         };
         let flash = self.flash.as_ref().map(|f| (f.lines.clone(), f.strength(), f.color));
-        // A live edit's parts, in its frame's bytes.
-        let live = self.live.as_ref().map(|l| {
-            let pulse = if l.striking() { 0.75 + 0.25 * ((l.tick as f32) * 0.35).sin().abs() } else { 1. };
-            (l.frame.waiting.clone(), l.frame.typed.clone(), l.frame.typing, pulse)
-        });
         let state = self.state.clone();
+        let glide = self.glide.clone();
         let (added, removed, panel) = (c.added_band, c.removed, p.panel);
-        let (lit, struck, caret) = (c.added_band, c.removed_band, c.caret);
+        let lit = c.added_band;
         let label_font = look::ui_font(cx);
+        let flag_ink = gpui::white();
         Some(
             canvas(
                 |_, _, _| {},
                 move |bounds, _, window, cx| {
                     let mut quads: Vec<(gpui::Bounds<gpui::Pixels>, gpui::Hsla)> = Vec::new();
                     let mut labels: Vec<(gpui::Pixels, usize)> = Vec::new();
+                    let mut caret: Option<(gpui::Point<gpui::Pixels>, gpui::Pixels, Presence)> = None;
                     {
                         let s = state.read(cx);
                         let (Some(rows), Some(line_height)) = (s.visible_row_range(), s.line_height()) else {
@@ -491,23 +596,14 @@ impl EditorPanel {
                                 quads.push((gpui::Bounds::new(point(x, y0), size(bounds.right() - x, y1 - y0)), color));
                             }
                         };
-                        // Bytes of the text to the lines they cover.
-                        let line_run = |r: &Range<usize>| {
-                            let a = text.offset_to_point(r.start.min(text.len())).row;
-                            let end = r.end.min(text.len()).max(r.start);
-                            let b = text.offset_to_point(end.saturating_sub(1).max(r.start)).row;
-                            a..b + 1
-                        };
+                        for (run, color) in &tint {
+                            band(run, *color);
+                        }
                         for m in &marks {
                             band(&m.lines, added);
                         }
-                        if let Some((waiting, typed, _, pulse)) = &live {
-                            for r in waiting {
-                                band(&line_run(r), struck.opacity(struck.a * pulse));
-                            }
-                            for r in typed {
-                                band(&line_run(r), lit);
-                            }
+                        for (l, a, color) in &written {
+                            band(&(*l..*l + 1), color.opacity(*a));
                         }
                         if let Some((runs, strength, color)) = &flash {
                             let (c, a) = match color {
@@ -515,7 +611,6 @@ impl EditorPanel {
                                 None => (lit, (lit.a * 1.8).min(0.45)),
                             };
                             for run in runs {
-                                // It starts brighter than the typed text's band, then fades.
                                 band(run, c.opacity(a * strength));
                             }
                         }
@@ -529,12 +624,24 @@ impl EditorPanel {
                             quads.push((rule, removed.opacity(0.8)));
                             labels.push((y, m.removed));
                         }
-                        // The typing point: a bar the height of a line.
-                        if let Some((_, _, Some(at), _)) = &live
-                            && let Some(b) = s.range_to_bounds(&(*at..*at))
-                        {
-                            let x = b.left() - scroll_x;
-                            quads.push((gpui::Bounds::new(point(x, b.top()), size(px(2.), line_height)), caret));
+                        // On the scrollbar: where the agent writes, and its lines to review.
+                        let total = lines.max(1) as f32;
+                        let tick = |line: usize, h: f32| {
+                            let y = bounds.top() + (bounds.size.height - px(h)) * (line as f32 / total);
+                            gpui::Bounds::new(point(bounds.right() - px(9.), y), size(px(7.), px(h)))
+                        };
+                        for (run, color) in &tint {
+                            quads.push((tick(run.start, 3.), color.opacity(0.85)));
+                        }
+                        if let Some(pr) = &presence {
+                            let at = pr.at.min(text.len());
+                            let line = text.offset_to_point(at).row;
+                            quads.push((tick(line, 4.), pr.writer.color.opacity(pr.strength())));
+                            if (first..last.max(first + 1)).contains(&line)
+                                && let Some(b) = s.range_to_bounds(&(at..at))
+                            {
+                                caret = Some((point(b.left() - scroll_x, b.top()), line_height, pr.clone()));
+                            }
                         }
                     }
                     for (rect, color) in quads {
@@ -559,11 +666,142 @@ impl EditorPanel {
                         let origin = point(chip.left() + px(5.), chip.top() + px(1.));
                         let _ = shaped.paint(origin, px(13.), TextAlign::Left, None, window, cx);
                     }
+                    // The agent's caret, gliding, and the flag of its name above it (below,
+                    // on the first line showing).
+                    if let Some((target, line_height, pr)) = caret {
+                        let at = glide.borrow_mut().toward(target);
+                        let alpha = pr.strength();
+                        let color = pr.writer.color.opacity(alpha);
+                        window.paint_quad(gpui::fill(gpui::Bounds::new(at, size(px(2.), line_height)), color));
+                        let mut font = gpui::font(label_font.clone());
+                        font.weight = gpui::FontWeight::SEMIBOLD;
+                        let name = pr.writer.name.to_string();
+                        let run = TextRun {
+                            len: name.len(),
+                            font,
+                            color: flag_ink.opacity(alpha),
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        };
+                        let shaped = ts.shape_line(name.into(), px(10.5), &[run], None);
+                        let (w, h) = (shaped.width + px(10.), px(15.));
+                        let above = at.y - h >= bounds.top();
+                        let y = if above { at.y - h } else { at.y + line_height };
+                        let flag = gpui::Bounds::new(point(at.x, y), size(w, h));
+                        let radii = if above {
+                            gpui::Corners {
+                                top_left: px(4.),
+                                top_right: px(4.),
+                                bottom_right: px(4.),
+                                bottom_left: px(0.),
+                            }
+                        } else {
+                            gpui::Corners {
+                                top_left: px(0.),
+                                top_right: px(4.),
+                                bottom_right: px(4.),
+                                bottom_left: px(4.),
+                            }
+                        };
+                        window.paint_quad(gpui::fill(flag, color).corner_radii(radii));
+                        let _ = shaped.paint(
+                            point(flag.left() + px(5.), flag.top() + px(1.)),
+                            px(13.),
+                            TextAlign::Left,
+                            None,
+                            window,
+                            cx,
+                        );
+                    } else {
+                        *glide.borrow_mut() = Glide::default();
+                    }
                 },
             )
             .absolute()
             .inset_0(),
         )
+    }
+
+    /// The chip at the editor's edge while the agent writes out of sight: where, and a
+    /// click goes there.
+    pub fn presence_chip(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let pr = self.presence.as_ref().filter(|p| !p.gone())?;
+        let s = self.state.read(cx);
+        let rows = s.visible_row_range()?;
+        let text = s.text();
+        let lines = text.lines_len();
+        let map = s.display_map();
+        let first = map.display_row_to_buffer_line(rows.start);
+        let last = (map.display_row_to_buffer_line(rows.end.saturating_sub(1).max(rows.start)) + 1).min(lines);
+        let at = pr.at.min(text.len());
+        let line = text.offset_to_point(at).row;
+        if (first..last).contains(&line) {
+            return None;
+        }
+        let up = line < first;
+        let p = palette(cx);
+        let color = pr.writer.color;
+        let what = if pr.left.is_none() { "is editing" } else { "edited" };
+        let label = format!("{} {what} line {} {}", pr.writer.name, line + 1, if up { "\u{2191}" } else { "\u{2193}" });
+        let chip = div()
+            .id("agent-chip")
+            .debug_selector(|| "agent-chip".into())
+            .h(px(26.))
+            .pl(px(8.))
+            .pr(px(10.))
+            .flex()
+            .items_center()
+            .gap(px(7.))
+            .rounded(px(13.))
+            .bg(p.card)
+            .border_1()
+            .border_color(mix(color, 0.55, p.border))
+            .shadow_md()
+            .font_family(look::ui_font(cx))
+            .text_size(px(12.))
+            .text_color(p.fg)
+            .cursor_pointer()
+            .child(div().flex_none().size(px(8.)).rounded_full().bg(color))
+            .child(div().whitespace_nowrap().child(label))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
+                cx.notify();
+            }));
+        Some(div().absolute().right(px(28.)).when(up, |d| d.top(px(8.))).when(!up, |d| d.bottom(px(10.))).child(chip))
+    }
+
+    /// The soft tint of the lines agents changed and nobody has reviewed yet, in each
+    /// agent's colour (Claude's when the ledger does not say).
+    pub(super) fn agent_tint(&self, cx: &App) -> Vec<(Range<usize>, gpui::Hsla)> {
+        if self.review.is_some() || self.claude_base.is_none() || self.live.is_some() {
+            return Vec::new();
+        }
+        let p = palette(cx);
+        let a = if p.dark { 0.10 } else { 0.075 };
+        self.claude_hunks
+            .iter()
+            .filter(|h| !h.new_lines.is_empty())
+            .map(|h| (h.new_lines.clone(), self.agent_color_of(h.new_lines.start, cx).opacity(a)))
+            .collect()
+    }
+
+    /// The dot on the tab: an agent writing here (its colour, pulsing), or changes of an
+    /// agent's waiting for review (or made while the editor did not follow).
+    pub fn agent_dot(&self, cx: &App) -> Option<(gpui::Hsla, bool)> {
+        if let Some(p) = self.presence.as_ref().filter(|p| p.left.is_none()) {
+            return Some((p.writer.color, true));
+        }
+        let unreviewed = self.review.is_none() && self.claude_base.is_some() && !self.claude_hunks.is_empty();
+        (self.touched || unreviewed).then(|| (self.agent_color_of(0, cx), false))
+    }
+
+    /// The colour of the agent behind `line` (Claude's when nobody says).
+    pub fn agent_color_of(&self, line: usize, cx: &App) -> gpui::Hsla {
+        let p = palette(cx);
+        let _ = line;
+        self.claude_agent.as_ref().map_or(p.claude().mark, |a| a.color(&p))
     }
 
     /// The bar over a tab under review: what changes, and Accept and Reject.
@@ -656,13 +894,20 @@ impl EditorPanel {
     /// Claude changed the file to `after`: play it out from the text shown. `visible`
     /// says whether anyone sees the tab; a tab nobody sees takes the text at once.
     /// Returns false when there was nothing to show (the tab already had the text).
-    pub fn animate_edit(&mut self, after: &str, visible: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub fn animate_edit(
+        &mut self,
+        after: &str,
+        visible: bool,
+        writer: Option<Writer>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         self.claude_hold = None;
         // The tab is still reading its file: the edit plays once it has it.
         if self.loading {
             let after = after.to_owned();
             self.after_load.push(Box::new(move |e, window, cx| {
-                e.animate_edit(&after, visible, window, cx);
+                e.animate_edit(&after, visible, writer, window, cx);
             }));
             return true;
         }
@@ -675,28 +920,37 @@ impl EditorPanel {
             self.take_disk(after, cx);
             return false;
         }
-        self.preview_edit(&original, after, visible, window, cx);
+        self.preview_edit(&original, after, visible, writer, window, cx);
         true
     }
 
     /// Show `before` in the tab first, then play the edit to `after` (a file just opened to
     /// follow Claude, which already holds `after`).
-    pub fn animate_from(&mut self, before: &str, after: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn animate_from(
+        &mut self,
+        before: &str,
+        after: &str,
+        writer: Option<Writer>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.claude_hold = None;
         if self.loading {
             let (before, after) = (before.to_owned(), after.to_owned());
-            self.after_load.push(Box::new(move |e, window, cx| e.animate_from(&before, &after, window, cx)));
+            self.after_load.push(Box::new(move |e, window, cx| e.animate_from(&before, &after, writer, window, cx)));
             return;
         }
         if self.review.is_some() || self.dirty {
             return;
         }
         self.end_live(window, cx);
+        // Only what differs is put back (never the whole text: that would light the tab
+        // up afresh, its colours and marks gone for a moment).
         let at = self.state.read(cx).selected_range();
-        self.state.update(cx, |s, cx| s.set_value(before.to_owned(), window, cx));
+        self.write_text(before, false, window, cx);
         let at = at.start.min(before.len());
         self.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
-        self.preview_edit(before, after, true, window, cx);
+        self.preview_edit(before, after, true, writer, window, cx);
     }
 
     fn preview_edit(
@@ -704,6 +958,7 @@ impl EditorPanel {
         original: &str,
         after: &str,
         visible: bool,
+        writer: Option<Writer>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -711,25 +966,31 @@ impl EditorPanel {
         let lines: Vec<Range<usize>> = plan.hunks.iter().map(|h| lit_lines(h, after)).collect();
         let big = original.len().max(after.len()) > LIVE_MAX_TEXT || plan.chars > LIVE_MAX_CHARS;
         self.saved = after.to_owned();
-        if !visible || big || plan.hunks.is_empty() {
+        let writer = writer.filter(|_| visible);
+        if writer.is_none() || big || plan.hunks.is_empty() {
             self.write_text(after, false, window, cx);
             self.settle(cx, window);
-            if visible {
-                self.flash(lines, window, cx);
+            if let Some(w) = writer {
+                // At once (too big to type in), the new lines fading all the same.
+                let now = Instant::now();
+                self.fade_lines(lines.iter().flat_map(|r| r.clone()).map(|l| (l, now)), w.color, cx);
+                let at = plan.hunks.last().map_or(0, |h| h.new.end.min(after.len()));
+                self.presence = Some(Presence { writer: w, at, left: Some(now) });
+                self.run_fades(cx);
             }
             return;
         }
-        let strike = if plan.hunks.iter().any(|h| !h.old.is_empty()) {
-            (STRIKE_TIME.as_millis() / LIVE_TICK.as_millis()) as u32
-        } else {
-            0
-        };
+        let Some(writer) = writer else { return };
         let ticks = (live_time(plan.hunks.len(), plan.chars).as_millis() / LIVE_TICK.as_millis()).max(1) as u32;
         let frame = plan.frame(original, after, 0);
         // The view goes to the first change; the caret too, when nobody is typing here.
+        let follow = self.follows_agents(cx);
         if let Some(h) = plan.hunks.first() {
             let at = h.old.start;
-            self.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
+            if follow {
+                self.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
+            }
+            self.presence = Some(Presence { writer: writer.clone(), at, left: None });
         }
         self.live = Some(Live {
             plan,
@@ -737,11 +998,11 @@ impl EditorPanel {
             proposed: after.to_owned(),
             frame,
             tick: 0,
-            strike,
             ticks,
             paused: false,
+            writer,
+            lit: Vec::new(),
         });
-        self.strike_marks(cx);
         self._live_task = Some(cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(LIVE_TICK).await;
@@ -767,20 +1028,17 @@ impl EditorPanel {
             return true;
         }
         live.tick += 1;
-        if live.tick <= live.strike {
-            cx.notify();
-            return true;
-        }
-        let step = live.tick - live.strike;
+        let step = live.tick;
         let total = live.plan.total;
         let typed = if step >= live.ticks { total } else { total * step as usize / live.ticks as usize };
         let frame = live.plan.frame(&live.original, &live.proposed, typed);
         let text = frame.text.clone();
         live.frame = frame;
         let done = typed >= total;
-        let focused = gpui::Focusable::focus_handle(self.state.read(cx), cx).is_focused(window);
-        self.write_text(&text, !focused, window, cx);
-        self.strike_marks(cx);
+        // Follow mode: the view follows the typing, unless someone types here.
+        let follow = self.follows_agents(cx);
+        self.write_text(&text, follow, window, cx);
+        self.note_typing(cx);
         if done {
             self.end_live(window, cx);
             return false;
@@ -797,10 +1055,100 @@ impl EditorPanel {
         let now = self.text(cx);
         let text = review::carry(&live.frame, &live.proposed, &now);
         self.write_text(&text, false, window, cx);
-        self.strike_marks(cx);
-        let lines: Vec<Range<usize>> = live.plan.hunks.iter().map(|h| lit_lines(h, &live.proposed)).collect();
         self.settle(cx, window);
-        self.light(lines, window, cx);
+        // The lines typed fade on from when they were written; any left (the user typed and
+        // the rest went in at once) from now.
+        let stamp = Instant::now();
+        let mut lit = live.lit.clone();
+        for h in &live.plan.hunks {
+            for l in lit_lines(h, &live.proposed) {
+                if !lit.iter().any(|(x, _)| *x == l) {
+                    lit.push((l, stamp));
+                }
+            }
+        }
+        self.fade_lines(lit, live.writer.color, cx);
+        let at = self.presence.as_ref().map_or(0, |p| p.at).min(text.len());
+        self.presence = Some(Presence { writer: live.writer, at, left: Some(stamp) });
+        self.run_fades(cx);
+    }
+
+    /// Whether the view follows an agent's typing: Follow is on, and nobody types here.
+    fn follows_agents(&self, cx: &App) -> bool {
+        let typing = self.edited_at.is_some_and(|t| t.elapsed() < Duration::from_millis(1_500));
+        !typing && cx.try_global::<crate::agents::Following>().is_none_or(|f| f.0)
+    }
+
+    /// Where the typing is now: the agent's caret goes there, and the line it writes on is
+    /// lit (its band fades once the typing moves on).
+    fn note_typing(&mut self, _: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else { return };
+        let text = &live.frame.text;
+        let at = live.frame.typing.or_else(|| live.frame.typed.last().map(|r| r.end)).unwrap_or(0).min(text.len());
+        let line_of = |offset: usize| text[..offset.min(text.len())].matches('\n').count();
+        let now = Instant::now();
+        let caret_line = line_of(at);
+        for r in &live.frame.typed {
+            let (a, b) = (line_of(r.start), line_of(r.end.saturating_sub(1).max(r.start)));
+            for l in a..=b {
+                match live.lit.iter_mut().find(|(x, _)| *x == l) {
+                    Some(e) if l == caret_line => e.1 = now,
+                    Some(_) => {}
+                    None => live.lit.push((l, now)),
+                }
+            }
+        }
+        if let Some(p) = self.presence.as_mut() {
+            p.at = at;
+            p.left = None;
+        }
+    }
+
+    /// Light `lines` (each with when it was written) in `color`, to fade to normal.
+    fn fade_lines(
+        &mut self,
+        lines: impl IntoIterator<Item = (usize, Instant)>,
+        color: gpui::Hsla,
+        _: &mut Context<Self>,
+    ) {
+        for (l, at) in lines {
+            self.fades.retain(|(x, _, _)| *x != l);
+            self.fades.push((l, at, color));
+        }
+    }
+
+    /// Keep the tab painting while lines fade and the agent's caret lingers.
+    fn run_fades(&mut self, cx: &mut Context<Self>) {
+        if self._fade_task.is_some() {
+            return;
+        }
+        self._fade_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(FADE_TICK).await;
+                let more = this.update(cx, |this, cx| {
+                    this.fades.retain(|(_, at, _)| at.elapsed() < FADE);
+                    if this.presence.as_ref().is_some_and(Presence::gone) {
+                        this.presence = None;
+                    }
+                    cx.notify();
+                    let more = !this.fades.is_empty() || this.presence.is_some() || this.live.is_some();
+                    if !more {
+                        this._fade_task = None;
+                    }
+                    more
+                });
+                if !matches!(more, Ok(true)) {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// The line the agent writes on (or stopped on), if one does.
+    pub fn presence_line(&self, cx: &App) -> Option<usize> {
+        let p = self.presence.as_ref()?;
+        let text = self.state.read(cx).text();
+        Some(text.offset_to_point(p.at.min(text.len())).row)
     }
 
     /// Hold a live edit `fraction` of the way through (0 the struck text alone, 1 all
@@ -809,24 +1157,20 @@ impl EditorPanel {
         let Some(live) = self.live.as_mut() else { return };
         live.paused = true;
         let typed = ((live.plan.total as f32) * fraction.clamp(0., 1.)) as usize;
-        live.tick = if fraction <= 0. { 0 } else { live.strike + 1 };
+        live.tick = 1;
         live.frame = live.plan.frame(&live.original, &live.proposed, typed);
         let text = live.frame.text.clone();
         self.write_text(&text, false, window, cx);
-        self.strike_marks(cx);
+        self.note_typing(cx);
         cx.notify();
     }
 
-    /// The text is the file's again: one undo step no more (the edit came from outside),
-    /// the caret and the view where they were.
-    fn settle(&mut self, cx: &mut Context<Self>, window: &mut Window) {
+    /// The text is the file's again. The text itself is never set afresh: that would drop
+    /// the tab's highlighting, the language server's colours and its marks, and repaint the
+    /// whole file (the blinking a followed edit used to cause). Only the lines written
+    /// changed; the edit stays in the tab's undo history.
+    fn settle(&mut self, cx: &mut Context<Self>, _window: &mut Window) {
         let text = self.text(cx);
-        self.state.update(cx, |s, cx| {
-            let (sel, scroll) = (s.selected_range(), s.scroll_offset());
-            s.set_value(text.clone(), window, cx);
-            s.set_selected_range(sel, cx);
-            s.set_scroll_offset(scroll, cx);
-        });
         let dirty = text != self.saved;
         self.take_disk_stamp(cx);
         self.dirty = dirty;
@@ -842,29 +1186,6 @@ impl EditorPanel {
         self.dirty = false;
         self.take_disk_stamp(cx);
         cx.notify();
-    }
-
-    /// The struck text of the live edit, as the editor draws it.
-    fn strike_marks(&mut self, cx: &mut Context<Self>) {
-        let ranges = self.live.as_ref().map(|l| l.frame.waiting.clone()).unwrap_or_default();
-        if ranges.is_empty() && self.struck.is_none() {
-            return;
-        }
-        let c = palette(cx).claude();
-        let style = gpui::HighlightStyle {
-            color: Some(c.removed_text),
-            strikethrough: Some(gpui::StrikethroughStyle { thickness: px(1.5), color: Some(c.removed) }),
-            ..Default::default()
-        };
-        let decorations: Vec<gpui_component::input::TextDecoration> =
-            ranges.into_iter().map(|r| gpui_component::input::TextDecoration::new(r, style)).collect();
-        match &self.struck {
-            Some(struck) => struck.set(decorations, cx),
-            None => {
-                let struck = self.state.update(cx, |s, cx| s.create_decorations_collection(decorations, cx));
-                self.struck = Some(struck);
-            }
-        }
     }
 
     /// Light `lines` as a fading light is `step` steps in, and hold it there (for a look

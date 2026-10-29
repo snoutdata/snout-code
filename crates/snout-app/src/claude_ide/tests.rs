@@ -515,25 +515,37 @@ fn the_editor_follows_the_files_claude_changes(cx: &mut TestAppContext) {
     pump(cx, 300);
     std::thread::sleep(Duration::from_millis(300));
 
-    // An open file Claude changes: the tab takes the text, scrolls there, lights it.
+    // An open file Claude changes: the tab plays the change out with Claude's caret, only
+    // the lines that changed going in (never the whole text afresh), and they fade.
+    let rev = cx.update(|_, cx| editor.read(cx).state.read(cx).text().to_string());
     std::fs::write(&hello, HELLO_V2).unwrap();
-    pump_until(cx, "the reload", |cx| text_of(&editor, cx) == HELLO_V2);
-    let lit = cx.update(|_, cx| editor.read(cx).flash.as_ref().map(|f| f.lines.clone())).expect("the change lights up");
-    assert_eq!(lit.len(), 2, "{lit:?}");
-    assert_eq!(lit.iter().map(|l| l.len()).sum::<usize>(), 3, "the new lines: {lit:?}");
-    assert_eq!(lit[1], 7..8);
+    pump_until(cx, "the change played", |cx| cx.update(|_, cx| editor.read(cx).live.is_some()));
+    pump_until(cx, "the reload", |cx| {
+        text_of(&editor, cx) == HELLO_V2 && cx.update(|_, cx| editor.read(cx).live.is_none())
+    });
+    assert_eq!(rev, HELLO);
+    let lit: Vec<usize> = cx.update(|_, cx| editor.read(cx).fades.iter().map(|f| f.0).collect());
+    let mut sorted = lit.clone();
+    sorted.sort();
+    assert_eq!(sorted, [2, 3, 7], "the new lines fade, the rest stays as it was");
     let caret = cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
-    assert_eq!(caret as usize, lit[0].start, "the view goes to the change");
-    pump(cx, 3_500);
-    cx.update(|_, cx| assert!(editor.read(cx).flash.is_none(), "and fades"));
+    assert!((2..=7).contains(&(caret as usize)), "the view follows the typing: line {caret}");
+    pump(cx, 1_200);
+    std::thread::sleep(Duration::from_millis(1_800));
+    pump(cx, 200);
+    cx.update(|_, cx| assert!(editor.read(cx).fades.is_empty(), "and fades"));
 
     // A file no tab shows: it opens, as a preview, on the change.
     std::fs::write(&other, "class Other {\n    int count;\n}\n").unwrap();
     pump_until(cx, "the other file", |cx| editor_of(&ws, &other, cx).is_some());
     let opened = editor_of(&ws, &other, cx).unwrap();
-    let lit = cx.update(|_, cx| opened.read(cx).flash.as_ref().map(|f| f.lines.clone()));
-    let lit = lit.expect("the change lights up");
-    assert_eq!((lit.len(), lit[0].clone()), (1, 0..3));
+    pump_until(cx, "the other file typed in", |cx| {
+        text_of(&opened, cx) == "class Other {\n    int count;\n}\n"
+            && cx.update(|_, cx| opened.read(cx).live.is_none())
+    });
+    let mut lit: Vec<usize> = cx.update(|_, cx| opened.read(cx).fades.iter().map(|f| f.0).collect());
+    lit.sort();
+    assert_eq!(lit, [0, 1, 2]);
     cx.update(|_, cx| assert!(opened.read(cx).preview));
 
     // Following off: only a dot on the tab.
@@ -542,7 +554,7 @@ fn the_editor_follows_the_files_claude_changes(cx: &mut TestAppContext) {
     pump_until(cx, "the reload", |cx| text_of(&editor, cx) == HELLO);
     cx.update(|_, cx| {
         assert!(editor.read(cx).touched, "a dot marks the tab");
-        assert!(editor.read(cx).flash.is_none());
+        assert!(editor.read(cx).agent_dot(cx).is_some(), "in Claude's colour");
     });
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
@@ -625,18 +637,40 @@ fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut Test
     run_hook(port, &cmd, tool_hook("PostToolUse", "Edit", &hello));
     pump_until(cx, "the live edit", |cx| cx.update(|_, cx| editor.read(cx).live.is_some()));
     cx.update(|_, cx| {
-        let live = editor.read(cx).live.as_ref().unwrap();
-        assert!(live.striking(), "the removed line shows struck through first");
-        let waiting: Vec<String> = live.frame.waiting.iter().map(|r| live.frame.text[r.clone()].to_owned()).collect();
-        assert_eq!(waiting, ["        return \"Hello, \" + name;\n"]);
-        assert!(!editor.read(cx).dirty, "a live edit is not an unsaved change");
+        let e = editor.read(cx);
+        let live = e.live.as_ref().unwrap();
+        assert_eq!(live.writer.name.as_ref(), "Claude", "Claude's caret, with its name on the flag");
+        assert!(e.presence.as_ref().is_some_and(|p| p.left.is_none()), "the caret writes");
+        assert!(!e.dirty, "a live edit is not an unsaved change");
+        assert!(e.agent_dot(cx).is_some_and(|(_, live)| live), "the tab's dot pulses");
     });
-    pump_until(cx, "the typing", |cx| cx.update(|_, cx| editor.read(cx).live.as_ref().is_none_or(|l| !l.striking())));
-    pump_until(cx, "the end of the edit", |cx| cx.update(|_, cx| editor.read(cx).live.is_none()));
+    // The text types itself in: the caret moves on with it, only the lines it writes change.
+    let mut seen = Vec::new();
+    pump_until(cx, "the end of the edit", |cx| {
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            if let Some(p) = &e.presence {
+                seen.push(p.at);
+            }
+            e.live.is_none()
+        })
+    });
+    seen.dedup();
+    assert!(seen.len() >= 3, "the caret moved as the text came in: {seen:?}");
     assert_eq!(text_of(&editor, cx), HELLO_V2);
     cx.update(|_, cx| {
         let e = editor.read(cx);
-        assert!(!e.dirty && e.flash.is_some(), "the new lines lit, fading; the tab as the file");
+        assert!(!e.dirty, "the tab as the file");
+        assert!(!e.fades.is_empty(), "the new lines fade from Claude's colour");
+        assert!(e.fades.iter().all(|(l, _, _)| *l < 9), "only the lines written: {:?}", e.fades);
+        assert!(e.presence.as_ref().is_some_and(|p| p.left.is_some()), "the caret lingers where it stopped");
+    });
+    pump(cx, 2_500);
+    std::thread::sleep(Duration::from_millis(1_700));
+    pump(cx, 200);
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        assert!(e.fades.is_empty() && e.presence.is_none(), "faded and gone in a second or two");
     });
     pump_until(cx, "the change listed", |cx| settled(&ws, cx) && !listed(&ws, cx).is_empty());
     assert_eq!(listed(&ws, cx), [(hello.clone(), 3, 1, false)]);
@@ -957,6 +991,34 @@ fn codex_in_the_console_gets_its_turns_and_its_edits(cx: &mut TestAppContext) {
         cx.update(|_, cx| c.read(cx).set.current().is_some_and(|t| t.prompt.as_deref() == Some("Count the others")))
     });
     cx.update(|_, cx| console.update(cx, |c, _| c.program = None));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// Claude writes far down a file while the editor does not follow: the view stays where
+/// the user is, and a chip at the editor's edge says where Claude is.
+#[gpui::test]
+fn an_edit_out_of_sight_shows_a_chip_at_the_edge(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("claude-chip", cx);
+    let (port, cmd) = hook_command(&ws, cx);
+    cx.update(|_, cx| model.update(cx, |m, _| m.settings.follow_claude = false));
+    let long = repo.join("src/demo/Long.java");
+    let body: String = (0..300).map(|i| format!("    int f{i} = {i};\n")).collect();
+    let v1 = format!("class Long {{\n{body}}}\n");
+    std::fs::write(&long, &v1).unwrap();
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(long.clone(), None, false, w, cx)));
+    let editor = editor_of(&ws, &long, cx).unwrap();
+    pump_until(cx, "the file", |cx| text_of(&editor, cx) == v1);
+    pump(cx, 300);
+    run_hook(port, &cmd, tool_hook("PreToolUse", "Edit", &long));
+    let v2 = v1.replace("    int f250 = 250;\n", "    int f250 = 250;\n    int added = 1;\n");
+    std::fs::write(&long, &v2).unwrap();
+    run_hook(port, &cmd, tool_hook("PostToolUse", "Edit", &long));
+    pump_until(cx, "the chip", |cx| cx.update(|_, cx| editor.update(cx, |e, cx| e.presence_chip(cx).is_some())));
+    let line = cx.update(|_, cx| editor.read(cx).presence_line(cx)).unwrap();
+    assert!(line >= 250, "Claude writes at line {line}");
+    let caret = cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
+    assert!(caret < 5, "the user's caret stays where it was: {caret}");
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }

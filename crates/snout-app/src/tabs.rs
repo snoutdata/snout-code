@@ -296,10 +296,10 @@ fn tab(
 ) -> AnyElement {
     let p = palette(cx);
     let editor = editor_of(panel);
-    let (name, dirty, preview, path, reviews, touched) = match &editor {
+    let (name, dirty, preview, path, reviews, agent_dot) = match &editor {
         Some(e) => {
             let e = e.read(cx);
-            (e.name(), e.dirty, e.preview, Some(e.path.clone()), e.review_count(), e.touched)
+            (e.name(), e.dirty, e.preview, Some(e.path.clone()), e.review_count(), e.agent_dot(cx))
         }
         None => (
             PanelHandle::of(panel).and_then(|h| h.tab_name(cx)).unwrap_or_else(|| panel.panel_name(cx).into()),
@@ -307,7 +307,7 @@ fn tab(
             false,
             None,
             0,
-            false,
+            None,
         ),
     };
     let closable = group.is_panel_closable(panel.panel_id(cx), cx);
@@ -390,15 +390,14 @@ fn tab(
                 .when(preview, |d| d.italic())
                 .child(name.clone()),
         )
-        .when(touched && !selected, |d| {
-            d.child(
-                div()
-                    .debug_selector(move || format!("touched-{ix}"))
-                    .flex_none()
-                    .size(px(5.))
-                    .rounded_full()
-                    .bg(p.claude().mark),
-            )
+        // An agent writing here: its dot, pulsing; one that changed the file: its dot, until
+        // the change is reviewed.
+        .when_some(agent_dot, |d, (color, live)| {
+            d.child(div().debug_selector(move || format!("agent-dot-{ix}")).flex_none().child(if live {
+                crate::claude_ide::bridge::pulse_dot(color, "tab-agent-dot")
+            } else {
+                div().size(px(7.)).rounded_full().bg(color).into_any_element()
+            }))
         })
         .when(reviews > 0, |d| {
             d.child(

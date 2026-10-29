@@ -199,6 +199,19 @@ impl ConsoleTurn {
     }
 }
 
+/// The agent a change on disk is put down to now (its turn runs in the console, or Claude
+/// Code is connected): an open tab plays such a change out in its colour.
+#[derive(Clone, Debug, Default)]
+pub struct Watching(pub Option<Agent>);
+
+impl Global for Watching {}
+
+/// Whether the editor follows the agents' edits (the console's Follow).
+#[derive(Clone, Copy, Debug)]
+pub struct Following(pub bool);
+
+impl Global for Following {}
+
 /// `codex` on the host's PATH or where its installers put it.
 pub fn find_codex(host: &dyn snout_host::Host) -> Option<PathBuf> {
     let home = &host.info().home;

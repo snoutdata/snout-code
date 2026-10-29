@@ -1112,13 +1112,22 @@ sleep 30
                     match which {
                         ClaudeShot::Strike | ClaudeShot::Typing => {
                             greeter.update(cx, |e, cx| {
-                                e.animate_edit(GREETER_V2, true, window, cx);
+                                e.animate_edit(
+                                    GREETER_V2,
+                                    true,
+                                    Some(snout_app::editor::Writer {
+                                        name: "Claude".into(),
+                                        color: snout_app::theme::palette(cx).claude().mark,
+                                    }),
+                                    window,
+                                    cx,
+                                );
                                 e.hold_live_at(if which == ClaudeShot::Strike { 0. } else { 0.55 }, window, cx);
                             });
                         }
                         ClaudeShot::Fade | ClaudeShot::Inline => {
                             greeter.update(cx, |e, cx| {
-                                e.animate_edit(GREETER_V2, false, window, cx);
+                                e.animate_edit(GREETER_V2, false, None, window, cx);
                             });
                             ws.update(cx, snout_app::claude_ide::bridge::sync_bases);
                         }
