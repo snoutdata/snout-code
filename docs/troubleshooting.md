@@ -136,6 +136,23 @@ The Java engine keeps its files under `~/Library/Caches/SnoutCode`, one folder p
   copied to `settings.json.unreadable`, and SnoutCode starts from the defaults. See
   [Settings](settings-and-keymap.md#where-settings-are-kept).
 
+## Ghostty unavailable
+
+Settings ▸ Tools ▸ Terminal shows **Ghostty is unavailable**, with its card dimmed, in a build
+of SnoutCode made without the Ghostty terminal engine. Release builds (the `.dmg`) include it;
+a development build (`./snout.sh`, `cargo build`) does not, unless it is built with the
+`ghostty` feature. Terminals then run on the built-in engine, also when `settings.json` says
+`"terminal_engine": "Ghostty"`.
+
+To build with Ghostty, install Zig 0.15 (`brew install zig@0.15`) and build with the feature:
+
+```sh
+PATH="$(brew --prefix zig@0.15)/bin:$PATH" cargo build --release -p snout-app --features ghostty
+```
+
+The first such build fetches Ghostty's sources from GitHub, so it needs the network. See
+[Building](../README.md#building).
+
 ## The app does not open on another Mac
 
 A copy of SnoutCode that was signed only for the Mac that built it is blocked on other Macs.

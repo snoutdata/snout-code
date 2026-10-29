@@ -20,6 +20,7 @@ Each item links to its page in the user guide.
 - **[Spring](docs/spring.md):** beans and where they are injected, endpoints, the Spring window, and help in `application.properties` and `application.yml`.
 - **[Git](docs/git.md):** changes, diffs, commit, branches, history, pull, fetch and push.
 - **[Claude Code](docs/claude-code.md):** Claude Code in a docked console, its proposed changes reviewed in the editor, and every edit it makes shown live and kept for review.
+- **[Terminal](docs/terminal.md):** your shell in the bottom dock, with scrollback, find and links, on the built-in terminal engine or Ghostty's.
 - **[Remote SSH](docs/remote-ssh.md):** the project, Git, the Java engine, builds, runs and terminals on a Linux machine you reach with `ssh`.
 - **[Processes](docs/processes.md):** what SnoutCode runs on your machine, and stopping it.
 
@@ -37,6 +38,7 @@ The window stays on your Mac while the project, Git, the Java engine, builds, ru
 - **Git** on `PATH`. Push, pull and fetch use your normal Git credentials.
 - **JDK 21**, to build the Java engine. `snout.sh` and `scripts/package-mac.sh` look for one (`SNOUT_JDK21`, then `JAVA_HOME` if it is 21, then `/usr/libexec/java_home`) and otherwise download Temurin 21 to `~/Library/Caches/SnoutCode`.
 - **Docker**, only to build the Linux server for Remote SSH (`scripts/build-server-linux.sh`).
+- **Zig 0.15**, only for the Ghostty terminal engine (`brew install zig@0.15`; it is keg-only, and the scripts find it there). `scripts/package-mac.sh` needs it; `snout.sh` and plain `cargo build` do not.
 - **Optional:** [Claude Code](https://docs.claude.com/en/docs/claude-code), for the console.
 
 ### Build and run
@@ -51,9 +53,20 @@ cd snout-code
 
 `snout.sh` builds the release binary (`target/release/snout-code`) and the Java engine when they are missing or older than their sources. In the background, logs go to `$TMPDIR/snout-code.log`.
 
+### The Ghostty terminal engine
+
+The terminals can run on Ghostty's terminal emulation (libghostty-vt) as well as the built-in one; see [docs/terminal.md](docs/terminal.md). It is the `ghostty` cargo feature of `snout-app`, off by default so that building and running need no Zig:
+
+```sh
+PATH="$(brew --prefix zig@0.15)/bin:$PATH" cargo build --release -p snout-app --features ghostty
+cargo test --workspace --features snout-app/ghostty   # the terminal tests run on both engines
+```
+
+The first build fetches Ghostty's sources (a pinned commit) from GitHub and builds `libghostty-vt.a` with Zig. A build without the feature offers Ghostty in Settings ▸ Terminal as unavailable, and its terminals run on the built-in engine.
+
 ### macOS app
 
-`scripts/package-mac.sh` builds `SnoutCode.app` and a disk image in `target/release/bundle/`, for this Mac's architecture. Open the `.dmg` and drag SnoutCode into Applications.
+`scripts/package-mac.sh` builds `SnoutCode.app` and a disk image in `target/release/bundle/`, for this Mac's architecture, with the Ghostty terminal engine (`SNOUT_NO_GHOSTTY=1` leaves it out). Open the `.dmg` and drag SnoutCode into Applications.
 
 Without signing settings the app is signed ad hoc: it opens as is on the Mac that built it, and a copy on another Mac has to be allowed once in System Settings > Privacy & Security. To sign with a Developer ID and notarize, set `SNOUT_APPLE_DIR` and `SNOUT_NOTARY_ISSUER` in the environment or in a gitignored `.signing.env`; the comment at the top of the script lists what the folder holds.
 

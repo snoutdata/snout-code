@@ -7,7 +7,7 @@ Claude Code is installed and signed in separately. SnoutCode does not ship it.
 ## Open the console
 
 - Press ⌘J, choose View ▸ Claude Code Console, or click **Claude Code** on the tool window stripe. In the Git view, the **Claude** button does the same.
-- The console opens in the bottom dock, beside the **Terminal** tab (your login shell in the project).
+- The console opens in the bottom dock, beside the **Terminal** tab (your login shell in the project, see [Terminal](terminal.md)).
 - Press ⌘J again, or click × in the console's header, to hide it. The session keeps running.
 
 Claude Code starts in the folder of the open project. There is one session per project: switch projects and each keeps its own, still running.
@@ -36,7 +36,12 @@ The console is a real terminal, so Claude Code behaves as it does in a terminal 
 - ⇧↩ or ⌥↩ adds a new line to the prompt.
 - ⌘V pastes text. ⌃V goes to Claude Code, which pastes an image.
 - Drag to select text, then press ⌘C to copy it.
-- Scroll to see earlier output.
+- Scroll to see earlier output, and press ⌘F to find text in it.
+- ⌘-click a link to open it.
+
+The console runs on the terminal engine chosen in Settings ▸ Tools ▸ Terminal, Ghostty or the
+built-in one; with Ghostty, Claude Code gets the kitty keyboard protocol and draws without
+flicker. See [Terminal](terminal.md).
 
 ### The Git view follows along
 

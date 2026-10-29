@@ -58,7 +58,7 @@ A project can set these, by their names in the file:
 | Gradle ▸ Stop idle daemons after | `daemon_idle_minutes` | 1 to 240 |
 | Spring ▸ Active profiles | `spring_profiles` | `"any"`, `"config"`, or a list of names |
 
-The other pages (Appearance, Keymap, Claude Code) hold settings that are yours alone; in the
+The other pages (Appearance, Keymap, Terminal, Claude Code) hold settings that are yours alone; in the
 **Project** scope they say so. Run configurations are kept per project already: see
 [Run and debug](run-and-debug.md).
 
@@ -185,6 +185,26 @@ removes and downloads JDKs on its SDKs page (see [Project Structure](project-str
   as the Spring window's **Active profiles** switch: see [Spring](spring.md#profiles). Set it
   in the **Project** scope to share it in the project's file; then the switch in the Spring
   window changes the file too.
+
+## Tools ▸ Terminal
+
+![The Terminal page](images/settings-and-keymap-terminal.png)
+
+*The terminal engine: Built-in or Ghostty.*
+
+**Engine**
+
+- **Terminal engine**: what reads the output of the programs in the Terminal tab and the
+  Claude Code console, and keeps their screens. **Built-in** is in every build of SnoutCode.
+  **Ghostty**, the terminal emulation of the Ghostty terminal, is in release builds, and is
+  their default: it reflows lines on resize, speaks the kitty keyboard protocol, keeps
+  hyperlinks, and draws more text styles. In `settings.json` it is `terminal_engine`, with
+  `"Builtin"` or `"Ghostty"`. See [Terminal](terminal.md#terminal-engine).
+
+A new choice holds for the terminals started after it. A terminal already open keeps the
+engine it started with until you click **New** in its header; **Running now** lists the open
+terminals and the engine each runs. In a build without Ghostty, its card is dimmed and the
+page says why (see [Troubleshooting](troubleshooting.md#ghostty-unavailable)).
 
 ## Tools ▸ Claude Code
 

@@ -156,6 +156,21 @@ See [Git](git.md).
 
 See [Claude Code](claude-code.md).
 
+## Terminal
+
+These keys are SnoutCode's in the Terminal tab and the Claude Code console; the others go to
+the program running there.
+
+| Shortcut | Command | Where |
+|---|---|---|
+| ⌘F | Find in the terminal, scrollback included | Terminal, console |
+| ↩ / ⇧↩ | Previous / next match | The terminal's find bar |
+| Esc | Close the find bar | The terminal's find bar |
+| ⌘-click | Open the link under the pointer | Terminal, console |
+| ⌘C / ⌘V | Copy the selection / paste | Terminal, console |
+
+See [Terminal](terminal.md).
+
 ## Dialogs
 
 | Shortcut | Command | Where |
