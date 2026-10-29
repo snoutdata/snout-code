@@ -124,8 +124,21 @@ build_in_background() {
   } >>"$STATUS"
 }
 
+# The Ghostty terminal engine needs Zig 0.15 (SNOUT_ZIG, zig on PATH, or Homebrew's zig@0.15);
+# without one the app builds with the built-in engine only. SNOUT_NO_GHOSTTY=1 skips it.
+features=()
+if [[ "$PKG" == snout-app && "${SNOUT_NO_GHOSTTY:-}" != 1 ]]; then
+  for c in "${SNOUT_ZIG:-}" "$(command -v zig || true)" "$(brew --prefix zig@0.15 2>/dev/null || true)/bin/zig"; do
+    if [[ -n "$c" && -x "$c" && "$("$c" version 2>/dev/null)" == 0.15.* ]]; then
+      export PATH="$(dirname "$c"):$PATH"
+      features=(--features ghostty)
+      break
+    fi
+  done
+fi
+
 # Incremental: a no-op when nothing changed.
-cargo build --release --quiet -p "$PKG" --manifest-path "$ROOT/Cargo.toml"
+cargo build --release --quiet -p "$PKG" "${features[@]}" --manifest-path "$ROOT/Cargo.toml"
 
 args=()
 [[ -n "$repo" ]] && args+=("$repo")

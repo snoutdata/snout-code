@@ -38,7 +38,7 @@ The window stays on your Mac while the project, Git, the Java engine, builds, ru
 - **Git** on `PATH`. Push, pull and fetch use your normal Git credentials.
 - **JDK 21**, to build the Java engine. `snout.sh` and `scripts/package-mac.sh` look for one (`SNOUT_JDK21`, then `JAVA_HOME` if it is 21, then `/usr/libexec/java_home`) and otherwise download Temurin 21 to `~/Library/Caches/SnoutCode`.
 - **Docker**, only to build the Linux server for Remote SSH (`scripts/build-server-linux.sh`).
-- **Zig 0.15**, only for the Ghostty terminal engine (`brew install zig@0.15`; it is keg-only, and the scripts find it there). `scripts/package-mac.sh` needs it; `snout.sh` and plain `cargo build` do not.
+- **Zig 0.15**, only for the Ghostty terminal engine (`brew install zig@0.15`; it is keg-only, and the scripts find it there). `scripts/package-mac.sh` needs it; `snout.sh` uses it when it finds it and otherwise builds with the built-in engine only; plain `cargo build` leaves it out.
 - **Optional:** [Claude Code](https://docs.claude.com/en/docs/claude-code), for the console.
 
 ### Build and run
