@@ -56,7 +56,7 @@ fn login_path() {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         // Interactive too, since many set PATH in .zshrc; the marks skip anything it prints.
-        let out = Command::new(shell)
+        let out = snout_host::default_signals(&mut Command::new(shell))
             .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
             .stdin(Stdio::null())
             .stderr(Stdio::null())

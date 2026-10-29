@@ -64,7 +64,7 @@ fn metadata_of(m: std::fs::Metadata) -> Metadata {
 
 fn command(cmd: &Cmd) -> io::Result<std::process::Command> {
     let mut c = std::process::Command::new(&cmd.program);
-    c.args(&cmd.args);
+    crate::default_signals(&mut c).args(&cmd.args);
     if let Some(dir) = &cmd.cwd {
         c.current_dir(dir);
     }
@@ -308,7 +308,7 @@ impl Host for LocalHost {
         if !self.info.can_trash {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "this Mac has no trash command"));
         }
-        let out = std::process::Command::new(TRASH).args(paths).output()?;
+        let out = crate::default_signals(&mut std::process::Command::new(TRASH)).args(paths).output()?;
         if out.status.success() {
             Ok(())
         } else {

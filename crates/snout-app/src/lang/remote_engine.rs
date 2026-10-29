@@ -141,7 +141,7 @@ fn local_archive(dist: &Path, hash: &str) -> anyhow::Result<PathBuf> {
     }
     let tmp = file.with_extension("part");
     // No AppleDouble files or extended attributes: the archive is for Linux.
-    let status = std::process::Command::new("tar")
+    let status = snout_host::default_signals(&mut std::process::Command::new("tar"))
         .env("COPYFILE_DISABLE", "1")
         .arg("--no-xattrs")
         .arg("-czf")

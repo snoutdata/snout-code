@@ -105,7 +105,7 @@ impl Catalog {
 /// Ask `base` for its metadata (blocking). The answer is kept in `cache`, so a later offline
 /// start uses the Spring Boot version it named.
 pub fn fetch(base: &str, cache: Option<&Path>) -> anyhow::Result<Catalog> {
-    let out = Command::new("curl")
+    let out = snout_host::default_signals(&mut Command::new("curl"))
         .args([
             "-fsSL",
             "--max-time",

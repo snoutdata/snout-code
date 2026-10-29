@@ -52,7 +52,7 @@ impl SshTarget {
 
     fn base_command(&self) -> Command {
         let mut c = Command::new(&self.ssh_program);
-        default_signals(&mut c);
+        snout_host::default_signals(&mut c);
         if let Some(f) = &self.config_file {
             c.arg("-F").arg(f);
         }
@@ -141,28 +141,6 @@ impl SshTarget {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-    }
-}
-
-/// Start `c` with no signal blocked. A process starts with the signal mask of the thread
-/// that started it, and the app starts ssh on its background threads, which block signals.
-/// ssh lets SIGTERM, SIGINT and SIGHUP in only while it waits, with the mask it started
-/// with, so they stayed pending: a `kill` of the ssh processes on this Mac did nothing, the
-/// link stayed up, and nothing reconnected.
-fn default_signals(c: &mut Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-        // SAFETY: only sigemptyset and pthread_sigmask, which are async-signal-safe, between
-        // fork and exec.
-        unsafe {
-            c.pre_exec(|| {
-                let mut none: libc::sigset_t = std::mem::zeroed();
-                libc::sigemptyset(&mut none);
-                libc::pthread_sigmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
-                Ok(())
-            });
-        }
     }
 }
 

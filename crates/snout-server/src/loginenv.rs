@@ -52,7 +52,7 @@ fn parse(out: &[u8]) -> Option<BTreeMap<String, String>> {
 
 fn run_shell(shell: &str, args: &[&str]) -> Option<BTreeMap<String, String>> {
     let script = format!("printf '%s' {MARK}; env -0 2>/dev/null || env");
-    let mut child = Command::new(shell)
+    let mut child = snout_host::default_signals(&mut Command::new(shell))
         .args(args)
         .arg(&script)
         .stdin(Stdio::null())

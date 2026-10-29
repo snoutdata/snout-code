@@ -52,9 +52,11 @@ use std::time::{Duration, SystemTime};
 
 mod latency;
 mod local;
+mod signals;
 
 pub use latency::LatencyHost;
 pub use local::LocalHost;
+pub use signals::default_signals;
 
 /// A host as the app holds it.
 pub type HostRef = Arc<dyn Host>;

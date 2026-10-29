@@ -7490,7 +7490,6 @@ dependencies = [
 name = "snout-remote"
 version = "1.0.0"
 dependencies = [
- "libc",
  "sha2 0.10.9",
  "snout-host",
  "snout-remote-proto",

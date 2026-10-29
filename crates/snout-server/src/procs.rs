@@ -286,7 +286,8 @@ impl Procs {
             })
         };
         let mut cmd = Command::new(&req.program);
-        cmd.args(&req.args)
+        snout_host::default_signals(&mut cmd)
+            .args(&req.args)
             .stdin(pipe(stdin_ch.is_some()))
             .stdout(output(stdout_ch.is_some(), &req.stdout_file)?)
             .stderr(output(stderr_ch.is_some(), &req.stderr_file)?)

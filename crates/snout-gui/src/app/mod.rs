@@ -803,7 +803,8 @@ impl SnoutApp {
                 }
             }
             Action::Reveal(path) => {
-                let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+                let _ =
+                    snout_host::default_signals(&mut std::process::Command::new("open")).arg("-R").arg(path).spawn();
             }
             Action::Copy(text) => ctx.copy_text(text),
             Action::ShowCommit(rev) => {

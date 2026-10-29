@@ -41,7 +41,8 @@ fn start_daemon(opts: &Options) -> io::Result<()> {
     std::fs::create_dir_all(&opts.dir)?;
     let log = std::fs::OpenOptions::new().create(true).append(true).open(opts.dir.join("daemon.log"))?;
     let mut cmd = Command::new(std::env::current_exe()?);
-    cmd.arg("--daemon")
+    snout_host::default_signals(&mut cmd)
+        .arg("--daemon")
         .arg("--dir")
         .arg(&opts.dir)
         .arg("--idle-timeout")
