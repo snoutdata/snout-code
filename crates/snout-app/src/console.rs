@@ -1088,19 +1088,22 @@ impl Colors {
     }
 
     /// The ink and ground of a cell, swapped when it is inverse. Ink a program picked from
-    /// the palette is made to read on the ground it ends up on (as a terminal's minimum
-    /// contrast does): bright green on cream, white on a light ground, black on a dark one.
+    /// the palette, and the default text on a ground it picked from the palette, is made to
+    /// read on that ground (as a terminal's minimum contrast does): bright green on cream,
+    /// white on a light ground, dark text on a deep red bar.
     pub fn of_cell(&self, c: &snout_core::term::Cell) -> (Rgb, Rgb) {
         use snout_core::term::Color;
         let base = Some(&self.ansi);
         let mut fg = pty::color_in(c.fg, self.fg0, c.bold(), base);
         let mut bg = pty::color_in(c.bg, self.bg0, false, base);
-        let mut ink_from = c.fg;
+        let (mut ink_from, mut ground_from) = (c.fg, c.bg);
         if c.attrs.contains(Attrs::INVERSE) {
             std::mem::swap(&mut fg, &mut bg);
-            ink_from = c.bg;
+            std::mem::swap(&mut ink_from, &mut ground_from);
         }
-        if matches!(ink_from, Color::Idx(_)) {
+        // The palette's ink, or the default text on a palette ground (dark text on a red bar).
+        let picked = matches!(ink_from, Color::Idx(_)) || matches!(ground_from, Color::Idx(_));
+        if picked && !matches!(ink_from, Color::Rgb(..)) {
             fg = readable(fg, bg);
         }
         (fg, bg)
