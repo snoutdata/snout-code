@@ -68,7 +68,7 @@ group = "com.example"
 version = "0.3.0"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21
 }
 
 repositories {
@@ -587,7 +587,7 @@ subprojects {
     }
 
     extensions.configure<JavaPluginExtension> {
-        sourceCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
     }
 
     tasks.withType<Test> {

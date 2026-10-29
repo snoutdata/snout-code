@@ -7,7 +7,7 @@
 //!
 //! `scripts/docs-screenshots.sh` sets it all up and writes `docs/images`. `SNOUT_DOCS_JDK`
 //! names the JDK the builds run on; `SNOUT_DOCS_ONLY` takes only the parts it names
-//! (ledger, java, debug, welcome, wizard, settings, git, claude, palette, remote), separated
+//! (ledger, java, javatools, debug, welcome, wizard, settings, git, claude, palette, remote), separated
 //! by commas. `remote` needs Docker and the Linux server builds; `SNOUT_DOCS_SSH_DIR` is a
 //! short folder for ssh's control sockets.
 
@@ -137,6 +137,17 @@ impl Win {
         let dir = out_dir();
         std::fs::create_dir_all(&dir).unwrap();
         image.save(dir.join(format!("{name}.png"))).unwrap();
+        println!("docs shot {name}: ok");
+    }
+
+    /// [`Self::snap`] without running the app's tasks first: the window drawn as it is.
+    fn draw_and_snap(&mut self, name: &str) {
+        let _ = self.cx.update_window(self.handle, |_, window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        });
+        let image = self.cx.capture_screenshot(self.handle).expect("offscreen rendering must be available");
+        image.save(out_dir().join(format!("{name}.png"))).unwrap();
         println!("docs shot {name}: ok");
     }
 
@@ -290,6 +301,9 @@ pub fn run(projects: PathBuf) {
     if wanted("java") {
         shop(&projects);
     }
+    if wanted("javatools") {
+        java_tools(&projects);
+    }
     if wanted("debug") {
         debug(&projects, ThemeChoice::Light, "light");
         debug(&projects, ThemeChoice::Dark, "dark");
@@ -426,6 +440,49 @@ fn git(projects: &Path, theme: ThemeChoice, mode: &str) {
         });
         w.pump(3, &mut |_| false);
         w.snap("git-commit-light");
+        w.act(Action::CloseCommit);
+        w.pump(1, &mut |_| false);
+        // Discard asks first, with the files it would put back.
+        let entries = w.cx.update(|cx| {
+            model
+                .read(cx)
+                .status
+                .files
+                .iter()
+                .filter(|f| f.path.ends_with("Service.java") || f.path.ends_with("PriceCalculator.java"))
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+        assert!(!entries.is_empty(), "work in progress to discard");
+        w.act(Action::AskDiscard(entries));
+        w.pump(2, &mut |_| false);
+        w.snap("git-discard-light");
+        // What Git said when a push was turned back.
+        w.cx.update(|cx| {
+            model.update(cx, |m, cx| {
+                use snout_app::model::{Dialog, ModelEvent};
+                m.dialog = Some(Dialog::Error(
+                    "To github.com:example/shop.git\n ! [rejected]        main -> main (fetch first)\n\
+                     error: failed to push some refs to 'github.com:example/shop.git'\n\
+                     hint: Updates were rejected because the remote contains\n\
+                     hint: work that you do not have locally. Integrate the\n\
+                     hint: remote changes (e.g. 'git pull ...') before pushing\n\
+                     hint: again."
+                        .into(),
+                ));
+                cx.emit(ModelEvent::Dialog);
+            })
+        });
+        w.pump(2, &mut |_| false);
+        w.snap("git-error-light");
+        // A project with nothing to commit.
+        drop(w);
+        let greeter = home().join("projects/greeter");
+        let mut w = Win::new(settings(theme, vec![greeter.clone()], Some(greeter)), false);
+        w.activity(Activity::Git);
+        w.act(Action::Refresh);
+        w.pump(3, &mut |_| false);
+        w.snap("git-clean-light");
     }
 }
 
@@ -998,6 +1055,113 @@ fn shop(projects: &Path) {
     w.shutdown();
 }
 
+/// The Java tools on the shop: parameter name hints, the Structure window, the call
+/// hierarchy, Go to Class and Extract Method.
+fn java_tools(projects: &Path) {
+    use snout_app::editor::Refactoring;
+    use snout_app::lang::hierarchy::Mode;
+    let shop = copy(projects, "javatools", "shop");
+    let pkg = shop.join("src/main/java/com/example/shop");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), true);
+    w.activity(Activity::Project);
+    let products = pkg.join("repository/ProductRepository.java");
+    let e = w.open(&products, Some((18, 0)));
+    engine_ready(&mut w, &shop, 900);
+    let ws = w.ws.clone();
+    let hub = w.cx.update(|cx| ws.read(cx).hub.clone());
+    let s2 = shop.clone();
+    let ok = w.pump(600, &mut |cx| hub.read(cx).servers.get(&s2).is_some_and(|s| s.first_diagnostics.is_some()));
+    println!("docs: javatools diagnostics {ok}");
+
+    // Parameter name hints: the products made from literals.
+    let e2 = e.clone();
+    let ok = w.pump(60, &mut |cx| !e2.read(cx).param_hints.is_empty());
+    println!("docs: parameter hints {ok}");
+    w.caret(&e, "    public List<Product> findAll", 0);
+    w.pump(2, &mut |_| false);
+    w.snap("java-param-hints-light");
+
+    // The Structure window beside the order service, the caret in `place`.
+    let orders = pkg.join("service/OrderService.java");
+    let oe = w.open(&orders, Some((24, 0)));
+    w.caret(&oe, "        int items = 0;", 8);
+    w.tool(Tool::Structure);
+    let structure = w.cx.update(|cx| ws.read(cx).structure.clone());
+    let ok = w.pump(30, &mut |cx| structure.read(cx).current.is_some());
+    println!("docs: structure {ok}");
+    w.pump(2, &mut |_| false);
+    w.snap("java-structure-light");
+    w.tool(Tool::Structure);
+
+    // The callers of `withTax`, and the callers of `place`.
+    let calc = pkg.join("service/PriceCalculator.java");
+    let ce = w.open(&calc, Some((20, 0)));
+    w.caret(&ce, "withTax(BigDecimal net)", 2);
+    w.with(|ws, window, cx| ws.update(cx, |w, cx| w.show_hierarchy(Mode::Callers, window, cx)));
+    let hierarchy = w.cx.update(|cx| ws.read(cx).hierarchy.clone());
+    let h = hierarchy.clone();
+    let ok = w.pump(60, &mut |cx| h.read(cx).nodes.iter().any(|n| n.depth == 1));
+    println!("docs: call hierarchy {ok}");
+    let place = w.cx.update(|cx| hierarchy.read(cx).nodes.iter().position(|n| n.name.starts_with("place")));
+    if let Some(place) = place {
+        w.cx.update(|cx| hierarchy.update(cx, |h, cx| h.expand(place, cx)));
+        let h = hierarchy.clone();
+        w.pump(30, &mut |cx| h.read(cx).nodes.iter().any(|n| n.depth == 2));
+    }
+    w.pump(2, &mut |_| false);
+    w.snap("java-call-hierarchy-light");
+    w.tool(Tool::Hierarchy);
+
+    // Go to Class: the shop's classes and the libraries' by a part of the name.
+    w.with(|ws, window, cx| ws.update(cx, |w, cx| w.open_classes(window, cx)));
+    let search = w.cx.update(|cx| ws.read(cx).search.clone()).expect("Go to Class");
+    let s3 = search.clone();
+    w.with(|_, window, cx| s3.update(cx, |s, cx| s.set_query("Order", window, cx)));
+    let s4 = search.clone();
+    let ok = w.pump(30, &mut |cx| s4.read(cx).items.len() >= 4);
+    println!("docs: go to class {ok}");
+    w.pump(2, &mut |_| false);
+    w.snap("java-go-to-class-light");
+    w.key("escape");
+    w.cx.update(|cx| {
+        ws.update(cx, |w, cx| {
+            w.search = None;
+            cx.notify();
+        })
+    });
+
+    // Extract Method on the discount's sum: the new method, its name ready to rename. The
+    // engine may still be indexing: ask until it answers.
+    let original = w.text(&ce);
+    let find = "total.multiply(new BigDecimal(\"0.10\")).setScale(2, RoundingMode.HALF_UP)";
+    let mut ok = false;
+    for _ in 0..10 {
+        let at = w.text(&ce).find(find).expect("the discount is there");
+        let c2 = ce.clone();
+        w.with(|_, window, cx| {
+            c2.update(cx, |e, cx| {
+                e.state.update(cx, |s, cx| {
+                    s.set_selected_range(at..at + find.len(), cx);
+                    s.focus(window, cx);
+                });
+                e.refactor(Refactoring::ExtractMethod, window, cx);
+            })
+        });
+        let c3 = ce.clone();
+        if w.pump(6, &mut |cx| c3.read(cx).rename.is_some()) {
+            ok = true;
+            break;
+        }
+    }
+    println!("docs: extract method {ok}");
+    w.pump(2, &mut |_| false);
+    w.snap("java-extract-method-light");
+    let c4 = ce.clone();
+    w.with(|_, window, cx| c4.update(cx, |e, cx| e.cancel_rename(window, cx)));
+    w.set_text(&ce, original);
+    w.shutdown();
+}
+
 /// The command palette, over the shop's editor.
 fn palette(projects: &Path) {
     let shop = copy(projects, "palette", "shop");
@@ -1221,24 +1385,27 @@ fn remote(projects: &Path) {
     w.pump(5, &mut |_| false);
     w.snap("remote-git-light");
     w.activity(Activity::Project);
-    // The window while the connection comes back. Drawn as the app draws it: here, with
-    // the harness running background work on this thread, a real drop would stall it.
+    w.pump(3, &mut |_| false);
+    // The window while the connection comes back: the machine gone quiet (the container
+    // paused) and the connection dropped under the window. The harness runs the app's
+    // background work on this thread, where it would wait for the connection; so the window
+    // is drawn as it is now, the status bar told the host's state as the app's poll tells
+    // it, and the app runs again once the machine is back.
+    sh(here, &["docker", "pause", &name]);
+    host.drop_connection();
+    let status = host.status();
+    assert!(matches!(status, snout_remote::Status::Reconnecting { .. }), "reconnecting: {status:?}");
     w.cx.update(|cx| {
-        let r = cx.global_mut::<Remote>();
-        if let Some(c) = r.connection.as_mut() {
-            c.host = None;
-            c.status = snout_remote::Status::Reconnecting { attempt: 3, error: None };
+        if let Some(c) = cx.global_mut::<Remote>().connection.as_mut() {
+            c.status = status;
         }
         cx.refresh_windows();
     });
-    w.pump(2, &mut |_| false);
-    w.snap("remote-reconnecting-light");
-    w.cx.update(|cx| {
-        if let Some(c) = cx.global_mut::<Remote>().connection.as_mut() {
-            c.host = Some(host.clone());
-            c.status = snout_remote::Status::Connected;
-        }
-    });
+    w.draw_and_snap("remote-reconnecting-light");
+    sh(here, &["docker", "unpause", &name]);
+    let h5 = host.clone();
+    assert!(w.pump(150, &mut |_| h5.status() == snout_remote::Status::Connected), "connected again");
+    w.pump(3, &mut |_| false);
     w.shutdown();
     host.close();
     drop(container);
