@@ -266,6 +266,13 @@ impl ConsolePanel {
         self.sessions.get(root).map(|s| s.pty.contents())
     }
 
+    /// Send `bytes` to the session of `root`, as keys typed.
+    pub fn send_keys(&self, root: &Path, bytes: &[u8]) {
+        if let Some(s) = self.sessions.get(root) {
+            s.pty.send(bytes);
+        }
+    }
+
     /// Type `text` into the session of `root`, as a paste.
     pub fn type_text(&self, root: &Path, text: &str) {
         if let Some(s) = self.sessions.get(root) {

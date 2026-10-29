@@ -357,8 +357,12 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-enter");
     let answer = c.wait(cx, id1);
     assert_eq!(texts(&answer), ["FILE_SAVED", HELLO_V2]);
-    assert_eq!(std::fs::read_to_string(&hello).unwrap(), HELLO_V2, "accepting writes the file");
+    assert_eq!(std::fs::read_to_string(&hello).unwrap(), HELLO, "Claude Code writes the file, not the IDE");
     cx.update(|_, cx| assert!(editor.read(cx).review.is_none() && !editor.read(cx).dirty));
+    // Claude Code writes it; the tab already shows it.
+    std::fs::write(&hello, HELLO_V2).unwrap();
+    pump(cx, 900);
+    cx.update(|_, cx| assert!(!editor.read(cx).dirty && !editor.read(cx).conflict));
     assert_eq!(c.tool(cx, "close_tab", json!({ "tab_name": tab1 })), ["TAB_CLOSED"]);
     assert!(editor_of(&ws, &hello, cx).is_some(), "the file's own tab stays");
 
@@ -383,7 +387,8 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     focus(&editor, cx);
     cx.simulate_keystrokes("cmd-enter");
     assert_eq!(texts(&c.wait(cx, id3)), ["FILE_SAVED".to_owned(), format!("// typed\n{v3}")]);
-    assert_eq!(std::fs::read_to_string(&hello).unwrap(), format!("// typed\n{v3}"), "the edited text is saved");
+    // Claude Code writes what the answer says: the text as edited.
+    std::fs::write(&hello, format!("// typed\n{v3}")).unwrap();
     let accepted = text_of(&editor, cx);
 
     // Claude Code closing a diff still waiting rejects it and restores the text.
@@ -418,7 +423,10 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     let fresh_editor = editor_of(&ws, &fresh, cx).unwrap();
     cx.update(|w, cx| fresh_editor.update(cx, |e, cx| e.accept_review(w, cx)));
     assert_eq!(texts(&c.wait(cx, id8))[0], "FILE_SAVED");
-    assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "class Fresh {}\n");
+    assert!(!fresh.exists(), "Claude Code makes the file");
+    std::fs::write(&fresh, "class Fresh {}\n").unwrap();
+    pump(cx, 900);
+    cx.update(|_, cx| assert!(!fresh_editor.read(cx).dirty));
 
     // ⌥⌘K sends the selection's lines as an @-mention and brings the console forward.
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(hello.clone(), None, false, w, cx)));
@@ -681,4 +689,158 @@ fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut Test
     cx.update(|_, cx| assert!(c.read(cx).activity.is_none(), "the indicator goes once Claude stops"));
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// Pump until `done`, for as long as `secs`; the console's text on the way out if not.
+fn wait_long(
+    cx: &mut VisualTestContext,
+    what: &str,
+    secs: u64,
+    console: &Entity<crate::console::ConsolePanel>,
+    root: &Path,
+    mut done: impl FnMut(&mut VisualTestContext) -> bool,
+) {
+    let start = Instant::now();
+    while !done(cx) {
+        if start.elapsed() > Duration::from_secs(secs) {
+            let text = cx.update(|_, cx| console.read(cx).session_text(root)).unwrap_or_default();
+            panic!("timed out waiting for {what}; the console shows:\n{text}");
+        }
+        pump(cx, 50);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The real `claude` in the console, against the window: a change it asks to make (default
+/// mode, through openDiff, accepted in the Claude Changes window), then edits it makes on
+/// its own (`--permission-mode acceptEdits`), all reported by the hooks; then Revert All.
+/// Needs the user's Claude Code login, so it runs only when asked:
+/// `SNOUT_E2E_CLAUDE=<path to claude> SNOUT_E2E_LOCK_DIR=<lock folder> cargo test real_claude -- --ignored`.
+#[gpui::test]
+#[ignore]
+fn real_claude_edits_live_and_reverts(cx: &mut TestAppContext) {
+    let Ok(claude) = std::env::var("SNOUT_E2E_CLAUDE") else { return };
+    let lock_dir = PathBuf::from(std::env::var("SNOUT_E2E_LOCK_DIR").expect("SNOUT_E2E_LOCK_DIR"));
+    let repo = demo_repo("claude-e2e");
+    std::fs::create_dir_all(repo.join("src/demo")).unwrap();
+    let greeter = repo.join("src/demo/Greeter.java");
+    let v1 = "package demo;\n\npublic class Greeter {\n    private final String name;\n\n    public Greeter(String name) {\n        this.name = name;\n    }\n\n    public String greet() {\n        return \"Hello, \" + name;\n    }\n}\n";
+    std::fs::write(&greeter, v1).unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "Greeter"]);
+    let (model, ws, cx) = open_with_ide(cx, with_repo(&repo), &lock_dir);
+    let (_, _) = hook_command(&ws, cx);
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(greeter.clone(), None, false, w, cx)));
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(PathBuf::from(&claude))));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
+    let root = repo.clone();
+    let session =
+        |cx: &mut VisualTestContext| cx.update(|_, cx| console.read(cx).session_text(&root)).unwrap_or_default();
+    // Claude Code asks whether to trust a new folder: yes, for this scratch one.
+    let ready = |cx: &mut VisualTestContext, console: &Entity<crate::console::ConsolePanel>, root: &Path| {
+        let start = Instant::now();
+        loop {
+            let text = cx.update(|_, cx| console.read(cx).session_text(root)).unwrap_or_default();
+            if text.contains("trust this folder") {
+                // The choice starts on "No, exit": down to "Yes", then Enter, once the
+                // dialog listens.
+                std::thread::sleep(Duration::from_millis(3_000));
+                pump(cx, 100);
+                cx.update(|_, cx| console.read(cx).send_keys(root, b"\x1b[B"));
+                for _ in 0..10 {
+                    pump(cx, 100);
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                cx.update(|_, cx| console.read(cx).send_keys(root, b"\r"));
+                pump(cx, 500);
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            if cx.update(|_, cx| cx.global::<IdeStatus>().clients >= 1)
+                && !text.contains("trust this folder")
+                && text.contains('❯')
+            {
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(60), "claude did not start:\n{text}");
+            pump(cx, 50);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        pump(cx, 500);
+        std::thread::sleep(Duration::from_millis(1_500));
+    };
+    let prompt = |cx: &mut VisualTestContext, text: &str| {
+        cx.update(|_, cx| console.read(cx).type_text(&root, text));
+        pump(cx, 300);
+        std::thread::sleep(Duration::from_millis(300));
+        cx.update(|_, cx| console.read(cx).send_keys(&root, b"\r"));
+    };
+    let editor = editor_of(&ws, &greeter, cx).unwrap();
+
+    // 1. Manual mode (asks for every edit): Claude asks through openDiff; the window lists
+    // the request; it is accepted there.
+    pump(cx, 300);
+    cx.update(|w, cx| {
+        console.update(cx, |c, cx| c.start(&root, &["--permission-mode".into(), "manual".into()], w, cx))
+    });
+    pump(cx, 500);
+    std::thread::sleep(Duration::from_millis(1_000));
+    ready(cx, &console, &root);
+    prompt(
+        cx,
+        "In src/demo/Greeter.java add a private int count field after the name field. Change nothing else and run no commands.",
+    );
+    let c = changes(&ws, cx);
+    wait_long(cx, "the openDiff request", 240, &console, &root, |cx| {
+        cx.update(|_, cx| c.read(cx).pending.iter().any(|d| d.front && d.path == greeter))
+    });
+    pump_until(cx, "the stream", |cx| !streaming(&editor, cx));
+    let tab = cx.update(|_, cx| c.read(cx).pending[0].tab.clone());
+    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::answer_review(ws, &tab, true, w, cx)));
+    wait_long(cx, "the field listed", 240, &console, &root, |cx| {
+        settled(&ws, cx) && listed(&ws, cx).iter().any(|f| f.0 == greeter)
+    });
+    let text = std::fs::read_to_string(&greeter).unwrap();
+    assert!(text.contains("int count"), "{text}");
+    println!("e2e 1 (default mode, openDiff): listed {:?}", listed(&ws, cx));
+    cx.update(|_, cx| assert!(c.read(cx).hooks_heard, "the hooks reported the edit"));
+    wait_long(cx, "Claude to finish", 240, &console, &root, |cx| cx.update(|_, cx| c.read(cx).busy().is_none()));
+
+    // 2. acceptEdits: Claude edits on its own; the hooks say so; the editor plays it out.
+    cx.update(|w, cx| {
+        console.update(cx, |c, cx| c.start(&root, &["--permission-mode".into(), "acceptEdits".into()], w, cx))
+    });
+    pump(cx, 500);
+    std::thread::sleep(Duration::from_millis(3_000));
+    ready(cx, &console, &root);
+    prompt(
+        cx,
+        "Rename the method greet to sayHello in src/demo/Greeter.java, and create src/demo/Farewell.java with a class Farewell that has a method bye(String name) returning \"Goodbye, \" + name. Run no commands.",
+    );
+    let farewell = repo.join("src/demo/Farewell.java");
+    let mut saw_live = false;
+    wait_long(cx, "both edits listed", 300, &console, &root, |cx| {
+        saw_live |= cx.update(|_, cx| ws.read(cx).editors(cx).iter().any(|e| e.read(cx).live.is_some()));
+        settled(&ws, cx) && {
+            let l = listed(&ws, cx);
+            l.iter().any(|f| f.0 == farewell && f.3)
+                && std::fs::read_to_string(&greeter).unwrap().contains("sayHello")
+                && l.iter().any(|f| f.0 == greeter)
+        }
+    });
+    println!("e2e 2 (acceptEdits): listed {:?}, live seen: {saw_live}", listed(&ws, cx));
+    assert!(saw_live, "an edit played out live in the editor");
+    wait_long(cx, "the greeter's tab to show it", 30, &console, &root, |cx| text_of(&editor, cx).contains("sayHello"));
+    wait_long(cx, "Claude to finish", 240, &console, &root, |cx| cx.update(|_, cx| c.read(cx).busy().is_none()));
+
+    // Revert All: the session's changes undone, the new file gone.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::revert_all(ws, w, cx)));
+    pump(cx, 300);
+    assert_eq!(std::fs::read_to_string(&greeter).unwrap(), v1, "back to before Claude's first edit");
+    assert!(!farewell.exists());
+    println!("e2e: reverted; the console showed:\n{}", session(cx));
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = None));
+    cx.update(|_, cx| ws.update(cx, |ws, _| ws.claude = None));
+    std::thread::sleep(Duration::from_millis(500));
+    let _ = std::fs::remove_dir_all(repo);
 }

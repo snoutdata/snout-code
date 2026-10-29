@@ -309,7 +309,9 @@ impl EditorPanel {
         }
     }
 
-    /// Accept: write the text shown (with any edits) to the file and say so.
+    /// Accept: say so, with the text shown (and any edits made to it). Claude Code writes
+    /// the file itself once told (it refuses to when the file changed under it), so the tab
+    /// takes that text as the file's and waits for the write.
     pub fn accept_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.review.is_none() {
             return;
@@ -317,24 +319,16 @@ impl EditorPanel {
         self.finish_stream(window, cx);
         let Some(mut r) = self.review.take() else { return };
         let text = self.text(cx);
-        let saved = self.save_making_folder(r.new_file, cx);
-        cx.spawn_in(window, async move |this, cx| {
-            let ok = saved.await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                if !ok {
-                    // Not written (the error shows); the review stays.
-                    this.review = Some(r);
-                    cx.notify();
-                    return;
-                }
-                if let Some(answer) = r.answer.take() {
-                    answer(Outcome::Accepted(text));
-                }
-                drop(r);
-                this.next_review(window, cx);
-            });
-        })
-        .detach();
+        self.saved = text.clone();
+        self.dirty = false;
+        self.preview = false;
+        self.error = None;
+        self.claude_hold = Some(std::time::Instant::now());
+        if let Some(answer) = r.answer.take() {
+            answer(Outcome::Accepted(text));
+        }
+        drop(r);
+        self.next_review(window, cx);
     }
 
     /// Reject: put the text back as it was and say so.
