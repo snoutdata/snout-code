@@ -29,7 +29,7 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-q", Box::new(Quit), None),
         ("cmd-o", Box::new(Open), None),
         ("cmd-j", Box::new(ToggleConsole), None),
-        ("cmd-r", Box::new(Refresh), None),
+        // ⌘R runs again what ran last; F5 refreshes.
         ("f5", Box::new(Refresh), None),
         ("cmd-shift-o", Box::new(Checkout), None),
         ("cmd-1", Box::new(ShowProject), None),
@@ -93,6 +93,16 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("f7", Box::new(StepInto), None),
         ("shift-f8", Box::new(StepOut), None),
         ("f9", Box::new(Resume), None),
+        ("cmd-alt-f9", Box::new(PauseProgram), None),
+        ("alt-f9", Box::new(RunToCursor), Some("EditorPanel")),
+        ("alt-f8", Box::new(EvaluateExpression), None),
+        ("cmd-f8", Box::new(ToggleBreakpoint), Some("EditorPanel")),
+        ("cmd-alt-f8", Box::new(ToggleBreakpointEnabled), Some("EditorPanel")),
+        ("cmd-alt-shift-f8", Box::new(EditBreakpointCondition), Some("EditorPanel")),
+        ("cmd-shift-f8", Box::new(ViewBreakpoints), None),
+        ("cmd-r", Box::new(Rerun), None),
+        ("cmd-alt-r", Box::new(RerunFailedTests), None),
+        ("ctrl-alt-g", Box::new(RunGradleTask), None),
         ("cmd-\\", Box::new(SplitRight), None),
         ("cmd-w", Box::new(CloseTab), Some("Workspace")),
         ("cmd-=", Box::new(ZoomIn), None),
@@ -347,6 +357,41 @@ mod tests {
             set(&mut mine, &go, vec!["cmd-p".into()]);
             assert!(mine.is_empty());
             assert_eq!(display("cmd-shift-p", cx), "⌘⇧P");
+        });
+    }
+
+    #[gpui::test]
+    fn the_run_and_debug_keys_belong_to_nothing_else(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            init(&Overrides::new(), cx);
+            let kit = cx.global::<KitBindings>().0.clone();
+            for keys in [
+                "cmd-f8",
+                "cmd-alt-f8",
+                "cmd-alt-shift-f8",
+                "cmd-shift-f8",
+                "alt-f8",
+                "alt-f9",
+                "cmd-alt-f9",
+                "cmd-r",
+                "cmd-alt-r",
+                "ctrl-alt-g",
+                "cmd-shift-r",
+            ] {
+                let os = cx.platform_info().os;
+                let keys = Keystroke::parse_with_os(keys, os).unwrap().unparse(os);
+                let keys = keys.as_str();
+                let taken: Vec<&str> =
+                    kit.iter().filter(|b| keys_of(b, cx) == keys).map(|b| b.action().name()).collect();
+                assert!(taken.is_empty(), "{keys} is GPUI Kit's: {taken:?}");
+                let ours: Vec<String> = defaults(cx)
+                    .iter()
+                    .filter(|b| keys_of(b, cx) == keys)
+                    .map(|b| b.action().name().to_owned())
+                    .collect();
+                assert_eq!(ours.len(), 1, "{keys}: {ours:?}");
+            }
         });
     }
 }

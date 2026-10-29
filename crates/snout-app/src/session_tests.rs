@@ -189,7 +189,7 @@ fn breakpoints_and_run_configurations_come_back_with_the_project(cx: &mut TestAp
     let saved = ProjectSettings {
         configurations: vec![mine],
         selected: Some("user:1".into()),
-        breakpoints: vec![Breakpoint { path: repo.join("App.java"), line: 1, condition: None }],
+        breakpoints: vec![Breakpoint::new(repo.join("App.java"), 1, None)],
     };
     saved.save(&project_file(&support, &repo)).unwrap();
     store.save(&with_repo(&repo)).unwrap();

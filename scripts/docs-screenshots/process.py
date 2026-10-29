@@ -37,6 +37,8 @@ SPEC = {
     "run-and-debug-tests": ("run-tests-light", None),
     "run-and-debug-debugger": ("debug-paused-light", None),
     "run-and-debug-debugger-dark": ("debug-paused-dark", None),
+    "run-and-debug-breakpoints": ("breakpoints-light", (710, 390, 2170, 1410)),
+    "run-and-debug-evaluate": ("evaluate-light", (840, 140, 2040, 760)),
     "spring-injections": ("spring-injections-light", None),
     "spring-beans": ("spring-beans-light", None),
     "spring-endpoints": ("spring-endpoints-light", None),

@@ -1270,6 +1270,37 @@ fn debug(projects: &Path, theme: ThemeChoice, mode: &str) {
     w.cx.update(|cx| runs.update(cx, |r, cx| r.add_watch(id, "names.get(i - 1)".into(), cx)));
     w.pump(4, &mut |_| false);
     w.snap(&format!("debug-paused-{mode}"));
+    if mode == "light" {
+        // Evaluate Expression, on the expression of a watch.
+        w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.open_evaluate(window, cx)));
+        w.with(|ws, window, cx| {
+            let d = ws.read(cx).evaluate_dialog.clone().unwrap();
+            d.update(cx, |d, cx| {
+                d.input.update(cx, |i, cx| i.set_value("total * 10", window, cx));
+                d.evaluate(cx);
+            });
+        });
+        w.pump(10, &mut |cx| {
+            let r = runs.read(cx);
+            r.session(id).and_then(|s| s.debug.as_ref()).is_some_and(|d| d.evaluated.is_some())
+        });
+        w.snap("evaluate-light");
+        w.with(|ws, _, cx| ws.update(cx, |ws, _| ws.evaluate_dialog = None));
+        // View Breakpoints: one with a condition, one disabled.
+        let greeter_java = greeter.join("src/main/java/demo/Greeter.java");
+        let print = text.lines().position(|l| l.contains("System.out.println")).unwrap() as u32;
+        w.cx.update(|cx| {
+            runs.update(cx, |r, cx| {
+                r.set_condition(&main, line, Some("i == 3".into()), cx);
+                r.toggle_breakpoint(&main, print, cx);
+                r.set_breakpoint_enabled(&main, print, false, cx);
+                r.toggle_breakpoint(&greeter_java, 9, cx);
+            })
+        });
+        w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.open_breakpoints(window, cx)));
+        w.pump(2, &mut |_| false);
+        w.snap("breakpoints-light");
+    }
     w.shutdown();
 }
 

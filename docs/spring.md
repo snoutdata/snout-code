@@ -40,6 +40,8 @@ Click a mark to go somewhere:
 
 A bean that comes from a library opens as its class, read only.
 
+From the keyboard, **Go to Spring Bean or Usages…** (Code menu, or the command palette) does what a click on the caret line's mark does.
+
 ### @Value placeholders
 
 A `@Value("${key}")` shows the value it gets at the end of its line, in quiet italics: the value from the module's `application.properties` or `application.yml` and from the files of the profiles that `spring.profiles.active` names, or the placeholder's default.
@@ -55,7 +57,7 @@ Press ⌘. on the warning for quick fixes:
 
 ## The Spring tool window
 
-Open it from the leaf on the right stripe, or with **Spring Beans and Endpoints** in the command palette (⇧⌘P). Its header has **Read the Spring Model Again**, **Collapse All** and **Hide**.
+Open it from the leaf on the right stripe, or with **Spring Beans and Endpoints** in the command palette (⇧⌘P). Its header has **Read the Spring Model Again**, **Collapse All** and **Hide**; the first two are also in the command palette, and **Collapse the Spring Window** in View ▸ Tool Window Actions.
 
 Until the engine has imported the project, the window says "No Spring model yet". While it reads, the header says "Reading…".
 

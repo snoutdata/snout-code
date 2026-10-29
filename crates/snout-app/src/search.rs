@@ -69,6 +69,8 @@ pub enum Mode {
     GoToLine,
     /// The command palette: every command, with its shortcut.
     Commands,
+    /// Run Gradle Task…: the project's tasks, run as a command.
+    Tasks,
     /// Symbols, from a language server: the workspace's (⌘T) or the file's (⇧⌘O).
     Symbols,
     /// The file's symbols as a tree, the one the caret is in picked (File Structure, ⌘F12).
@@ -170,6 +172,7 @@ impl SearchView {
             Mode::GoToFile => "Go to file",
             Mode::GoToLine => "Line, or line:column",
             Mode::Commands => "Type a command",
+            Mode::Tasks => "Run a Gradle task: its name or path",
             Mode::Symbols => "Go to symbol",
             Mode::Structure => "Filter the file's symbols",
             Mode::Classes => "Go to class, in the project, its libraries and the JDK",
@@ -182,22 +185,23 @@ impl SearchView {
         })
         .detach();
         let host = crate::host::host(cx);
-        let listing =
-            (!matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols | Mode::Structure | Mode::Classes)).then(
-                || {
-                    let list = cx.background_executor().spawn({
-                        let (host, root) = (host.clone(), root.clone());
-                        async move { list_files(&*host, &root) }
-                    });
-                    cx.spawn(async move |this, cx| {
-                        let files = list.await;
-                        let _ = this.update(cx, |this, cx| {
-                            this.files = Arc::new(files);
-                            this.update(cx);
-                        });
-                    })
-                },
-            );
+        let listing = (!matches!(
+            mode,
+            Mode::GoToLine | Mode::Commands | Mode::Tasks | Mode::Symbols | Mode::Structure | Mode::Classes
+        ))
+        .then(|| {
+            let list = cx.background_executor().spawn({
+                let (host, root) = (host.clone(), root.clone());
+                async move { list_files(&*host, &root) }
+            });
+            cx.spawn(async move |this, cx| {
+                let files = list.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.files = Arc::new(files);
+                    this.update(cx);
+                });
+            })
+        });
         let mut this = Self {
             model,
             root,
@@ -245,7 +249,7 @@ impl SearchView {
         self.selected = 0;
         match self.mode {
             Mode::GoToLine => cx.notify(),
-            Mode::Commands => {
+            Mode::Commands | Mode::Tasks => {
                 self.items = match_commands(&self.commands, &query)
                     .into_iter()
                     .map(|i| Item {
@@ -342,6 +346,7 @@ impl Render for SearchView {
             Mode::GoToFile => "No file matches".into(),
             Mode::GoToLine => SharedString::default(),
             Mode::Commands => "No command matches".into(),
+            Mode::Tasks => "No task matches".into(),
             Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),
             Mode::Symbols => "No symbol matches".into(),
             Mode::Structure => "No symbol matches".into(),

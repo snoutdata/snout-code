@@ -185,6 +185,33 @@ impl EditorPanel {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(line) = self.spring_mark_at(at, cx) else { return false };
+        self.open_spring_menu(line, at, window, cx);
+        true
+    }
+
+    /// Go to Spring Bean or Usages…: the Spring mark of the caret's line, as a click on it
+    /// does. False when the line has none.
+    pub fn spring_menu_at_caret(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> bool {
+        let s = self.state.read(cx);
+        let line = s.cursor_position().line;
+        let caret = s.cursor();
+        let at = s
+            .range_to_bounds(&(caret..caret))
+            .map(|b| b.bottom_left())
+            .unwrap_or_else(|| self.lanes.get().bounds.origin);
+        let Some(marks) = self.spring.as_ref().and_then(|m| m.line(line).cloned()) else { return false };
+        self.open_spring_menu(marks, at, window, cx);
+        true
+    }
+
+    /// Go where a Spring mark leads: at once when it leads one place, else its menu at `at`.
+    fn open_spring_menu(
+        &mut self,
+        line: SpringLine,
+        at: Point<Pixels>,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
         self.gutter_tip = None;
         let items = spring_items(&line);
         let gos: Vec<&Target> = items
@@ -201,7 +228,7 @@ impl EditorPanel {
                 model.update(cx, |s, cx| s.open(target, cx));
             }
             cx.notify();
-            return true;
+            return;
         }
         // A bean injected in many places: a field narrows the list, and has the keyboard.
         let filter = (gos.len() > FILTER_FROM).then(|| {
@@ -220,7 +247,6 @@ impl EditorPanel {
         });
         self.gutter_menu = Some(GutterMenu::Spring { at, items, filter });
         cx.notify();
-        true
     }
 
     /// Go to the first place the filter of a Spring mark's menu lets through.

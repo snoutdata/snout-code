@@ -203,8 +203,26 @@ pub fn comment_prefix(language: &str) -> Option<&'static str> {
     }
 }
 
+/// The identifier (letters, digits, `_`, `$`, and `.` between them, as `order.total`) the
+/// byte `at` of `text` is in or just after.
+pub fn word_at(text: &str, at: usize) -> Option<String> {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '.';
+    let at = at.min(text.len());
+    let start = text[..at].char_indices().rev().take_while(|(_, c)| is_word(*c)).last().map_or(at, |(i, _)| i);
+    let end = text[at..].char_indices().find(|(_, c)| !is_word(*c)).map_or(text.len(), |(i, _)| at + i);
+    let word = text[start..end].trim_matches('.');
+    (!word.is_empty()).then(|| word.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_word_at_the_caret_takes_dotted_names() {
+        assert_eq!(word_at("x = order.total;", 12).as_deref(), Some("order.total"));
+        assert_eq!(word_at("x = order.total;", 4).as_deref(), Some("order.total"));
+        assert_eq!(word_at("a + b", 2), None);
+    }
+
     use super::*;
 
     fn apply(text: &str, e: &Edit) -> String {

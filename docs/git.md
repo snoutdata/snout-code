@@ -19,7 +19,7 @@ The project you open is a Git repository, or a folder inside one. The Git view a
 
 Drag the edges between panes to resize them. In the Git view, the status bar shows the branch, its upstream and how far ahead (↑) and behind (↓) it is, for example `main → origin/main  ↑1`.
 
-SnoutCode reads the repository again when the window comes forward, when you press F5 or ⌘R (**View ▸ Refresh**), and while the Claude Code console's agent is working.
+SnoutCode reads the repository again when the window comes forward, when you press F5 (**View ▸ Refresh**), and while the Claude Code console's agent is working.
 
 ## Repositories
 
@@ -209,7 +209,7 @@ SnoutCode fetches the repositories in the list in the background, to count what 
 | ⌘↩ | Commit (in the message field) |
 | ⌘A | Select every file shown in Files (outside text fields) |
 | ⌘⌫ | Move the selected files to the Trash, after asking |
-| F5 or ⌘R | Refresh |
+| F5 | Refresh |
 | ↑ ↓ | Previous or next commit, in the commit view |
 | Esc | Leave the commit view |
 | ⌘J | Show or hide the Claude Code console |

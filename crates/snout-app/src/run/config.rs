@@ -207,6 +207,24 @@ pub struct Breakpoint {
     pub line: u32,
     #[serde(default)]
     pub condition: Option<String>,
+    /// A disabled breakpoint stays where it is but does not stop the program.
+    #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
+    pub enabled: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+fn is_enabled(on: &bool) -> bool {
+    *on
+}
+
+impl Breakpoint {
+    /// An enabled breakpoint on `line` (from 0) of `path`.
+    pub fn new(path: impl Into<PathBuf>, line: u32, condition: Option<String>) -> Self {
+        Self { path: path.into(), line, condition, enabled: true }
+    }
 }
 
 /// What `ProjectSettings::selected` says when the user picked Current File.
@@ -324,7 +342,7 @@ mod tests {
         assert!(file.to_string_lossy().contains("/projects/shop-"));
         let s = ProjectSettings {
             selected: Some("a".into()),
-            breakpoints: vec![Breakpoint { path: "/w/A.java".into(), line: 3, condition: Some("i > 2".into()) }],
+            breakpoints: vec![Breakpoint::new("/w/A.java", 3, Some("i > 2".into()))],
             ..Default::default()
         };
         s.save(&file).unwrap();

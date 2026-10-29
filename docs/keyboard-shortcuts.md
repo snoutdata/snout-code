@@ -14,7 +14,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘2 | Show Git | |
 | ⌘7 | Show or hide the Structure window | |
 | ⌘J | Show or hide the Claude Code console | |
-| ⌘R or F5 | Refresh | |
+| F5 | Refresh (⌘R is Rerun) | |
 | ⌘= or ⌘+ | Zoom In | |
 | ⌘- | Zoom Out | |
 | ⌘0 | Actual Size | |
@@ -93,12 +93,36 @@ See [Java](java.md) for what each one does.
 | ⌃⇧R | Run Context Configuration (what the caret is in) | |
 | ⌃⇧D | Debug Context Configuration (what the caret is in) | |
 | ⌘F2 | Stop | |
+| ⌘R | Rerun (what ran last) | |
+| ⌥⌘R | Rerun Failed Tests | |
+| ⌃⌥G | Run Gradle Task… | |
 | F8 | Step Over | |
 | F7 | Step Into | |
 | ⇧F8 | Step Out | |
+| ⌥F9 | Run to Cursor | Editor |
 | F9 | Resume Program | |
+| ⌥⌘F9 | Pause Program | |
+| ⌥F8 | Evaluate Expression… | |
+| ⌘F8 | Toggle Breakpoint | Editor |
+| ⌥⌘F8 | Toggle Breakpoint Enabled | Editor |
+| ⌥⇧⌘F8 | Edit Breakpoint Condition… | Editor |
+| ⇧⌘F8 | View Breakpoints… | |
 
 See [Run and debug](run-and-debug.md).
+
+## Tool windows
+
+These have no key out of the box; the command palette and **View ▸ Tool Window Actions** run them, and Settings ▸ Keymap can give them one.
+
+| Command | What it does |
+|---|---|
+| Select Opened File | Shows the file in front in the Project tree |
+| Collapse the Project Tree | Folds every folder of the Project tree |
+| Hide the Side Panel | Closes the left panel |
+| Sort Structure by Name | Sorts the Structure window by name, or back in file order |
+| Collapse All Gradle Tasks | Folds the Gradle window |
+| Collapse the Spring Window | Folds the Spring window |
+| Clear Output | Empties the Output tab |
 
 ## Git
 

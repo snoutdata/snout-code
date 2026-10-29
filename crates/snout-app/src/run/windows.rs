@@ -329,16 +329,16 @@ impl RunWindow {
             .border_r_1()
             .border_color(mix(p.border, 0.6, p.ground))
             .child(
-                tool("run-rerun", Icon::Rerun, "Rerun", true, ok, &p)
+                tool("run-rerun", Icon::Rerun, "Rerun (⌘R)", true, ok, &p)
                     .on_click(move |_, _, cx| a.update(cx, |r, cx| r.rerun(id, cx))),
             )
             .child(
-                tool("run-stop", Icon::Stop, "Stop", s.running(), p.error, &p)
+                tool("run-stop", Icon::Stop, "Stop (⌘F2)", s.running(), p.error, &p)
                     .on_click(move |_, _, cx| b.update(cx, |r, cx| r.stop(id, cx))),
             )
             .when(s.launch.test_module().is_some(), |d| {
                 d.child(
-                    tool("run-rerun-failed", Icon::RerunFailed, "Rerun Failed Tests", failed, p.error, &p)
+                    tool("run-rerun-failed", Icon::RerunFailed, "Rerun Failed Tests (⌥⌘R)", failed, p.error, &p)
                         .on_click(move |_, _, cx| c.update(cx, |r, cx| r.rerun_failed(id, cx))),
                 )
             })
@@ -694,13 +694,13 @@ impl RunWindow {
             .child(tab("debug-tab-console", DebugTab::Console, self.debug_tab == DebugTab::Console, cx))
             .child(div().w(px(10.)))
             .child(
-                tool("debug-rerun", Icon::Rerun, "Rerun", true, p.ok, &p)
+                tool("debug-rerun", Icon::Rerun, "Rerun (⌘R)", true, p.ok, &p)
                     .on_click(move |_, _, cx| a.update(cx, |r, cx| r.rerun(id, cx))),
             )
             .child(step("debug-resume", Icon::Resume, "Resume (F9)", "continue", paused, p.ok))
-            .child(step("debug-pause", Icon::Pause, "Pause", "pause", live && !paused, p.fg))
+            .child(step("debug-pause", Icon::Pause, "Pause Program (⌥⌘F9)", "pause", live && !paused, p.fg))
             .child(
-                tool("debug-stop", Icon::Stop, "Stop", s.running(), p.error, &p)
+                tool("debug-stop", Icon::Stop, "Stop (⌘F2)", s.running(), p.error, &p)
                     .on_click(move |_, _, cx| b.update(cx, |r, cx| r.stop(id, cx))),
             )
             .child(div().w(px(10.)))

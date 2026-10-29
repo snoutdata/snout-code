@@ -315,6 +315,7 @@ impl Runs {
                     d.reason = body.get("reason").and_then(Value::as_str).map(str::to_owned);
                     d.thread = body.get("threadId").and_then(Value::as_i64).or(d.thread);
                     d.frame = 0;
+                    self.clear_run_to(id, cx);
                     self.refresh_stack(id, cx);
                     cx.emit(RunsEvent::Show(super::Place::Debug));
                 }
@@ -328,6 +329,7 @@ impl Runs {
                     self.sync_marks(cx);
                 }
                 "terminated" | "exited" => {
+                    self.run_to.take_if(|(sid, _, _)| *sid == id);
                     if let Some(d) = self.dbg(id) {
                         d.paused = false;
                         d.frames.clear();
@@ -663,6 +665,7 @@ impl Runs {
 }
 
 fn bp_args(path: &std::path::Path, list: &[Breakpoint]) -> Value {
+    let list: Vec<&Breakpoint> = list.iter().filter(|b| b.enabled).collect();
     let bps: Vec<Value> = list
         .iter()
         .map(|b| match &b.condition {
@@ -707,8 +710,13 @@ mod tests {
         );
         let args = bp_args(
             std::path::Path::new("/w/A.java"),
-            &[Breakpoint { path: "/w/A.java".into(), line: 4, condition: Some("i > 2".into()) }],
+            &[Breakpoint::new("/w/A.java", 4, Some("i > 2".into())), {
+                let mut off = Breakpoint::new("/w/A.java", 9, None);
+                off.enabled = false;
+                off
+            }],
         );
         assert_eq!(args["breakpoints"][0], json!({ "line": 5, "condition": "i > 2" }));
+        assert_eq!(args["breakpoints"].as_array().unwrap().len(), 1, "a disabled breakpoint is not sent");
     }
 }

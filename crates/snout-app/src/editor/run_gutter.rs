@@ -198,12 +198,21 @@ impl EditorPanel {
                 }
                 // Breakpoints, over the line numbers.
                 let (bl, br) = l.breakpoints();
-                for (line, condition) in &bps {
+                for (line, condition, enabled) in &bps {
                     let Some(top) = top_of(*line) else { continue };
                     window.paint_quad(gpui::fill(Bounds::new(point(bl, top), size(br - bl, line_height)), p.panel));
                     let r = px(6.);
                     let c = point((bl + br) / 2., top + line_height / 2.);
                     let dot = Bounds::new(point(c.x - r, c.y - r), size(r * 2., r * 2.));
+                    if !enabled {
+                        // Disabled: a ring, the dot's colour faded.
+                        let ring = mix(p.error, 0.55, p.panel);
+                        window.paint_quad(gpui::fill(dot, ring).corner_radii(r));
+                        let q = r - px(1.75);
+                        let hole = Bounds::new(point(c.x - q, c.y - q), size(q * 2., q * 2.));
+                        window.paint_quad(gpui::fill(hole, p.panel).corner_radii(q));
+                        continue;
+                    }
                     window.paint_quad(gpui::fill(dot, p.error).corner_radii(r));
                     if condition.is_some() {
                         let q = px(2.5);
@@ -284,26 +293,49 @@ impl EditorPanel {
                 true
             }
             gpui::MouseButton::Right => {
-                let current = runs.read(cx).breakpoints_in(&path).into_iter().find(|b| b.line == line).cloned();
-                let input =
-                    cx.new(|cx| InputState::new(window, cx).placeholder("Stop only when this is true, as `i > 3`"));
-                let text = current.and_then(|b| b.condition).unwrap_or_default();
-                input.update(cx, |s, cx| s.set_value(text, window, cx));
-                cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, window, cx| {
-                    if let InputEvent::PressEnter { .. } = ev {
-                        let text = input.read(cx).value().to_string();
-                        this.apply_condition(text, window, cx);
-                    }
-                })
-                .detach();
-                let focus = input.clone();
-                cx.defer_in(window, move |_, window, cx| focus.update(cx, |s, cx| s.focus(window, cx)));
-                self.gutter_menu = Some(GutterMenu::Condition { at: e.position, line, input });
-                cx.notify();
+                self.open_condition(line, e.position, window, cx);
                 true
             }
             _ => false,
         }
+    }
+
+    /// The line (from 0) the caret is on, in a file that can have breakpoints.
+    pub fn breakpoint_line(&self, cx: &App) -> Option<u32> {
+        (debuggable(&self.path) && self.class_file.is_none()).then(|| self.state.read(cx).cursor_position().line)
+    }
+
+    /// Edit Breakpoint Condition at the caret: the condition popup, under the caret's line.
+    pub fn edit_condition_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(line) = self.breakpoint_line(cx) else { return false };
+        let s = self.state.read(cx);
+        let caret = s.cursor();
+        let at = s
+            .range_to_bounds(&(caret..caret))
+            .map(|b| b.bottom_left())
+            .unwrap_or_else(|| self.lanes.get().bounds.origin);
+        self.open_condition(line, at, window, cx);
+        true
+    }
+
+    /// Put up the condition of the breakpoint on `line` (none yet: it is set on Done).
+    fn open_condition(&mut self, line: u32, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(runs) = crate::run::runs(cx) else { return };
+        let current = runs.read(cx).breakpoints_in(&self.path).into_iter().find(|b| b.line == line).cloned();
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Stop only when this is true, as `i > 3`"));
+        let text = current.and_then(|b| b.condition).unwrap_or_default();
+        input.update(cx, |s, cx| s.set_value(text, window, cx));
+        cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                let text = input.read(cx).value().to_string();
+                this.apply_condition(text, window, cx);
+            }
+        })
+        .detach();
+        let focus = input.clone();
+        cx.defer_in(window, move |_, window, cx| focus.update(cx, |s, cx| s.focus(window, cx)));
+        self.gutter_menu = Some(GutterMenu::Condition { at, line, input });
+        cx.notify();
     }
 
     fn apply_condition(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {

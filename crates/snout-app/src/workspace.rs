@@ -30,6 +30,7 @@ use crate::settings::ThemeChoice;
 use crate::status::StatusBar;
 use crate::theme::{self, palette};
 
+mod debug_ui;
 mod lang_ui;
 pub mod quit;
 mod remote_ui;
@@ -111,6 +112,9 @@ pub struct Workspace {
     pub welcome: Entity<WelcomePanel>,
     /// The Edit Configurations dialog, while it shows.
     pub config_dialog: Option<Entity<crate::run::config_dialog::ConfigDialog>>,
+    /// View Breakpoints and Evaluate Expression, while they show.
+    pub breakpoints_dialog: Option<Entity<crate::run::debug_dialogs::BreakpointsDialog>>,
+    pub evaluate_dialog: Option<Entity<crate::run::debug_dialogs::EvaluateDialog>>,
     /// The New Project dialog, while it shows.
     pub new_project: Option<Entity<crate::new_project::NewProjectView>>,
     /// Connect to SSH Host, while it shows.
@@ -467,6 +471,8 @@ impl Workspace {
             build_window,
             welcome,
             config_dialog: None,
+            breakpoints_dialog: None,
+            evaluate_dialog: None,
             new_project: None,
             connect_dialog: None,
             remote_picker: None,
@@ -1572,6 +1578,27 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &StepInto, _, cx| this.debug_step("stepIn", cx)))
             .on_action(cx.listener(|this, _: &StepOut, _, cx| this.debug_step("stepOut", cx)))
             .on_action(cx.listener(|this, _: &Resume, _, cx| this.debug_step("continue", cx)))
+            .on_action(cx.listener(|this, _: &PauseProgram, _, cx| this.pause_program(cx)))
+            .on_action(cx.listener(|this, _: &RunToCursor, w, cx| this.run_to_cursor(w, cx)))
+            .on_action(cx.listener(|this, _: &EvaluateExpression, w, cx| this.open_evaluate(w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleBreakpoint, w, cx| this.toggle_breakpoint_at_caret(w, cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleBreakpointEnabled, w, cx| this.toggle_breakpoint_enabled_at_caret(w, cx)),
+            )
+            .on_action(cx.listener(|this, _: &EditBreakpointCondition, w, cx| this.edit_breakpoint_condition(w, cx)))
+            .on_action(cx.listener(|this, _: &ViewBreakpoints, w, cx| this.open_breakpoints(w, cx)))
+            .on_action(cx.listener(|this, _: &SpringAtCaret, w, cx| this.spring_at_caret(w, cx)))
+            .on_action(cx.listener(|this, _: &Rerun, _, cx| this.rerun_last(cx)))
+            .on_action(cx.listener(|this, _: &RerunFailedTests, _, cx| this.rerun_failed_tests(cx)))
+            .on_action(cx.listener(|this, _: &RunGradleTask, w, cx| this.open_task_picker(w, cx)))
+            .on_action(cx.listener(|this, a: &RunTask, _, cx| this.run_task(a.build.clone(), a.task.clone(), cx)))
+            .on_action(cx.listener(|this, _: &SortStructure, _, cx| {
+                this.structure.update(cx, |s, cx| {
+                    use crate::lang::symbols::Sort;
+                    let next = if s.sort == Sort::Name { Sort::Position } else { Sort::Name };
+                    s.set_sort(next, cx)
+                })
+            }))
             .on_action(cx.listener(|_, _: &SyncGradle, _, cx| {
                 if let Some(store) = crate::project_model::store(cx) {
                     store.update(cx, |s, cx| s.sync(cx));
@@ -1743,6 +1770,31 @@ impl Render for Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .bg(p.scrim)
+                    .occlude()
+                    .child(dialog)
+            }))
+            .children(self.breakpoints_dialog.clone().map(|dialog| {
+                div()
+                    .id("breakpoints-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(p.scrim)
+                    .occlude()
+                    .child(dialog)
+            }))
+            .children(self.evaluate_dialog.clone().map(|dialog| {
+                div()
+                    .id("evaluate-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_start()
+                    .justify_center()
+                    .pt(px(TITLE_H + 60.))
                     .bg(p.scrim)
                     .occlude()
                     .child(dialog)

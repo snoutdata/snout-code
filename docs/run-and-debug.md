@@ -108,9 +108,11 @@ File places in the output are links. Click a stack trace line such as `at demo.A
 
 The buttons down the window's left edge:
 
-- **Rerun** stops the run and starts it again.
-- **Stop** stops it.
-- **Rerun Failed Tests**, for a test run, runs only the tests that failed.
+- **Rerun** (⌘R) stops the run and starts it again.
+- **Stop** (⌘F2) stops it.
+- **Rerun Failed Tests** (⌥⌘R), for a test run, runs only the tests that failed.
+
+The keys work from anywhere: ⌘R runs again whatever ran last (in Run, Debug or Build), ⌥⌘R the tests that failed in the last test run. Both are in the **Run** menu and the command palette.
 
 Click × on a tab to stop the run and close the tab.
 
@@ -143,8 +145,15 @@ Start a debug session with the title bar's Debug button (⌃D), **Debug '…'** 
 
 Breakpoints go in Java, Scala, Kotlin and Groovy files.
 
-- Click on a line number to set a breakpoint. Click again to remove it.
-- Right click a line number to give the breakpoint a condition. In the box **Breakpoint on line N**, type an expression such as `i > 3`, then press Enter or click **Done**. The program stops there only when it is true. Leave it empty to stop every time. **Remove** removes the breakpoint.
+- Click on a line number to set a breakpoint. Click again to remove it. **Toggle Breakpoint** (⌘F8, Run menu) does the same for the caret's line.
+- Right click a line number to give the breakpoint a condition, or press ⌥⇧⌘F8 (**Edit Breakpoint Condition…**) on its line. In the box **Breakpoint on line N**, type an expression such as `i > 3`, then press Enter or click **Done**. The program stops there only when it is true. Leave it empty to stop every time. **Remove** removes the breakpoint.
+- **Toggle Breakpoint Enabled** (⌥⌘F8) keeps the breakpoint on the caret's line but stops the program there no more; it shows as a ring. Press it again to enable it.
+
+**View Breakpoints…** (⇧⌘F8) lists every breakpoint of the project, by file and line, with its condition. Untick one to disable it, pick one to edit its condition below the list, click its bin to remove it, or **Remove All**. A double click, or **Go to Line**, shows its line.
+
+![View Breakpoints](images/run-and-debug-breakpoints.png)
+
+*Three breakpoints of the greeter: one with a condition, one disabled.*
 
 Breakpoints are kept with the project, and you can set and change them while a session runs.
 
@@ -168,16 +177,25 @@ Use the buttons of the Debug window's toolbar, the **Run** menu, or the keys:
 | Action | Key |
 |---|---|
 | Resume Program | F9 |
+| Pause Program | ⌥⌘F9 |
 | Step Over | F8 |
 | Step Into | F7 |
 | Step Out | ⇧F8 |
+| Run to Cursor | ⌥F9 |
 | Stop | ⌘F2 |
+| Rerun | ⌘R |
 
-The toolbar also has **Pause**, which stops the running program where it is, and **Rerun**.
+**Pause Program** stops the running program where it is. **Run to Cursor** lets the stopped program go on until it reaches the caret's line, as if a breakpoint were there for once; the breakpoints on the way still stop it.
 
 ### Evaluate expressions and watches
 
-While the program is stopped, type an expression in the **Evaluate an expression** box at the top of the variables.
+While the program is stopped, press ⌥F8 (**Run ▸ Evaluate Expression…**) to evaluate Java in the frame it stopped in. The selection, or the name at the caret, is filled in and evaluated at once; type another expression and press Enter. The value shows with its type. **Add to Watches** (⌘Enter) keeps it among the watches.
+
+![Evaluate Expression](images/run-and-debug-evaluate.png)
+
+*`total * 10` evaluated where the greeter's loop stopped.*
+
+You can also type an expression in the **Evaluate an expression** box at the top of the variables.
 
 - Press Enter to evaluate it. The result shows under the box.
 - Press ⇧Enter, or click the eye button (**Add to Watches**), to add it to the watches.

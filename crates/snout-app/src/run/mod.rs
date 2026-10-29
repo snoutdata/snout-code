@@ -11,6 +11,7 @@ pub mod ansi;
 pub mod config;
 pub mod config_dialog;
 pub mod debug;
+pub mod debug_dialogs;
 pub mod gradle_window;
 pub mod test_tree;
 pub mod windows;
@@ -350,7 +351,8 @@ impl FileRunnables {
 /// stopped on with the values it sees there.
 #[derive(Default)]
 pub struct Marks {
-    pub breakpoints: BTreeMap<PathBuf, Vec<(u32, Option<String>)>>,
+    /// By file: the line (from 0), the condition, and whether it is enabled.
+    pub breakpoints: BTreeMap<PathBuf, Vec<(u32, Option<String>, bool)>>,
     /// The file and line (from 0) the selected frame is at, while paused.
     pub exec: Option<(PathBuf, u32)>,
     /// The selected frame's local variables, name and value.
@@ -412,6 +414,8 @@ pub struct Runs {
     /// A Scala compile is running (since then).
     pub scala: Option<Instant>,
     pub scala_error: Option<String>,
+    /// Run to Cursor: the session, and the line (from 0) of the file it stops at once.
+    pub run_to: Option<(u64, PathBuf, u32)>,
     _tick: Option<Task<()>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -454,6 +458,7 @@ impl Runs {
             gradle: GradleTasks::default(),
             scala: None,
             scala_error: None,
+            run_to: None,
             _tick: None,
             _subscriptions: subscriptions,
         };
@@ -1401,7 +1406,7 @@ impl Runs {
         let before = self.project.breakpoints.len();
         self.project.breakpoints.retain(|b| !(b.path == path && b.line == line));
         if self.project.breakpoints.len() == before {
-            self.project.breakpoints.push(Breakpoint { path: path.to_owned(), line, condition: None });
+            self.project.breakpoints.push(Breakpoint::new(path, line, None));
         }
         self.breakpoints_changed(path, cx);
     }
@@ -1411,7 +1416,7 @@ impl Runs {
         let condition = condition.map(|c| c.trim().to_owned()).filter(|c| !c.is_empty());
         match self.project.breakpoints.iter_mut().find(|b| b.path == path && b.line == line) {
             Some(b) => b.condition = condition,
-            None => self.project.breakpoints.push(Breakpoint { path: path.to_owned(), line, condition }),
+            None => self.project.breakpoints.push(Breakpoint::new(path, line, condition)),
         }
         self.breakpoints_changed(path, cx);
     }
@@ -1421,23 +1426,108 @@ impl Runs {
         self.breakpoints_changed(path, cx);
     }
 
+    /// Enable or disable the breakpoint on `line` of `path` (a disabled one does not stop
+    /// the program). False when there is none there.
+    pub fn set_breakpoint_enabled(&mut self, path: &Path, line: u32, on: bool, cx: &mut Context<Self>) -> bool {
+        let Some(b) = self.project.breakpoints.iter_mut().find(|b| b.path == path && b.line == line) else {
+            return false;
+        };
+        b.enabled = on;
+        self.breakpoints_changed(path, cx);
+        true
+    }
+
+    /// Enable the breakpoint on `line` if it is disabled, else disable it. False when
+    /// there is none there.
+    pub fn toggle_breakpoint_enabled(&mut self, path: &Path, line: u32, cx: &mut Context<Self>) -> bool {
+        let on = self.project.breakpoints.iter().find(|b| b.path == path && b.line == line).map(|b| b.enabled);
+        match on {
+            Some(on) => self.set_breakpoint_enabled(path, line, !on, cx),
+            None => false,
+        }
+    }
+
+    /// Remove every breakpoint of the project.
+    pub fn remove_all_breakpoints(&mut self, cx: &mut Context<Self>) {
+        let paths: std::collections::BTreeSet<PathBuf> = self.project.breakpoints.drain(..).map(|b| b.path).collect();
+        for path in paths {
+            self.breakpoints_changed(&path, cx);
+        }
+    }
+
+    /// The breakpoints session `id`'s debugger gets for `path`: the project's, and the
+    /// line Run to Cursor stops at.
+    pub(crate) fn breakpoints_for(&self, id: u64, path: &Path) -> Vec<Breakpoint> {
+        let mut list: Vec<Breakpoint> = self.breakpoints_in(path).into_iter().cloned().collect();
+        if let Some((sid, p, line)) = &self.run_to
+            && *sid == id
+            && p == path
+        {
+            list.retain(|b| b.line != *line);
+            list.push(Breakpoint::new(path, *line, None));
+        }
+        list
+    }
+
     fn breakpoints_changed(&mut self, path: &Path, cx: &mut Context<Self>) {
         self.save_project();
-        let list: Vec<Breakpoint> = self.breakpoints_in(path).into_iter().cloned().collect();
         let ids: Vec<u64> =
             self.sessions.iter().filter(|s| s.debug.as_ref().is_some_and(|d| d.live())).map(|s| s.id).collect();
         for id in ids {
-            self.send_breakpoints(id, path.to_owned(), list.clone(), cx);
+            let list = self.breakpoints_for(id, path);
+            self.send_breakpoints(id, path.to_owned(), list, cx);
         }
         self.sync_marks(cx);
         cx.notify();
     }
 
+    /// The debug session the Debug window shows, while its program is stopped.
+    pub fn paused_debug(&self) -> Option<u64> {
+        self.shown(Place::Debug).filter(|s| s.debug.as_ref().is_some_and(|d| d.paused && d.live())).map(|s| s.id)
+    }
+
+    /// The debug session the Debug window shows, while it is connected.
+    pub fn live_debug(&self) -> Option<u64> {
+        self.shown(Place::Debug).filter(|s| s.debug.as_ref().is_some_and(|d| d.live())).map(|s| s.id)
+    }
+
+    /// Run to Cursor: let session `id`'s program go on until it reaches `line` (from 0)
+    /// of `path`, as if a breakpoint were there for once (other breakpoints still stop it).
+    pub fn run_to_cursor(&mut self, id: u64, path: &Path, line: u32, cx: &mut Context<Self>) {
+        self.run_to = Some((id, path.to_owned(), line));
+        let list = self.breakpoints_for(id, path);
+        self.send_breakpoints(id, path.to_owned(), list, cx);
+        self.step(id, "continue", cx);
+    }
+
+    /// The program of session `id` stopped: the line Run to Cursor set goes.
+    pub(crate) fn clear_run_to(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some((sid, path, _)) = self.run_to.take_if(|(sid, _, _)| *sid == id) {
+            let list = self.breakpoints_for(sid, &path);
+            self.send_breakpoints(sid, path, list, cx);
+        }
+    }
+
+    /// The most recent session, for Rerun: the one the Run or Debug window shows, the
+    /// newest of them.
+    pub fn last_session(&self) -> Option<u64> {
+        [Place::Run, Place::Debug, Place::Build]
+            .into_iter()
+            .filter_map(|p| self.shown(p))
+            .max_by_key(|s| s.id)
+            .map(|s| s.id)
+    }
+
+    /// The newest session that ran tests, for Rerun Failed Tests.
+    pub fn last_tests(&self) -> Option<u64> {
+        self.sessions.iter().rev().find(|s| s.launch.test_module().is_some() && s.tests.is_some()).map(|s| s.id)
+    }
+
     /// Hand the editors what they draw.
     pub fn sync_marks(&mut self, cx: &mut Context<Self>) {
-        let mut breakpoints: BTreeMap<PathBuf, Vec<(u32, Option<String>)>> = BTreeMap::new();
+        let mut breakpoints: BTreeMap<PathBuf, Vec<(u32, Option<String>, bool)>> = BTreeMap::new();
         for b in &self.project.breakpoints {
-            breakpoints.entry(b.path.clone()).or_default().push((b.line, b.condition.clone()));
+            breakpoints.entry(b.path.clone()).or_default().push((b.line, b.condition.clone(), b.enabled));
         }
         let (exec, locals) = match self.shown(Place::Debug).and_then(|s| s.debug.as_ref()) {
             Some(d) => (d.exec_point(), d.locals()),

@@ -122,7 +122,7 @@ fn breakpoints_are_kept_and_drawn_and_the_gutter_offers_runs(cx: &mut TestAppCon
     cx.update(|_, cx| {
         let marks = crate::run::marks(cx).unwrap();
         let m = marks.read(cx);
-        assert_eq!(m.breakpoints[&file], [(4, None), (5, Some("x > 0".into()))]);
+        assert_eq!(m.breakpoints[&file], [(4, None, true), (5, Some("x > 0".into()), true)]);
         assert_eq!(runs.read(cx).breakpoints_in(&file).len(), 2);
     });
     // Clicking the breakpoint lane over the line numbers clears it.
@@ -142,6 +142,88 @@ fn breakpoints_are_kept_and_drawn_and_the_gutter_offers_runs(cx: &mut TestAppCon
     // The file's main class is found for the run icon, with no engine.
     let mains = crate::run::main_classes(&file, &std::fs::read_to_string(&file).unwrap());
     assert_eq!(mains, [(2, "demo.App".to_owned()), (3, "demo.App".to_owned())]);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn breakpoints_have_named_actions_and_a_window_and_the_debugger_actions_say_when_they_cannot(cx: &mut TestAppContext) {
+    let repo = demo_repo("run-bp-actions");
+    std::fs::create_dir_all(repo.join("src/main/java/demo")).unwrap();
+    let file = repo.join("src/main/java/demo/App.java");
+    std::fs::write(&file, "package demo;\n\npublic class App {\n    public static void main(String[] args) {\n        int x = 1;\n    }\n}\n")
+        .unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = runs_of(&ws, cx);
+    act(&model, cx, Action::OpenFile(file.clone(), Some((4, 8))));
+    cx.run_until_parked();
+    // ⌘F8 sets the caret line's breakpoint, ⌥⌘F8 disables it: drawn as such, not sent.
+    cx.simulate_keystrokes("cmd-f8");
+    cx.update(|_, cx| assert_eq!(runs.read(cx).breakpoints_in(&file).len(), 1, "⌘F8 set one on line 5"));
+    cx.simulate_keystrokes("cmd-alt-f8");
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let marks = crate::run::marks(cx).unwrap();
+        assert_eq!(marks.read(cx).breakpoints[&file], [(4, None, false)]);
+    });
+    // ⌥⇧⌘F8 puts up its condition at the caret.
+    cx.simulate_keystrokes("cmd-alt-shift-f8");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("gutter-menu").is_some(), "the condition box shows");
+    cx.simulate_keystrokes("escape");
+    // ⇧⌘F8: View Breakpoints lists it; its tick enables it again.
+    cx.simulate_keystrokes("cmd-shift-f8");
+    cx.run_until_parked();
+    let dialog = cx.update(|_, cx| ws.read(cx).breakpoints_dialog.clone()).expect("View Breakpoints shows");
+    cx.update(|_, cx| assert_eq!(dialog.read(cx).list(cx).len(), 1));
+    let tick = cx.debug_bounds("bp-enabled-0").expect("its tick box").center();
+    cx.simulate_click(tick, gpui::Modifiers::none());
+    cx.update(|_, cx| assert!(runs.read(cx).breakpoints_in(&file)[0].enabled));
+    cx.update(|w, cx| {
+        dialog.update(cx, |d, cx| {
+            d.condition.update(cx, |i, cx| i.set_value("x > 0", w, cx));
+            d.apply_condition(cx);
+        })
+    });
+    cx.update(|_, cx| assert_eq!(runs.read(cx).breakpoints_in(&file)[0].condition.as_deref(), Some("x > 0")));
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| assert!(ws.read(cx).breakpoints_dialog.is_none(), "Esc closes it"));
+    // With nothing debugged: Evaluate says how it works, Run to Cursor and Rerun say why not.
+    cx.simulate_keystrokes("alt-f8");
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| ws.read(cx).evaluate_dialog.is_some()));
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| assert!(ws.read(cx).evaluate_dialog.is_none()));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.run_to_cursor(w, cx)));
+    cx.update(|_, cx| assert!(model.read(cx).message.contains("Run to Cursor"), "{}", model.read(cx).message));
+    cx.simulate_keystrokes("cmd-r");
+    cx.update(|_, cx| assert!(model.read(cx).message.contains("Nothing ran yet"), "{}", model.read(cx).message));
+    // Run to Cursor's line goes with the program's next stop.
+    cx.update(|_, cx| {
+        runs.update(cx, |r, cx| {
+            r.run_to = Some((7, file.clone(), 5));
+            assert_eq!(r.breakpoints_for(7, &file).len(), 2);
+            assert_eq!(r.breakpoints_for(8, &file).len(), 1, "another session's stop is its own");
+            r.clear_run_to(7, cx);
+            assert!(r.run_to.is_none());
+        })
+    });
+    // Every named action is in the palette.
+    let names: Vec<String> = crate::menus::commands(&[]).into_iter().map(|(n, _)| n.to_string()).collect();
+    for n in [
+        "Toggle Breakpoint",
+        "Toggle Breakpoint Enabled",
+        "Edit Breakpoint Condition…",
+        "View Breakpoints…",
+        "Evaluate Expression…",
+        "Run to Cursor",
+        "Pause Program",
+        "Rerun",
+        "Rerun Failed Tests",
+        "Run Gradle Task…",
+        "Sort Structure by Name",
+    ] {
+        assert!(names.iter().any(|x| x == n), "{n} is in the palette");
+    }
     let _ = std::fs::remove_dir_all(repo);
 }
 

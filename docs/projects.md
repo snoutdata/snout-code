@@ -126,6 +126,8 @@ SnoutCode remembers which one you chose. The buttons on the right of its header:
 - **Collapse All** closes every folder.
 - **Hide** hides the tool window.
 
+All three are also in View ▸ Tool Window Actions and the command palette (**Select Opened File**, **Collapse the Project Tree**, **Hide the Side Panel**).
+
 ### The Project view
 
 ![The Project view of a multi-module build](images/projects-project-view.png)
