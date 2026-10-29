@@ -1378,6 +1378,12 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::claude_ide::AcceptAllClaude, w, cx| {
+                crate::claude_ide::bridge::accept_all(this, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::claude_ide::RevertAllClaude, w, cx| {
+                crate::claude_ide::bridge::revert_all(this, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &NewProject, w, cx| this.open_new_project(w, cx)))
             .on_action(cx.listener(|this, _: &ConnectSsh, w, cx| this.open_connect(w, cx)))
             .on_action(cx.listener(|this, a: &OpenRemoteRecent, w, cx| this.open_remote_recent(a.0.clone(), w, cx)))

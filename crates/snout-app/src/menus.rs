@@ -183,6 +183,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Previous Claude Change", Box::new(crate::claude_ide::PrevClaudeChange)),
         ("Accept Claude Change at Caret", Box::new(crate::claude_ide::AcceptClaudeHunk)),
         ("Revert Claude Change at Caret", Box::new(crate::claude_ide::RevertClaudeHunk)),
+        ("Accept All Claude Changes", Box::new(crate::claude_ide::AcceptAllClaude)),
+        ("Revert All Claude Changes", Box::new(crate::claude_ide::RevertAllClaude)),
         ("Undo", Box::new(Undo)),
         ("Redo", Box::new(Redo)),
         ("Zoom In", Box::new(ZoomIn)),
@@ -336,6 +338,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Show Problems", ShowProblems),
             MenuItem::separator(),
             MenuItem::action("Send Selection to Claude", crate::editor::SendToClaude),
+            MenuItem::action("Accept All Claude Changes", crate::claude_ide::AcceptAllClaude),
+            MenuItem::action("Revert All Claude Changes", crate::claude_ide::RevertAllClaude),
         ]),
         Menu::new("Run").items([
             MenuItem::action("Run", RunSelected),

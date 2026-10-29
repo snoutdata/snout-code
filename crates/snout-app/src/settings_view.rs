@@ -191,6 +191,7 @@ impl SettingsView {
         next.soft_wrap = d.soft_wrap;
         next.show_whitespace = d.show_whitespace;
         next.fetch_minutes = d.fetch_minutes;
+        next.daemon_idle_minutes = d.daemon_idle_minutes;
         next.claude_path = d.claude_path.clone();
         next.project_jdks = d.project_jdks.clone();
         next.keymap = d.keymap.clone();

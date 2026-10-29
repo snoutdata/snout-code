@@ -19,8 +19,8 @@ use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
 use snout_core::art::Glyph;
 
+use super::bridge;
 use super::changes::{ChangeSet, Diffed, Source};
-use super::{AcceptAllClaude, RevertAllClaude, bridge};
 use crate::look;
 use crate::theme::{Palette, mix, palette};
 use crate::workspace::Workspace;
@@ -230,8 +230,6 @@ impl Render for ChangesPanel {
             .debug_selector(|| "claude-changes".into())
             .key_context("ClaudeChanges")
             .track_focus(&self.focus)
-            .on_action(cx.listener(|this, _: &AcceptAllClaude, w, cx| this.act(w, cx, bridge::accept_all)))
-            .on_action(cx.listener(|this, _: &RevertAllClaude, w, cx| this.act(w, cx, bridge::revert_all)))
             .size_full()
             .flex()
             .flex_col()

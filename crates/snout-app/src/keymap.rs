@@ -105,6 +105,9 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("ctrl-alt-shift-up", Box::new(c::PrevClaudeChange), Some("EditorPanel")),
         ("cmd-alt-y", Box::new(c::AcceptClaudeHunk), Some("EditorPanel")),
         ("cmd-alt-z", Box::new(c::RevertClaudeHunk), Some("EditorPanel")),
+        // All of them at once, wherever the keyboard is.
+        ("cmd-alt-shift-y", Box::new(c::AcceptAllClaude), None),
+        ("cmd-alt-shift-z", Box::new(c::RevertAllClaude), None),
     ]
 }
 

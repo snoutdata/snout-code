@@ -636,8 +636,8 @@ fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut Test
     cx.update(|_, cx| assert!(editor.read(cx).claude_base.is_none(), "no marks left in the gutter"));
     assert_eq!(std::fs::read_to_string(&hello).unwrap(), reverted, "keeping writes nothing");
 
-    // Revert All: the file Claude made goes, its tab too.
-    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::revert_all(ws, w, cx)));
+    // Revert All, by its keys: the file Claude made goes, its tab too.
+    cx.simulate_keystrokes("cmd-alt-shift-z");
     pump_until(cx, "the created file gone", |_| !fresh.exists());
     assert!(!fresh.exists(), "a created file reverts to nothing");
     assert!(editor_of(&ws, &fresh, cx).is_none());

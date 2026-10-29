@@ -878,6 +878,14 @@ fn the_settings_sheet_edits_a_copy_until_apply_or_ok(cx: &mut TestAppContext) {
         assert_eq!(model.read(cx).settings.tab_size, 3, "OK puts it in place");
         assert!(ws.read(cx).settings_sheet.is_none(), "and closes the sheet");
     });
+    // Gradle: how long an idle daemon lives.
+    let idle = cx.update(|_, cx| model.read(cx).settings.daemon_idle_minutes);
+    cx.dispatch_action(crate::menus::OpenSettings);
+    cx.run_until_parked();
+    click(cx, "settings-page-gradle");
+    click(cx, "settings-daemon-idle-up");
+    click(cx, "settings-ok");
+    cx.update(|_, cx| assert!(model.read(cx).settings.daemon_idle_minutes > idle, "OK keeps the daemons' idle time"));
     let _ = std::fs::remove_dir_all(repo);
 }
 

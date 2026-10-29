@@ -311,7 +311,9 @@ impl Render for DialogBody {
             Dialog::About => {
                 body.push(dim(format!("Version {}", env!("CARGO_PKG_VERSION"))).into_any_element());
                 body.push(
-                    div().child("A small, fast desktop Git client, with Claude Code beside it.").into_any_element(),
+                    div()
+                        .child("An IDE for Java, Gradle and Spring Boot, with Git and Claude Code built in.")
+                        .into_any_element(),
                 );
                 body.push(
                     Button::new("src")
