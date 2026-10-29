@@ -451,7 +451,7 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
     use crate::glyphs::Icon;
     let p = palette(cx);
     let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
-    let right = matches!(active, "Gradle" | "Spring" | "Notifications" | "Claude Changes");
+    let right = matches!(active, "Gradle" | "Spring" | "Notifications" | "Claude Changes" | "Structure");
     let mut row = div()
         .id(("tool-header", group.node().as_u64()))
         .debug_selector(|| "tool-header".into())

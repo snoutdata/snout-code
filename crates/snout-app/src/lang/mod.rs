@@ -8,6 +8,8 @@ pub mod java;
 pub mod panels;
 pub mod providers;
 pub mod remote_engine;
+pub mod structure;
+pub mod symbols;
 pub mod text;
 
 pub use hub::{HubEvent, LangHub, hub};

@@ -92,6 +92,8 @@ actions!(
         ConnectSsh,
         CloseRemote,
         ToggleParamHints,
+        ShowStructure,
+        FileStructure,
     ]
 );
 
@@ -166,6 +168,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Trigger Completion", Box::new(i::ShowCompletions)),
         ("Go to Symbol in Workspace…", Box::new(GoToSymbol)),
         ("Go to Symbol in File…", Box::new(GoToSymbolInFile)),
+        ("File Structure…", Box::new(FileStructure)),
+        ("Structure", Box::new(ShowStructure)),
         ("Show Problems", Box::new(ShowProblems)),
         ("Run", Box::new(RunSelected)),
         ("Debug", Box::new(DebugSelected)),
@@ -309,6 +313,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
         Menu::new("View").items([
             MenuItem::action("Project", ShowProject),
             MenuItem::action("Git", ShowGit),
+            MenuItem::action("Structure", ShowStructure),
             check(MenuItem::action("Claude Code Console", ToggleConsole), s.console_open),
             MenuItem::separator(),
             check(MenuItem::action("Side by Side Diff", SideBySide), s.side_by_side),
@@ -342,13 +347,19 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Organize Imports", crate::editor::OrganizeImports),
             MenuItem::action("Show Parameter Hints", crate::editor::ShowSignature),
             MenuItem::separator(),
-            MenuItem::action("Go to Symbol in Workspace…", GoToSymbol),
-            MenuItem::action("Go to Symbol in File…", GoToSymbolInFile),
             MenuItem::action("Show Problems", ShowProblems),
             MenuItem::separator(),
             MenuItem::action("Send Selection to Claude", crate::editor::SendToClaude),
             MenuItem::action("Accept All Claude Changes", crate::claude_ide::AcceptAllClaude),
             MenuItem::action("Revert All Claude Changes", crate::claude_ide::RevertAllClaude),
+        ]),
+        Menu::new("Navigate").items([
+            MenuItem::action("Go to File…", GoToFile),
+            MenuItem::action("Go to Symbol in Workspace…", GoToSymbol),
+            MenuItem::action("Go to Symbol in File…", GoToSymbolInFile),
+            MenuItem::action("Go to Line…", GoToLine),
+            MenuItem::separator(),
+            MenuItem::action("File Structure…", FileStructure),
         ]),
         Menu::new("Refactor").items([
             MenuItem::action("Rename Symbol…", crate::editor::RenameSymbol),

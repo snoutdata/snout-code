@@ -91,6 +91,10 @@ pub enum Icon {
     Copy,
     /// Claude's changes: a page with a plus and a minus on it.
     ClaudeChanges,
+    /// Sorted by name: bars growing shorter, an arrow down beside them.
+    Sort,
+    /// The Structure window: an outline, a bar and the bars it holds.
+    Structure,
 }
 
 /// One stroke of an icon, in grid units (16 across).
@@ -371,6 +375,20 @@ impl Icon {
                 Line(&[(8., 4.5), (8., 9.5)], false),
                 Line(&[(5.5, 7.), (10.5, 7.)], false),
                 Line(&[(5.5, 12.), (10.5, 12.)], false),
+            ],
+            Icon::Sort => &[
+                Line(&[(2., 4.), (9.5, 4.)], false),
+                Line(&[(2., 8.), (7.5, 8.)], false),
+                Line(&[(2., 12.), (5.5, 12.)], false),
+                Line(&[(12.5, 3.), (12.5, 13.)], false),
+                Line(&[(10.5, 11.), (12.5, 13.), (14.5, 11.)], false),
+            ],
+            Icon::Structure => &[
+                Line(&[(2., 3.5), (14., 3.5)], false),
+                Line(&[(4.5, 3.5), (4.5, 12.5)], false),
+                Line(&[(4.5, 8.), (13., 8.)], false),
+                Line(&[(4.5, 12.5), (13., 12.5)], false),
+                Circle(2.5, 3.5, 0.9, true),
             ],
             Icon::Copy => &[
                 Line(&[(5.5, 5.5), (13.5, 5.5), (13.5, 14.), (5.5, 14.)], true),

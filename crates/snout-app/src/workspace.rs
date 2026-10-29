@@ -50,6 +50,7 @@ pub struct Tabs {
     pub spring: PanelId,
     pub notifications: PanelId,
     pub claude_changes: PanelId,
+    pub structure: PanelId,
     pub run: PanelId,
     pub debug: PanelId,
     pub build: PanelId,
@@ -112,6 +113,8 @@ pub struct Workspace {
     pub remote_picker: Option<Entity<crate::remote::picker::FolderPicker>>,
     /// Claude Code's connection to this window, when the app runs one.
     pub claude: Option<crate::claude_ide::bridge::Bridge>,
+    /// The Structure tool window: the symbols of the file in front.
+    pub structure: Entity<crate::lang::structure::StructureWindow>,
     /// The Claude Changes tool window, and the session's changes it shows.
     pub claude_changes: Entity<crate::claude_ide::panel::ChangesPanel>,
     /// Every panel the window made, and where it goes when a layout does not place it.
@@ -289,6 +292,7 @@ impl Workspace {
         let claude_changes = cx.new(|cx| crate::claude_ide::panel::ChangesPanel::new(cx_ws.clone(), cx));
         let processes_window = cx.new(|cx| crate::processes::window::ProcessesWindow::new(processes.clone(), cx));
         let spring_window = cx.new(|cx| crate::spring::window::SpringWindow::new(spring.clone(), window, cx));
+        let structure = cx.new(|cx| crate::lang::structure::StructureWindow::new(window, cx));
         let mut tabs = Tabs {
             welcome: PanelId::from(welcome.entity_id()),
             console: None,
@@ -299,6 +303,7 @@ impl Workspace {
             spring: PanelId::from(spring_window.entity_id()),
             notifications: PanelId::from(notifications.entity_id()),
             claude_changes: PanelId::from(claude_changes.entity_id()),
+            structure: PanelId::from(structure.entity_id()),
             run: PanelId::from(run_window.entity_id()),
             debug: PanelId::from(debug_window.entity_id()),
             build: PanelId::from(build_window.entity_id()),
@@ -316,6 +321,7 @@ impl Workspace {
         panels.push((panel_handle(debug_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(processes_window.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(structure.clone()), DockPlacement::Right));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
         panels.push((panel_handle(spring_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
@@ -450,6 +456,7 @@ impl Workspace {
             connect_dialog: None,
             remote_picker: None,
             claude: None,
+            structure,
             claude_changes,
             panels,
             shown: root.clone(),
@@ -842,6 +849,7 @@ impl Workspace {
     /// The editor in front changed: the status bar and the file tree follow it.
     pub fn set_active_editor(&mut self, editor: Option<&Entity<EditorPanel>>, cx: &mut Context<Self>) {
         self.status.update(cx, |s, cx| s.set_editor(editor, cx));
+        self.structure.update(cx, |s, cx| s.follow(editor, cx));
         let path = editor.map(|e| e.read(cx).path.clone());
         let files = self.side.read(cx).files.clone();
         files.update(cx, |f, cx| f.reveal(path.clone(), cx));
@@ -1478,6 +1486,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToSymbol, w, cx| this.open_symbols(false, w, cx)))
             .on_action(cx.listener(|this, _: &GoToSymbolInFile, w, cx| this.open_symbols(true, w, cx)))
             .on_action(cx.listener(|this, _: &ShowProblems, w, cx| this.show_problems(w, cx)))
+            .on_action(cx.listener(|this, _: &ShowStructure, w, cx| this.toggle_tool(Tool::Structure, w, cx)))
+            .on_action(cx.listener(|this, _: &FileStructure, w, cx| this.open_file_structure(w, cx)))
             .on_action(cx.listener(|this, _: &ToggleParamHints, w, cx| {
                 let mut next = this.model.read(cx).settings.clone();
                 next.param_hints = !next.param_hints;

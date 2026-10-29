@@ -1,7 +1,7 @@
 //! The tool window stripes: thin icon strips down both edges of the window. Left, at the
 //! top: the Project and Git activities; at the bottom: Run, Debug, Build, Output,
-//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Gradle, Spring, Notifications
-//! and Claude Changes, in the right dock. The item showing is a filled accent square with a white glyph.
+//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Structure, Gradle,
+//! Spring, Notifications and Claude Changes, in the right dock. The item showing is a filled accent square with a white glyph.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -39,6 +39,7 @@ pub enum Tool {
     Spring,
     Notifications,
     ClaudeChanges,
+    Structure,
     /// Not on a stripe: the status bar and View ▸ Processes open it.
     Processes,
 }
@@ -46,7 +47,9 @@ pub enum Tool {
 impl Tool {
     pub fn placement(self) -> DockPlacement {
         match self {
-            Tool::Gradle | Tool::Spring | Tool::Notifications | Tool::ClaudeChanges => DockPlacement::Right,
+            Tool::Gradle | Tool::Spring | Tool::Notifications | Tool::ClaudeChanges | Tool::Structure => {
+                DockPlacement::Right
+            }
             _ => DockPlacement::Bottom,
         }
     }
@@ -83,6 +86,7 @@ impl Tool {
             Tool::Spring => Icon::Leaf,
             Tool::Notifications => Icon::Bell,
             Tool::ClaudeChanges => Icon::ClaudeChanges,
+            Tool::Structure => Icon::Structure,
             Tool::Processes => Icon::Gear,
         }
     }
@@ -102,6 +106,7 @@ impl Tool {
             Tool::Notifications => 6,
             Tool::Processes => 0,
             Tool::ClaudeChanges => 2,
+            Tool::Structure => 4,
         }
     }
 
@@ -118,6 +123,7 @@ impl Tool {
             Tool::Spring => "Spring",
             Tool::Notifications => "Notifications",
             Tool::ClaudeChanges => "Claude Changes",
+            Tool::Structure => "Structure (⌘7)",
             Tool::Processes => "Processes",
         }
     }
@@ -135,6 +141,7 @@ impl Tool {
             Tool::Spring => "stripe-spring",
             Tool::Notifications => "stripe-notifications",
             Tool::ClaudeChanges => "stripe-claude-changes",
+            Tool::Structure => "stripe-structure",
             Tool::Processes => "stripe-processes",
         }
     }
@@ -222,6 +229,7 @@ impl Workspace {
             Tool::Spring => Some(self.tabs.spring),
             Tool::Notifications => Some(self.tabs.notifications),
             Tool::ClaudeChanges => Some(self.tabs.claude_changes),
+            Tool::Structure => Some(self.tabs.structure),
             Tool::Processes => Some(self.tabs.processes),
         }
     }
@@ -354,6 +362,7 @@ impl Workspace {
             .bg(p.ground)
             .border_l_1()
             .border_color(p.border)
+            .child(self.tool_item(Tool::Structure, None, cx))
             .child(self.tool_item(Tool::Gradle, None, cx))
             .child(self.tool_item(Tool::Spring, None, cx))
             .child(self.tool_item(Tool::Notifications, Some((notes, p.accent)), cx))

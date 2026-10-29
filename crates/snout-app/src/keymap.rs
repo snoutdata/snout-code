@@ -34,6 +34,7 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-shift-o", Box::new(Checkout), None),
         ("cmd-1", Box::new(ShowProject), None),
         ("cmd-2", Box::new(ShowGit), None),
+        ("cmd-7", Box::new(ShowStructure), None),
         // Outside text fields, which take these keys first: ⌘⌫ moves the selected files to
         // the Trash, as in Finder, Esc leaves the commit view, and ↑ ↓ step through the
         // Journal while it shows.
@@ -73,6 +74,7 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("ctrl-space", Box::new(i::ShowCompletions), Some("EditorPanel > Input")),
         ("escape", Box::new(e::CancelRename), Some("RenameBox > Input")),
         ("cmd-t", Box::new(GoToSymbol), None),
+        ("cmd-f12", Box::new(FileStructure), Some("EditorPanel")),
         // In an editor ⇧⌘O lists the file's symbols; elsewhere it stays Check Out.
         ("cmd-shift-o", Box::new(GoToSymbolInFile), Some("EditorPanel > Input")),
         ("cmd-shift-m", Box::new(ShowProblems), None),

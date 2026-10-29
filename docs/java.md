@@ -52,6 +52,20 @@ Rest the pointer on a name to see its type and documentation. On a squiggle, you
 
 To find a class, method or field by name instead, use Go to Symbol (⌘T) or Search Everywhere (⇧⌘A). See [The editor](editor.md#go-to-symbol).
 
+## The structure of a file
+
+The **Structure** window shows the symbols of the Java file in front as a tree: its classes, interfaces, enums and records, and in each its fields, constructors and methods. Open it with ⌘7 (View ▸ Structure), or from its icon at the top of the right stripe; ⌘7 again hides it.
+
+- Each symbol has a badge for its kind (`C` class, `I` interface, `E` enum, `R` record, `f` field, `c` constructor, `m` method) and a mark for its visibility: a green dot for public, an amber dot for protected, a ring for package private, a lock for private. A method shows its return type, a field its type.
+- The symbol the caret is in is highlighted, and follows the caret as you move it. Click a symbol to go to it; click the arrow beside a type to fold it.
+- Type in the filter field at the top to keep the symbols whose names match, with the types that hold them.
+- The button beside the filter sorts the symbols by name, types first. Click it again for the order of the file.
+- The tree follows the editor in front, and your edits, a moment after you stop typing.
+
+**File Structure** (⌘F12 in an editor, Navigate ▸ File Structure…) shows the same tree in a box over the editor, with the symbol the caret is in already picked. Type to filter it, use ↑ ↓ to pick, and ↩ to go there; Esc closes it.
+
+![The Structure window beside a Java file](images/structure.png)
+
 ## Find references
 
 Put the caret on a name and press ⇧F12 (Code ▸ Find References). Every use of it is listed in the **References** window, in the bottom dock, titled `References to <name>: <n> results`. Each row shows the file, the line and column, and the line of code. Click a row to go there.

@@ -80,6 +80,8 @@ pub enum Mode {
     Commands,
     /// Symbols, from a language server: the workspace's (⌘T) or the file's (⇧⌘O).
     Symbols,
+    /// The file's symbols as a tree, the one the caret is in picked (File Structure, ⌘F12).
+    Structure,
 }
 
 /// Where the symbol box gets its rows: the query in, the matching symbols out.
@@ -130,6 +132,11 @@ pub struct Item {
     pub keys: Option<String>,
     /// For a symbol: its build, document and position.
     pub target: Option<(PathBuf, lsp_types::Uri, lsp_types::Position)>,
+    /// For a symbol of the file's tree: its kind and visibility, how deep it is, and whether
+    /// the caret is in it.
+    pub symbol: Option<(lsp_types::SymbolKind, crate::lang::symbols::Visibility)>,
+    pub depth: usize,
+    pub current: bool,
 }
 
 pub enum SearchEvent {
@@ -173,6 +180,7 @@ impl SearchView {
             Mode::GoToLine => "Line, or line:column",
             Mode::Commands => "Type a command",
             Mode::Symbols => "Go to symbol",
+            Mode::Structure => "Filter the file's symbols",
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
@@ -182,7 +190,7 @@ impl SearchView {
         })
         .detach();
         let host = crate::host::host(cx);
-        let listing = (!matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols)).then(|| {
+        let listing = (!matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols | Mode::Structure)).then(|| {
             let list = cx.background_executor().spawn({
                 let (host, root) = (host.clone(), root.clone());
                 async move { list_files(&*host, &root) }
@@ -252,20 +260,21 @@ impl SearchView {
                         detail: None,
                         command: Some(i),
                         keys: self.commands[i].keys.clone(),
-                        target: None,
+                        ..Default::default()
                     })
                     .collect();
                 cx.notify();
             }
-            Mode::Symbols => {
+            Mode::Symbols | Mode::Structure => {
                 let Some(source) = self.symbols.clone() else { return };
                 self._search = Some(cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(Duration::from_millis(120)).await;
                     let Ok(task) = this.update(cx, |_, cx| source(query, cx)) else { return };
                     let items = task.await;
                     let _ = this.update(cx, |this, cx| {
+                        // The file's tree opens on the symbol the caret is in.
+                        this.selected = items.iter().position(|i| i.current).unwrap_or(0);
                         this.items = items;
-                        this.selected = 0;
                         cx.notify();
                     });
                 }));
@@ -367,6 +376,7 @@ impl Render for SearchView {
             Mode::Commands => "No command matches".into(),
             Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),
             Mode::Symbols => "No symbol matches".into(),
+            Mode::Structure => "No symbol matches".into(),
         };
         // Nothing typed yet: a plain line saying what to type, no drawing.
         let blank = self.input.read(cx).value().trim().is_empty();
@@ -418,6 +428,11 @@ impl Render for SearchView {
                         .rounded(px(6.))
                         .cursor_pointer()
                         .when(i == selected, |d| d.bg(p.selection()))
+                        .when_some(item.symbol, |d, (kind, visibility)| {
+                            d.pl(px(8. + 16. * item.depth as f32))
+                                .child(crate::lang::symbols::badge(kind, &p))
+                                .child(crate::lang::symbols::visibility_mark(visibility, &p))
+                        })
                         .child(div().flex_none().whitespace_nowrap().child(name))
                         .child(div().flex_none().whitespace_nowrap().text_color(p.weak()).child(dir))
                         .when(commands, |d| d.child(div().flex_1()))

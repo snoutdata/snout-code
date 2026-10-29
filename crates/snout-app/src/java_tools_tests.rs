@@ -315,3 +315,95 @@ fn parameter_names_of_literals_show_and_follow_the_text(cx: &mut TestAppContext)
     assert!(pump_until(t.cx, 30, |cx| !param_hints(&e5, cx).is_empty()));
     t.stop();
 }
+
+#[gpui::test]
+fn the_structure_window_and_popup_show_the_files_symbols(cx: &mut TestAppContext) {
+    use crate::lang::symbols::{Sort, Visibility};
+    let _engine = crate::tests::engine_lock();
+    let Some(t) = start(cx, "java-structure", "Shop.java") else { return };
+    let (ws, editor, cx) = (t.ws.clone(), t.editor.clone(), &mut *t.cx);
+    let structure = cx.update(|_, cx| ws.read(cx).structure.clone());
+    caret_at(&editor, "sum += s.area()", 0, 0, cx);
+    cx.simulate_keystrokes("cmd-7");
+    let open = cx.update(|_, cx| ws.read(cx).tool_open(crate::workspace::Tool::Structure, cx));
+    assert!(open, "⌘7 opens the Structure window");
+    let names = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| structure.read(cx).rows(cx).iter().map(|r| r.symbol.name.clone()).collect::<Vec<_>>())
+    };
+    let s2 = structure.clone();
+    let listed = pump_until(cx, 60, |cx| cx.update(|_, cx| s2.read(cx).rows(cx).len() >= 9));
+    assert!(listed, "the symbols are listed: {:?}", names(cx));
+    let rows = cx.update(|_, cx| structure.read(cx).rows(cx));
+    let row = |name: &str| {
+        rows.iter().find(|r| r.symbol.name.starts_with(name)).unwrap_or_else(|| panic!("{name}: {rows:?}"))
+    };
+    assert_eq!(row("Shop").depth, 0);
+    assert_eq!(row("shapes").symbol.visibility, Visibility::Private);
+    assert_eq!(row("owner").symbol.visibility, Visibility::Protected);
+    assert_eq!(row("visits").symbol.visibility, Visibility::Package);
+    assert_eq!(row("add").symbol.visibility, Visibility::Public);
+    let label = row("label");
+    assert!(label.symbol.visibility == Visibility::Private && label.symbol.is_static);
+    assert_eq!(row("total").depth, 1);
+    assert!(cx.debug_bounds("structure-row-0").is_some(), "the tree shows");
+    // The caret is in total(): its row is picked out, and follows the caret.
+    let current = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let s = structure.read(cx);
+            let path = s.current.clone()?;
+            s.rows(cx).into_iter().find(|r| r.path == path).map(|r| r.symbol.name)
+        })
+    };
+    assert!(current(cx).is_some_and(|n| n.starts_with("total")), "{:?}", current(cx));
+    caret_at(&editor, "shop.add(new Circle", 0, 0, cx);
+    assert!(current(cx).is_some_and(|n| n.starts_with("main")), "{:?}", current(cx));
+    // Sorted by name, types first; then back in the file's order.
+    cx.update(|_, cx| structure.update(cx, |s, cx| s.set_sort(Sort::Name, cx)));
+    let sorted = names(cx);
+    assert!(sorted[1].starts_with("add") && sorted.last().unwrap().starts_with("visits"), "{sorted:?}");
+    cx.update(|_, cx| structure.update(cx, |s, cx| s.set_sort(Sort::Position, cx)));
+    // The filter keeps what matches and what holds it.
+    let filter = cx.update(|_, cx| structure.read(cx).filter.clone());
+    cx.update(|w, cx| filter.update(cx, |f, cx| f.set_value("tot", w, cx)));
+    cx.run_until_parked();
+    let found = names(cx);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[1].starts_with("total"));
+    // A click goes there.
+    let at = cx.debug_bounds("structure-row-1").expect("the row").center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    cx.run_until_parked();
+    let line = cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
+    assert_eq!(line, 22, "on public double total()");
+    cx.update(|w, cx| filter.update(cx, |f, cx| f.set_value("", w, cx)));
+
+    // ⌘F12: the same tree over the editor, on the symbol the caret is in; ↩ goes there.
+    caret_at(&editor, "String text", 0, 0, cx);
+    cx.simulate_keystrokes("cmd-f12");
+    let popup = pump_until(cx, 30, |cx| {
+        cx.update(|_, cx| {
+            ws.read(cx).search.as_ref().is_some_and(|s| {
+                let s = s.read(cx);
+                s.mode == crate::search::Mode::Structure && s.items.len() >= 9
+            })
+        })
+    });
+    assert!(popup, "⌘F12 lists the file's symbols");
+    let picked = cx.update(|_, cx| {
+        let s = ws.read(cx).search.clone().unwrap();
+        let s = s.read(cx);
+        (s.items[s.selected].path.clone(), s.items.iter().map(|i| i.depth).max())
+    });
+    assert!(picked.0.starts_with("label"), "the caret's method is picked: {picked:?}");
+    assert_eq!(picked.1, Some(1), "nested");
+    cx.simulate_input("main");
+    let narrowed = pump_until(cx, 10, |cx| {
+        cx.update(|_, cx| ws.read(cx).search.as_ref().is_some_and(|s| s.read(cx).items.len() == 2))
+    });
+    assert!(narrowed);
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+    let line = cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
+    assert_eq!(line, 35, "on main");
+    t.stop();
+}

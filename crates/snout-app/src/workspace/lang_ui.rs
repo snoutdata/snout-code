@@ -323,6 +323,65 @@ impl Workspace {
         cx.notify();
     }
 
+    /// ⌘F12: the file's symbols as a tree in a box over the editor, the one the caret is in
+    /// picked; typing filters them, ↩ goes to one.
+    pub fn open_file_structure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor(window, cx) else { return };
+        let Some(link) = editor.read(cx).lang.clone().filter(|l| !l.config) else {
+            self.model.update(cx, |m, cx| {
+                m.message = "File Structure shows the symbols of a Java file".into();
+                cx.notify();
+            });
+            return;
+        };
+        let (rope, caret) = {
+            let s = editor.read(cx).state.read(cx);
+            (s.text().clone(), s.cursor())
+        };
+        let at = crate::lang::text::to_lsp(&rope, caret);
+        let source: crate::search::SymbolSource = Rc::new(move |query: String, cx: &mut App| {
+            use crate::lang::symbols;
+            let params = json!({ "textDocument": { "uri": link.uri.as_str() } });
+            let call = link.ask(&rope, "textDocument/documentSymbol", params, cx);
+            let (root, uri, text) = (link.root.clone(), link.uri.clone(), rope.to_string());
+            cx.background_executor().spawn(async move {
+                let v = call.await.unwrap_or_default();
+                let tree = symbols::parse(&v, &text);
+                let current = symbols::path_at(&tree, at);
+                symbols::rows(&tree, &query, symbols::Sort::Position, &|_| false)
+                    .into_iter()
+                    .map(|r| Item {
+                        path: r.symbol.name.clone(),
+                        detail: Some(r.symbol.detail.trim().to_owned()).filter(|d| !d.is_empty()),
+                        target: Some((root.clone(), uri.clone(), r.symbol.selection.start)),
+                        symbol: Some((r.symbol.kind, r.symbol.visibility)),
+                        depth: r.depth,
+                        current: current.as_ref() == Some(&r.path),
+                        ..Default::default()
+                    })
+                    .collect()
+            })
+        });
+        let model = self.model.clone();
+        let view = cx.new(|cx| SearchView::new(model, PathBuf::new(), Mode::Structure, window, cx));
+        view.update(cx, |v, cx| v.set_symbols(source, cx));
+        cx.subscribe_in(&view, window, move |this, _, e: &SearchEvent, window, cx| {
+            this.search = None;
+            match e {
+                SearchEvent::OpenLocation(root, uri, at) => {
+                    this.open_location(root.clone(), uri.clone(), *at, window, cx);
+                }
+                _ => window.focus(&this.focus, cx),
+            }
+            cx.notify();
+        })
+        .detach();
+        let v = view.clone();
+        cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
+        self.search = Some(view);
+        cx.notify();
+    }
+
     /// The workspace's symbols, from the Java server of the open project, if one runs.
     pub fn workspace_symbols(&self, cx: &App) -> Option<crate::search::SymbolSource> {
         let repo = self.model.read(cx).project_root()?;

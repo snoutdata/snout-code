@@ -12,6 +12,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘Q | Quit SnoutCode | |
 | ⌘1 | Show Project | |
 | ⌘2 | Show Git | |
+| ⌘7 | Show or hide the Structure window | |
 | ⌘J | Show or hide the Claude Code console | |
 | ⌘R or F5 | Refresh | |
 | ⌘= or ⌘+ | Zoom In | |
@@ -30,6 +31,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘L | Go to Line… | |
 | ⌘T | Go to Symbol in Workspace… | |
 | ⇧⌘O | Go to Symbol in File… | Editor |
+| ⌘F12 | File Structure… | Editor |
 | ↑ ↓ | Pick the previous or next result | In a search box |
 | Esc | Close the search box | In a search box |
 

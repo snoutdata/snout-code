@@ -1618,6 +1618,42 @@ mod shots {
         pump(&mut cx, 1, &|_| false);
         save(&mut cx, "java-param-hints");
 
+        // The Structure window, the caret in `total()`; then the File Structure popup on
+        // `label`, typed into.
+        let caret_on = |cx: &mut HeadlessAppContext, line: u32, column: u32| {
+            cx.update_window(handle.into(), |_, window, cx| {
+                editor.update(cx, |e, cx| e.go_to(line, column, window, cx));
+            })
+            .unwrap();
+        };
+        caret_on(&mut cx, 25, 12);
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.toggle_tool(snout_app::workspace::Tool::Structure, window, cx));
+        })
+        .unwrap();
+        let structure = cx.update(|cx| ws.read(cx).structure.clone());
+        pump(&mut cx, 30, &|cx| cx.update(|cx| structure.read(cx).current.is_some()));
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-structure");
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.toggle_tool(snout_app::workspace::Tool::Structure, window, cx));
+        })
+        .unwrap();
+        caret_on(&mut cx, 32, 12);
+        cx.update_window(handle.into(), |_, window, cx| ws.update(cx, |w, cx| w.open_file_structure(window, cx)))
+            .unwrap();
+        pump(&mut cx, 30, &|cx| {
+            cx.update(|cx| ws.read(cx).search.as_ref().is_some_and(|s| !s.read(cx).items.is_empty()))
+        });
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-file-structure");
+        cx.update(|cx| {
+            ws.update(cx, |w, cx| {
+                w.search = None;
+                cx.notify();
+            })
+        });
+
         // Extract Method on the loop of `total()`: the new method, its name in the field.
         // Right after the start the engine may still be indexing: ask until it answers.
         for _ in 0..10 {
