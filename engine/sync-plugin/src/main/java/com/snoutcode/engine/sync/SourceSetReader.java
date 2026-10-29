@@ -170,6 +170,16 @@ final class SourceSetReader {
         unresolved.addAll(compileClasspath.unresolved);
         unresolved.addAll(runtimeClasspath.unresolved);
         out.put("unresolved", unresolved);
+        if (DependencyGraph.enabled()) {
+            Map<String, Object> graphs = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> c : configurations.entrySet()) {
+                Map<String, Object> graph = DependencyGraph.read(configuration((String) c.getValue()), errors);
+                if (graph != null) {
+                    graphs.put(c.getKey(), graph);
+                }
+            }
+            out.put("dependencyGraph", graphs);
+        }
         return out;
     }
 

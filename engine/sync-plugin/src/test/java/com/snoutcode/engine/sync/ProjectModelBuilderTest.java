@@ -103,6 +103,71 @@ class ProjectModelBuilderTest {
     }
 
     @org.junit.jupiter.api.Test
+    void graphsSayWhereEachDependencyIsDeclared() {
+        Map<String, Object> graphs = map(sourceSet("main").get("dependencyGraph"));
+        Map<String, Object> compile = map(graphs.get("compileClasspath"));
+        Map<String, Object> edge = list(compile.get("roots")).stream().map(ProjectModelBuilderTest::map)
+            .filter(e -> e.containsKey("to")).findFirst().orElseThrow(AssertionError::new);
+        Map<String, Object> node = map(list(compile.get("nodes")).get((Integer) edge.get("to")));
+        assertEquals("project", node.get("kind"));
+        assertEquals(":lib", node.get("path"));
+        assertEquals("implementation", edge.get("declaredIn"));
+    }
+
+    /**
+     * Two versions of one library asked for, the newer one wins: the node says it won a conflict
+     * and the edge that asked for the older one keeps its version.
+     */
+    @org.junit.jupiter.api.Test
+    void graphsMarkVersionConflicts(@TempDir File other) throws Exception {
+        File repo = new File(other, "repo");
+        pom(repo, "demo", "util", "1.0", null);
+        pom(repo, "demo", "util", "2.0", null);
+        pom(repo, "demo", "client", "1.0", "<dependency><groupId>demo</groupId><artifactId>util</artifactId><version>1.0</version></dependency>");
+        Project p = ProjectBuilder.builder().withProjectDir(new File(other, "app")).withName("app").build();
+        p.getPluginManager().apply("java");
+        p.getRepositories().maven(r -> r.setUrl(repo.toURI()));
+        p.getDependencies().add("implementation", "demo:client:1.0");
+        p.getDependencies().add("runtimeOnly", "demo:util:2.0");
+        Map<String, Object> built = ProjectModelBuilder.build(p);
+        Map<String, Object> main = list(built.get("sourceSets")).stream().map(ProjectModelBuilderTest::map)
+            .filter(s -> "main".equals(s.get("name"))).findFirst().orElseThrow(AssertionError::new);
+        Map<String, Object> runtime = map(map(main.get("dependencyGraph")).get("runtimeClasspath"));
+        List<Map<String, Object>> nodes = list(runtime.get("nodes")).stream().map(ProjectModelBuilderTest::map)
+            .collect(Collectors.toList());
+        int util = -1;
+        for (int i = 0; i < nodes.size(); i++) {
+            if ("util".equals(nodes.get(i).get("name"))) {
+                util = i;
+            }
+        }
+        assertEquals("2.0", nodes.get(util).get("version"));
+        assertEquals("conflict", nodes.get(util).get("reason"));
+        Map<String, Object> client = nodes.stream().filter(n -> "client".equals(n.get("name"))).findFirst()
+            .orElseThrow(AssertionError::new);
+        Map<String, Object> asked = map(list(client.get("deps")).get(0));
+        assertEquals(util, asked.get("to"));
+        assertEquals("1.0", asked.get("requested"));
+        List<String> declared = list(runtime.get("roots")).stream().map(e -> String.valueOf(map(e).get("declaredIn")))
+            .collect(Collectors.toList());
+        assertEquals(Arrays.asList("implementation", "runtimeOnly"), declared);
+    }
+
+    private static void pom(File repo, String group, String name, String version, String deps) throws Exception {
+        File dir = new File(repo, group + "/" + name + "/" + version);
+        dir.mkdirs();
+        String pom = "<project><modelVersion>4.0.0</modelVersion><groupId>" + group + "</groupId><artifactId>" + name
+            + "</artifactId><version>" + version + "</version>"
+            + (deps == null ? "" : "<dependencies>" + deps + "</dependencies>") + "</project>";
+        java.nio.file.Files.write(new File(dir, name + "-" + version + ".pom").toPath(), pom.getBytes("UTF-8"));
+        try (java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(
+            new java.io.FileOutputStream(new File(dir, name + "-" + version + ".jar")))) {
+            z.putNextEntry(new java.util.zip.ZipEntry("META-INF/MANIFEST.MF"));
+            z.closeEntry();
+        }
+    }
+
+    @org.junit.jupiter.api.Test
     void rootProjectCarriesBuildInfo() {
         Map<String, Object> build = map(model.get("build"));
         assertNotNull(build.get("gradleVersion"));

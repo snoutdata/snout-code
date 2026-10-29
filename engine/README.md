@@ -386,6 +386,10 @@ Format version 2. The top holds the project view, which the app shows as the Pro
               { "kind": "sourceSetOutput", "sourceSet", "files" }
               { "kind": "file", "file" } ],
           "unresolved": [ { "requested", "reason" } ],
+          "dependencyGraph": { "compileClasspath" | "runtimeClasspath" | "annotationProcessor": {
+              "roots": [Edge], "nodes": [ { "kind": "module" | "project" | "other", "group", "name",
+                  "version" | "build", "path" | "id", "reason": "conflict" | "forced" | "rule" | "constraint",
+                  "deps": [Edge] } ] } },
           "scalaBridge": { (lsp only) "compiledDir", "folders": [ { "classesDir", "sourceDir", "classes" } ] }
         } ],
         "sourceJarsFound",
@@ -408,6 +412,8 @@ Format version 2. The top holds the project view, which the app shows as the Pro
 - Dependency scopes are an IDE's: `compile` is on the main compile and runtime classpaths, `provided` on compile only, `runtime` on runtime only, `test` only on the tests' classpaths. A dependency on another project's output is a `module` reference; everything else is a `library`, listed once in `libraries` however many modules use it.
 - A source root belongs to the module with the deepest content root that holds it, when that module compiles it. A root that belongs to no module is a shared source root, listed once with every module that compiles it; its `name` is its folder inside the project, which groups `core/src/main/java` and `core/src/main/resources` under `core`.
 - `reason` is a few words for a list of failed builds; `error` is Gradle's full message chain.
+
+A source set's `dependencyGraph` is each classpath's resolution as Gradle did it, for the Project Structure window: the root's edges are the dependencies the configuration and those it extends declare (`declaredIn` names the one that declares it, `implementation` or `testRuntimeOnly`), every component selected is one node, and an `Edge` is `{ "to": node, "requested"?: the version asked for when another won }` or `{ "unresolved": "group:name:version", "reason" }`. Constraints are not edges. A node's `reason` says why it was selected when that is more than being asked for: `conflict` (a newer version asked for elsewhere won). A graph stops at 4000 nodes; `-Dsnout.sync.dependencyGraphs=false` leaves them out.
 
 A Scala or Groovy source set that also compiles `.java` files (joint compilation) lists those directories under `javaSourceDirs`, and its roots name both languages.
 
