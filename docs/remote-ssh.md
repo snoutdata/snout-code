@@ -37,7 +37,7 @@ Host devbox
 
 The window opens again on that folder, with the host's name in the title bar. The Java engine starts there. The first time, SnoutCode downloads Java 21 for the engine and copies the engine over, which takes a minute or two.
 
-If the connection fails, the dialog says why, and you can try again.
+While it connects, the dialog says so. If the connection fails, the dialog says why, and you can try again.
 
 Processes on the remote machine get the environment of your login shell there: `PATH`, `JAVA_HOME`, SDK managers and the like.
 
@@ -73,7 +73,7 @@ Then SnoutCode connects again by itself, trying again after a quarter of a secon
 
 Builds, programs, the program you debug, terminals and the engine keep running on the remote machine meanwhile, and their output is kept for when the connection comes back.
 
-After two minutes of trying, SnoutCode stops and says **The connection to devbox is lost**. Click **Reconnect** in the status bar, or choose it from the host's menu in the title bar.
+After two minutes of trying, SnoutCode stops and says **The connection to devbox is lost**. Click **Reconnect** in the status bar or in the Project tool window (which says **The connection is lost** in place of the files), or choose it from the host's menu in the title bar.
 
 ## Disconnect
 

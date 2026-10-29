@@ -47,7 +47,7 @@ On a remote machine, Open Project… browses that machine's folders instead. See
 
 ## Clone a repository
 
-Click **Clone Repository…** on the Welcome page. Enter the repository's **URL**, and under
+Click **Clone Repository…** on the Welcome page. Enter the **Repository URL**, and under
 **Into folder** the folder to clone it in; the dialog shows where it lands. **Clone** copies the repository and opens
 it. File ▸ Clone from GitHub… opens the same dialog.
 

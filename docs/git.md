@@ -84,8 +84,8 @@ When nothing has changed, Files says the working tree is clean.
 
 Stage, Unstage, Discard and Delete act on the selected files. They are on the toolbar, in the context menu and in the **Repository** menu (**Stage**, **Unstage**, **Discard Changes…**, **Move to Trash…**).
 
-- **Discard** puts the files back as they are in HEAD. Untracked files are deleted. SnoutCode asks first, because this cannot be undone.
-- **Delete** (⌘⌫) moves the files to the Trash, where you can still get them back. SnoutCode asks first.
+- **Discard** puts the files back as they are in HEAD. Untracked files are deleted. SnoutCode asks first, because this cannot be undone: the dialog lists each file with its state, and goes ahead only when you click **Discard** or press ⌘⌫. ⏎ does not discard; Esc cancels.
+- **Delete** (⌘⌫) moves the files to the Trash, where you can still get them back. SnoutCode asks first; click **Move to Trash** or press ⌘⌫ again.
 
 ## Changes
 
@@ -181,7 +181,7 @@ They use your normal Git credentials, as in a terminal.
 - **Both sides have new commits** and your settings do not say how to combine them: choose **Merge** (join both histories with a merge commit; nothing is rewritten) or **Rebase** (replay your commits on top of the remote ones, for a straight history).
 - **No shared history** (the remote was recreated or its history rewritten): **Reset to** the upstream makes your branch match it exactly. Your current commits stay on a backup branch, which SnoutCode names afterwards, so nothing is lost. Commit or stash your uncommitted changes first; until then the reset is not offered.
 
-Each dialog shows what Git reported.
+Each dialog shows what Git reported. When Git stops with an error (a push the remote turns back, for example), **Something went wrong** shows Git's own words, with **Copy** to put them on the clipboard.
 
 ### Background fetch
 

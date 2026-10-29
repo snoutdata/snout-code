@@ -121,4 +121,8 @@ See [Claude Code](claude-code.md).
 
 | Shortcut | Command | Where |
 |---|---|---|
-| Esc | Close | Settings, New Project |
+| Esc | Close (Cancel) | Every dialog |
+| ⏎ | The main button: Create, Clone, Check Out, OK | Dialogs whose main button keeps your work |
+| ⌘⌫ | Discard, Delete, Delete branch | Dialogs that discard or delete, where ⏎ does nothing |
+
+The buttons show their keys: **Cancel** has Esc, the main button ⏎, a button that discards or deletes ⌘⌫.
