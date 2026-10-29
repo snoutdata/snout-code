@@ -85,6 +85,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The Ghostty terminal engine, as release builds have it, when Zig 0.15 is here (else the
+# Terminal settings page shows Ghostty as unavailable).
+features=()
+for z in "${SNOUT_ZIG:-}" "$(command -v zig || true)" "$(brew --prefix zig@0.15 2>/dev/null || true)/bin/zig"; do
+  if [[ -n "$z" && -x "$z" && "$("$z" version 2>/dev/null)" == 0.15.* ]]; then
+    export PATH="$(dirname "$z"):$PATH"
+    features=(--features ghostty)
+    break
+  fi
+done
+
 say "Taking the shots: $PARTS"
 rm -f "$RAW"/*.png
 (cd "$ROOT/crates/snout-app" && env HOME="$DOCS_HOME" GRADLE_USER_HOME="$DOCS_HOME/.gradle" "${ro_cache[@]}" \
@@ -92,7 +103,7 @@ rm -f "$RAW"/*.png
   RUSTUP_HOME="${RUSTUP_HOME:-$REAL_HOME/.rustup}" \
   SNOUT_DOCS_SHOTS="$SCRATCH/demos" SNOUT_SCREENSHOT="$RAW" SNOUT_DOCS_ONLY="$PARTS" \
   SNOUT_DOCS_JDK="$jdk_bundle/Contents/Home" SNOUT_DOCS_SSH_DIR="$SSH_DIR" \
-  cargo test -p snout-app --test screenshots -- --nocapture 2>&1 | grep -E '^docs|panicked|error' || true)
+  cargo test -p snout-app ${features[@]+"${features[@]}"} --test screenshots -- --nocapture 2>&1 | grep -E '^docs|panicked|error' || true)
 
 say "Writing docs/images"
 "$SCRATCH/venv/bin/python" -I "$HERE/process.py" "$RAW" "$ROOT/docs/images"

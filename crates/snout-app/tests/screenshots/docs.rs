@@ -389,6 +389,7 @@ fn settings_pages(projects: &Path) {
         (Page::Appearance, ThemeChoice::Dark, "settings-appearance-dark"),
         (Page::Keymap, ThemeChoice::Light, "settings-keymap-light"),
         (Page::Editor, ThemeChoice::Light, "settings-editor-light"),
+        (Page::Terminal, ThemeChoice::Light, "settings-terminal-light"),
     ] {
         let shop = copy(projects, "settings", "shop");
         let mut w = Win::new(settings(theme, vec![shop.clone()], Some(shop)), false);

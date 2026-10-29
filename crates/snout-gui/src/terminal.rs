@@ -4,6 +4,7 @@
 use eframe::egui::{self, Color32, Event, FontId, Key, Modifiers, Pos2, Rect, Sense, Stroke, Vec2};
 pub use snout_core::pty::Launch;
 use snout_core::pty::{self, Pty, Rgb};
+use snout_core::term::{Attrs, Color, EngineKind, Frame, Underline, Width};
 
 const FONT_SIZE: f32 = 13.0;
 
@@ -21,6 +22,7 @@ impl Terminal {
         let pty = Pty::spawn(
             &*snout_host::local(),
             launch,
+            EngineKind::Builtin,
             rgb(default_fg(&visuals)),
             rgb(default_bg(&visuals)),
             move || ctx.request_repaint(),
@@ -120,16 +122,15 @@ impl Terminal {
                     }
                 }
                 Event::Copy if focused => {
-                    let text = self.selection.and_then(|s| pty::selected_text(self.pty.parser().screen(), s));
+                    let text = self.selection.and_then(|s| self.pty.frame().selected_text(s));
                     if let Some(text) = text {
                         ui.ctx().copy_text(text);
                     }
                 }
                 _ if focused => {
                     let bytes = {
-                        let parser = self.pty.parser();
-                        let screen = parser.screen();
-                        encode_event(event, screen.application_cursor(), screen.bracketed_paste())
+                        let modes = self.pty.frame().modes;
+                        encode_event(event, modes.app_cursor, modes.bracketed_paste)
                     };
                     if !bytes.is_empty() {
                         out.extend_from_slice(&bytes);
@@ -140,8 +141,9 @@ impl Terminal {
             }
         }
         // Follow the theme, also for the colour queries TUIs send later.
-        self.pty.set_colors(rgb(default_fg(ui.visuals())), rgb(default_bg(ui.visuals())));
-        paint(ui, &self.pty.parser(), inner, cell, &font, focused, self.selection);
+        let (fg0, bg0) = (default_fg(ui.visuals()), default_bg(ui.visuals()));
+        self.pty.set_colors(rgb(fg0), rgb(bg0));
+        paint(ui, &self.pty.frame(), (fg0, bg0), inner, cell, &font, focused, self.selection);
         // Typing jumps back to the live screen.
         self.pty.send(&out);
         if response.hovered() {
@@ -217,26 +219,28 @@ fn color32((r, g, b): Rgb) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-fn color(c: vt100::Color, default: Color32, bold: bool) -> Color32 {
+fn color(c: Color, default: Color32, bold: bool) -> Color32 {
     color32(pty::color(c, rgb(default), bold))
 }
 
 /// Resolved colours of one cell.
-fn cell_colors(cell: &vt100::Cell, fg0: Color32, bg0: Color32) -> (Color32, Color32) {
-    let mut fg = color(cell.fgcolor(), fg0, cell.bold());
-    let mut bg = color(cell.bgcolor(), bg0, false);
-    if cell.inverse() {
+fn cell_colors(cell: &snout_core::term::Cell, fg0: Color32, bg0: Color32) -> (Color32, Color32) {
+    let mut fg = color(cell.fg, fg0, cell.bold());
+    let mut bg = color(cell.bg, bg0, false);
+    if cell.attrs.contains(Attrs::INVERSE) {
         std::mem::swap(&mut fg, &mut bg);
     }
-    if cell.dim() {
+    if cell.attrs.contains(Attrs::DIM) {
         fg = fg.lerp_to_gamma(bg, 0.45);
     }
     (fg, bg)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint(
     ui: &egui::Ui,
-    parser: &vt100::Parser<pty::Hooks>,
+    screen: &Frame,
+    (fg0, bg0): (Color32, Color32),
     inner: Rect,
     cell: Vec2,
     font: &FontId,
@@ -244,12 +248,7 @@ fn paint(
     selection: Option<((u16, u16), (u16, u16))>,
 ) {
     let painter = ui.painter_at(inner.expand(4.0));
-    let (fg0, bg0) = {
-        let hooks = parser.callbacks();
-        (color32(hooks.fg), color32(hooks.bg))
-    };
     painter.rect_filled(inner.expand(4.0), 0.0, bg0);
-    let screen = parser.screen();
     let (rows, cols) = screen.size();
     let selection = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
     let selected = |r: u16, c: u16| selection.is_some_and(|(s, e)| (r, c) >= s && (r, c) <= e && s != e);
@@ -270,10 +269,11 @@ fn paint(
         };
         for col in 0..cols {
             let Some(c) = screen.cell(row, col) else { continue };
-            if c.is_wide_continuation() {
+            if c.width == Width::Continuation {
                 continue;
             }
-            let width = if c.is_wide() { 2.0 } else { 1.0 };
+            let wide = c.width == Width::Wide;
+            let width = if wide { 2.0 } else { 1.0 };
             let (fg, mut bg) = cell_colors(c, fg0, bg0);
             if selected(row, col) {
                 bg = select_bg;
@@ -283,12 +283,12 @@ fn paint(
             if bg != bg0 {
                 painter.rect_filled(rect.expand(0.3), 0.0, bg);
             }
-            if c.underline() {
+            if c.underline != Underline::None {
                 painter.hline(rect.x_range(), rect.bottom() - 1.5, Stroke::new(1.0, fg));
             }
-            let text = c.contents();
+            let text = screen.text(c);
             let plain = text.len() == 1 && text.as_bytes()[0].is_ascii_graphic() || text.is_empty() || text == " ";
-            if plain && fg == run_fg && !c.is_wide() {
+            if plain && fg == run_fg && !wide {
                 if run.is_empty() {
                     run_start = col;
                 }
@@ -308,21 +308,21 @@ fn paint(
         flush(&mut run, run_start, run_fg);
     }
 
-    if screen.scrollback() == 0 && !screen.hide_cursor() {
-        let (row, col) = screen.cursor_position();
+    if let Some(cursor) = screen.cursor {
+        let (row, col) = (cursor.row, cursor.col);
         let pos = inner.min + Vec2::new(f32::from(col) * cell.x, f32::from(row) * cell.y);
         let rect = Rect::from_min_size(pos, cell);
         if focused {
             painter.rect_filled(rect, 0.0, fg0.gamma_multiply(0.7));
             if let Some(c) = screen.cell(row, col) {
-                painter.text(rect.center(), egui::Align2::CENTER_CENTER, c.contents(), font.clone(), bg0);
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, screen.text(c), font.clone(), bg0);
             }
         } else {
             painter.rect_stroke(rect, 0.0, Stroke::new(1.0, fg0.gamma_multiply(0.6)), egui::StrokeKind::Inside);
         }
     }
-    if screen.scrollback() > 0 {
-        let label = format!("↑ {} lines", screen.scrollback());
+    if screen.scrollback > 0 {
+        let label = format!("↑ {} lines", screen.scrollback);
         let pos = inner.right_top() + Vec2::new(-6.0, 4.0);
         painter.text(pos, egui::Align2::RIGHT_TOP, label, FontId::proportional(11.0), ui.visuals().weak_text_color());
     }
@@ -340,6 +340,6 @@ mod tests {
         assert_eq!(encode_key(Key::C, Modifiers::CTRL, false), [3]);
         assert!(encode_key(Key::C, Modifiers::MAC_CMD, false).is_empty());
         assert_eq!(encode_event(&Event::Paste("a\nb".into()), false, false), b"a\rb");
-        assert_eq!(color(vt100::Color::Idx(1), Color32::WHITE, true), color32(pty::indexed(9)));
+        assert_eq!(color(Color::Idx(1), Color32::WHITE, true), color32(pty::indexed(9)));
     }
 }

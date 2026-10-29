@@ -27,6 +27,7 @@ mod scope;
 mod status;
 pub mod survey;
 mod tags;
+pub mod term;
 
 pub use scope::{Scope, branch_name_problem, on_disk, repo_dir_name, stage_paths, unstage_paths};
 

@@ -11,6 +11,7 @@ use crate::model::{Action, Model};
 use crate::panels::Activity;
 use crate::settings::Settings;
 use crate::workspace::Workspace;
+use snout_core::term::EngineKind;
 
 pub fn git(dir: &Path, args: &[&str]) {
     let ok = Command::new("git").arg("-C").arg(dir).args(args).status().unwrap().success();
@@ -365,14 +366,25 @@ fn the_journal_filters_and_opens_commits_in_the_commit_tab(cx: &mut TestAppConte
 
 #[gpui::test]
 fn claude_console_runs_in_the_repo_and_refreshes_git(cx: &mut TestAppContext) {
-    let repo = demo_repo("console");
-    let bin = scratch_dir("console-bin");
+    claude_console_on(EngineKind::Builtin, cx);
+}
+
+#[cfg(feature = "ghostty")]
+#[gpui::test]
+fn claude_console_runs_on_ghostty(cx: &mut TestAppContext) {
+    claude_console_on(EngineKind::Ghostty, cx);
+}
+
+fn claude_console_on(engine: EngineKind, cx: &mut TestAppContext) {
+    let name = format!("console-{}", engine.label().to_lowercase());
+    let repo = demo_repo(&name);
+    let bin = scratch_dir(&format!("{name}-bin"));
     // A stand-in for `claude`: it says where it runs, then makes the file it is told to.
     let fake = bin.join("claude");
     let script = "#!/bin/sh\necho \"ready in $(pwd)\"\nread name\ntouch \"$name.txt\"\necho \"made $name\"\nsleep 30\n";
     std::fs::write(&fake, script).unwrap();
     Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
-    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let (model, ws, cx) = open(cx, Settings { terminal_engine: engine, ..with_repo(&repo) });
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).expect("the console is docked");
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     act(&model, cx, Action::ToggleConsole);
@@ -394,6 +406,7 @@ fn claude_console_runs_in_the_repo_and_refreshes_git(cx: &mut TestAppContext) {
     // The line may wrap: the program can print before the terminal takes the panel's width.
     let text = wait(cx, "ready in").replace('\n', "");
     assert!(text.contains(repo.file_name().unwrap().to_str().unwrap()), "{text}");
+    cx.update(|_, cx| assert_eq!(console.read(cx).session_engine(&repo), Some(engine)));
     cx.simulate_keystrokes("n o t e enter");
     wait(cx, "made note");
     assert!(repo.join("note.txt").exists());
@@ -846,9 +859,19 @@ fn replace_in_files_writes_ticked_matches_updates_open_editors_and_undoes(cx: &m
 
 #[gpui::test]
 fn the_terminal_tab_runs_a_shell_in_the_repository(cx: &mut TestAppContext) {
+    terminal_tab_on(EngineKind::Builtin, cx);
+}
+
+#[cfg(feature = "ghostty")]
+#[gpui::test]
+fn the_terminal_tab_runs_on_ghostty(cx: &mut TestAppContext) {
+    terminal_tab_on(EngineKind::Ghostty, cx);
+}
+
+fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     use gpui_component::dock::DockPlacement;
-    let repo = demo_repo("terminal");
-    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let repo = demo_repo(&format!("terminal-{}", engine.label().to_lowercase()));
+    let (_, ws, cx) = open(cx, Settings { terminal_engine: engine, ..with_repo(&repo) });
     let terminal = cx.update(|_, cx| {
         let ws = ws.read(cx);
         let view = ws.dock.read(cx).panel(ws.tabs.terminal).expect("the terminal is docked").clone();
@@ -884,8 +907,24 @@ fn the_terminal_tab_runs_a_shell_in_the_repository(cx: &mut TestAppContext) {
         panic!("{what:?} never appeared: {:?}", cx.update(|_, cx| terminal.read(cx).session_text(&repo)));
     };
     wait(cx, "$");
+    cx.update(|_, cx| assert_eq!(terminal.read(cx).session_engine(&repo), Some(engine)));
     cx.simulate_keystrokes("p w d enter");
     wait(cx, repo.file_name().unwrap().to_str().unwrap());
+    // A colourful line, a link, and ⌘F finding text in the scrollback.
+    let typed =
+        "printf '\\033[32mgreen\\033[0m https://example.com\\n'; for i in $(seq 1 60); do echo filler $i; done\r";
+    cx.update(|_, cx| terminal.read(cx).type_keys(&repo, typed.as_bytes()));
+    wait(cx, "filler 60");
+    cx.simulate_keystrokes("cmd-f");
+    assert!(cx.debug_bounds("terminal-find").is_some(), "⌘F opens the find bar");
+    cx.simulate_input("green");
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let (found, current) = terminal.read(cx).find_state().expect("the find bar is open");
+        assert!(found >= 1 && current.is_some(), "{found} matches, current {current:?}");
+    });
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| assert!(terminal.read(cx).find_state().is_none(), "Esc closes the find bar"));
     let _ = std::fs::remove_dir_all(repo);
 }
 

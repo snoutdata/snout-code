@@ -139,6 +139,10 @@ pub struct Settings {
     pub sdks: Vec<PathBuf>,
     /// The JDKs added by hand on each remote machine, by its SSH host name.
     pub remote_sdks: std::collections::BTreeMap<String, Vec<PathBuf>>,
+    /// The engine that parses what runs in the terminals and the Claude Code console:
+    /// `Builtin`, or `Ghostty` in builds that include it (the default there). New terminals
+    /// start with it; open ones keep the engine they started with.
+    pub terminal_engine: snout_core::term::EngineKind,
 }
 
 impl Default for Settings {
@@ -177,6 +181,7 @@ impl Default for Settings {
             spring_profiles: Default::default(),
             sdks: Vec::new(),
             remote_sdks: Default::default(),
+            terminal_engine: snout_core::term::EngineKind::preferred(),
         }
     }
 }

@@ -20,7 +20,6 @@ eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
 rfd.workspace = true
-vt100.workspace = true
 anyhow.workspace = true
 arboard.workspace = true
 

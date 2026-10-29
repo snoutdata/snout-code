@@ -16,6 +16,13 @@ similar.workspace = true
 # The terminal under the Claude Code console (xterm parser; the host runs the pseudo-terminal).
 vt100.workspace = true
 anyhow.workspace = true
+libghostty-vt = { workspace = true, optional = true }
+libghostty-vt-sys = { workspace = true, optional = true }
+
+[features]
+# The Ghostty terminal engine. Building it needs Zig 0.15 on PATH and the network (it
+# fetches Ghostty's sources); release builds turn it on (scripts/package-mac.sh).
+ghostty = ["dep:libghostty-vt", "dep:libghostty-vt-sys"]
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -1,21 +1,30 @@
-//! A terminal's insides, without drawing: a child process on a pseudo-terminal, parsed
-//! with `vt100`. Enough of xterm for full-screen TUIs such as Claude Code: 256 and true
-//! colour, bracketed paste, application cursor keys, mouse wheel reporting, scrollback,
-//! and answers to the queries TUIs send at start-up (cursor position, device attributes,
-//! colours). Front ends paint [`Pty::parser`]'s screen and turn their key events into
-//! bytes with [`encode_key`] and [`paste_bytes`].
+//! A terminal's insides, without drawing: a child process on a pseudo-terminal, parsed by
+//! a terminal engine ([`crate::term`]). Enough of xterm for full-screen TUIs such as Claude
+//! Code: 256 and true colour, bracketed paste, application cursor keys, mouse wheel
+//! reporting, scrollback, and answers to the queries TUIs send at start-up.
+//!
+//! Three threads per terminal: the reader takes the child's output, the terminal's own
+//! thread owns the engine (which must stay on one thread) and publishes a [`Frame`] after
+//! each batch of work, and the front end's thread reads that frame to paint it and sends
+//! the engine what to do (resize, scroll...). Front ends turn their key events into bytes
+//! with [`Pty::key`] and [`paste_bytes`].
 
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use snout_host::{Cmd, Host, PtyProcess};
 
-const SCROLLBACK: usize = 10_000;
+use crate::term::{Color, Engine};
+pub use crate::term::{EngineKind, Frame};
 
 pub type Rgb = (u8, u8, u8);
+
+/// How long a synchronized update (mode 2026) may hold the screen back.
+const SYNC_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// How to start the child process.
 pub struct Launch<'a> {
@@ -28,79 +37,57 @@ pub struct Launch<'a> {
     pub env_remove: &'a [&'a str],
 }
 
-/// State written by the reader thread.
+/// State written by the reader and terminal threads.
 #[derive(Default)]
 struct Shared {
     exited: AtomicBool,
     /// Bumped on every chunk of output.
     output_gen: AtomicU64,
+    /// Bumped on every frame published.
+    frame_gen: AtomicU64,
     last_output: Mutex<Option<Instant>>,
 }
 
-/// Parser callbacks: replies to the child's queries are queued here and written back by
-/// the reader thread.
-pub struct Hooks {
-    replies: Vec<u8>,
-    pub title: String,
-    /// The default colours, which TUIs ask for to pick a light or dark theme.
-    pub fg: Rgb,
-    pub bg: Rgb,
-}
-
-impl vt100::Callbacks for Hooks {
-    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
-        self.title = String::from_utf8_lossy(title).into_owned();
-    }
-
-    fn set_window_icon_name(&mut self, screen: &mut vt100::Screen, name: &[u8]) {
-        self.set_window_title(screen, name);
-    }
-
-    fn unhandled_csi(&mut self, screen: &mut vt100::Screen, i1: Option<u8>, _: Option<u8>, params: &[&[u16]], c: char) {
-        let first = params.first().and_then(|p| p.first()).copied().unwrap_or(0);
-        match (i1, c, first) {
-            // Device status report: OK.
-            (None, 'n', 5) => self.replies.extend_from_slice(b"\x1b[0n"),
-            // Cursor position report.
-            (None, 'n', 6) => {
-                let (row, col) = screen.cursor_position();
-                self.replies.extend_from_slice(format!("\x1b[{};{}R", row + 1, col + 1).as_bytes());
-            }
-            // Primary device attributes: a VT220 with ANSI colour. TUIs send this after
-            // optional queries (kitty keyboard, ...) and treat the answer as "done".
-            (None, 'c', 0) => self.replies.extend_from_slice(b"\x1b[?62;22c"),
-            // Secondary device attributes.
-            (Some(b'>'), 'c', 0) => self.replies.extend_from_slice(b"\x1b[>0;10;1c"),
-            _ => {}
-        }
-    }
-
-    fn unhandled_osc(&mut self, _: &mut vt100::Screen, params: &[&[u8]]) {
-        // Default foreground (10) / background (11) colour queries.
-        if let [which @ (b"10" | b"11"), b"?"] = params {
-            let (r, g, b) = if *which == b"10" { self.fg } else { self.bg };
-            let hex = |v: u8| format!("{v:02x}{v:02x}");
-            let reply = format!("\x1b]{};rgb:{}/{}/{}\x1b\\", String::from_utf8_lossy(which), hex(r), hex(g), hex(b));
-            self.replies.extend_from_slice(reply.as_bytes());
-        }
-    }
+/// What the terminal thread is asked to do.
+enum Msg {
+    Output(Vec<u8>),
+    Resize(u16, u16),
+    Colors(Rgb, Rgb),
+    /// Scroll the view back by this many lines (forward when negative).
+    Scroll(isize),
+    ScrollTo(usize),
+    Key {
+        key: Option<Key>,
+        mods: Mods,
+        text: Option<String>,
+        base: Option<char>,
+        reply: Sender<Option<Vec<u8>>>,
+    },
+    Lines(Sender<Vec<String>>),
 }
 
 pub struct Pty {
-    parser: Arc<Mutex<vt100::Parser<Hooks>>>,
+    frame: Arc<Mutex<Frame>>,
+    to_engine: Sender<Msg>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn PtyProcess>,
     shared: Arc<Shared>,
     size: (u16, u16),
+    colors: Mutex<(Rgb, Rgb)>,
+    engine: EngineKind,
+    /// Why the engine asked for could not start, when the built-in one stands in.
+    engine_error: Option<String>,
     exit: Option<String>,
 }
 
 impl Pty {
-    /// Start `launch` on `host` on a 24×80 terminal with default colours `fg` on `bg`. `wake`
-    /// runs on the reader thread after each chunk of output and when the process ends.
+    /// Start `launch` on `host` on a 24×80 terminal run by `engine` (the built-in one when
+    /// this build lacks it), default colours `fg` on `bg`. `wake` runs on the terminal's
+    /// thread after each frame it publishes and when the process ends.
     pub fn spawn(
         host: &dyn Host,
         launch: &Launch<'_>,
+        engine: EngineKind,
         fg: Rgb,
         bg: Rgb,
         wake: impl Fn() + Send + 'static,
@@ -115,44 +102,74 @@ impl Pty {
             cmd = cmd.env(k, v);
         }
         let mut child = host.spawn_pty(&cmd, size.0, size.1)?;
-
-        let hooks = Hooks { replies: Vec::new(), title: String::new(), fg, bg };
-        let parser = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(size.0, size.1, SCROLLBACK, hooks)));
         let writer = Arc::new(Mutex::new(child.take_writer()?));
         let shared = Arc::new(Shared::default());
+        let frame = Arc::new(Mutex::new(Frame::default()));
+        let (to_engine, inbox) = mpsc::channel::<Msg>();
+
+        // The terminal's own thread: it makes the engine and keeps it to the end.
+        let (ready_tx, ready) = mpsc::channel();
+        let (f, w, s) = (frame.clone(), writer.clone(), shared.clone());
+        std::thread::Builder::new().name("terminal".into()).spawn(move || {
+            let wanted = engine.or_available();
+            let mut error = (wanted != engine).then(|| engine.unavailable().unwrap_or_default().to_owned());
+            let made = wanted.create(size.0, size.1, fg, bg).or_else(|e| {
+                error = Some(e);
+                EngineKind::Builtin.create(size.0, size.1, fg, bg)
+            });
+            let Ok(mut e) = made else { return };
+            let _ = ready_tx.send((e.kind(), error));
+            run_engine(&mut *e, &inbox, &f, &w, &s, &wake);
+        })?;
+        let (engine, engine_error) = ready.recv().map_err(|_| anyhow::anyhow!("the terminal could not start"))?;
 
         let mut reader = child.take_reader()?;
-        let (p, w, s) = (parser.clone(), writer.clone(), shared.clone());
+        let (tx, s) = (to_engine.clone(), shared.clone());
         std::thread::Builder::new().name("terminal-reader".into()).spawn(move || {
             let mut buf = [0u8; 16 * 1024];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        let replies = {
-                            let mut parser = lock(&p);
-                            parser.process(&buf[..n]);
-                            std::mem::take(&mut parser.callbacks_mut().replies)
-                        };
-                        if !replies.is_empty() {
-                            let _ = lock(&w).write_all(&replies);
+                        if tx.send(Msg::Output(buf[..n].to_vec())).is_err() {
+                            break;
                         }
-                        s.output_gen.fetch_add(1, Ordering::Relaxed);
-                        *lock(&s.last_output) = Some(Instant::now());
-                        wake();
                     }
                 }
             }
             s.exited.store(true, Ordering::Relaxed);
-            wake();
+            // Wakes the terminal thread, which publishes and wakes the front end.
+            let _ = tx.send(Msg::Scroll(0));
         })?;
 
-        Ok(Self { parser, writer, child, shared, size, exit: None })
+        Ok(Self {
+            frame,
+            to_engine,
+            writer,
+            child,
+            shared,
+            size,
+            colors: Mutex::new((fg, bg)),
+            engine,
+            engine_error,
+            exit: None,
+        })
     }
 
-    /// The parser, for painting its screen; hold it briefly, the reader thread waits.
-    pub fn parser(&self) -> MutexGuard<'_, vt100::Parser<Hooks>> {
-        lock(&self.parser)
+    /// The screen as last published, for painting it; hold it briefly, the terminal's
+    /// thread waits to publish the next.
+    pub fn frame(&self) -> MutexGuard<'_, Frame> {
+        lock(&self.frame)
+    }
+
+    /// The engine running this terminal.
+    pub fn engine(&self) -> EngineKind {
+        self.engine
+    }
+
+    /// Why the engine asked for did not start, when the built-in one runs instead.
+    pub fn engine_error(&self) -> Option<&str> {
+        self.engine_error.as_deref()
     }
 
     /// `None` while running; a description of how it ended afterwards.
@@ -169,11 +186,16 @@ impl Pty {
     }
 
     pub fn title(&self) -> String {
-        self.parser().callbacks().title.clone()
+        self.frame().title.clone()
     }
 
     pub fn output_gen(&self) -> u64 {
         self.shared.output_gen.load(Ordering::Relaxed)
+    }
+
+    /// Bumped on every frame published: output, a resize, a scroll...
+    pub fn frame_gen(&self) -> u64 {
+        self.shared.frame_gen.load(Ordering::Relaxed)
     }
 
     pub fn last_output(&self) -> Option<Instant> {
@@ -182,7 +204,16 @@ impl Pty {
 
     /// The visible screen as text, one line per row.
     pub fn contents(&self) -> String {
-        self.parser().screen().contents()
+        self.frame().contents()
+    }
+
+    /// Every line, the scrollback first, as text (for search).
+    pub fn lines(&self) -> Vec<String> {
+        let (tx, rx) = mpsc::channel();
+        if self.to_engine.send(Msg::Lines(tx)).is_err() {
+            return Vec::new();
+        }
+        rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default()
     }
 
     pub fn write(&self, bytes: &[u8]) {
@@ -205,16 +236,19 @@ impl Pty {
             return false;
         }
         self.size = size;
-        self.parser().screen_mut().set_size(size.0, size.1);
+        // The engine first: the child redraws for the new size once it hears of it.
+        let _ = self.to_engine.send(Msg::Resize(size.0, size.1));
         let _ = self.child.resize(size.0, size.1);
         true
     }
 
     /// Follow the theme, also for the colour queries TUIs send later.
     pub fn set_colors(&self, fg: Rgb, bg: Rgb) {
-        let mut parser = self.parser();
-        let hooks = parser.callbacks_mut();
-        (hooks.fg, hooks.bg) = (fg, bg);
+        let mut colors = lock(&self.colors);
+        if *colors != (fg, bg) {
+            *colors = (fg, bg);
+            let _ = self.to_engine.send(Msg::Colors(fg, bg));
+        }
     }
 
     /// Wheel `lines` (up when positive): report it if the app asked for mouse events, move
@@ -226,40 +260,37 @@ impl Pty {
             return false;
         }
         let up = lines > 0.0;
+        let modes = self.frame().modes;
         let mut out = Vec::new();
-        let moved = {
-            let mut parser = self.parser();
-            let screen = parser.screen();
-            if screen.mouse_protocol_mode() != vt100::MouseProtocolMode::None {
-                let button = if up { 64 } else { 65 };
-                for _ in 0..n {
-                    if screen.mouse_protocol_encoding() == vt100::MouseProtocolEncoding::Sgr {
-                        out.extend_from_slice(format!("\x1b[<{button};1;1M").as_bytes());
-                    } else {
-                        out.extend_from_slice(&[0x1b, b'[', b'M', 32 + button, 33, 33]);
-                    }
+        if modes.mouse {
+            let button = if up { 64 } else { 65 };
+            for _ in 0..n {
+                if modes.mouse_sgr {
+                    out.extend_from_slice(format!("\x1b[<{button};1;1M").as_bytes());
+                } else {
+                    out.extend_from_slice(&[0x1b, b'[', b'M', 32 + button, 33, 33]);
                 }
-                false
-            } else if screen.alternate_screen() {
-                let key: &[u8] = match (up, screen.application_cursor()) {
-                    (true, true) => b"\x1bOA",
-                    (true, false) => b"\x1b[A",
-                    (false, true) => b"\x1bOB",
-                    (false, false) => b"\x1b[B",
-                };
-                out.extend(key.repeat(n));
-                false
-            } else {
-                let offset = screen.scrollback();
-                let offset = if up { offset + n } else { offset.saturating_sub(n) };
-                parser.screen_mut().set_scrollback(offset);
-                true
             }
-        };
-        if !out.is_empty() {
-            self.write(&out);
+        } else if modes.alt_screen {
+            let key: &[u8] = match (up, modes.app_cursor) {
+                (true, true) => b"\x1bOA",
+                (true, false) => b"\x1b[A",
+                (false, true) => b"\x1bOB",
+                (false, false) => b"\x1b[B",
+            };
+            out.extend(key.repeat(n));
+        } else {
+            let n = n as isize;
+            let _ = self.to_engine.send(Msg::Scroll(if up { n } else { -n }));
+            return true;
         }
-        moved
+        self.write(&out);
+        false
+    }
+
+    /// Show the line `offset` lines back from the live screen (0: the live screen).
+    pub fn scroll_to(&self, offset: usize) {
+        let _ = self.to_engine.send(Msg::ScrollTo(offset));
     }
 
     /// Send typed bytes: back to the live screen first.
@@ -267,29 +298,122 @@ impl Pty {
         if bytes.is_empty() {
             return;
         }
-        self.parser().screen_mut().set_scrollback(0);
+        if self.frame().scrollback != 0 {
+            let _ = self.to_engine.send(Msg::ScrollTo(0));
+        }
         self.write(bytes);
     }
+
+    /// Send a key: in the kitty keyboard protocol when the child turned it on and the
+    /// engine speaks it, else as an xterm does. Whether it sent anything.
+    pub fn key(&self, input: &KeyInput<'_>) -> bool {
+        let modes = self.frame().modes;
+        let bytes = if modes.kitty_keyboard != 0 {
+            let (reply, rx) = mpsc::channel();
+            let text = input.text.map(str::to_owned);
+            let _ = self.to_engine.send(Msg::Key { key: input.key, mods: input.mods, text, base: input.base, reply });
+            rx.recv_timeout(Duration::from_secs(1)).ok().flatten()
+        } else {
+            None
+        };
+        let bytes = bytes.unwrap_or_else(|| encode_input(input, modes.app_cursor));
+        self.send(&bytes);
+        !bytes.is_empty()
+    }
+
+    /// Paste `text`: bracketed when the child asked for it.
+    pub fn paste(&self, text: &str) {
+        let bracketed = self.frame().modes.bracketed_paste;
+        self.send(&paste_bytes(text, bracketed));
+    }
+}
+
+/// The terminal thread's work: parse what comes, do what is asked, publish the screen.
+fn run_engine(
+    engine: &mut dyn Engine,
+    inbox: &Receiver<Msg>,
+    frame: &Mutex<Frame>,
+    writer: &Mutex<Box<dyn Write + Send>>,
+    shared: &Shared,
+    wake: &dyn Fn(),
+) {
+    let mut next = Frame::default();
+    let mut held_since: Option<Instant> = None;
+    let publish = |engine: &mut dyn Engine, next: &mut Frame| {
+        engine.frame(next);
+        std::mem::swap(&mut *lock(frame), next);
+        shared.frame_gen.fetch_add(1, Ordering::Relaxed);
+        wake();
+    };
+    publish(engine, &mut next);
+    let mut timeout = None;
+    loop {
+        let first = match timeout {
+            Some(t) => match inbox.recv_timeout(t) {
+                Ok(m) => Some(m),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            },
+            None => match inbox.recv() {
+                Ok(m) => Some(m),
+                Err(_) => return,
+            },
+        };
+        let mut output = false;
+        // Everything waiting, then one frame.
+        for msg in first.into_iter().chain(std::iter::from_fn(|| inbox.try_recv().ok())) {
+            match msg {
+                Msg::Output(bytes) => {
+                    engine.write(&bytes);
+                    let replies = engine.take_replies();
+                    if !replies.is_empty() {
+                        let mut w = lock(writer);
+                        let _ = w.write_all(&replies);
+                        let _ = w.flush();
+                    }
+                    output = true;
+                }
+                Msg::Resize(rows, cols) => engine.resize(rows, cols),
+                Msg::Colors(fg, bg) => engine.set_colors(fg, bg),
+                Msg::Scroll(by) => {
+                    let (at, max) = engine.scrollback();
+                    engine.set_scrollback(at.saturating_add_signed(by).min(max));
+                }
+                Msg::ScrollTo(offset) => engine.set_scrollback(offset),
+                Msg::Key { key, mods, text, base, reply } => {
+                    let _ = reply.send(engine.encode_key(&KeyInput { key, mods, text: text.as_deref(), base }));
+                }
+                Msg::Lines(reply) => {
+                    let _ = reply.send(engine.lines());
+                }
+            }
+        }
+        if output {
+            shared.output_gen.fetch_add(1, Ordering::Relaxed);
+            *lock(&shared.last_output) = Some(Instant::now());
+        }
+        // A synchronized update shows once it ends, or after a while if it never does.
+        if engine.modes().sync_output {
+            let since = *held_since.get_or_insert_with(Instant::now);
+            if since.elapsed() < SYNC_TIMEOUT {
+                timeout = Some(SYNC_TIMEOUT - since.elapsed());
+                continue;
+            }
+        }
+        held_since = None;
+        timeout = None;
+        publish(engine, &mut next);
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Drop for Pty {
     fn drop(&mut self) {
         let _ = self.child.kill();
     }
-}
-
-/// The text between two cells (row, col), either way round, lines trimmed.
-pub fn selected_text(screen: &vt100::Screen, (a, b): ((u16, u16), (u16, u16))) -> Option<String> {
-    let (start, end) = if a <= b { (a, b) } else { (b, a) };
-    if start == end {
-        return None;
-    }
-    let text = screen.contents_between(start.0, start.1, end.0, end.1 + 1);
-    Some(text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n"))
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 // ----- Input ---------------------------------------------------------------------------
@@ -323,6 +447,29 @@ pub struct Mods {
     pub ctrl: bool,
     /// ⌘ on macOS: its combinations belong to the app (copy, paste, shortcuts).
     pub cmd: bool,
+}
+
+/// A key event as the front end has it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KeyInput<'a> {
+    /// A key with a sequence of its own (arrows, Enter...), or a Ctrl combination.
+    pub key: Option<Key>,
+    pub mods: Mods,
+    /// The text the key types, as the keyboard layout makes it.
+    pub text: Option<&'a str>,
+    /// The key's own character, without Shift (`1` for `!`).
+    pub base: Option<char>,
+}
+
+/// The bytes an xterm sends for a key event; empty for keys it leaves to the app.
+pub fn encode_input(input: &KeyInput<'_>, app_cursor: bool) -> Vec<u8> {
+    let m = input.mods;
+    match (input.key, input.text) {
+        (Some(key), _) => encode_key(key, m, app_cursor),
+        (None, Some(text)) if !m.cmd && !m.ctrl && m.alt => [b"\x1b".as_slice(), text.as_bytes()].concat(),
+        (None, Some(text)) if !m.cmd && !m.ctrl => text.as_bytes().to_vec(),
+        _ => Vec::new(),
+    }
 }
 
 /// The bytes an xterm sends for `key`; empty for keys it leaves to the app or to text input.
@@ -429,12 +576,12 @@ pub fn indexed(i: u8) -> Rgb {
 }
 
 /// A cell colour, `default` for the default; bold brightens the eight base colours.
-pub fn color(c: vt100::Color, default: Rgb, bold: bool) -> Rgb {
+pub fn color(c: Color, default: Rgb, bold: bool) -> Rgb {
     match c {
-        vt100::Color::Default => default,
-        vt100::Color::Idx(i) if bold && i < 8 => indexed(i + 8),
-        vt100::Color::Idx(i) => indexed(i),
-        vt100::Color::Rgb(r, g, b) => (r, g, b),
+        Color::Default => default,
+        Color::Idx(i) if bold && i < 8 => indexed(i + 8),
+        Color::Idx(i) => indexed(i),
+        Color::Rgb(r, g, b) => (r, g, b),
     }
 }
 
@@ -467,7 +614,7 @@ mod tests {
         assert_eq!(indexed(16), (0, 0, 0));
         assert_eq!(indexed(231), (255, 255, 255));
         assert_eq!(indexed(255), (238, 238, 238));
-        assert_eq!(color(vt100::Color::Idx(1), (255, 255, 255), true), indexed(9));
+        assert_eq!(color(Color::Idx(1), (255, 255, 255), true), indexed(9));
     }
 
     fn wait_for(term: &Pty, what: &str) -> String {
@@ -483,20 +630,28 @@ mod tests {
 
     #[test]
     fn runs_a_process_and_answers_its_queries() {
+        for engine in EngineKind::available() {
+            runs_a_process_on(engine);
+        }
+    }
+
+    fn runs_a_process_on(engine: EngineKind) {
         let dir = std::env::temp_dir();
         // Ask for the cursor position, then echo what the terminal answered (minus ESC).
         let script = r#"printf 'hello \033[31mred\033[0m\n'; stty raw -echo; printf '\033[6n'; r=$(dd bs=1 count=6 2>/dev/null); stty sane; printf 'reply:%s\n' "$(printf %s "$r" | tr -d '\033')"; read line; echo "got:$line""#;
         let args = ["-c".to_owned(), script.to_owned()];
         let launch = Launch { program: Path::new("/bin/sh"), args: &args, cwd: &dir, env: &[], env_remove: &[] };
-        let mut term = Pty::spawn(&*snout_host::local(), &launch, (255, 255, 255), (0, 0, 0), || {}).unwrap();
+        let mut term = Pty::spawn(&*snout_host::local(), &launch, engine, (255, 255, 255), (0, 0, 0), || {}).unwrap();
+        assert_eq!(term.engine(), engine);
         wait_for(&term, "hello red");
         wait_for(&term, "reply:[2;1R");
         {
-            let parser = term.parser();
-            let red = parser.screen().cell(0, 6).unwrap();
-            assert_eq!((red.contents(), red.fgcolor()), ("r", vt100::Color::Idx(1)));
+            let frame = term.frame();
+            let red = frame.cell(0, 6).unwrap();
+            assert_eq!((frame.text(red), red.fg), ("r", Color::Idx(1)), "{engine:?}");
         }
-        term.write(b"typed\r");
+        assert!(term.key(&KeyInput { text: Some("typed"), ..KeyInput::default() }));
+        assert!(term.key(&KeyInput { key: Some(Key::Enter), ..KeyInput::default() }));
         wait_for(&term, "got:typed");
         for _ in 0..200 {
             if term.exit_status().is_some() {

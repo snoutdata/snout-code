@@ -28,6 +28,7 @@ use crate::project_settings::{self as ps, Key, ProjectSettings};
 use crate::settings::{ColorTheme, Settings, ThemeChoice};
 use crate::spring::ProfileMode;
 use crate::theme::{Palette, palette};
+use snout_core::term::EngineKind;
 
 /// A page of the sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +39,7 @@ pub enum Page {
     VersionControl,
     Gradle,
     Spring,
+    Terminal,
     ClaudeCode,
 }
 
@@ -49,13 +51,14 @@ pub enum Scope {
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 8] = [
         Page::Appearance,
         Page::Keymap,
         Page::Editor,
         Page::VersionControl,
         Page::Gradle,
         Page::Spring,
+        Page::Terminal,
         Page::ClaudeCode,
     ];
 
@@ -74,6 +77,7 @@ impl Page {
             Page::VersionControl => IconName::GitBranch,
             Page::Gradle => IconName::Hammer,
             Page::Spring => IconName::Leaf,
+            Page::Terminal => IconName::SquareTerminal,
             Page::ClaudeCode => IconName::Sparkles,
         }
     }
@@ -86,6 +90,7 @@ impl Page {
             Page::VersionControl => "Version Control",
             Page::Gradle => "Gradle",
             Page::Spring => "Spring",
+            Page::Terminal => "Terminal",
             Page::ClaudeCode => "Claude Code",
         }
     }
@@ -95,7 +100,7 @@ impl Page {
         match self {
             Page::Gradle => Some("Build Tools"),
             Page::Spring => Some("Frameworks"),
-            Page::ClaudeCode => Some("Tools"),
+            Page::Terminal | Page::ClaudeCode => Some("Tools"),
             _ => None,
         }
     }
@@ -111,6 +116,7 @@ impl Page {
             Page::VersionControl => "git fetch interval background",
             Page::Gradle => "build tools jdk java daemon idle timeout",
             Page::Spring => "frameworks boot profiles active beans",
+            Page::Terminal => "tools engine ghostty built-in builtin shell console emulator vt",
             Page::ClaudeCode => "tools agent console program path",
         }
     }
@@ -319,6 +325,7 @@ impl SettingsView {
         next.spring_profiles = d.spring_profiles.clone();
         next.keymap = d.keymap.clone();
         next.confirm_quit = d.confirm_quit;
+        next.terminal_engine = d.terminal_engine;
         self.draft = next.clone();
         cx.emit(SettingsEvent::Apply { user: Box::new(next), project, close });
     }
@@ -639,6 +646,89 @@ pub(crate) fn choice(
         menu
     })
     .into_any_element()
+}
+
+/// A terminal engine to pick: a small terminal drawn in the theme's colours with the
+/// engine's icon, its name and what it brings beneath, outlined in the accent when chosen.
+/// One this build lacks is dimmed and cannot be picked.
+fn engine_card(engine: EngineKind, on: bool, p: &Palette) -> gpui::Stateful<gpui::Div> {
+    let name = engine.label().to_lowercase().replace('-', "");
+    let id = format!("settings-engine-{name}");
+    let available = engine.unavailable().is_none();
+    let (ico, blurb) = match engine {
+        EngineKind::Builtin => (IconName::SquareTerminal, "In every build"),
+        EngineKind::Ghostty => (IconName::Ghost, "Reflow, kitty keys, links"),
+    };
+    let hover = p.button_hover;
+    let term_bg = if p.dark { gpui::black().opacity(0.35) } else { p.panel };
+    let line = |w: f32, c: gpui::Hsla| div().h(px(3.)).w(px(w)).rounded(px(2.)).bg(c);
+    let hues = p.hues;
+    div()
+        .id(SharedString::from(id.clone()))
+        .debug_selector(move || id.clone())
+        .w(px(150.))
+        .flex()
+        .flex_col()
+        .gap(px(5.))
+        .p(px(4.))
+        .rounded(px(8.))
+        .when(on, |d| d.bg(p.selection()))
+        .when(available && !on, |d| d.cursor_pointer().hover(move |st| st.bg(hover)))
+        .when(!available, |d| d.opacity(0.55))
+        .child(
+            div()
+                .h(px(64.))
+                .flex()
+                .flex_col()
+                .rounded(px(5.))
+                .overflow_hidden()
+                .border_1()
+                .border_color(if on { p.accent } else { p.border })
+                .bg(term_bg)
+                .child(
+                    div()
+                        .h(px(14.))
+                        .px(px(5.))
+                        .flex()
+                        .items_center()
+                        .gap(px(3.))
+                        .bg(p.ground)
+                        .border_b_1()
+                        .border_color(p.border)
+                        .children([hues[3], hues[6], hues[1]].map(|c| div().size(px(4.)).rounded(px(2.)).bg(c)))
+                        .child(div().flex_1())
+                        .child(crate::components::icon(ico, 10., if on { p.accent } else { p.fg_dim })),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(5.))
+                        .p(px(7.))
+                        .child(div().flex().gap(px(3.)).child(line(6., p.accent)).child(line(40., p.fg_dim)))
+                        .child(div().flex().gap(px(3.)).child(line(22., hues[1])).child(line(30., hues[0])))
+                        .child(
+                            div()
+                                .flex()
+                                .gap(px(3.))
+                                .child(line(6., p.accent))
+                                .child(div().w(px(5.)).h(px(7.)).bg(p.fg)),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .text_size(px(12.))
+                .text_color(if on { p.fg } else { p.fg_dim })
+                .when(on, |d| d.font_weight(FontWeight::SEMIBOLD))
+                .child(crate::components::icon(ico, 12., if on { p.accent } else { p.fg_dim }))
+                .child(engine.label()),
+        )
+        .child(div().text_size(px(11.)).text_color(p.fg_dim).child(if available { blurb } else { "Unavailable" }))
 }
 
 /// A colour theme to pick: a small window drawn in its colours (in the light or dark showing
@@ -1110,6 +1200,7 @@ impl SettingsView {
                     ))
                     .into_any_element()
             }
+            Page::Terminal => self.terminal_page(&d, cx),
             Page::ClaudeCode => body
                 .child(section("Program", &p))
                 .child(row("Claude Code", div().w(px(360.)).child(look::field(&self.claude, false, None, &p)), &p))
@@ -1122,6 +1213,62 @@ impl SettingsView {
                 )
                 .into_any_element(),
         }
+    }
+
+    /// Settings ▸ Terminal: the engine new terminals start with, and those running.
+    fn terminal_page(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        use crate::components::{Tone, callout_with};
+        let p = palette(cx);
+        let chosen = d.terminal_engine;
+        let cards = div().flex().gap(px(6.)).children(EngineKind::ALL.map(|e| {
+            let card = engine_card(e, chosen == e, &p);
+            if e.unavailable().is_none() {
+                card.on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.terminal_engine = e)))
+            } else {
+                card
+            }
+        }));
+        let open: Vec<(String, EngineKind)> = cx
+            .try_global::<crate::console::OpenTerminals>()
+            .map(|o| o.0.iter().map(|((kind, root), e)| (format!("{kind} in {}", Model::dir_name(root)), *e)).collect())
+            .unwrap_or_default();
+        let others = open.iter().filter(|(_, e)| *e != chosen).count();
+        let mut body =
+            div().flex().flex_col().child(section("Engine", &p)).child(row("Terminal engine", cards, &p)).child(
+                div().pl(px(162.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                    "The engine reads what runs in the terminals and the Claude Code console. A change applies \
+                 to the terminals you start after it; open terminals keep the engine they started with.",
+                ),
+            );
+        if let Some(why) = EngineKind::Ghostty.unavailable() {
+            body = body.child(
+                div().pl(px(162.)).pt(px(10.)).child(
+                    callout_with(Tone::Info, Some("Ghostty is unavailable".into()), why, &p)
+                        .debug_selector(|| "settings-ghostty-unavailable".into()),
+                ),
+            );
+        }
+        if !open.is_empty() {
+            body = body.child(section("Running now", &p)).children(open.into_iter().map(|(what, e)| {
+                let ico = if e == EngineKind::Ghostty { IconName::Ghost } else { IconName::SquareTerminal };
+                div()
+                    .pl(px(12.))
+                    .py(px(3.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(crate::components::icon(ico, 13., p.fg_dim))
+                    .child(what)
+                    .child(div().text_color(p.fg_dim).child(e.label()))
+            }));
+            if others > 0 {
+                body =
+                    body.child(div().pl(px(12.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                        "A terminal running another engine keeps it until it starts again (New, in its header).",
+                    ));
+            }
+        }
+        body.into_any_element()
     }
 
     /// Wait for the keys of a new shortcut for `action`; Esc stops waiting.

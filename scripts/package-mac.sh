@@ -12,6 +12,10 @@
 # engine/build/dist, which a running development app may be using. Its runtime is linked from the
 # build JDK, so the app is for this Mac's architecture.
 #
+# The app is built with the Ghostty terminal engine (the `ghostty` feature), which needs Zig 0.15
+# (SNOUT_ZIG names its zig, else zig on PATH if it is 0.15, else Homebrew's zig@0.15) and, the first
+# time, the network: the build fetches Ghostty's sources. SNOUT_NO_GHOSTTY=1 builds without it.
+#
 # Building the engine needs JDK 21: SNOUT_JDK21, else JAVA_HOME if it is 21, else one that
 # /usr/libexec/java_home finds, else the one ./snout.sh downloads to ~/Library/Caches/SnoutCode.
 #
@@ -47,7 +51,18 @@ WORK="$(mktemp -d)"
 
 # --- The binary and the engine --------------------------------------------------------------
 
-cargo build --release -p snout-app
+features=()
+if [[ "${SNOUT_NO_GHOSTTY:-}" != 1 ]]; then
+  zig_ok() { [[ -n "$1" && -x "$1" && "$("$1" version 2>/dev/null)" == 0.15.* ]]; }
+  ZIG=""
+  for c in "${SNOUT_ZIG:-}" "$(command -v zig || true)" "$(brew --prefix zig@0.15 2>/dev/null || true)/bin/zig"; do
+    if zig_ok "$c"; then ZIG="$c"; break; fi
+  done
+  [[ -n "$ZIG" ]] || { echo "No Zig 0.15 for the Ghostty terminal engine: brew install zig@0.15, set SNOUT_ZIG, or SNOUT_NO_GHOSTTY=1." >&2; exit 1; }
+  export PATH="$(dirname "$ZIG"):$PATH"
+  features=(--features ghostty)
+fi
+cargo build --release -p snout-app ${features[@]+"${features[@]}"}
 BIN="${CARGO_TARGET_DIR:-$ROOT/target}/release/snout-code"
 
 java_major() { "$1/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java.specification.version = //p'; }
@@ -76,6 +91,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/snout-code"
 cp assets/icon/snout.icns "$APP/Contents/Resources/snout.icns"
+# The third-party licences: Lucide, Inter, and Ghostty's terminal engine and what it includes.
+cp NOTICE LICENSE "$APP/Contents/Resources/"
 
 # What never runs here: jdtls's launch scripts, its feature archives (Equinox runs without
 # them; one carries Eclipse's own native launchers), the configurations for Windows and for

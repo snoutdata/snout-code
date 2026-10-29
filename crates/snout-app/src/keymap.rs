@@ -121,6 +121,7 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("up", Box::new(s::SearchUp), Some("SearchBox > Input")),
         ("down", Box::new(s::SearchDown), Some("SearchBox > Input")),
         ("escape", Box::new(s::SearchClose), Some("SearchBox > Input")),
+        ("escape", Box::new(s::SearchClose), Some("TerminalFind > Input")),
         // A change Claude Code proposes: ⌘↩ accepts it, Esc (once the editor has nothing
         // of its own to dismiss) rejects it.
         ("cmd-enter", Box::new(e::AcceptChanges), Some("ClaudeReview")),

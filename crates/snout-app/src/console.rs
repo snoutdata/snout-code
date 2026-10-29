@@ -1,7 +1,11 @@
 //! The Claude Code console in the bottom dock: `claude` running in the open repository on
-//! the pseudo-terminal of `snout_core::pty`, painted cell by cell. One session per
-//! repository, kept alive while switching between them. When the agent has printed and
-//! gone quiet, the Git views are re-read, since it may have changed files.
+//! the pseudo-terminal of `snout_core::pty`, painted cell by cell from the frame its
+//! terminal engine publishes (the built-in one or Ghostty's, as Settings ▸ Terminal says
+//! when the session starts). One session per repository, kept alive while switching between
+//! them. When the agent has printed and gone quiet, the Git views are re-read, since it may
+//! have changed files.
+//!
+//! ⌘F finds in the terminal's text and scrollback; ⌘-click opens a link.
 //!
 //! `claude` starts with the variables that connect it to this window's IDE server; the
 //! header says when it is connected, and switches the editor's following of its edits.
@@ -13,16 +17,18 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Bounds, ClipboardItem, Context, Entity, FocusHandle, Font, FontWeight, Hsla,
-    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString, StatefulInteractiveElement as _, Styled as _,
-    TextAlign, TextRun, UnderlineStyle, Window, canvas, div, font, point, px, size,
+    App, AppContext as _, Bounds, ClipboardItem, Context, Entity, FocusHandle, Font, FontStyle, FontWeight, Global,
+    Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString, StatefulInteractiveElement as _,
+    StrikethroughStyle, Styled as _, Subscription, TextAlign, TextRun, UnderlineStyle, Window, canvas, div, font,
+    point, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{BasePanelView, panel_handle};
-use gpui_component::input::{Copy, Paste};
+use gpui_component::input::{Copy, InputEvent, InputState, Paste};
 use snout_core::claude::{ENV_REMOVE, find_claude};
-use snout_core::pty::{self, Launch, Pty, Rgb};
+use snout_core::pty::{self, KeyInput, Launch, Pty, Rgb};
+use snout_core::term::{Attrs, CursorShape, EngineKind, Frame, Underline, Width};
 
 use crate::art::glyph;
 use crate::look;
@@ -70,6 +76,22 @@ struct Session {
     refreshed: Instant,
 }
 
+/// The terminals running, and the engine each runs: Settings ▸ Terminal lists them, since
+/// a new choice of engine holds only for the terminals started after it.
+#[derive(Default)]
+pub struct OpenTerminals(pub std::collections::BTreeMap<(&'static str, PathBuf), EngineKind>);
+
+impl Global for OpenTerminals {}
+
+/// Find in the terminal (⌘F): the query's matches in its lines, scrollback first.
+struct Find {
+    input: Entity<InputState>,
+    /// Each match: its line (0 is the oldest in the scrollback) and which of the line's.
+    matches: Vec<(usize, usize)>,
+    current: Option<usize>,
+    _changes: Subscription,
+}
+
 pub struct ConsolePanel {
     model: Entity<Model>,
     pub kind: Kind,
@@ -85,6 +107,7 @@ pub struct ConsolePanel {
     shown_gen: u64,
     /// The folders whose session is being started.
     starting: std::collections::HashSet<PathBuf>,
+    find: Option<Find>,
     focus: FocusHandle,
 }
 
@@ -158,8 +181,25 @@ impl ConsolePanel {
             grid: None,
             shown_gen: 0,
             starting: Default::default(),
+            find: None,
             focus: cx.focus_handle(),
         }
+    }
+
+    /// Note which engine the session of `root` runs, or that it ended.
+    fn note_engine(&self, root: &Path, cx: &mut App) {
+        let engine = self.sessions.get(root).map(|s| s.pty.engine());
+        let key = (self.kind.title(), root.to_owned());
+        let open = &mut cx.default_global::<OpenTerminals>().0;
+        match engine {
+            Some(e) => open.insert(key, e),
+            None => open.remove(&key),
+        };
+    }
+
+    /// The engine the session of `root` runs, if one runs.
+    pub fn session_engine(&self, root: &Path) -> Option<EngineKind> {
+        self.sessions.get(root).map(|s| s.pty.engine())
     }
 
     fn root(&self, cx: &App) -> Option<PathBuf> {
@@ -172,11 +212,11 @@ impl ConsolePanel {
     fn tick(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.root(cx) else { return };
         let Some(s) = self.sessions.get_mut(&root) else { return };
-        let generation = s.pty.output_gen();
-        if generation != self.shown_gen {
-            self.shown_gen = generation;
+        if s.pty.frame_gen() != self.shown_gen {
+            self.shown_gen = s.pty.frame_gen();
             cx.notify();
         }
+        let generation = s.pty.output_gen();
         let quiet = s.pty.last_output().is_some_and(|t| t.elapsed() >= QUIET);
         if generation != s.seen_gen && (quiet || s.refreshed.elapsed() >= BUSY_REFRESH) {
             s.seen_gen = generation;
@@ -194,10 +234,12 @@ impl ConsolePanel {
     /// the UI thread, the session shows once it runs.
     pub fn start(&mut self, root: &Path, args: &[String], window: &mut Window, cx: &mut Context<Self>) {
         self.sessions.remove(root);
+        self.note_engine(root, cx);
         self.error = None;
         let host = crate::host::host(cx);
         let kind = self.kind;
         let configured = self.model.read(cx).settings.claude_path.clone();
+        let engine = self.model.read(cx).settings.terminal_engine;
         let program = self.program.clone();
         let shell_args = ["-l".to_owned()];
         let args = if kind == Kind::Shell && args.is_empty() { &shell_args[..] } else { args }.to_vec();
@@ -228,7 +270,7 @@ impl ConsolePanel {
                 let program = program.or(found).ok_or(None)?;
                 let env_remove: &[&str] = if kind == Kind::Claude { ENV_REMOVE } else { &[] };
                 let launch = Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove };
-                Pty::spawn(&*host, &launch, fg, bg, || {})
+                Pty::spawn(&*host, &launch, engine, fg, bg, || {})
                     .map_err(|e| Some(format!("Could not start {}: {e}", program.display())))
             }
         });
@@ -238,7 +280,8 @@ impl ConsolePanel {
                 this.starting.remove(&root);
                 match result {
                     Ok(pty) => {
-                        this.sessions.insert(root, Session { pty, seen_gen: 0, refreshed: Instant::now() });
+                        this.sessions.insert(root.clone(), Session { pty, seen_gen: 0, refreshed: Instant::now() });
+                        this.note_engine(&root, cx);
                         window.focus(&this.focus, cx);
                     }
                     Err(None) => {
@@ -276,8 +319,7 @@ impl ConsolePanel {
     /// Type `text` into the session of `root`, as a paste.
     pub fn type_text(&self, root: &Path, text: &str) {
         if let Some(s) = self.sessions.get(root) {
-            let bracketed = s.pty.parser().screen().bracketed_paste();
-            s.pty.send(&pty::paste_bytes(text, bracketed));
+            s.pty.paste(text);
         }
     }
 
@@ -295,10 +337,15 @@ impl ConsolePanel {
         Some((y, x))
     }
 
-    fn on_key(&mut self, e: &KeyDownEvent, root: &Path, cx: &mut Context<Self>) {
-        let Some(s) = self.sessions.get(root) else { return };
+    fn on_key(&mut self, e: &KeyDownEvent, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         let m = k.modifiers;
+        if m.platform && !m.control && !m.alt && k.key == "f" {
+            self.open_find(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        let Some(s) = self.sessions.get(root) else { return };
         let mods = pty::Mods { shift: m.shift, alt: m.alt, ctrl: m.control, cmd: m.platform };
         let key = match k.key.as_str() {
             "up" => Some(pty::Key::Up),
@@ -319,22 +366,148 @@ impl ConsolePanel {
             other if m.control && other.chars().count() == 1 => other.chars().next().map(pty::Key::Char),
             _ => None,
         };
-        let app_cursor = s.pty.parser().screen().application_cursor();
-        let bytes = match key {
-            Some(key) => pty::encode_key(key, mods, app_cursor),
-            None if !m.platform && !m.control => match &k.key_char {
-                Some(text) if m.alt => [b"\x1b".as_slice(), text.as_bytes()].concat(),
-                Some(text) => text.clone().into_bytes(),
-                None => Vec::new(),
-            },
-            None => Vec::new(),
-        };
-        if !bytes.is_empty() {
-            s.pty.send(&bytes);
+        let mut chars = k.key.chars();
+        let base = chars.next().filter(|_| chars.next().is_none());
+        let base = base.or((k.key == "space").then_some(' '));
+        let input = KeyInput { key, mods, text: k.key_char.as_deref(), base };
+        if s.pty.key(&input) {
             self.selection = None;
             cx.stop_propagation();
             cx.notify();
         }
+    }
+
+    /// The find bar's state, while it is open: how many matches, and which one shows.
+    pub fn find_state(&self) -> Option<(usize, Option<usize>)> {
+        self.find.as_ref().map(|f| (f.matches.len(), f.current))
+    }
+
+    /// Open the find bar, on the selected text when there is some.
+    fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.root(cx).and_then(|root| {
+            let s = self.sessions.get(&root)?;
+            self.selection.and_then(|sel| s.pty.frame().selected_text(sel)).filter(|t| !t.contains('\n'))
+        });
+        if self.find.is_none() {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in terminal"));
+            let changes = cx.subscribe_in(&input, window, |this, _, e: &InputEvent, _, cx| match e {
+                InputEvent::Change => this.search(cx),
+                InputEvent::PressEnter { secondary, shift } => {
+                    this.step_find(if *secondary || *shift { 1 } else { -1 }, cx)
+                }
+                _ => {}
+            });
+            self.find = Some(Find { input, matches: Vec::new(), current: None, _changes: changes });
+        }
+        let Some(input) = self.find.as_ref().map(|f| f.input.clone()) else { return };
+        if let Some(text) = selected {
+            input.update(cx, |i, cx| i.set_value(text, window, cx));
+            self.search(cx);
+        }
+        input.update(cx, |i, cx| i.focus(window, cx));
+        cx.notify();
+    }
+
+    fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.find = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// Find the query in the session's lines; show the newest match.
+    fn search(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root(cx) else { return };
+        let Some(f) = self.find.as_mut() else { return };
+        let query = f.input.read(cx).value().to_string();
+        f.matches.clear();
+        f.current = None;
+        if let Some(s) = self.sessions.get(&root)
+            && !query.is_empty()
+        {
+            for (i, line) in s.pty.lines().iter().enumerate() {
+                let n = snout_core::term::find_spans(line, &query).len();
+                f.matches.extend((0..n).map(|nth| (i, nth)));
+            }
+        }
+        if !f.matches.is_empty() {
+            f.current = Some(f.matches.len() - 1);
+        }
+        self.reveal_match(cx);
+    }
+
+    /// Go to the match `by` before (negative: older) or after the current one.
+    fn step_find(&mut self, by: isize, cx: &mut Context<Self>) {
+        let Some(f) = self.find.as_mut() else { return };
+        let n = f.matches.len();
+        if n == 0 {
+            return;
+        }
+        let at = f.current.unwrap_or(n - 1) as isize;
+        f.current = Some((at + by).rem_euclid(n as isize) as usize);
+        self.reveal_match(cx);
+    }
+
+    /// Scroll so that the current match shows.
+    fn reveal_match(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root(cx) else { return };
+        let (Some(f), Some(s)) = (self.find.as_ref(), self.sessions.get(&root)) else { return };
+        if let Some(&(line, _)) = f.current.and_then(|i| f.matches.get(i)) {
+            let (rows, history, offset) = {
+                let fr = s.pty.frame();
+                (usize::from(fr.rows), fr.history, fr.scrollback)
+            };
+            let top = history - offset.min(history);
+            if line < top || line >= top + rows {
+                let want_top = line.saturating_sub(rows / 2).min(history);
+                s.pty.scroll_to(history - want_top);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The find bar, over the terminal.
+    fn find_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        use crate::components::{IconButton, IconName};
+        let f = self.find.as_ref()?;
+        let count = match (f.current, f.matches.len()) {
+            (_, 0) if f.input.read(cx).value().is_empty() => String::new(),
+            (_, 0) => "No matches".to_owned(),
+            (Some(i), n) => format!("{} of {n}", i + 1),
+            (None, n) => format!("{n}"),
+        };
+        Some(
+            div()
+                .id("terminal-find")
+                .debug_selector(|| "terminal-find".into())
+                .key_context("TerminalFind")
+                .on_action(cx.listener(|this, _: &crate::search::SearchClose, w, cx| this.close_find(w, cx)))
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .px(px(8.))
+                .py(px(4.))
+                .border_b_1()
+                .border_color(p.border)
+                .child(look::field(&f.input, true, Some(260.), p))
+                .child(div().min_w(px(70.)).text_size(px(12.)).text_color(p.fg_dim).child(count))
+                .child(
+                    IconButton::new("terminal-find-prev", IconName::ChevronUp, "Previous match (Return)")
+                        .size(22.)
+                        .on_click(cx.listener(|this, _, _, cx| this.step_find(-1, cx))),
+                )
+                .child(
+                    IconButton::new("terminal-find-next", IconName::ChevronDown, "Next match (Shift+Return)")
+                        .size(22.)
+                        .on_click(cx.listener(|this, _, _, cx| this.step_find(1, cx))),
+                )
+                .child(
+                    IconButton::new("terminal-find-close", IconName::X, "Close (Esc)")
+                        .size(22.)
+                        .on_click(cx.listener(|this, _, w, cx| this.close_find(w, cx))),
+                )
+                .into_any_element(),
+        )
     }
 }
 
@@ -474,6 +647,7 @@ impl Render for ConsolePanel {
                         if let Some(mut s) = this.sessions.remove(&r) {
                             s.pty.kill();
                         }
+                        this.note_engine(&r, cx);
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -523,7 +697,8 @@ impl ConsolePanel {
         let focused = self.focus.is_focused(_window);
         let (r1, r2, r3) = (root.to_owned(), root.to_owned(), root.to_owned());
         let start = root.to_owned();
-        div()
+        let find_bar = self.find_bar(&p, cx);
+        let grid = div()
             .id("terminal")
             .flex_1()
             .min_h_0()
@@ -547,19 +722,16 @@ impl ConsolePanel {
                         ),
                 )
             })
-            .on_key_down(cx.listener(move |this, e: &KeyDownEvent, _, cx| this.on_key(e, &r1, cx)))
+            .on_key_down(cx.listener(move |this, e: &KeyDownEvent, w, cx| this.on_key(e, &r1, w, cx)))
             .on_action(cx.listener(move |this, _: &Paste, _, cx| {
                 let text = cx.read_from_clipboard().and_then(|c| c.text());
                 if let (Some(text), Some(s)) = (text, this.sessions.get(&r2)) {
-                    let bracketed = s.pty.parser().screen().bracketed_paste();
-                    s.pty.send(&pty::paste_bytes(&text, bracketed));
+                    s.pty.paste(&text);
                 }
             }))
             .on_action(cx.listener(move |this, _: &Copy, _, cx| {
-                let text = this
-                    .selection
-                    .zip(this.sessions.get(&r3))
-                    .and_then(|(sel, s)| pty::selected_text(s.pty.parser().screen(), sel));
+                let text =
+                    this.selection.zip(this.sessions.get(&r3)).and_then(|(sel, s)| s.pty.frame().selected_text(sel));
                 if let Some(text) = text {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
@@ -577,15 +749,24 @@ impl ConsolePanel {
                     cx.notify();
                 }
             }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+            .on_mouse_down(MouseButton::Left, {
+                let root = root.to_owned();
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus, cx);
-                    this.selection = this.cell_at(e.position).map(|c| (c, c));
+                    let cell = this.cell_at(e.position);
+                    // ⌘-click opens the link under the pointer.
+                    if e.modifiers.platform
+                        && let Some((row, col)) = cell
+                        && let Some(link) = this.sessions.get(&root).and_then(|s| s.pty.frame().link_at(row, col))
+                    {
+                        cx.open_url(&link);
+                        return;
+                    }
+                    this.selection = cell.map(|c| (c, c));
                     this.selecting = true;
                     cx.notify();
-                }),
-            )
+                })
+            })
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
                 if this.selecting
                     && e.pressed_button == Some(MouseButton::Left)
@@ -607,7 +788,8 @@ impl ConsolePanel {
                 })
                 .flex_1()
                 .size_full(),
-            )
+            );
+        div().flex_1().min_h_0().flex().flex_col().children(find_bar).child(grid)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -639,50 +821,35 @@ impl ConsolePanel {
             self.selection = None;
         }
         self.grid = Some((inner, size(cell_w, cell_h)));
-        let parser = s.pty.parser();
-        let screen = parser.screen();
+        let frame = s.pty.frame();
+        // The find bar's matches in the rows showing, the current one apart.
+        let query = self.find.as_ref().map(|f| f.input.read(cx).value().to_string()).unwrap_or_default();
+        let current = self.find.as_ref().and_then(|f| f.current.and_then(|i| f.matches.get(i)).copied());
+        let top = frame.history - frame.scrollback.min(frame.history);
         let (fg0, bg0) = (rgb(p.fg), rgb(p.panel));
         let sel = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
         let selected = |r: u16, c: u16| sel.is_some_and(|(s, e)| (r, c) >= s && (r, c) <= e && s != e);
-        let (rows, cols) = screen.size();
+        let (found, found_now) = (p.accent.opacity(0.28), p.accent.opacity(0.6));
+        let (rows, cols) = frame.size();
         for row in 0..rows {
+            let hits = if query.is_empty() { Vec::new() } else { frame.find_in_row(row, &query) };
+            let hit = |col: u16| {
+                hits.iter()
+                    .enumerate()
+                    .find(|(_, (a, b))| (*a..=*b).contains(&col))
+                    .map(|(nth, _)| if current == Some((top + usize::from(row), nth)) { found_now } else { found })
+            };
             let mut text = String::new();
             let mut runs: Vec<TextRun> = Vec::new();
             for col in 0..cols {
-                let Some(c) = screen.cell(row, col) else { continue };
-                if c.is_wide_continuation() {
+                let Some(c) = frame.cell(row, col) else { continue };
+                if c.width == Width::Continuation {
                     continue;
                 }
-                let mut fg = pty::color(c.fgcolor(), fg0, c.bold());
-                let mut bg = pty::color(c.bgcolor(), bg0, false);
-                if c.inverse() {
-                    std::mem::swap(&mut fg, &mut bg);
-                }
-                let mut fg = hsla(fg);
-                if c.dim() {
-                    fg = mix(fg, 0.55, hsla(bg));
-                }
-                let bg = if selected(row, col) { Some(p.selection()) } else { (bg != bg0).then(|| hsla(bg)) };
-                let contents = c.contents();
-                let mut glyph = if contents.is_empty() { " ".to_owned() } else { contents.to_owned() };
-                if c.is_wide() {
-                    // Kept to one cell so the grid stays aligned; the space fills the other.
-                    glyph.push(' ');
-                }
-                let mut f = font.clone();
-                if c.bold() {
-                    f.weight = FontWeight::BOLD;
-                }
-                let underline =
-                    c.underline().then(|| UnderlineStyle { thickness: px(1.), color: Some(fg), wavy: false });
-                runs.push(TextRun {
-                    len: glyph.len(),
-                    font: f,
-                    color: fg,
-                    background_color: bg,
-                    underline,
-                    strikethrough: None,
-                });
+                let run = cell_run(&frame, c, &font, (fg0, bg0), p);
+                let bg = if selected(row, col) { Some(p.selection()) } else { hit(col).or(run.1) };
+                let glyph = run.0;
+                runs.push(TextRun { len: glyph.len(), background_color: bg, ..run.2 });
                 text.push_str(&glyph);
             }
             let line = ts.shape_line(text.into(), font_size, &runs, Some(cell_w));
@@ -690,17 +857,73 @@ impl ConsolePanel {
             let _ = line.paint_background(origin, cell_h, TextAlign::Left, None, window, cx);
             let _ = line.paint(origin, cell_h, TextAlign::Left, None, window, cx);
         }
-        if screen.scrollback() == 0 && !screen.hide_cursor() {
-            let (row, col) = screen.cursor_position();
-            let at = point(inner.left() + cell_w * f32::from(col), inner.top() + cell_h * f32::from(row));
-            let rect = Bounds::new(at, size(cell_w, cell_h));
-            if focused {
+        if let Some(cur) = frame.cursor {
+            let at = point(inner.left() + cell_w * f32::from(cur.col), inner.top() + cell_h * f32::from(cur.row));
+            let rect = match cur.shape {
+                CursorShape::Block => Bounds::new(at, size(cell_w, cell_h)),
+                CursorShape::Bar => Bounds::new(at, size(px(2.), cell_h)),
+                CursorShape::Underline => Bounds::new(point(at.x, at.y + cell_h - px(2.)), size(cell_w, px(2.))),
+            };
+            if focused || cur.shape != CursorShape::Block {
                 window.paint_quad(gpui::fill(rect, p.fg.opacity(0.7)));
             } else {
                 window.paint_quad(gpui::outline(rect, p.fg.opacity(0.6), gpui::BorderStyle::Solid));
             }
         }
     }
+}
+
+/// A cell as text to shape: its glyph (a wide one kept to one cell so the grid stays
+/// aligned, a space filling the other), its own background when it has one, and its look.
+fn cell_run(
+    frame: &Frame,
+    c: &snout_core::term::Cell,
+    font: &Font,
+    (fg0, bg0): (Rgb, Rgb),
+    p: &Palette,
+) -> (String, Option<Hsla>, TextRun) {
+    let mut fg = pty::color(c.fg, fg0, c.bold());
+    let mut bg = pty::color(c.bg, bg0, false);
+    if c.attrs.contains(Attrs::INVERSE) {
+        std::mem::swap(&mut fg, &mut bg);
+    }
+    let mut ink = hsla(fg);
+    if c.attrs.contains(Attrs::DIM) {
+        ink = mix(ink, 0.55, hsla(bg));
+    }
+    if c.attrs.contains(Attrs::INVISIBLE) {
+        ink = hsla(bg);
+    }
+    let contents = frame.text(c);
+    let mut glyph = if contents.is_empty() { " ".to_owned() } else { contents.to_owned() };
+    if c.width == Width::Wide {
+        glyph.push(' ');
+    }
+    let mut f = font.clone();
+    if c.bold() {
+        f.weight = FontWeight::BOLD;
+    }
+    if c.attrs.contains(Attrs::ITALIC) {
+        f.style = FontStyle::Italic;
+    }
+    let line_color = match c.underline_color {
+        snout_core::term::Color::Default => ink,
+        other => hsla(pty::color(other, fg0, false)),
+    };
+    let underline = match c.underline {
+        Underline::None if c.has_link() => {
+            Some(UnderlineStyle { thickness: px(1.), color: Some(p.accent), wavy: false })
+        }
+        Underline::None => None,
+        Underline::Curly => Some(UnderlineStyle { thickness: px(1.), color: Some(line_color), wavy: true }),
+        Underline::Double => Some(UnderlineStyle { thickness: px(2.), color: Some(line_color), wavy: false }),
+        _ => Some(UnderlineStyle { thickness: px(1.), color: Some(line_color), wavy: false }),
+    };
+    let strikethrough =
+        c.attrs.contains(Attrs::STRIKETHROUGH).then(|| StrikethroughStyle { thickness: px(1.), color: Some(ink) });
+    let background = (bg != bg0).then(|| hsla(bg));
+    let run = TextRun { len: glyph.len(), font: f, color: ink, background_color: None, underline, strikethrough };
+    (glyph, background, run)
 }
 
 /// The docked console, if the workspace has one.

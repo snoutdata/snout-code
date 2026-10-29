@@ -36,6 +36,11 @@ egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 egui_extras = "0.37"
 portable-pty = "0.9"
 vt100 = "0.16"
+# The Ghostty terminal engine (snout-core's `ghostty` feature): safe bindings, and the -sys
+# crate that builds libghostty-vt.a from Ghostty's sources with Zig 0.15. Pinned: the API is
+# not stable yet.
+libghostty-vt = { version = "=0.2.2", default-features = false }
+libghostty-vt-sys = { version = "=0.2.2" }
 anyhow = "1"
 # snout-server: file watching, signals and process groups, and the checksum of its binary.
 notify = "8"

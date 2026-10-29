@@ -11,6 +11,10 @@ repository.workspace = true
 name = "snout-code"
 path = "src/main.rs"
 
+[features]
+# The Ghostty terminal engine (see snout-core): Settings ▸ Terminal offers it.
+ghostty = ["snout-core/ghostty"]
+
 [dependencies]
 snout-core.workspace = true
 snout-lang.workspace = true

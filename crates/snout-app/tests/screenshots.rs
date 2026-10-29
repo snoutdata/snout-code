@@ -97,6 +97,9 @@ mod shots {
         /// A commit (by summary) and one of its files, in a repository with a merge.
         Commit(&'static str, &'static str),
         Console,
+        /// The console running a program that prints colours, attributes, wide characters
+        /// and a link: the same output under each terminal engine.
+        TerminalColors,
         /// No repository open: the welcome page.
         Nothing,
         /// A Java file in an editor tab.
@@ -173,6 +176,22 @@ mod shots {
         Properties,
     }
 
+    /// Colourful output for the terminal engines' shots: the 16 colours plain and bold, a
+    /// 256-colour ramp, a true-colour gradient, the attributes, wide characters and a link.
+    const TERMINAL_COLORS: &str = r#"#!/bin/sh
+printf '\033]0;Terminal colours\007'
+for i in 0 1 2 3 4 5 6 7; do printf '\033[3%sm col%s \033[0m' $i $i; done; printf '\n'
+for i in 0 1 2 3 4 5 6 7; do printf '\033[1;3%sm bld%s \033[0m' $i $i; done; printf '\n'
+for i in 0 1 2 3 4 5 6 7; do printf '\033[4%sm bg%s  \033[0m' $i $i; done; printf '\n'
+i=16; while [ $i -lt 232 ]; do printf '\033[48;5;%sm ' $i; i=$((i+6)); done; printf '\033[0m\n'
+i=0; while [ $i -lt 72 ]; do printf '\033[48;2;%s;%s;200m ' $((i*3)) $((255-i*3)); i=$((i+1)); done; printf '\033[0m\n'
+printf '\033[1mbold\033[0m \033[2mdim\033[0m \033[3mitalic\033[0m \033[4munderline\033[0m \033[4:3mcurly\033[0m \033[9mstrike\033[0m \033[7minverse\033[0m \033[53moverline\033[0m\n'
+printf 'wide: 中文字符 かな 한글  emoji: ✓ ★ ●\n'
+printf 'link: \033]8;;https://example.com/docs\033\\the docs\033]8;;\033\\ and https://example.com/plain\n'
+printf '\033[32m✓\033[0m Read \033[36msrc/main.rs\033[0m\n> '
+sleep 30
+"#;
+
     const MAIN_JAVA: &str = "package demo.app;\n\nimport java.util.List;\n\npublic final class Main {\n    public static void main(String[] args) {\n        List<String> names = List.of(\"ada\", \"grace\");\n        int total = 0;\n        for (int i = 1; i <= 3; i++) {\n            total = add(total, i);\n        }\n        System.out.println(\"total \" + total + \" for \" + names);\n    }\n\n    static int add(int a, int b) {\n        return a + b;\n    }\n}\n";
 
     fn note(
@@ -189,6 +208,16 @@ mod shots {
     thread_local! {
         /// The colour theme the next shots take (Studio, the default, unless a shot says).
         static COLORS: std::cell::Cell<ColorTheme> = const { std::cell::Cell::new(ColorTheme::Studio) };
+        /// The terminal engine the next shots take.
+        static ENGINE: std::cell::Cell<snout_core::term::EngineKind> =
+            const { std::cell::Cell::new(snout_core::term::EngineKind::Builtin) };
+    }
+
+    /// `shot` with the terminals on another engine.
+    fn engine_shot(engine: snout_core::term::EngineKind, name: &str, theme: ThemeChoice, select: Option<Select>) {
+        ENGINE.set(engine);
+        shot(name, theme, Activity::Git, select);
+        ENGINE.set(snout_core::term::EngineKind::Builtin);
     }
 
     /// `shot` in another colour theme.
@@ -213,8 +242,14 @@ mod shots {
             gpui_platform::current_headless_renderer,
         );
         let current = (!matches!(select, Some(Select::Nothing))).then(|| repo.clone());
-        let mut settings =
-            Settings { theme, colors: COLORS.get(), repos: vec![repo.clone()], current, ..Settings::default() };
+        let mut settings = Settings {
+            theme,
+            colors: COLORS.get(),
+            terminal_engine: ENGINE.get(),
+            repos: vec![repo.clone()],
+            current,
+            ..Settings::default()
+        };
         if matches!(select, Some(Select::Nothing)) {
             // The Welcome page's recent projects, opened a while ago.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -267,6 +302,14 @@ mod shots {
                 let fake = repo.join("fake-claude");
                 let script = "#!/bin/sh\nprintf '\\033]0;Fixing the diff view\\007'\nprintf '\\033[1;32m✓\\033[0m Read \\033[36msrc/main.rs\\033[0m\\n'\nprintf '\\033[7m inverse \\033[0m and \\033[4munderline\\033[0m\\n> '\nsleep 30\n";
                 std::fs::write(&fake, script).unwrap();
+                Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+                cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+            }
+            Some(Select::TerminalColors) => {
+                let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+                let fake = repo.join("fake-claude");
+                std::fs::write(&fake, TERMINAL_COLORS).unwrap();
                 Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
                 cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
@@ -2377,6 +2420,28 @@ mod shots {
         shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
+        // The same colourful output under each terminal engine this build has.
+        for engine in snout_core::term::EngineKind::available() {
+            let name = engine.label().to_lowercase().replace('-', "");
+            engine_shot(
+                engine,
+                &format!("terminal-colors-{name}-dark"),
+                ThemeChoice::Dark,
+                Some(Select::TerminalColors),
+            );
+            engine_shot(
+                engine,
+                &format!("terminal-colors-{name}-light"),
+                ThemeChoice::Light,
+                Some(Select::TerminalColors),
+            );
+        }
+        shot(
+            "settings-terminal-light",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::Settings(snout_app::settings_view::Page::Terminal)),
+        );
         shot("welcome-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Nothing));
         shot("git-empty-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Nothing));
         shot("project-dark", ThemeChoice::Dark, Activity::Project, None);
