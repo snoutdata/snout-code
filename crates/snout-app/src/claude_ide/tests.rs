@@ -1022,3 +1022,92 @@ fn an_edit_out_of_sight_shows_a_chip_at_the_edge(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }
+
+/// What an agent wrote stays put down to it: the ledger, the gutter's lane, the tint until
+/// the change is reviewed, the dots on the tab and the file, the status bar's note, the
+/// turn and its prompt in the Agent Changes window; accepting keeps the record.
+#[gpui::test]
+fn the_lines_an_agent_wrote_keep_its_name(cx: &mut TestAppContext) {
+    let (repo, lock_dir, _model, ws, _client, cx) = connected("claude-attribution", cx);
+    let (port, cmd) = hook_command(&ws, cx);
+    let hello = repo.join("src/demo/Hello.java");
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(hello.clone(), None, false, w, cx)));
+    let editor = editor_of(&ws, &hello, cx).unwrap();
+    pump_until(cx, "the file", |cx| text_of(&editor, cx) == HELLO);
+    run_hook(
+        port,
+        &cmd,
+        json!({ "hook_event_name": "UserPromptSubmit", "prompt": "Check the name\nand greet louder" }),
+    );
+    run_hook(port, &cmd, tool_hook("PreToolUse", "Edit", &hello));
+    std::fs::write(&hello, HELLO_V2).unwrap();
+    run_hook(port, &cmd, tool_hook("PostToolUse", "Edit", &hello));
+    pump_until(cx, "the edit played and listed", |cx| {
+        cx.update(|_, cx| editor.read(cx).live.is_none()) && settled(&ws, cx) && listed(&ws, cx).len() == 1
+    });
+    pump(cx, 300);
+    let c = changes(&ws, cx);
+    cx.update(|_, cx| {
+        let c = c.read(cx);
+        let owners = c.ledger.owners(&hello).expect("the ledger has the file");
+        let runs = owners.runs();
+        assert_eq!(runs.iter().map(|r| r.0.clone()).collect::<Vec<_>>(), [2..4, 7..8], "{runs:?}");
+        let edit = c.ledger.edit(runs[0].1).unwrap();
+        assert_eq!((edit.agent.as_str(), edit.prompt.as_deref()), ("claude", Some("Check the name")));
+        assert_eq!(c.set.current().unwrap().prompt.as_deref(), Some("Check the name"));
+        // The dots and the note.
+        assert_eq!(cx.global::<super::AgentFiles>().0.get(&hello), Some(&"claude"));
+        assert_eq!(cx.global::<super::AgentSummary>(), &super::AgentSummary { files: 1, agent: Some("claude") });
+    });
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        let lane = e.agent_lane(cx);
+        assert!(lane.iter().any(|r| r.lines == (2..4) && r.unreviewed && r.edit.is_some()), "{lane:?}");
+        assert!(!e.agent_tint(cx).is_empty(), "tinted until reviewed");
+        assert!(e.agent_dot(cx).is_some_and(|(_, live)| !live), "the tab's dot");
+    });
+    // The user types above: Claude's lines move down with the text, and stay Claude's.
+    cx.update(|w, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, cx| {
+            s.set_selected_range(0..0, cx);
+            s.replace("// top\n", w, cx);
+        });
+    });
+    pump_until(cx, "the lines moved", |cx| {
+        cx.update(|_, cx| {
+            editor.read(cx).agent_lines.as_ref().is_some_and(|o| o.runs().first().is_some_and(|r| r.0 == (3..5)))
+        })
+    });
+    pump(cx, 300);
+    cx.update(|_, cx| {
+        let runs = c.read(cx).ledger.owners(&hello).unwrap().runs();
+        assert_eq!(runs[0].0, 3..5, "the ledger took the editor's lines: {runs:?}");
+    });
+    cx.update(|w, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, cx| {
+            s.set_selected_range(0..7, cx);
+            s.replace("", w, cx);
+        });
+        editor.update(cx, |e, cx| e.save(cx)).detach();
+    });
+    pump(cx, 500);
+    // Accept the file: the tint goes, the record stays (Annotate with Agents still says so).
+    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::accept_file(ws, &hello, w, cx)));
+    pump_until(cx, "reviewed", |cx| cx.update(|_, cx| editor.read(cx).claude_base.is_none()));
+    pump(cx, 300);
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        assert!(e.agent_tint(cx).is_empty(), "no tint once reviewed");
+        let lane = e.agent_lane(cx);
+        assert!(!lane.is_empty() && lane.iter().all(|r| !r.unreviewed), "the marks stay, paler: {lane:?}");
+        assert!(cx.global::<super::AgentFiles>().0.is_empty() && cx.global::<super::AgentSummary>().files == 0);
+    });
+    cx.update(|_, cx| editor.update(cx, |e, cx| e.toggle_annotate(cx)));
+    let notes = cx.update(|_, cx| editor.read(cx).annotations(cx));
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(notes[0].1.starts_with("Claude \u{b7} "), "{:?}", notes[0].1);
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}

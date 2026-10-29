@@ -176,6 +176,8 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "SendToClaude" => sf("paperplane", L::Send),
         "AcceptAllClaude" => sf("checkmark.seal", L::CheckCheck),
         "RevertAllClaude" => sf("arrow.uturn.backward.circle", L::Undo2),
+        "ShowAgentChanges" => sf("doc.badge.clock", L::FileClock),
+        "AnnotateWithAgents" => sf("person.text.rectangle", L::UserPen),
         // Navigate.
         "GoToClass" => sf("c.square", L::SquareCode),
         "GoToSymbol" => sf("at", L::AtSign),

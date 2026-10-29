@@ -832,6 +832,7 @@ impl Workspace {
                 }
                 EditorEvent::CaretMoved => this.save_layout_soon(cx),
                 EditorEvent::Claude(r) => crate::claude_ide::bridge::editor_request(this, editor, r, window, cx),
+                EditorEvent::AgentLines => crate::claude_ide::bridge::take_lines(this, editor, cx),
             }
         }));
     }
@@ -1856,6 +1857,9 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &crate::claude_ide::RevertAllClaude, w, cx| {
                 crate::claude_ide::bridge::revert_all(this, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::claude_ide::ShowAgentChanges, w, cx| {
+                this.show_tool(crate::workspace::Tool::ClaudeChanges, w, cx)
             }))
             .on_action(cx.listener(|this, _: &NewProject, w, cx| this.open_new_project(w, cx)))
             .on_action(cx.listener(|this, _: &ConnectSsh, w, cx| this.open_connect(w, cx)))

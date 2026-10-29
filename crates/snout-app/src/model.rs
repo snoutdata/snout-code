@@ -439,6 +439,11 @@ pub struct Model {
 impl EventEmitter<ModelEvent> for Model {}
 
 impl Model {
+    /// The folder of the app's own files, when it keeps any (never in tests).
+    pub fn store_dir(&self) -> Option<PathBuf> {
+        self.store.as_ref().map(Store::dir)
+    }
+
     pub fn new(settings: Settings, store: Option<Store>, cx: &mut Context<Self>) -> Self {
         let mut model = Self {
             host: crate::host::host(cx),

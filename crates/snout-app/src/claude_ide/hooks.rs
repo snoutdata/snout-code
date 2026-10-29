@@ -135,6 +135,10 @@ pub fn parse(body: &Value) -> Option<HookEvent> {
 /// The first line of a prompt that says something, trimmed and cut to a tooltip's length.
 pub fn first_line(text: &str) -> Option<String> {
     let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    // The files mentioned first (`@src/A.java#L3-5 rename it`) say less than the words after.
+    let words: Vec<&str> = line.split_whitespace().skip_while(|w| w.starts_with('@')).collect();
+    let rest = words.join(" ");
+    let line = if rest.is_empty() { line } else { rest.as_str() };
     let mut out: String = line.chars().take(160).collect();
     if line.chars().count() > 160 {
         out.push('\u{2026}');
@@ -499,6 +503,7 @@ pub mod tests {
         // The prompt of a Claude turn too, from UserPromptSubmit.
         let p = parse(&json!({ "hook_event_name": "UserPromptSubmit", "prompt": "\n  Rename greet\nplease" })).unwrap();
         assert_eq!(p.prompt.as_deref(), Some("Rename greet"));
+        assert_eq!(first_line("@src/A.java#L3-5 make it faster").as_deref(), Some("make it faster"));
     }
 
     #[test]

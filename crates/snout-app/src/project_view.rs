@@ -347,6 +347,7 @@ impl ProjectView {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
         cx.observe(&files, |_, _, cx| cx.notify()).detach();
         cx.observe(&store, |_, _, cx| cx.notify()).detach();
+        cx.observe_global::<crate::claude_ide::AgentFiles>(|_, cx| cx.notify()).detach();
         Self { model, files, store, expanded: HashSet::from([NodeId::Root]), jars: HashMap::new(), root: None }
     }
 
@@ -714,6 +715,22 @@ fn row_look(
     look
 }
 
+/// The dot of the agent whose changes to `file` wait for review, in its colour.
+pub fn agent_dot(file: Option<&Path>, p: &Palette, cx: &gpui::App) -> Option<gpui::AnyElement> {
+    let agent = cx.try_global::<crate::claude_ide::AgentFiles>()?.0.get(file?)?;
+    let color = crate::agents::by_id(agent, cx).color(p);
+    Some(
+        div()
+            .debug_selector(|| "agent-file-dot".into())
+            .flex_none()
+            .ml(px(6.))
+            .size(px(7.))
+            .rounded_full()
+            .bg(color)
+            .into_any_element(),
+    )
+}
+
 fn name_of(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
@@ -767,6 +784,7 @@ impl ProjectView {
                     .child(look.label),
             )
             .when_some(look.badge, |d, (g, c)| d.child(div().flex_none().ml(px(5.)).child(icon(g, 12., c))))
+            .when_some(agent_dot(look.file.as_deref(), p, cx), |d, dot| d.child(dot))
             .when_some(look.chip, |d, (text, c)| {
                 d.child(
                     div()

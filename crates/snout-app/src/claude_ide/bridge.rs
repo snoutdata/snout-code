@@ -84,6 +84,8 @@ pub struct Bridge {
     queued: Option<PathBuf>,
     /// The console's turn last seen begin.
     turn_seen: Option<Instant>,
+    /// Since when the ledger waits to be kept.
+    ledger_since: Option<Instant>,
     _tasks: Vec<Task<()>>,
     _quit: gpui::Subscription,
     _changes: gpui::Subscription,
@@ -220,6 +222,9 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
     });
     let changes = changes_of(ws, cx);
     changes.update(cx, |c, _| c.root = root.clone());
+    if let Some(root) = &root {
+        restore_ledger(ws, root, cx);
+    }
     let changes_sub = cx.subscribe(&changes, |ws, _, _: &Updated, cx| sync_bases(ws, cx));
     let events = cx.spawn_in(window, async move |this, cx| {
         while let Some(event) = rx.next().await {
@@ -264,6 +269,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         last_reveal: None,
         queued: None,
         turn_seen: None,
+        ledger_since: None,
         _tasks: vec![events, ticks, hook_events],
         _quit: quit,
         _changes: changes_sub,
@@ -689,10 +695,17 @@ fn tick(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     {
         b.root = root.clone();
         b.server.set_folders(&root.iter().cloned().collect::<Vec<_>>());
-        changes_of(ws, cx).update(cx, |c, _| c.root = root.clone());
+        changes_of(ws, cx).update(cx, |c, _| {
+            c.root = root.clone();
+            c.ledger = Default::default();
+        });
+        if let Some(root) = &root {
+            restore_ledger(ws, root, cx);
+        }
     }
     track_reviews(ws, cx);
     sync_bases(ws, cx);
+    keep_ledger(ws, cx);
     reveal_queued(ws, window, cx);
     // Claude went quiet: the indicator goes.
     changes_of(ws, cx).update(cx, |c, cx| {
@@ -894,7 +907,9 @@ pub fn followed_reload(
     if lines.is_empty() {
         return;
     }
-    // Claude Code without the hooks (started elsewhere): the change waits for review too.
+    // Claude Code without the hooks (started elsewhere), or an agent only watched: the
+    // change waits for review too, and the lines are the agent's.
+    note_edit(ws, &path, Some(before), &after, agent, "", cx);
     let base = Some(Some(Arc::new(before.to_owned())));
     changes_of(ws, cx).update(cx, |c, cx| {
         c.record(path, Some(Arc::new(after.clone())), base, String::new(), Source::Watcher, agent, cx)
@@ -1035,6 +1050,9 @@ fn follow_changed(
         if before == text {
             continue;
         }
+        if let Some(agent) = agent {
+            note_edit(ws, &path, Some(&before), &text, agent, "", cx);
+        }
         if connected {
             let base = Some(Some(Arc::new(before.clone())));
             let now = Some(Arc::new(text.clone()));
@@ -1052,6 +1070,108 @@ fn follow_changed(
 }
 
 // ----- Claude's edits, as its hooks report them -------------------------------------
+
+/// An agent changed `path` from `before` to `after`: the ledger puts the lines it changed
+/// down to it, with the turn and its prompt.
+fn note_edit(
+    ws: &Workspace,
+    path: &Path,
+    before: Option<&str>,
+    after: &str,
+    agent: &'static str,
+    tool: &str,
+    cx: &mut Context<Workspace>,
+) {
+    changes_of(ws, cx).update(cx, |c, _| {
+        let (turn, prompt) = c
+            .set
+            .turns
+            .iter()
+            .rev()
+            .find(|t| t.agent == agent)
+            .map_or((c.set.turn, None), |t| (t.id, t.prompt.clone()));
+        let edit = super::ledger::EditRecord::now(agent, turn, prompt, tool);
+        c.ledger.record(path, before, after, edit);
+        c.ledger_changed = true;
+    });
+}
+
+/// An editor's lines moved with what was typed there: the ledger takes them.
+pub fn take_lines(ws: &mut Workspace, editor: &Entity<EditorPanel>, cx: &mut Context<Workspace>) {
+    let (path, owners) = {
+        let e = editor.read(cx);
+        (e.path.clone(), e.agent_lines.clone())
+    };
+    let Some(owners) = owners else { return };
+    changes_of(ws, cx).update(cx, |c, _| {
+        c.ledger.take(&path, owners);
+        c.ledger_changed = true;
+    });
+}
+
+/// How long the ledger waits after a change before it is kept.
+const KEEP_AFTER: Duration = Duration::from_secs(2);
+
+/// Keep the ledger of the project in the app's folder (off the UI thread), a moment after
+/// it changed.
+fn keep_ledger(ws: &mut Workspace, cx: &mut Context<Workspace>) {
+    let Some(dir) = ws.model.read(cx).store_dir() else { return };
+    let Some(root) = ws.model.read(cx).project_root() else { return };
+    let changes = changes_of(ws, cx);
+    let Some(b) = ws.claude.as_mut() else { return };
+    if !changes.read(cx).ledger_changed {
+        b.ledger_since = None;
+        return;
+    }
+    let since = *b.ledger_since.get_or_insert_with(Instant::now);
+    if since.elapsed() < KEEP_AFTER {
+        return;
+    }
+    b.ledger_since = None;
+    let saved = changes.update(cx, |c, _| {
+        c.ledger_changed = false;
+        c.ledger.to_saved(&root)
+    });
+    let file = super::ledger::saved_path(&dir, &root);
+    cx.background_executor()
+        .spawn(async move {
+            let Ok(text) = serde_json::to_string(&saved) else { return };
+            if let Some(parent) = file.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&file, text);
+        })
+        .detach();
+}
+
+/// Take back the project's ledger kept by an earlier run: a file's lines only if the file
+/// on the host still holds the text they were recorded for.
+fn restore_ledger(ws: &mut Workspace, root: &Path, cx: &mut Context<Workspace>) {
+    let Some(dir) = ws.model.read(cx).store_dir() else { return };
+    let file = super::ledger::saved_path(&dir, root);
+    let host = crate::host::host(cx);
+    let read = cx.background_executor().spawn(async move {
+        let saved: super::ledger::Saved = serde_json::from_str(&std::fs::read_to_string(&file).ok()?).ok()?;
+        Some(super::ledger::Ledger::restore(saved, |p| host.read_to_string(p).ok()))
+    });
+    let root = root.to_owned();
+    cx.spawn(async move |ws, cx| {
+        let Some(ledger) = read.await else { return };
+        let _ = ws.update(cx, |ws, cx| {
+            if ws.model.read(cx).project_root().as_deref() != Some(root.as_path()) {
+                return;
+            }
+            changes_of(ws, cx).update(cx, |c, cx| {
+                if c.ledger.edits.is_empty() {
+                    c.ledger = ledger;
+                    cx.notify();
+                }
+            });
+            sync_bases(ws, cx);
+        });
+    })
+    .detach();
+}
 
 /// The indicator stays this long after the tool ran.
 const LINGER: Duration = Duration::from_millis(1_500);
@@ -1126,6 +1246,11 @@ pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut C
                 b.hooked.insert(path.clone(), Instant::now());
                 b.pre.remove(&path)
             });
+            // The ledger: these lines are the agent's now.
+            if let Some(text) = after.text() {
+                let before = before.as_ref().and_then(Snapshot::text).map(|t| t.as_str().to_owned());
+                note_edit(ws, &path, before.as_deref(), text, e.agent, &e.tool, cx);
+            }
             changes.update(cx, |c, cx| {
                 c.hooks_heard = true;
                 c.activity =
@@ -1258,13 +1383,47 @@ pub fn sync_bases(ws: &mut Workspace, cx: &mut Context<Workspace>) {
         let file = changes.read(cx).set.file(&editor.read(cx).path).cloned();
         let base = file.as_ref().map(|f| f.base.clone().unwrap_or_else(empty));
         let agent = file.map(|f| agents::Agent::of(f.agent, &settings));
+        let (owners, edits) = {
+            let c = changes.read(cx);
+            (c.ledger.files.get(&editor.read(cx).path).cloned(), c.ledger.edits.clone())
+        };
         editor.update(cx, |e, cx| {
             if e.claude_agent != agent {
                 e.claude_agent = agent;
                 cx.notify();
             }
+            let same = match (&e.agent_lines, &owners) {
+                (Some(a), Some(b)) => Arc::ptr_eq(&a.lines, &b.lines) || a.text.as_str() != b.text.as_str(),
+                (None, None) => true,
+                _ => false,
+            };
+            if !same || !Arc::ptr_eq(&e.agent_edits, &edits) {
+                // The ledger's record, unless the tab has moved on from the text it is for.
+                if owners.as_ref().is_none_or(|o| o.text.as_str() == e.text(cx)) {
+                    e.agent_lines = owners;
+                }
+                e.agent_edits = edits;
+                cx.notify();
+            }
             e.set_claude_base(base, cx)
         });
+    }
+    // The Project tree's dots and the status bar's note.
+    let files: std::collections::HashMap<PathBuf, &'static str> =
+        changes.read(cx).set.files.iter().map(|f| (f.path.clone(), f.agent)).collect();
+    let mut count: std::collections::HashMap<&'static str, usize> = Default::default();
+    for a in files.values() {
+        *count.entry(a).or_default() += 1;
+    }
+    let summary = super::AgentSummary {
+        files: files.len(),
+        agent: count.into_iter().max_by_key(|(a, n)| (*n, *a == agents::CLAUDE)).map(|(a, _)| a),
+    };
+    if cx.try_global::<super::AgentFiles>().is_none_or(|f| f.0 != files) {
+        cx.set_global(super::AgentFiles(files));
+    }
+    if cx.try_global::<super::AgentSummary>() != Some(&summary) {
+        cx.set_global(summary);
     }
 }
 
@@ -1308,6 +1467,15 @@ fn restore(ws: &mut Workspace, r: Restore, window: &mut Window, cx: &mut Context
             b.known.remove(&r.path);
         }
     }
+    changes_of(ws, cx).update(cx, |c, _| {
+        match &r.text {
+            Some(text) => c.ledger.sync(&r.path, text),
+            None => {
+                c.ledger.files.remove(&r.path);
+            }
+        }
+        c.ledger_changed = true;
+    });
     let host = crate::host::host(cx);
     let write = cx.background_executor().spawn({
         let (path, text) = (r.path.clone(), r.text.clone());
@@ -1375,6 +1543,20 @@ pub fn revert_file(ws: &mut Workspace, path: &Path, window: &mut Window, cx: &mu
     });
     if let Some(r) = r {
         restore(ws, r, window, cx);
+    }
+}
+
+/// Keep every change of turn `id`.
+pub fn accept_turn(ws: &mut Workspace, id: u32, window: &mut Window, cx: &mut Context<Workspace>) {
+    for path in changes_of(ws, cx).read(cx).set.files_of_turn(id) {
+        accept_file(ws, &path, window, cx);
+    }
+}
+
+/// Put back every file turn `id` changed.
+pub fn revert_turn(ws: &mut Workspace, id: u32, window: &mut Window, cx: &mut Context<Workspace>) {
+    for path in changes_of(ws, cx).read(cx).set.files_of_turn(id) {
+        revert_file(ws, &path, window, cx);
     }
 }
 

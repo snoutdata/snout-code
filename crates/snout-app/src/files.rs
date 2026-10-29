@@ -151,6 +151,7 @@ impl FileTree {
             cx.notify();
         })
         .detach();
+        cx.observe_global::<crate::claude_ide::AgentFiles>(|_, cx| cx.notify()).detach();
         // The watcher runs on its own thread; look for what it saw on a short timer.
         cx.spawn(async move |this, cx| {
             loop {
@@ -391,6 +392,10 @@ impl Render for FileTree {
                             .text_ellipsis()
                             .whitespace_nowrap()
                             .child(label),
+                    )
+                    .when_some(
+                        crate::project_view::agent_dot((!e.dir).then_some(e.path.as_path()), &p, cx),
+                        |d, dot| d.child(dot),
                     )
                     .when_some(mark.filter(|_| !e.dir), |d, m| {
                         d.child(

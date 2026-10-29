@@ -167,7 +167,8 @@ impl EditorPanel {
 
     /// The pointer moved over the editor: show a Spring mark's tooltip while it is on one.
     pub(super) fn gutter_hover(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        let tip = self.spring_mark_at(at, cx).map(|m| (m.line, m.tooltip())).or_else(|| self.claude_tip_at(at));
+        self.agent_hover(at, cx);
+        let tip = self.spring_mark_at(at, cx).map(|m| (m.line, m.tooltip()));
         let now = tip.map(|(line, text)| (line, at, text));
         let same = match (&self.gutter_tip, &now) {
             (Some((a, _, _)), Some((b, _, _))) => a == b,

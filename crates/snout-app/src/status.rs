@@ -77,7 +77,10 @@ impl EditorStatus {
 
 impl StatusBar {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
-        let watch = vec![cx.observe(&model, |_, _, cx| cx.notify())];
+        let watch = vec![
+            cx.observe(&model, |_, _, cx| cx.notify()),
+            cx.observe_global::<crate::claude_ide::AgentSummary>(|_, cx| cx.notify()),
+        ];
         // Whether the engine is there is asked of the host off the UI thread.
         Self::look_for_engine(cx);
         let java_missing = false;
@@ -496,6 +499,48 @@ fn remote_item(cx: &mut Context<StatusBar>) -> Option<gpui::AnyElement> {
     )
 }
 
+/// The agents' changes waiting for review: "Claude changed 3 files · Review", in the
+/// agent's colour; a click opens the Agent Changes window.
+fn agent_item(cx: &gpui::App) -> Option<gpui::AnyElement> {
+    let s = cx.try_global::<crate::claude_ide::AgentSummary>()?;
+    if s.files == 0 {
+        return None;
+    }
+    let p = palette(cx);
+    let agent = crate::agents::by_id(s.agent.unwrap_or(crate::agents::CLAUDE), cx);
+    let color = agent.color(&p);
+    let what = match s.files {
+        1 => format!("{} changed 1 file", agent.short),
+        n => format!("{} changed {n} files", agent.short),
+    };
+    let hover_bg = p.button_hover;
+    Some(
+        div()
+            .id("status-agents")
+            .debug_selector(|| "status-agents".into())
+            .flex_none()
+            .h(px(20.))
+            .px(px(7.))
+            .mr(px(4.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .rounded(px(4.))
+            .whitespace_nowrap()
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover_bg))
+            .tooltip(|w, cx| {
+                gpui_component::tooltip::Tooltip::new("Changes the agents made that wait for your review").build(w, cx)
+            })
+            .child(crate::components::icon(agent.icon, 12., color))
+            .child(div().text_color(p.fg).child(what))
+            .child(div().child("\u{00b7}"))
+            .child(div().text_color(color).font_weight(gpui::FontWeight::MEDIUM).child("Review"))
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::claude_ide::ShowAgentChanges), cx))
+            .into_any_element(),
+    )
+}
+
 impl Render for StatusBar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
@@ -571,6 +616,7 @@ impl Render for StatusBar {
             .text_size(px(12.))
             .text_color(p.fg_dim)
             .child(div().flex_1().min_w_0().child(left))
+            .children(agent_item(cx))
             .when_some(status, |d, s| {
                 d.child(item("status-position", s.position.into()).when(p.tinted, |d| {
                     d.h(px(18.))

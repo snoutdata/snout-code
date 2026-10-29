@@ -63,6 +63,9 @@ pub struct ClaudeChanges {
     /// The project, to show paths from.
     pub root: Option<PathBuf>,
     diffs: HashMap<PathBuf, Task<()>>,
+    /// Who wrote which lines this session; changed since it was last kept.
+    pub ledger: super::ledger::Ledger,
+    pub ledger_changed: bool,
 }
 
 /// The set changed (a file listed, changed, or gone).
@@ -171,7 +174,7 @@ impl Render for Indicator {
     }
 }
 
-crate::panels::panel!(ChangesPanel, "Claude Changes", |_, _| "Claude Changes".into(), true);
+crate::panels::panel!(ChangesPanel, "Claude Changes", |_, _| "Agent Changes".into(), true);
 
 impl ChangesPanel {
     pub fn new(ws: WeakEntity<Workspace>, cx: &mut Context<Self>) -> Self {
@@ -201,6 +204,92 @@ impl ChangesPanel {
             }
             cx.notify();
         });
+    }
+}
+
+impl ChangesPanel {
+    /// The header of a turn: its agent, its prompt (or its number), when; Accept and Revert
+    /// for everything it changed.
+    fn turn_header(
+        &self,
+        changes: &ClaudeChanges,
+        id: u32,
+        agent: &'static str,
+        p: &Palette,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let turn = changes.set.turn_of(id);
+        let agent = crate::agents::by_id(turn.map_or(agent, |t| t.agent), cx);
+        let color = agent.color(p);
+        let title = turn.and_then(|t| t.prompt.clone()).unwrap_or_else(|| format!("Turn {id}"));
+        let when = turn.map(|t| super::ledger::clock(t.at));
+        let files = changes.set.files_of_turn(id).len();
+        let sub = [
+            Some(agent.name.to_string()),
+            when,
+            Some(if files == 1 { "1 file".into() } else { format!("{files} files") }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" \u{00b7} ");
+        let i = id as usize;
+        div()
+            .id(("claude-turn", i))
+            .debug_selector(move || format!("claude-turn-{i}"))
+            .mx(px(8.))
+            .mt(px(8.))
+            .mb(px(2.))
+            .pl(px(8.))
+            .pr(px(4.))
+            .py(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(6.))
+            .bg(p.wash(color))
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(22.))
+                    .rounded(px(6.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(mix(color, 0.2, p.card))
+                    .child(crate::components::icon(agent.icon, 12., color)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .child(title),
+                    )
+                    .child(div().text_size(px(11.)).text_color(p.fg_dim).whitespace_nowrap().child(sub)),
+            )
+            .child(
+                row_button(("claude-revert-turn", i), Glyph::Discard, "Revert what this prompt changed", p)
+                    .debug_selector(move || format!("claude-revert-turn-{i}"))
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        this.act(w, cx, move |ws, w, cx| bridge::revert_turn(ws, id, w, cx))
+                    })),
+            )
+            .child(
+                row_button(("claude-accept-turn", i), Glyph::Stage, "Accept what this prompt changed", p)
+                    .debug_selector(move || format!("claude-accept-turn-{i}"))
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        this.act(w, cx, move |ws, w, cx| bridge::accept_turn(ws, id, w, cx))
+                    })),
+            )
+            .into_any_element()
     }
 }
 
@@ -425,7 +514,15 @@ impl Render for ChangesPanel {
             rows.push(look::separator(&p).mx(px(8.)).into_any_element());
         }
         let busy_path = changes.busy().map(|a| a.path.clone());
-        for (ix, f) in changes.set.files.iter().enumerate() {
+        // By turn, the newest first: each prompt, with what it changed under it.
+        let mut order: Vec<usize> = (0..changes.set.files.len()).collect();
+        order.sort_by_key(|&i| (std::cmp::Reverse(changes.set.files[i].turn), i));
+        let mut last_turn = None;
+        for (ix, f) in order.into_iter().map(|i| (i, &changes.set.files[i])) {
+            if last_turn != Some(f.turn) {
+                last_turn = Some(f.turn);
+                rows.push(self.turn_header(changes, f.turn, f.agent, &p, cx));
+            }
             let (name, dir) = changes.display(&f.path);
             let open = changes.expanded.contains(&f.path);
             let group: SharedString = format!("claude-file-{ix}").into();

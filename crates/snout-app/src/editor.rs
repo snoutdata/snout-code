@@ -38,7 +38,9 @@ pub mod settings_lang;
 mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
-pub use claude::{Answer, ClaudeRequest, LIVE_TICK, Outcome, Presence, Proposal, Review, STREAM_TICK, Writer};
+pub use claude::{
+    AgentCard, Answer, ClaudeRequest, LIVE_TICK, LaneRun, Outcome, Presence, Proposal, Review, STREAM_TICK, Writer,
+};
 pub use inlay::{ParamHint, argument_at, hint_label, is_param_hint};
 pub use lang_features::{class_file_name, is_class_file_path};
 pub use refactor::{Refactoring, new_name};
@@ -227,6 +229,8 @@ pub enum EditorEvent {
     CaretMoved,
     /// Something to do with Claude Code's changes (a key, a button of the tab's bar).
     Claude(ClaudeRequest),
+    /// Who wrote which lines moved with the text typed here ([`EditorPanel::agent_lines`]).
+    AgentLines,
 }
 
 pub struct EditorPanel {
@@ -285,6 +289,17 @@ pub struct EditorPanel {
     /// A change Claude proposes, under review, and the ones waiting after it.
     pub review: Option<Review>,
     pub queue: VecDeque<Proposal>,
+    /// Who wrote which lines this session (the ledger's record of this file, carried along as
+    /// the text changes here), and the ledger's edits it points into.
+    pub agent_lines: Option<crate::claude_ide::ledger::Owners>,
+    pub agent_edits: Arc<Vec<crate::claude_ide::ledger::EditRecord>>,
+    /// The agents' lane in the gutter as drawn last: each run's lines, its edit, where.
+    agent_painted: Rc<RefCell<Vec<claude::LanePainted>>>,
+    /// The card of an agent's mark under the pointer, and whether the pointer is on it.
+    pub agent_card: Option<claude::AgentCard>,
+    card_hovered: bool,
+    /// Annotate with Agents: who wrote which lines, beside them.
+    pub annotate: bool,
     /// An agent changed the file while the editor did not follow: a dot on the tab.
     pub touched: bool,
     /// The agent behind the changes waiting for review here, for their colour.
@@ -309,8 +324,6 @@ pub struct EditorPanel {
     pub claude_hunks: Arc<Vec<crate::claude_ide::review::Hunk>>,
     /// Claude's changes shown inline, the bar above them.
     pub claude_diff: bool,
-    /// The Claude marks drawn on the last frame: the hunk's first new line and where.
-    pub claude_painted: Rc<RefCell<Vec<ClaudeMark>>>,
     /// When the user last typed here, and how many changes the app made that the editor
     /// has yet to report (they are not the user's typing).
     pub edited_at: Option<Instant>,
@@ -494,6 +507,12 @@ impl EditorPanel {
             review: None,
             queue: VecDeque::new(),
             touched: false,
+            agent_lines: None,
+            agent_edits: Arc::new(Vec::new()),
+            agent_painted: Default::default(),
+            agent_card: None,
+            card_hovered: false,
+            annotate: false,
             claude_agent: None,
             presence: None,
             fades: Vec::new(),
@@ -506,7 +525,6 @@ impl EditorPanel {
             claude_base: None,
             claude_hunks: Arc::new(Vec::new()),
             claude_diff: false,
-            claude_painted: Rc::new(RefCell::new(Vec::new())),
             edited_at: None,
             writing: 0,
             _review_task: None,
@@ -692,7 +710,11 @@ impl EditorPanel {
 
     /// Mark the gutter again once typing pauses.
     fn diff_soon(&mut self, cx: &mut Context<Self>) {
-        if self.head.is_none() && self.changes.is_empty() && self.claude_base.is_none() && self.claude_hunks.is_empty()
+        if self.head.is_none()
+            && self.changes.is_empty()
+            && self.claude_base.is_none()
+            && self.claude_hunks.is_empty()
+            && self.agent_lines.is_none()
         {
             return;
         }
@@ -713,22 +735,32 @@ impl EditorPanel {
             self.claude_hunks = Arc::new(Vec::new());
             cx.notify();
         }
-        if head.is_none() && base.is_none() {
+        let owners = self.agent_lines.clone();
+        if head.is_none() && base.is_none() && owners.is_none() {
             return;
         }
         let text = self.state.read(cx).text().to_string();
         let revision = self.revision;
         self._diff = Some(cx.spawn(async move |this, cx| {
-            let (changes, claude) = cx
+            let (changes, claude, owners) = cx
                 .background_executor()
                 .spawn(async move {
                     let changes = head.map(|head| snout_core::gutter::line_changes(&head, &text));
                     let claude = base.map(|base| crate::claude_ide::review::hunks(&base, &text));
-                    (changes, claude)
+                    // Who wrote which lines, moved with what was typed since.
+                    let owners = owners.map(|o| o.to(&text));
+                    (changes, claude, owners)
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.revision == revision {
+                    if let Some(o) = owners {
+                        let moved = this.agent_lines.as_ref().is_some_and(|c| !Arc::ptr_eq(&c.text, &o.text));
+                        this.agent_lines = Some(o);
+                        if moved {
+                            cx.emit(EditorEvent::AgentLines);
+                        }
+                    }
                     if let Some(changes) = changes {
                         this.changes = Arc::new(changes);
                     }
@@ -1184,9 +1216,10 @@ impl EditorPanel {
         // Under review, the gutter shows the proposed change instead of Git's.
         let changes = self.review_gutter().map_or_else(|| self.changes.clone(), Arc::new);
         let (state, painted) = (self.state.clone(), self.painted.clone());
-        // Over Git's marks, the lines Claude changed and nobody has reviewed yet.
-        let claude = (self.review.is_none() && self.claude_base.is_some()).then(|| self.claude_hunks.clone());
-        let (claude_painted, claude_color) = (self.claude_painted.clone(), p.claude().mark);
+        // In a lane of their own, left of Git's bars: the lines the agents wrote.
+        let lane = self.agent_lane(cx);
+        let (agent_painted, panel) = (self.agent_painted.clone(), p.panel);
+        let glyph_font = look::ui_font(cx);
         canvas(
             |_, _, _| {},
             move |_, _, window, cx| {
@@ -1200,26 +1233,14 @@ impl EditorPanel {
                     paint_mark(*kind, *b, color, window);
                 }
                 *painted.borrow_mut() = marks;
-                let mut drawn = Vec::new();
-                if let Some(hunks) = &claude {
-                    let runs = claude::hunk_changes(hunks);
-                    for ((kind, b), first) in gutter_marks(state.read(cx), &runs.0).into_iter().zip(runs.1) {
-                        let wide =
-                            Bounds::new(point(b.left() - px(0.5), b.top()), size(b.size.width + px(1.), b.size.height));
-                        paint_mark(kind, if kind == LineChangeKind::Deleted { b } else { wide }, claude_color, window);
-                        drawn.push((first, b));
-                    }
-                }
-                *claude_painted.borrow_mut() = drawn;
+                let drawn = claude::paint_lane(&state, &lane, panel, &glyph_font, window, cx);
+                *agent_painted.borrow_mut() = drawn;
             },
         )
         .absolute()
         .inset_0()
     }
 }
-
-/// A Claude mark in the gutter: its change's first line, and where it is drawn.
-pub type ClaudeMark = (usize, Bounds<Pixels>);
 
 /// A mark in the gutter: what changed, and where it is drawn.
 pub type GutterMark = (LineChangeKind, Bounds<Pixels>);
@@ -1506,6 +1527,7 @@ impl Render for EditorPanel {
                     .children(self.hint_popup(cx))
                     .children(self.choices_popup(cx))
                     .children(chip)
+                    .children(self.agent_card_view(cx))
                     .children(self.context.render(cx)),
             )
     }

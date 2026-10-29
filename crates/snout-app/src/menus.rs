@@ -266,6 +266,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Revert Claude Change at Caret", Box::new(crate::claude_ide::RevertClaudeHunk)),
         ("Accept All Claude Changes", Box::new(crate::claude_ide::AcceptAllClaude)),
         ("Revert All Claude Changes", Box::new(crate::claude_ide::RevertAllClaude)),
+        ("Show Agent Changes", Box::new(crate::claude_ide::ShowAgentChanges)),
+        ("Annotate with Agents", Box::new(crate::claude_ide::AnnotateWithAgents)),
         ("Undo", Box::new(Undo)),
         ("Redo", Box::new(Redo)),
         ("Zoom In", Box::new(ZoomIn)),
@@ -444,6 +446,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Send Selection to Claude", crate::editor::SendToClaude),
             MenuItem::action("Accept All Claude Changes", crate::claude_ide::AcceptAllClaude),
             MenuItem::action("Revert All Claude Changes", crate::claude_ide::RevertAllClaude),
+            MenuItem::action("Show Agent Changes", crate::claude_ide::ShowAgentChanges),
+            MenuItem::action("Annotate with Agents", crate::claude_ide::AnnotateWithAgents),
         ]),
         Menu::new("Navigate").items([
             MenuItem::action("Go to Class…", GoToClass),

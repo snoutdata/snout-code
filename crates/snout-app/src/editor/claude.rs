@@ -223,22 +223,6 @@ pub struct Flash {
     pub color: Option<gpui::Hsla>,
 }
 
-/// The gutter runs of `hunks` (Claude's unreviewed changes) and each one's first line.
-pub fn hunk_changes(hunks: &[Hunk]) -> (Vec<LineChange>, Vec<usize>) {
-    let mut runs = Vec::new();
-    let mut first = Vec::new();
-    for h in hunks {
-        let kind = match (h.old_lines.is_empty(), h.new_lines.is_empty()) {
-            (_, true) => LineChangeKind::Deleted,
-            (true, false) => LineChangeKind::Added,
-            (false, false) => LineChangeKind::Modified,
-        };
-        runs.push(LineChange { kind, lines: h.new_lines.clone() });
-        first.push(h.new_lines.start);
-    }
-    (runs, first)
-}
-
 impl Flash {
     fn strength(&self) -> f32 {
         let t = (self.step as f32 / FLASH_STEPS as f32).clamp(0., 1.);
@@ -530,7 +514,9 @@ impl EditorPanel {
             }
         }
         let tint = self.agent_tint(cx);
-        if self.review.is_none()
+        let notes = self.annotations(cx);
+        if notes.is_empty()
+            && self.review.is_none()
             && self.flash.is_none()
             && presence.is_none()
             && written.is_empty()
@@ -648,6 +634,49 @@ impl EditorPanel {
                         window.paint_quad(gpui::fill(rect, color));
                     }
                     let ts = window.text_system().clone();
+                    // Annotate with Agents: who wrote the run, at its first line, on the right.
+                    let mut chips = Vec::new();
+                    {
+                        let s = state.read(cx);
+                        let text = s.text();
+                        let lines = text.lines_len();
+                        let rows = s.visible_row_range();
+                        for (line, label, color) in &notes {
+                            let Some(rows) = rows.clone() else { break };
+                            let map = s.display_map();
+                            let first = map.display_row_to_buffer_line(rows.start);
+                            let last = map.display_row_to_buffer_line(rows.end.saturating_sub(1).max(rows.start)) + 1;
+                            if *line < first || *line >= last.min(lines) {
+                                continue;
+                            }
+                            let at = text.line_start_offset(*line);
+                            let Some(b) = s.range_to_bounds(&(at..at)) else { continue };
+                            let run = TextRun {
+                                len: label.len(),
+                                font: gpui::font(label_font.clone()),
+                                color: *color,
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            };
+                            let shaped = ts.shape_line(label.clone().into(), px(10.5), &[run], None);
+                            let (w, h) = (shaped.width + px(12.), px(16.));
+                            let chip =
+                                gpui::Bounds::new(point(bounds.right() - w - px(22.), b.top() + px(1.)), size(w, h));
+                            chips.push((chip, shaped, *color));
+                        }
+                    }
+                    for (chip, shaped, color) in chips {
+                        window.paint_quad(gpui::fill(chip, mix(color, 0.16, panel)).corner_radii(px(8.)));
+                        let _ = shaped.paint(
+                            point(chip.left() + px(6.), chip.top() + px(1.)),
+                            px(14.),
+                            TextAlign::Left,
+                            None,
+                            window,
+                            cx,
+                        );
+                    }
                     for (y, n) in labels {
                         let label = if n == 1 { "1 line removed".to_owned() } else { format!("{n} lines removed") };
                         let run = TextRun {
@@ -774,7 +803,7 @@ impl EditorPanel {
 
     /// The soft tint of the lines agents changed and nobody has reviewed yet, in each
     /// agent's colour (Claude's when the ledger does not say).
-    pub(super) fn agent_tint(&self, cx: &App) -> Vec<(Range<usize>, gpui::Hsla)> {
+    pub fn agent_tint(&self, cx: &App) -> Vec<(Range<usize>, gpui::Hsla)> {
         if self.review.is_some() || self.claude_base.is_none() || self.live.is_some() {
             return Vec::new();
         }
@@ -1294,17 +1323,7 @@ impl EditorPanel {
             .on_action(cx.listener(|this, _: &PrevClaudeChange, w, cx| this.step_claude_change(false, w, cx)))
             .on_action(cx.listener(|this, _: &AcceptClaudeHunk, _, cx| this.claude_hunk_request(true, cx)))
             .on_action(cx.listener(|this, _: &RevertClaudeHunk, _, cx| this.claude_hunk_request(false, cx)))
-    }
-
-    /// The gutter's tooltip over a Claude mark.
-    pub(super) fn claude_tip_at(&self, at: gpui::Point<gpui::Pixels>) -> Option<(u32, String)> {
-        let painted = self.claude_painted.borrow();
-        let (line, _) = painted.iter().find(|(_, b)| {
-            let grown =
-                gpui::Bounds::new(point(b.left() - px(3.), b.top()), size(b.size.width + px(6.), b.size.height));
-            grown.contains(&at)
-        })?;
-        Some((*line as u32, "Changed by Claude, not reviewed yet\n⌥⌘Y keeps the change, ⌥⌘Z reverts it".to_owned()))
+            .on_action(cx.listener(|this, _: &crate::claude_ide::AnnotateWithAgents, _, cx| this.toggle_annotate(cx)))
     }
 
     /// The bar over a tab showing Claude's changes inline: how much, keep or revert them.
@@ -1406,5 +1425,382 @@ fn lit_lines(h: &Hunk, after: &str) -> Range<usize> {
         at..at + 1
     } else {
         h.new_lines.clone()
+    }
+}
+
+// ----- Who wrote which lines: the agents' lane in the gutter, its card, Annotate ----------
+
+/// A run of lines in the agents' lane: the lines (empty where lines were only taken out),
+/// the agent's colour and mark, whether they still wait for review, and the ledger's edit.
+#[derive(Clone, Debug)]
+pub struct LaneRun {
+    pub lines: Range<usize>,
+    pub color: gpui::Hsla,
+    pub glyph: char,
+    pub unreviewed: bool,
+    pub edit: Option<u32>,
+}
+
+/// The card of an agent's mark: the run it is about, and where the pointer found it.
+#[derive(Clone, Debug)]
+pub struct AgentCard {
+    pub lines: Range<usize>,
+    pub edit: Option<u32>,
+    pub at: gpui::Point<gpui::Pixels>,
+}
+
+/// A run of the lane as drawn: its lines, its edit, where (for the pointer).
+pub type LanePainted = (Range<usize>, Option<u32>, gpui::Bounds<gpui::Pixels>);
+
+/// Width of the lane's bar, and how far left of the code it sits (left of Git's bar).
+const LANE_W: f32 = 3.;
+const LANE_GAP: f32 = 14.;
+
+/// Draw the agents' lane: a bar in each agent's colour beside the lines it wrote (full
+/// while they wait for review, paler after), a bead with the agent's mark where each run
+/// begins, a wedge where it took lines out. Returns where each run went, for the pointer.
+pub fn paint_lane(
+    state: &gpui::Entity<gpui_component::input::EditorState>,
+    lane: &[LaneRun],
+    panel: gpui::Hsla,
+    font: &gpui::SharedString,
+    window: &mut Window,
+    cx: &mut App,
+) -> Vec<LanePainted> {
+    let mut out = Vec::new();
+    // Where each run goes, worked out first; then painted (the beads' marks need `cx`).
+    let mut beads: Vec<(gpui::Point<gpui::Pixels>, gpui::Hsla, char)> = Vec::new();
+    let state = state.read(cx);
+    let (Some(rows), Some(line_height)) = (state.visible_row_range(), state.line_height()) else { return out };
+    let text = state.text();
+    let lines = text.lines_len();
+    let map = state.display_map();
+    let first = map.display_row_to_buffer_line(rows.start);
+    let last = (map.display_row_to_buffer_line(rows.end.saturating_sub(1).max(rows.start)) + 1).min(lines);
+    let scroll_x = state.scroll_offset().x.min(px(0.));
+    let top_of = |line: usize| {
+        let at = text.line_start_offset(line.min(lines.saturating_sub(1)));
+        state.range_to_bounds(&(at..at)).map(|b| {
+            let x = b.left() - scroll_x - px(LANE_GAP + LANE_W);
+            if line >= lines { (x, b.top() + line_height) } else { (x, b.top()) }
+        })
+    };
+    for run in lane {
+        let color = if run.unreviewed { run.color } else { run.color.opacity(0.45) };
+        if run.lines.is_empty() {
+            let at = run.lines.start;
+            if !(first..=last).contains(&at) {
+                continue;
+            }
+            let Some((x, y)) = top_of(at) else { continue };
+            let b = gpui::Bounds::new(point(x - px(1.), y - px(4.)), size(px(6.), px(8.)));
+            let mut path = gpui::PathBuilder::fill();
+            path.move_to(b.origin);
+            path.line_to(point(b.right(), b.center().y));
+            path.line_to(b.bottom_left());
+            path.close();
+            if let Ok(path) = path.build() {
+                window.paint_path(path, color);
+            }
+            out.push((run.lines.clone(), run.edit, b));
+            continue;
+        }
+        let (a, b) = (run.lines.start.max(first), run.lines.end.min(last));
+        if a >= b {
+            continue;
+        }
+        let (Some((x, top)), Some((_, bottom))) = (top_of(a), top_of(b - 1)) else { continue };
+        let bar = gpui::Bounds::new(point(x, top + px(1.)), size(px(LANE_W), bottom + line_height - top - px(2.)));
+        window.paint_quad(gpui::fill(bar, color).corner_radii(px(1.5)));
+        // The bead with the agent's mark, where the run begins.
+        if run.lines.start >= first {
+            beads.push((point(x + px(LANE_W / 2.), top + line_height / 2.), color, run.glyph));
+        }
+        let hit = gpui::Bounds::new(point(x - px(5.), top), size(px(LANE_W + 10.), bottom + line_height - top));
+        out.push((run.lines.clone(), run.edit, hit));
+    }
+    let ts = window.text_system().clone();
+    for (center, color, glyph) in beads {
+        let r = px(5.5);
+        let bead = gpui::Bounds::new(point(center.x - r, center.y - r), size(r * 2., r * 2.));
+        window.paint_quad(gpui::fill(bead, panel).corner_radii(r));
+        let inner = gpui::Bounds::new(
+            point(center.x - r + px(1.), center.y - r + px(1.)),
+            size(r * 2. - px(2.), r * 2. - px(2.)),
+        );
+        window.paint_quad(gpui::fill(inner, color).corner_radii(r - px(1.)));
+        let glyph = glyph.to_string();
+        let tr = TextRun {
+            len: glyph.len(),
+            font: gpui::font(font.clone()),
+            color: gpui::white(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let shaped = ts.shape_line(glyph.into(), px(7.5), &[tr], None);
+        let origin = point(center.x - shaped.width / 2., center.y - px(5.));
+        let _ = shaped.paint(origin, px(10.), TextAlign::Left, None, window, cx);
+    }
+    out
+}
+
+impl EditorPanel {
+    /// The agents' lane: the runs of lines the ledger puts down to an agent, and the
+    /// unreviewed changes it has no record of (in the colour of the file's agent).
+    pub fn agent_lane(&self, cx: &App) -> Vec<LaneRun> {
+        if self.review.is_some() {
+            return Vec::new();
+        }
+        let unreviewed: Vec<Range<usize>> = if self.claude_base.is_some() {
+            self.claude_hunks.iter().map(|h| h.new_lines.clone()).collect()
+        } else {
+            Vec::new()
+        };
+        let overlaps = |r: &Range<usize>| unreviewed.iter().any(|u| u.start < r.end && r.start < u.end);
+        let p = palette(cx);
+        let mut out: Vec<LaneRun> = Vec::new();
+        if let Some(o) = &self.agent_lines {
+            for (lines, id) in o.runs() {
+                let agent = self.agent_edits.get(id as usize).map(|e| crate::agents::by_id(&e.agent, cx));
+                let agent = agent.or_else(|| self.claude_agent.clone()).unwrap_or_else(crate::agents::Agent::claude);
+                let unreviewed = overlaps(&lines);
+                out.push(LaneRun { color: agent.color(&p), glyph: agent.glyph, unreviewed, edit: Some(id), lines });
+            }
+        }
+        let fallback = self.claude_agent.clone().unwrap_or_else(crate::agents::Agent::claude);
+        for h in self.claude_hunks.iter().filter(|_| self.claude_base.is_some()) {
+            let r = h.new_lines.clone();
+            let covered = !r.is_empty() && out.iter().any(|o| o.lines.start <= r.start && r.end <= o.lines.end);
+            if !covered {
+                out.push(LaneRun {
+                    lines: r,
+                    color: fallback.color(&p),
+                    glyph: fallback.glyph,
+                    unreviewed: true,
+                    edit: None,
+                });
+            }
+        }
+        out
+    }
+
+    /// The pointer moved over the editor: the card of the agent's mark under it shows, and
+    /// stays while the pointer is on the card.
+    pub(super) fn agent_hover(&mut self, at: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        let hit = self.agent_painted.borrow().iter().find(|(_, _, b)| b.contains(&at)).cloned();
+        match hit {
+            Some((lines, edit, b)) => {
+                if self.agent_card.as_ref().is_none_or(|c| c.lines != lines) {
+                    self.agent_card = Some(AgentCard { lines, edit, at: point(b.right() + px(2.), b.top()) });
+                    cx.notify();
+                }
+            }
+            None if !self.card_hovered && self.agent_card.is_some() => {
+                self.agent_card = None;
+                cx.notify();
+            }
+            None => {}
+        }
+    }
+
+    /// The change (hunk) of the agents' that the run `lines` is in.
+    fn hunk_of(&self, lines: &Range<usize>) -> Option<Hunk> {
+        self.claude_base.as_ref()?;
+        self.claude_hunks
+            .iter()
+            .find(|h| {
+                (h.new_lines.start < lines.end.max(lines.start + 1)
+                    && lines.start < h.new_lines.end.max(h.new_lines.start + 1))
+                    || h.new_lines.start == lines.start
+            })
+            .cloned()
+    }
+
+    /// The card of an agent's mark: who changed the lines and when, the prompt behind it,
+    /// and Accept, Revert and Show Diff for that change.
+    pub(super) fn agent_card_view(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        use crate::components::IconName;
+        let card = self.agent_card.as_ref()?;
+        let p = palette(cx);
+        let edit = card.edit.and_then(|id| self.agent_edits.get(id as usize)).cloned();
+        let agent = edit
+            .as_ref()
+            .map(|e| crate::agents::by_id(&e.agent, cx))
+            .or_else(|| self.claude_agent.clone())
+            .unwrap_or_else(crate::agents::Agent::claude);
+        let color = agent.color(&p);
+        let when = edit.as_ref().map(|e| crate::claude_ide::ledger::clock(e.time()));
+        let title = match &when {
+            Some(t) => format!("Changed by {} at {t}", agent.short),
+            None => format!("Changed by {}", agent.short),
+        };
+        let prompt = edit.as_ref().and_then(|e| e.prompt.clone());
+        let hunk = self.hunk_of(&card.lines);
+        let lines = card.lines.clone();
+        let what = if lines.is_empty() {
+            "Lines taken out here".to_owned()
+        } else if lines.len() == 1 {
+            format!("Line {}", lines.start + 1)
+        } else {
+            format!("Lines {}\u{2013}{}", lines.start + 1, lines.end)
+        };
+        let (h1, h2, h3) = (hunk.clone(), hunk.clone(), hunk.clone());
+        let body = div()
+            .id("agent-card")
+            .debug_selector(|| "agent-card".into())
+            .occlude()
+            .w(px(320.))
+            .p(px(10.))
+            .flex()
+            .flex_col()
+            .gap(px(7.))
+            .rounded(px(8.))
+            .bg(p.card)
+            .border_1()
+            .border_color(mix(color, 0.45, p.border))
+            .shadow_lg()
+            .font_family(look::ui_font(cx))
+            .text_size(px(12.5))
+            .text_color(p.fg)
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                this.card_hovered = *hovered;
+                if !*hovered {
+                    this.agent_card = None;
+                }
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(22.))
+                            .rounded(px(6.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(mix(color, 0.2, p.card))
+                            .child(crate::components::icon(agent.icon, 13., color)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(div().font_weight(gpui::FontWeight::MEDIUM).child(title))
+                            .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(what)),
+                    )
+                    .when(hunk.is_none(), |d| d.child(look::chip("Reviewed", p.ok, &p))),
+            )
+            .when_some(prompt, |d, prompt| {
+                d.child(
+                    div()
+                        .flex()
+                        .gap(px(6.))
+                        .px(px(8.))
+                        .py(px(5.))
+                        .rounded(px(5.))
+                        .bg(p.wash(color))
+                        .child(crate::components::icon(IconName::MessageSquare, 12., color))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(px(12.))
+                                .line_height(px(16.))
+                                .text_color(p.fg)
+                                .child(format!("\u{201c}{prompt}\u{201d}")),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(6.))
+                    .child(
+                        look::small_button("agent-card-diff", IconName::GitCompare, "Show Diff", &p)
+                            .debug_selector(|| "agent-card-diff".into())
+                            .h(px(24.))
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                let line = h1.as_ref().map_or(lines.start, |h| h.new_lines.start);
+                                this.agent_card = None;
+                                this.go_to_claude_line(line, w, cx);
+                            })),
+                    )
+                    .when_some(h2, |d, h| {
+                        let lines = h.new_lines.clone();
+                        d.child(
+                            look::small_button("agent-card-revert", IconName::Undo2, "Revert", &p)
+                                .debug_selector(|| "agent-card-revert".into())
+                                .h(px(24.))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.agent_card = None;
+                                    cx.emit(EditorEvent::Claude(ClaudeRequest::RevertHunk(lines.clone())));
+                                })),
+                        )
+                    })
+                    .when_some(h3, |d, h| {
+                        let lines = h.new_lines.clone();
+                        d.child(
+                            div()
+                                .id("agent-card-accept")
+                                .debug_selector(|| "agent-card-accept".into())
+                                .flex_none()
+                                .h(px(24.))
+                                .px(px(10.))
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
+                                .rounded(px(6.))
+                                .bg(p.accent)
+                                .text_color(p.on_accent)
+                                .cursor_pointer()
+                                .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
+                                .child(crate::components::icon(IconName::Check, 13., p.on_accent))
+                                .child("Accept")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.agent_card = None;
+                                    cx.emit(EditorEvent::Claude(ClaudeRequest::AcceptHunk(lines.clone())));
+                                })),
+                        )
+                    }),
+            );
+        Some(
+            gpui::deferred(gpui::anchored().position(card.at).snap_to_window_with_margin(px(8.)).child(body))
+                .with_priority(2)
+                .into_any_element(),
+        )
+    }
+
+    /// Annotate with Agents: show (or stop showing) who wrote which lines this session.
+    pub fn toggle_annotate(&mut self, cx: &mut Context<Self>) {
+        self.annotate = !self.annotate;
+        cx.notify();
+    }
+
+    /// What Annotate with Agents shows: at the first line of each run, who wrote it and when,
+    /// in the agent's colour.
+    pub fn annotations(&self, cx: &App) -> Vec<(usize, String, gpui::Hsla)> {
+        if !self.annotate {
+            return Vec::new();
+        }
+        let p = palette(cx);
+        let Some(o) = &self.agent_lines else { return Vec::new() };
+        o.runs()
+            .into_iter()
+            .filter_map(|(lines, id)| {
+                let e = self.agent_edits.get(id as usize)?;
+                let agent = crate::agents::by_id(&e.agent, cx);
+                let label = format!("{} \u{00b7} {}", agent.short, crate::claude_ide::ledger::clock(e.time()));
+                Some((lines.start, label, agent.color(&p)))
+            })
+            .collect()
     }
 }

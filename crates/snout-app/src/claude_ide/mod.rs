@@ -13,6 +13,7 @@
 pub mod bridge;
 pub mod changes;
 pub mod hooks;
+pub mod ledger;
 pub mod lockfile;
 pub mod panel;
 pub mod review;
@@ -26,12 +27,39 @@ use std::path::PathBuf;
 
 use gpui::{Global, actions};
 
-// Claude's changes: the next and previous one (in the file, then in the next file it
-// changed), keep or revert the one at the caret, keep or revert all of them.
+// The agents' changes: the next and previous one (in the file, then in the next file
+// changed), keep or revert the one at the caret, keep or revert all of them; show the Agent
+// Changes window; show who wrote which lines.
 actions!(
     claude,
-    [NextClaudeChange, PrevClaudeChange, AcceptClaudeHunk, RevertClaudeHunk, AcceptAllClaude, RevertAllClaude]
+    [
+        NextClaudeChange,
+        PrevClaudeChange,
+        AcceptClaudeHunk,
+        RevertClaudeHunk,
+        AcceptAllClaude,
+        RevertAllClaude,
+        ShowAgentChanges,
+        AnnotateWithAgents
+    ]
 );
+
+/// The files with agents' changes nobody has reviewed yet, and the agent of each: the
+/// Project tree's dots.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AgentFiles(pub std::collections::HashMap<PathBuf, &'static str>);
+
+impl Global for AgentFiles {}
+
+/// What the status bar says of the agents' changes: how many files wait for review, and
+/// the agent that changed the most of them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AgentSummary {
+    pub files: usize,
+    pub agent: Option<&'static str>,
+}
+
+impl Global for AgentSummary {}
 
 /// Where the window's server writes its lock file. Set by the app; tests set a scratch
 /// folder, and without it no server starts.

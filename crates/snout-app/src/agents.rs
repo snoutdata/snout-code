@@ -149,6 +149,16 @@ impl Agent {
     }
 }
 
+/// The agent behind `id` as the window knows it (a custom agent with the name the
+/// settings give it).
+pub fn by_id(id: &str, cx: &App) -> Agent {
+    let console = console_agent(cx);
+    if console.id == id {
+        return console;
+    }
+    Agent::of(id, &crate::settings::Settings::default())
+}
+
 /// Every agent the app knows, for the settings.
 pub fn known(s: &crate::settings::Settings) -> Vec<Agent> {
     vec![Agent::claude(), Agent::codex(), Agent::custom(&s.custom_agent_name, &s.custom_agent_command)]
