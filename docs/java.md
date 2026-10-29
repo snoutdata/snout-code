@@ -18,6 +18,10 @@ Completion opens as you type a name or a `.`. Press ⌃Space to open it anywhere
 
 When you accept a class the file does not import yet, SnoutCode adds the import.
 
+![Completion of a field's methods](images/java-completion.png)
+
+*Completion after `productService.`: the methods, with their types.*
+
 ## Parameter hints
 
 When you type `(` or `,` in a call, the method's signature shows over the caret with the current parameter in bold. It stays while the caret is on that line. Press ⇧⌘Space (Code ▸ Show Parameter Hints) to show it again.
@@ -25,6 +29,10 @@ When you type `(` or `,` in a call, the method's signature shows over the caret 
 ## Hover
 
 Rest the pointer on a name to see its type and documentation. On a squiggle, you see the problem's message.
+
+![Hover on a method call](images/java-hover.png)
+
+*The pointer on `withTax`: its signature and its Javadoc.*
 
 ## Go to a definition
 
@@ -38,17 +46,29 @@ To find a class, method or field by name instead, use Go to Symbol (⌘T) or Sea
 
 Put the caret on a name and press ⇧F12 (Code ▸ Find References). Every use of it is listed in the **References** window, in the bottom dock, titled `References to <name>: <n> results`. Each row shows the file, the line and column, and the line of code. Click a row to go there.
 
+![The References window](images/java-references.png)
+
+*The references to `ProductService`, in the main and the test sources.*
+
 ## Rename
 
 1. Put the caret on a name and press F2 (Code ▸ Rename Symbol…).
 2. Type the new name in the field that opens over the caret.
 3. Press ↩ to rename it everywhere the engine finds it, in every file. Esc cancels.
 
+![Renaming a method](images/java-rename.png)
+
+*Renaming `place` to `placeOrder`.*
+
 Files that are open take the change as an edit you can undo. Files that are not open are changed on disk.
 
 ## Quick fixes
 
 Press ⌘. (Code ▸ Quick Fix…) to list the fixes and actions the engine offers at the caret, such as adding a missing import. Choose one to apply it. Quick Fix… is also in the editor's right click menu.
+
+![Quick fixes for a class that is not imported](images/java-quick-fix.png)
+
+*The fixes for `LocalDate`, which the file does not import: first, the import.*
 
 ## Organize imports
 
@@ -68,6 +88,10 @@ The engine checks the files as you type.
 ### The Problems window
 
 Press ⇧⌘M (Code ▸ Show Problems) to open the **Problems** window in the bottom dock. It lists every error and warning in the project, errors first, then by file and line. Its header counts them, such as `2 errors, 5 warnings`. Click a row to go there.
+
+![The Problems window](images/java-problems.png)
+
+*Two errors in the Problems window, underlined in the code, and counted at the top right of the editor.*
 
 The Problems window also lists what the last Gradle compile reported, when you build, run or test. A compile with errors brings the Problems window forward. See [Run and debug](run-and-debug.md).
 

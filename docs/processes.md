@@ -26,6 +26,10 @@ Each line says what the process is for, and its columns give its **PID**, **Memo
 
 The foot of the window gives the totals: processes, memory and CPU.
 
+![The Processes window](images/processes-window.png)
+
+*The shop's engine, its language server, a Gradle daemon, and the application started with Run.*
+
 ## Stop or restart a process
 
 Each line offers the buttons that make sense for it:

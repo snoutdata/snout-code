@@ -12,6 +12,10 @@ Claude Code is installed and signed in separately. SnoutCode does not ship it.
 
 Claude Code starts in the folder of the open project. There is one session per project: switch projects and each keeps its own, still running.
 
+![The Claude Code console beside the Git view](images/claude-code-console.png)
+
+*The console beside the Git view, which shows what Claude Code changed.*
+
 ### The console's header
 
 | Control | What it does |
@@ -76,6 +80,14 @@ With **Follow** on (the default), the editor follows the files Claude Code chang
 - It never jumps while you are typing. A file that changes while you are typing, or while another file is in front, gets its turn a moment later.
 - Lines Claude changed keep a mark in the gutter until you review them. Hover the mark for the keys.
 
+![An edit by Claude Code, its removed lines struck through](images/claude-code-live-strike.png)
+
+*An edit starts: the lines it removes are struck through.*
+
+![An edit by Claude Code typing itself in](images/claude-code-live-typing.png)
+
+*Then the new text types itself in.*
+
 With **Follow** off, the editor stays where it is and a dot on a tab marks a file Claude Code changed.
 
 While Claude Code edits, a note floats over the lower right of the editor: **Claude is editing** with the file and the tool, or **Claude is waiting for your review**. Click it to open that file.
@@ -90,7 +102,9 @@ You do not need to send the selection for Claude Code to see it: while connected
 
 ## The Claude Changes window
 
-![The Claude Changes window beside a file Claude Code changed](images/claude-changes.png)
+![The Claude Changes window beside a file Claude Code changed](images/claude-code-changes.png)
+
+*The edit done, its lines marked in the gutter; the Claude Changes window lists the session's files.*
 
 Claude Changes, on the right tool window stripe, lists what Claude Code changed in the session that you have not reviewed yet. The count on its stripe icon is the number of files.
 
@@ -114,6 +128,10 @@ Accept All Claude Changes (⌥⇧⌘Y) and Revert All Claude Changes (⌥⇧⌘Z
 ### Review in the editor
 
 A file opened from the window shows Claude's changes inline, with a bar: **Claude changed this file: 3 changes to review**. The bar has **Revert File** and **Accept File**, and × hides the inline changes.
+
+![Claude's changes inline in the editor](images/claude-code-inline.png)
+
+*A file's changes inline, with the bar to accept or revert them.*
 
 | Shortcut | Action |
 |---|---|

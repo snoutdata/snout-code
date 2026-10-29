@@ -4,7 +4,9 @@
 
 A native IDE for Java, Gradle and Spring Boot on macOS, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your Mac.
 
-![SnoutCode debugging a Java program](docs/images/debugger.png)
+![SnoutCode on a Spring Boot web shop: the Project view, the editor and the Spring window's beans](docs/images/spring-beans.png)
+
+![The debugger stopped at a breakpoint, with the values inline and the variables and watches below, in dark mode](docs/images/run-and-debug-debugger-dark.png)
 
 ## Features
 

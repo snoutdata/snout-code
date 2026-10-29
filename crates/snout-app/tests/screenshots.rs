@@ -5,8 +5,17 @@
 
 #[cfg(target_os = "macos")]
 fn main() {
+    // The user guide's shots instead, when asked for (see `screenshots/docs.rs`).
+    if let Some(projects) = std::env::var_os("SNOUT_DOCS_SHOTS") {
+        docs::run(projects.into());
+        return;
+    }
     shots::run();
 }
+
+#[cfg(target_os = "macos")]
+#[path = "screenshots/docs.rs"]
+mod docs;
 
 #[cfg(not(target_os = "macos"))]
 fn main() {

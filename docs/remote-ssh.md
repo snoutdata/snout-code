@@ -24,10 +24,16 @@ Host devbox
 1. Choose File ▸ Connect to SSH Host….
 2. Pick a host under **Recent** or **From your ssh config**, or type one (`devbox`, `me@devbox.example.com`). Click **Connect**.
 
-   ![The Connect to SSH Host dialog](images/remote-connect.png)
+   ![The Connect to SSH Host dialog](images/remote-ssh-connect.png)
+
+   *A recent host, and the hosts of the ssh config.*
 
 3. The first time, SnoutCode installs its server on the host. The status bar's background tasks show it; it takes a few seconds.
 4. A dialog browses the remote machine's folders. Type a path or go up and into folders (**Show hidden folders** lists the hidden ones too), then click **Open**.
+
+   ![The folder picker of the remote machine](images/remote-ssh-picker.png)
+
+   *The projects in the home folder of `devbox`.*
 
 The window opens again on that folder, with the host's name in the title bar. The Java engine starts there. The first time, SnoutCode downloads Java 21 for the engine and copies the engine over, which takes a minute or two.
 
@@ -36,6 +42,10 @@ If the connection fails, the dialog says why, and you can try again.
 Processes on the remote machine get the environment of your login shell there: `PATH`, `JAVA_HOME`, SDK managers and the like.
 
 ## Work on the remote machine
+
+![A project on a remote machine](images/remote-ssh-project.png)
+
+*`shop` on `devbox`: the host in the title bar, and the Java engine running there.*
 
 - File ▸ Open Project… browses the remote machine.
 - File ▸ Open Recent lists remote projects as `shop on devbox`. Pick one to connect and open it in one go.
@@ -56,6 +66,10 @@ The Claude Code console runs `claude` on the remote machine, and it connects to 
 SnoutCode notices a dropped connection when the `ssh` processes on your Mac end (killed, or because the network went) or the SSH server's side closes it. It also sends the server a ping every 15 seconds, and a connection that leaves one unanswered for 15 seconds counts as dropped.
 
 Then SnoutCode connects again by itself, trying again after a quarter of a second, then less and less often, up to every 10 seconds. The status bar and the dot by the host's name say **Reconnecting to devbox…**.
+
+![The window while the connection comes back](images/remote-ssh-reconnecting.png)
+
+*Reconnecting to `devbox`: the dot by the host's name and the status bar say so.*
 
 Builds, programs, the program you debug, terminals and the engine keep running on the remote machine meanwhile, and their output is kept for when the connection comes back.
 

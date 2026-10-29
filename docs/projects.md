@@ -74,6 +74,10 @@ windows and their sizes, and the view (Project or Git) you were on.
 Choose File ▸ New Project…, or **New Project…** on the Welcome page. The dialog makes a Gradle
 project and opens it.
 
+![The New Project dialog for a Spring Boot project](images/projects-new-spring.png)
+
+*A Spring Boot project: its name, folder, build and coordinates.*
+
 1. Pick the kind of project:
    - **Java**: an application with Gradle. SnoutCode writes it itself, so it needs no network.
    - **Spring Boot**: from start.spring.io, with the versions and dependencies it offers.
@@ -89,6 +93,10 @@ project and opens it.
 6. For a Java project, click **Create**. For Spring Boot, click **Next**, choose the
    dependencies (search them, or pick them from their groups), then click **Create**.
    **Previous** goes back.
+
+![Choosing the dependencies of a Spring Boot project](images/projects-new-dependencies.png)
+
+*The dependencies of a Spring Boot project, picked from their groups.*
 
 The dialog says what is wrong while it cannot create the project, for example "Give the
 project a name." or a folder that already exists and is not empty. Esc or **Cancel** closes it.
@@ -120,7 +128,9 @@ SnoutCode remembers which one you chose. The buttons on the right of its header:
 
 ### The Project view
 
-![The Project view of a folder with several Gradle builds](images/project-view.png)
+![The Project view of a multi-module build](images/projects-project-view.png)
+
+*The `ledger` build: its modules `api`, `app` and `core`, the Gradle scripts and the libraries.*
 
 The Project view shows:
 

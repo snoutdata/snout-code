@@ -21,6 +21,14 @@ The sheet edits a copy of your settings:
 
 ## Appearance
 
+![The Appearance page](images/settings-and-keymap-appearance.png)
+
+*The four colour themes, and light or dark.*
+
+![The Appearance page in dark mode](images/settings-and-keymap-appearance-dark.png)
+
+*The same page in dark mode, in Studio.*
+
 **Theme**
 
 - **Colors**: the colour theme. Each comes in light and dark, and the swatches show the one
@@ -103,7 +111,9 @@ Change at Caret, and Accept All and Revert All Claude Changes.
 
 ## Keymap
 
-![The Keymap page, with keys taken from another command](images/keymap.png)
+![The Keymap page, with keys taken from another command](images/settings-and-keymap-keymap.png)
+
+*Go to File given ⌘, too: the page says Settings… has those keys.*
 
 The Keymap page lists every command with its shortcuts. Type in **Search commands or
 shortcuts** to find a command by its name or by its keys.

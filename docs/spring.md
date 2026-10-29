@@ -19,7 +19,9 @@ The model is read once the engine is ready, and again shortly after you save a J
 
 ## The Spring gutter
 
-![Spring marks in the gutter, and the beans an injection could take](images/spring-injections.png)
+![The beans a constructor takes, from its mark in the gutter](images/spring-injections.png)
+
+*A click on the injection mark of `OrderService`'s constructor: the bean each parameter takes.*
 
 Java and Scala editors get a lane of Spring marks in the gutter, one per line:
 
@@ -59,6 +61,10 @@ Until the engine has imported the project, the window says "No Spring model yet"
 
 ### Beans
 
+![The Beans tab of the Spring window](images/spring-beans.png)
+
+*The shop's beans, by package.*
+
 The Beans tab lists each module, with its number of beans and how many more come from libraries. Click a module or a group to fold it open or shut.
 
 - **Group** the beans by package or by stereotype: click **By package** or **By stereotype** to switch.
@@ -68,6 +74,10 @@ The Beans tab lists each module, with its number of beans and how many more come
 Each bean shows how many places it is injected into, and chips for **Primary**, **Scala** and **XML** where they apply. Click a bean to go to its declaration.
 
 ### Endpoints
+
+![The Endpoints tab of the Spring window](images/spring-endpoints.png)
+
+*The shop's endpoints, with their methods, paths and handlers.*
 
 The Endpoints tab is a table of every request mapping: **Method**, **Path**, **Handler**, and **Module** when the endpoints come from more than one module.
 
@@ -87,6 +97,10 @@ Files named `application*.properties`, `application*.yml` or `application*.yaml`
 - **Hover** on a key: its type, description, default value, deprecation and the class that declares it.
 - **Go to definition** (F12) on a key: the `@ConfigurationProperties` field, setter or class, in your sources or in a library, and the code that reads the key.
 - **Validation** as you type: unknown keys, values that do not fit the key's type (numbers, booleans, enums, durations, data sizes, each element of a list) and deprecated keys. A value with a `${...}` placeholder is not checked, nor are keys inside a map or a list of objects.
+
+![Completion in application.yml](images/spring-yml-completion.png)
+
+*Completion under `spring.mvc` in `application.yml`, with the type of each key.*
 
 What a file knows comes from the module whose resource folder holds it: the configuration metadata of every library on its classpath, its own `@ConfigurationProperties` classes (with their Javadoc and defaults), and the keys its code reads (`@Value` placeholders, `@ConditionalOnProperty`, `getProperty("key")` calls).
 

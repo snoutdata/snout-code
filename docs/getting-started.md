@@ -57,6 +57,10 @@ Welcome page shows:
 - **Recent Projects** lists the projects you opened, with their branch and when you last
   opened them. Type in the search box to filter them.
 
+![The Welcome page](images/getting-started-welcome.png)
+
+*The Welcome page, with three recent projects.*
+
 You can also drag a folder from Finder onto the window to open it.
 
 After that, SnoutCode opens the project you had open last, with its editor tabs as you left

@@ -100,9 +100,17 @@ Outside an editor, ⇧⌘O checks out a branch instead. See [Git](git.md).
 
 Press ⇧⌘A (File ▸ Search Everywhere…), or click the magnifier at the right of the title bar. One box finds both files of the project, as Go to File does, and the matching symbols of its Java code, which follow the files.
 
+![Search Everywhere](images/editor-search-everywhere.png)
+
+*Search Everywhere for `Order`: the files first, then the classes.*
+
 ## Command palette
 
 Press ⇧⌘P (File ▸ Command Palette…) and type part of a command's name. Every command is listed with the shortcut it has where the keyboard is now. Your recent projects are commands too, as `Open Recent: shop`. ↩ runs the command.
+
+![The command palette](images/editor-command-palette.png)
+
+*The command palette: the Go to commands, with their shortcuts.*
 
 ## Zoom, soft wrap and whitespace
 

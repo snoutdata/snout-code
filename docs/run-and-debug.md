@@ -43,6 +43,10 @@ A change to a configuration from the build stands in for it. The configuration s
 
 ## The title bar
 
+![The run controls in the title bar](images/run-and-debug-title-bar.png)
+
+*`ShopApplication` running: Rerun, Debug and Stop beside its configuration.*
+
 The right side of the title bar holds:
 
 - **The configuration menu.** It shows the configuration that runs, with an icon for its kind. Open it to pick **Current File** or one of the configurations, or **Edit Configurations…**.
@@ -86,6 +90,10 @@ When nothing can run, the run's tab says why. For example:
 
 ## The Run window
 
+![A Spring Boot application in the Run window](images/run-and-debug-run-window.png)
+
+*The shop's Spring Boot application started from the title bar, its output in the Run window.*
+
 Runs show in the **Run** tool window, debug sessions in **Debug**, and Gradle tasks in **Build**. Each opens at the bottom of the window when a run starts. You can also open them from the buttons at the bottom of the left edge.
 
 Each run gets a tab, with its state at the right: **Running 0:12**, **Finished in 3.2 s**, **Failed after …** or **Stopped after …**. Starting the same thing again reuses the tab of a finished run.
@@ -123,6 +131,10 @@ Click a test to see, on the right:
 
 When the run ends, the first failed test is selected.
 
+![A test run with a failed test](images/run-and-debug-tests.png)
+
+*All the shop's tests: one failed, with what it expected and what it got.*
+
 ## Debug
 
 Start a debug session with the title bar's Debug button (⌃D), **Debug '…'** on a gutter icon, or ⌃⇧D in the editor. Tests can be debugged the same way.
@@ -138,7 +150,9 @@ Breakpoints are kept with the project, and you can set and change them while a s
 
 ### When the program stops
 
-![A program stopped at a breakpoint, with the Debug window below](images/debugger.png)
+![A program stopped at a breakpoint, with the Debug window below](images/run-and-debug-debugger.png)
+
+*Stopped in the loop of `Main`: the values inline, two watches, and the local variables.*
 
 The editor opens the file at the line where the program stopped, and shows the values of the variables used on that line and the lines above it.
 

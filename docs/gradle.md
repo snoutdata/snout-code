@@ -43,6 +43,10 @@ See [Projects](projects.md) for the Project view.
 
 ## The Gradle tool window
 
+![The Gradle window and a task's run in the Build window](images/gradle-window.png)
+
+*The `ledger` build's tasks, and `:app:run` in the Build window with each task it ran.*
+
 Open it from the **Gradle** button on the right edge of the window. It lists:
 
 1. each build,

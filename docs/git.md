@@ -10,6 +10,8 @@ The project you open is a Git repository, or a folder inside one. The Git view a
 
 ![The Git view](images/git-view.png)
 
+*The shop's changes, the diff of one file, the branches, and the history with its graph.*
+
 - **Toolbar** across the top: Open, Pull, Fetch, Push, Stage, Unstage, Discard, Delete, Refresh, Check Out…, New Branch, then the theme menu, GitHub and Claude.
 - **Left column:** the Repositories list, and below it the branches and tags.
 - **Middle:** Files and Commit side by side, Changes under them, and the Journal at the bottom.
@@ -159,6 +161,10 @@ Click a commit in the Journal to see what it did:
 - **Changes:** the diff of the selected file, with the same Unified, Side by Side and Compact choices.
 
 Press ↑ or ↓ to move to the previous or next commit. Press Esc, or click **Working tree**, to go back.
+
+![A merge commit in the Commit view](images/git-commit.png)
+
+*A merge, and the diff of a file it brought in.*
 
 ## Pull, fetch and push
 

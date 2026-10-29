@@ -1,0 +1,1246 @@
+//! The user guide's screenshots: the real app on the demo projects of `SNOUT_DOCS_SHOTS`
+//! (a folder holding `shop`, a Spring Boot web app; `ledger`, a multi-module build; and
+//! `greeter`, a small Java app; each a Git repository), with the real engine where it has
+//! something to say. Only with `SNOUT_DOCS_SHOTS` set; the PNGs go to `SNOUT_SCREENSHOT`.
+//! Each part copies the projects it uses into `~/projects` first; `HOME` is a scratch folder,
+//! so paths read as `~/projects/shop`.
+//!
+//! `scripts/docs-screenshots.sh` sets it all up and writes `docs/images`. `SNOUT_DOCS_JDK`
+//! names the JDK the builds run on; `SNOUT_DOCS_ONLY` takes only the parts it names
+//! (ledger, java, debug, welcome, wizard, settings, git, claude, palette, remote), separated
+//! by commas. `remote` needs Docker and the Linux server builds; `SNOUT_DOCS_SSH_DIR` is a
+//! short folder for ssh's control sockets.
+
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use gpui::{AnyWindowHandle, AppContext as _, Entity, HeadlessAppContext, px, size};
+use snout_app::editor::EditorPanel;
+use snout_app::model::{Action, Model};
+use snout_app::panels::Activity;
+use snout_app::settings::{Settings, ThemeChoice};
+use snout_app::workspace::{Tool, Workspace};
+
+const W: f32 = 1440.;
+const H: f32 = 900.;
+
+fn out_dir() -> PathBuf {
+    PathBuf::from(std::env::var_os("SNOUT_SCREENSHOT").expect("SNOUT_SCREENSHOT names where the shots go"))
+}
+
+fn wanted(part: &str) -> bool {
+    std::env::var("SNOUT_DOCS_ONLY").map_or(true, |only| only.split(',').any(|p| p.trim() == part))
+}
+
+fn sh(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new(args[0]).args(&args[1..]).current_dir(dir).output().unwrap();
+    assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// The home folder the app sees (`HOME`): paths under it read as `~/…`.
+fn home() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap()).canonicalize().unwrap()
+}
+
+/// A fresh copy of the demo project `name` in `~/projects`, where the shots open it.
+fn copy(projects: &Path, _part: &str, name: &str) -> PathBuf {
+    let dir = home().join("projects");
+    std::fs::create_dir_all(&dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir.join(name));
+    assert!(Command::new("cp").arg("-R").arg(projects.join(name)).arg(&dir).status().unwrap().success());
+    dir.join(name).canonicalize().unwrap()
+}
+
+/// A window of the app, headless.
+pub struct Win {
+    pub cx: HeadlessAppContext,
+    pub handle: AnyWindowHandle,
+    pub ws: Entity<Workspace>,
+    pub model: Entity<Model>,
+}
+
+impl Win {
+    fn new(settings: Settings, lang: bool) -> Self {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        cx.update(|cx| snout_app::init(&settings, cx));
+        if lang {
+            cx.update(|cx| cx.set_global(snout_app::lang::hub::LangEnabled(true)));
+        }
+        let mut win = Self::window(cx, settings);
+        win.pump(1, &mut |_| false);
+        win
+    }
+
+    /// A window in `cx` (which has the app initialised).
+    fn window(mut cx: HeadlessAppContext, settings: Settings) -> Self {
+        let model = cx.update(|cx| cx.new(|cx| Model::new(settings, None, cx)));
+        let mut ws = None;
+        let handle = cx
+            .open_window(size(px(W), px(H)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+                ws = Some(view.clone());
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        cx.allow_parking();
+        Self { cx, handle: handle.into(), ws: ws.unwrap(), model }
+    }
+
+    /// Let real time pass (the engine and Git work in other processes) while the app's tasks
+    /// run and the window draws, until `done` or `secs` are up.
+    fn pump(&mut self, secs: u64, done: &mut dyn FnMut(&mut gpui::App) -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        loop {
+            self.cx.advance_clock(Duration::from_millis(200));
+            self.cx.run_until_parked();
+            let _ = self.cx.update_window(self.handle, |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+            if self.cx.update(|cx| done(cx)) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    }
+
+    fn settle(&mut self) {
+        self.pump(1, &mut |_| false);
+    }
+
+    fn snap(&mut self, name: &str) {
+        // The status bar's message, with the home folder as `~`.
+        let home = home().to_string_lossy().into_owned();
+        let model = self.model.clone();
+        self.cx.update(|cx| {
+            model.update(cx, |m, cx| {
+                if m.message.contains(&home) {
+                    m.message = m.message.replace(&home, "~");
+                    cx.notify();
+                }
+            })
+        });
+        self.settle();
+        let image = self.cx.capture_screenshot(self.handle).expect("offscreen rendering must be available");
+        let dir = out_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        image.save(dir.join(format!("{name}.png"))).unwrap();
+        println!("docs shot {name}: ok");
+    }
+
+    fn with<R>(&mut self, f: impl FnOnce(&Entity<Workspace>, &mut gpui::Window, &mut gpui::App) -> R) -> R {
+        let ws = self.ws.clone();
+        self.cx.update_window(self.handle, |_, window, cx| f(&ws, window, cx)).unwrap()
+    }
+
+    fn act(&mut self, a: Action) {
+        let model = self.model.clone();
+        self.cx.update(|cx| model.update(cx, |m, cx| m.handle(a, cx)));
+    }
+
+    fn activity(&mut self, a: Activity) {
+        self.with(|ws, window, cx| ws.update(cx, |w, cx| w.show_activity(a, window, cx)));
+    }
+
+    fn tool(&mut self, t: Tool) {
+        self.with(|ws, window, cx| ws.update(cx, |w, cx| w.toggle_tool(t, window, cx)));
+    }
+
+    fn open(&mut self, path: &Path, at: Option<(u32, u32)>) -> Entity<EditorPanel> {
+        self.act(Action::OpenFile(path.to_owned(), at));
+        let p = path.to_owned();
+        let ws = self.ws.clone();
+        assert!(
+            self.pump(30, &mut |cx| {
+                ws.read(cx).editors(cx).iter().any(|e| e.read(cx).path == p && !e.read(cx).loading)
+            }),
+            "{} opens",
+            path.display()
+        );
+        self.editor(path)
+    }
+
+    fn editor(&mut self, path: &Path) -> Entity<EditorPanel> {
+        let ws = self.ws.clone();
+        self.cx.update(|cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == path).unwrap())
+    }
+
+    fn text(&mut self, e: &Entity<EditorPanel>) -> String {
+        self.cx.update(|cx| e.read(cx).text(cx))
+    }
+
+    /// The caret at the `nth` match of `find`, plus `offset` bytes, the editor focused.
+    fn caret(&mut self, e: &Entity<EditorPanel>, find: &str, offset: usize) -> usize {
+        let at = self.text(e).find(find).unwrap_or_else(|| panic!("{find} is in the file")) + offset;
+        let e = e.clone();
+        self.with(|_, window, cx| {
+            e.update(cx, |e, cx| {
+                e.state.update(cx, |s, cx| {
+                    s.set_selected_range(at..at, cx);
+                    s.focus(window, cx);
+                })
+            })
+        });
+        self.settle();
+        at
+    }
+
+    fn insert(&mut self, e: &Entity<EditorPanel>, text: &str) {
+        let e = e.clone();
+        self.with(|_, window, cx| e.update(cx, |e, cx| e.state.update(cx, |s, cx| s.insert(text, window, cx))));
+    }
+
+    fn set_text(&mut self, e: &Entity<EditorPanel>, text: String) {
+        let e = e.clone();
+        self.with(|_, window, cx| {
+            e.update(cx, |e, cx| {
+                e.state.update(cx, |s, cx| {
+                    let end = s.text().len();
+                    s.set_selected_range(0..end, cx);
+                    s.replace(&text, window, cx);
+                })
+            })
+        });
+        self.settle();
+    }
+
+    fn key(&mut self, keys: &'static str) {
+        for k in keys.split(' ') {
+            let ks = gpui::Keystroke::parse(k).unwrap();
+            self.with(|_, window, cx| window.dispatch_keystroke(ks, cx));
+            self.cx.run_until_parked();
+        }
+    }
+
+    /// The pointer resting on the `find` text of the editor.
+    fn hover(&mut self, e: &Entity<EditorPanel>, find: &str, offset: usize) {
+        let at = self.text(e).find(find).unwrap() + offset;
+        let e2 = e.clone();
+        let point = self.cx.update(|cx| e2.read(cx).state.read(cx).range_to_bounds(&(at..at + 1)).map(|b| b.center()));
+        let point = point.expect("the line is laid out");
+        let e3 = e.clone();
+        for _ in 0..40 {
+            self.with(|_, window, cx| {
+                window.dispatch_event(
+                    gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                        position: point,
+                        pressed_button: None,
+                        modifiers: gpui::Modifiers::none(),
+                    }),
+                    cx,
+                );
+            });
+            if self.pump(1, &mut |cx| e3.read(cx).state.read(cx).hover_popover().is_some()) {
+                return;
+            }
+        }
+        println!("docs: no hover on {find}");
+    }
+
+    fn runs(&mut self) -> Entity<snout_app::run::Runs> {
+        let ws = self.ws.clone();
+        self.cx.update(|cx| ws.read(cx).runs.clone())
+    }
+
+    fn shutdown(mut self) {
+        let ws = self.ws.clone();
+        let runs = self.runs();
+        let ids: Vec<u64> = self.cx.update(|cx| runs.read(cx).sessions.iter().map(|s| s.id).collect());
+        for id in ids {
+            self.cx.update(|cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        }
+        let r = runs.clone();
+        self.pump(20, &mut |cx| !r.read(cx).any_running());
+        let hub = self.cx.update(|cx| ws.read(cx).hub.clone());
+        self.cx.update(|cx| hub.update(cx, |h, _| h.shutdown_all()));
+        self.pump(2, &mut |_| false);
+    }
+}
+
+fn settings(theme: ThemeChoice, repos: Vec<PathBuf>, current: Option<PathBuf>) -> Settings {
+    let mut s = Settings { theme, repos, current, ..Settings::default() };
+    s.fetch_minutes = 0;
+    if let Some(jdk) = std::env::var_os("SNOUT_DOCS_JDK").map(PathBuf::from) {
+        for r in s.repos.clone() {
+            s.project_jdks.insert(r, jdk.clone());
+        }
+    }
+    s
+}
+
+pub fn run(projects: PathBuf) {
+    // SAFETY: set before any app starts; the harness runs on this thread.
+    unsafe { std::env::set_var("SNOUT_NO_FETCH", "1") };
+    let projects = projects.canonicalize().unwrap();
+    if wanted("ledger") {
+        ledger(&projects);
+    }
+    if wanted("java") {
+        shop(&projects);
+    }
+    if wanted("debug") {
+        debug(&projects, ThemeChoice::Light, "light");
+        debug(&projects, ThemeChoice::Dark, "dark");
+    }
+    if wanted("welcome") {
+        welcome(&projects, ThemeChoice::Light, "welcome-light");
+        welcome(&projects, ThemeChoice::Dark, "welcome-dark");
+    }
+    if wanted("wizard") {
+        wizard();
+    }
+    if wanted("settings") {
+        settings_pages(&projects);
+    }
+    if wanted("git") {
+        git(&projects, ThemeChoice::Light, "light");
+        git(&projects, ThemeChoice::Dark, "dark");
+    }
+    if wanted("claude") {
+        claude(&projects);
+    }
+    if wanted("palette") {
+        palette(&projects);
+    }
+    if wanted("remote") {
+        remote(&projects);
+    }
+}
+
+fn welcome(projects: &Path, theme: ThemeChoice, name: &str) {
+    let repos: Vec<PathBuf> = ["shop", "ledger", "greeter"].iter().map(|p| copy(projects, "welcome", p)).collect();
+    let mut s = settings(theme, repos.clone(), None);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    for (p, ago) in repos.iter().zip([300, 7_200, 180_000]) {
+        s.opened.insert(p.clone(), now - ago);
+    }
+    s.recent = Some(repos);
+    let mut w = Win::new(s, false);
+    w.pump(3, &mut |_| false);
+    w.snap(name);
+}
+
+fn wizard() {
+    for (page, name) in
+        [(0u8, "projects-new-java-light"), (1, "projects-new-spring-light"), (2, "projects-new-deps-light")]
+    {
+        let mut w = Win::new(settings(ThemeChoice::Light, Vec::new(), None), false);
+        w.with(|ws, window, cx| {
+            ws.update(cx, |ws, cx| ws.open_new_project(window, cx));
+            let view = ws.read(cx).new_project.clone().unwrap();
+            view.update(cx, |v, cx| {
+                v.name.update(cx, |i, cx| i.set_value(if page == 0 { "invoices" } else { "inventory" }, window, cx));
+                v.location.update(cx, |i, cx| i.set_value("/Users/alex/projects", window, cx));
+                if page > 0 {
+                    use snout_app::new_project::initializr::Catalog;
+                    let mut c = Catalog::offline(Some("3.5.7".into()));
+                    c.offline = false;
+                    c.boot = vec![
+                        ("4.0.0-RC1".into(), "4.0.0 (RC1)".into()),
+                        ("3.5.7".into(), "3.5.7".into()),
+                        ("3.4.11".into(), "3.4.11".into()),
+                    ];
+                    v.catalog = Some(c);
+                    v.kind = snout_app::new_project::Kind::SpringBoot;
+                    v.picking = page == 2;
+                    v.deps = vec!["web".into(), "data-jpa".into(), "validation".into()];
+                }
+                cx.notify();
+            });
+        });
+        w.pump(2, &mut |_| false);
+        w.snap(name);
+    }
+}
+
+fn settings_pages(projects: &Path) {
+    use snout_app::settings_view::Page;
+    for (page, theme, name) in [
+        (Page::Appearance, ThemeChoice::Light, "settings-appearance-light"),
+        (Page::Appearance, ThemeChoice::Dark, "settings-appearance-dark"),
+        (Page::Keymap, ThemeChoice::Light, "settings-keymap-light"),
+        (Page::Editor, ThemeChoice::Light, "settings-editor-light"),
+    ] {
+        let shop = copy(projects, "settings", "shop");
+        let mut w = Win::new(settings(theme, vec![shop.clone()], Some(shop)), false);
+        w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.open_settings(window, cx)));
+        w.pump(3, &mut |_| false);
+        w.with(|ws, window, cx| {
+            let sheet = ws.read(cx).settings_sheet.clone().unwrap();
+            sheet.update(cx, |s, cx| {
+                s.page = page;
+                if page == Page::Keymap {
+                    // Go to File given Settings' keys too: the page says who has them.
+                    s.draft.keymap.insert("snout::GoToFile".into(), vec!["cmd-p".into(), "cmd-,".into()]);
+                    s.taken = Some(("snout::GoToFile".into(), "cmd-,".into(), vec!["snout::OpenSettings".into()]));
+                    s.key_search.update(cx, |i, cx| i.set_value("go to", window, cx));
+                }
+                cx.notify();
+            });
+        });
+        w.pump(2, &mut |_| false);
+        w.snap(name);
+    }
+}
+
+fn git(projects: &Path, theme: ThemeChoice, mode: &str) {
+    let shop = copy(projects, "git", "shop");
+    let others: Vec<PathBuf> = ["ledger", "greeter"].iter().map(|p| copy(projects, "git", p)).collect();
+    let mut repos = vec![shop.clone()];
+    repos.extend(others);
+    let mut w = Win::new(settings(theme, repos, Some(shop.clone())), false);
+    w.activity(Activity::Git);
+    w.act(Action::Refresh);
+    w.pump(3, &mut |_| false);
+    let model = w.model.clone();
+    w.cx.update(|cx| {
+        model.update(cx, |m, cx| {
+            m.click_file("src/main/java/com/example/shop/service/PriceCalculator.java", false, false, cx)
+        })
+    });
+    w.pump(3, &mut |_| false);
+    w.snap(&format!("git-view-{mode}"));
+    if mode == "light" {
+        // A commit: the merge, and a file it brought.
+        w.cx.update(|cx| {
+            let id = model.read(cx).log.iter().find(|c| c.summary.starts_with("Merge")).unwrap().id.clone();
+            model.update(cx, |m, cx| m.handle(Action::ShowCommit(id), cx));
+        });
+        w.pump(2, &mut |_| false);
+        w.cx.update(|cx| {
+            model.update(cx, |m, cx| {
+                m.select_commit_file("src/test/java/com/example/shop/service/OrderServiceTest.java".into(), cx)
+            })
+        });
+        w.pump(3, &mut |_| false);
+        w.snap("git-commit-light");
+    }
+}
+
+const PRICE_EDIT_FROM: &str = "        if (items >= 3) {\n            return total.multiply(new BigDecimal(\"0.10\")).setScale(2, RoundingMode.HALF_UP);";
+const PRICE_EDIT_TO: &str = "        if (items >= bulkItems) {\n            return total.multiply(bulkDiscount).setScale(2, RoundingMode.HALF_UP);";
+
+fn price_v2(v1: &str) -> String {
+    v1.replace("        // Ten percent off from three items.\n", "")
+        .replace(PRICE_EDIT_FROM, PRICE_EDIT_TO)
+        .replace(
+            "    private final BigDecimal taxRate;\n",
+            "    private final BigDecimal taxRate;\n    private final int bulkItems;\n    private final BigDecimal bulkDiscount;\n",
+        )
+        .replace(
+            "    public PriceCalculator(@Value(\"${shop.tax-rate:0.20}\") BigDecimal taxRate) {\n        this.taxRate = taxRate;\n",
+            "    public PriceCalculator(\n            @Value(\"${shop.tax-rate:0.20}\") BigDecimal taxRate,\n            @Value(\"${shop.bulk.items:3}\") int bulkItems,\n            @Value(\"${shop.bulk.discount:0.10}\") BigDecimal bulkDiscount) {\n        this.taxRate = taxRate;\n        this.bulkItems = bulkItems;\n        this.bulkDiscount = bulkDiscount;\n",
+        )
+}
+
+fn fake_claude(dir: &Path, body: &str) -> PathBuf {
+    let fake = dir.parent().unwrap().join("fake-claude");
+    std::fs::write(&fake, format!("#!/bin/sh\n{body}\nsleep 60\n")).unwrap();
+    Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    fake
+}
+
+/// The console with Claude Code (a stand-in that prints what it would), and its live edits.
+fn claude(projects: &Path) {
+    use snout_app::claude_ide::changes::Source;
+    use snout_app::claude_ide::panel::{Activity as Doing, PendingDiff};
+    #[derive(PartialEq, Clone, Copy)]
+    enum Step {
+        Console,
+        Strike,
+        Typing,
+        Fade,
+        Inline,
+    }
+    for (step, theme, name) in [
+        (Step::Console, ThemeChoice::Light, "claude-console-light"),
+        (Step::Strike, ThemeChoice::Light, "claude-live-strike-light"),
+        (Step::Typing, ThemeChoice::Light, "claude-live-typing-light"),
+        (Step::Fade, ThemeChoice::Light, "claude-changes-light"),
+        (Step::Fade, ThemeChoice::Dark, "claude-changes-dark"),
+        (Step::Inline, ThemeChoice::Light, "claude-inline-light"),
+    ] {
+        let shop = copy(projects, "claude", "shop");
+        // Committed: Claude starts from a clean tree.
+        sh(&shop, &["git", "add", "-A"]);
+        let ok = Command::new("git")
+            .args(["-c", "commit.gpgsign=false", "commit", "-qm", "Answer 404 for an unknown product"])
+            .current_dir(&shop)
+            .env("GIT_AUTHOR_DATE", "2026-10-19T09:40:00")
+            .env("GIT_COMMITTER_DATE", "2026-10-19T09:40:00")
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let file = shop.join("src/main/java/com/example/shop/service/PriceCalculator.java");
+        let v1 = std::fs::read_to_string(&file).unwrap();
+        let v2 = price_v2(&v1);
+        let mut w = Win::new(settings(theme, vec![shop.clone()], Some(shop.clone())), false);
+        w.activity(if step == Step::Console { Activity::Git } else { Activity::Project });
+        w.act(Action::Refresh);
+        let e = w.open(&file, Some((0, 0)));
+        let ws = w.ws.clone();
+        let console = w.cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+        let script = if step == Step::Console {
+            "sleep 1\n\
+             printf '\\033]0;Bulk discount settings\\007'\n\
+             printf '\\033[1m>\\033[0m Make the bulk discount configurable in application.yml\\n\\n'\n\
+             printf '\\033[32m●\\033[0m Read(\\033[36msrc/main/java/com/example/shop/service/PriceCalculator.java\\033[0m)\\n'\n\
+             printf '  ⎿  Read 41 lines\\n\\n'\n\
+             printf '\\033[32m●\\033[0m Update(\\033[36msrc/main/java/com/example/shop/service/PriceCalculator.java\\033[0m)\\n'\n\
+             printf '  ⎿  Updated with 9 additions and 3 removals\\n\\n'\n\
+             printf '\\033[32m●\\033[0m Update(\\033[36msrc/main/resources/application.yml\\033[0m)\\n'\n\
+             printf '  ⎿  Updated with 3 additions\\n\\n'\n\
+             printf '\\033[32m●\\033[0m The bulk discount now reads shop.bulk.items and\\n  shop.bulk.discount, with the old values as defaults.\\n\\n'\n\
+             printf '\\033[1m>\\033[0m '"
+        } else {
+            "sleep 1\n\
+             printf '\\033]0;Bulk discount settings\\007'\n\
+             printf '\\033[32m●\\033[0m Update(\\033[36msrc/main/java/com/example/shop/service/PriceCalculator.java\\033[0m)\\n'\n\
+             printf '  ⎿  Updated with 9 additions and 3 removals\\n\\n'\n\
+             printf '\\033[1m>\\033[0m '"
+        };
+        let fake = fake_claude(&shop, script);
+        w.cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+        w.act(Action::ToggleConsole);
+        w.cx.update(|cx| cx.set_global(snout_app::claude_ide::IdeStatus { clients: 1 }));
+        w.pump(4, &mut |_| false);
+        if step == Step::Console {
+            // What Claude changed, in the Git view beside it.
+            std::fs::write(&file, &v2).unwrap();
+            let yml = shop.join("src/main/resources/application.yml");
+            let y = std::fs::read_to_string(&yml).unwrap();
+            std::fs::write(&yml, y + "  bulk:\n    items: 3\n    discount: 0.10\n").unwrap();
+            w.act(Action::Refresh);
+            w.pump(2, &mut |_| false);
+            let model = w.model.clone();
+            w.cx.update(|cx| {
+                model.update(cx, |m, cx| {
+                    m.click_file("src/main/java/com/example/shop/service/PriceCalculator.java", false, false, cx)
+                })
+            });
+            w.pump(3, &mut |_| false);
+            w.snap(name);
+            continue;
+        }
+        let changes = w.cx.update(|cx| snout_app::claude_ide::bridge::changes_of(ws.read(cx), cx));
+        let yml = shop.join("src/main/resources/application.yml");
+        let yml_v1 = std::fs::read_to_string(&yml).unwrap();
+        let yml_v2 = yml_v1.clone() + "  bulk:\n    items: 3\n    discount: 0.10\n";
+        let test = shop.join("src/test/java/com/example/shop/service/BulkDiscountTest.java");
+        let (f2, s2, y2, t2) = (file.clone(), shop.clone(), yml.clone(), test.clone());
+        let (v1b, v2b) = (v1.clone(), v2.clone());
+        w.cx.update(|cx| {
+            changes.update(cx, |c, cx| {
+                c.root = Some(s2.clone());
+                c.set.new_turn();
+                c.hooks_heard = true;
+                c.set.before_edit(&f2, Some(Arc::new(v1b.clone())));
+                c.record(f2.clone(), Some(Arc::new(v2b.clone())), None, "Edit".into(), Source::Hook, cx);
+                c.set.before_edit(&t2, None);
+                let text = "package com.example.shop.service;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport java.math.BigDecimal;\nimport org.junit.jupiter.api.Test;\n\nclass BulkDiscountTest {\n\n    @Test\n    void usesTheConfiguredThreshold() {\n        PriceCalculator prices = new PriceCalculator(new BigDecimal(\"0.20\"), 5, new BigDecimal(\"0.15\"));\n        assertEquals(BigDecimal.ZERO, prices.discount(new BigDecimal(\"40.00\"), 4));\n        assertEquals(new BigDecimal(\"7.50\"), prices.discount(new BigDecimal(\"50.00\"), 5));\n    }\n}\n";
+                c.record(t2.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, cx);
+                let old = Some(Some(Arc::new(yml_v1.clone())));
+                c.record(y2.clone(), Some(Arc::new(yml_v2.clone())), old, String::new(), Source::Watcher, cx);
+                c.expanded.insert(f2.clone());
+                let tool = if matches!(step, Step::Strike | Step::Typing) { "Edit" } else { "Write" };
+                c.activity = Some(Doing { path: f2.clone(), tool: tool.into(), at: Instant::now(), done: false });
+                if matches!(step, Step::Fade | Step::Inline) {
+                    c.activity = None;
+                    c.pending.push(PendingDiff {
+                        tab: "✻ [Claude Code] README.md ⧉".into(),
+                        path: s2.join("README.md"),
+                        added: 4,
+                        removed: 1,
+                        new_file: false,
+                        front: true,
+                    });
+                }
+            })
+        });
+        w.pump(1, &mut |_| false);
+        let (e2, v2c) = (e.clone(), v2.clone());
+        w.with(|ws, window, cx| {
+            if step != Step::Typing {
+                ws.update(cx, |ws, cx| ws.toggle_tool(Tool::ClaudeChanges, window, cx));
+            }
+            e2.update(cx, |e, cx| match step {
+                Step::Strike | Step::Typing => {
+                    e.animate_edit(&v2c, true, window, cx);
+                    e.hold_live_at(if step == Step::Strike { 0. } else { 0.55 }, window, cx);
+                }
+                _ => {
+                    e.animate_edit(&v2c, false, window, cx);
+                }
+            });
+            if matches!(step, Step::Fade | Step::Inline) {
+                ws.update(cx, snout_app::claude_ide::bridge::sync_bases);
+            }
+        });
+        w.pump(1, &mut |_| false);
+        let (e3, v1c, v2d) = (e.clone(), v1.clone(), v2.clone());
+        w.with(|_, window, cx| {
+            e3.update(cx, |e, cx| match step {
+                Step::Fade => {
+                    let hunks = snout_app::claude_ide::review::hunks(&v1c, &v2d);
+                    let lines: Vec<std::ops::Range<usize>> =
+                        hunks.iter().map(|h| h.new_lines.clone()).filter(|l| !l.is_empty()).collect();
+                    e.hold_flash(lines, 8, cx);
+                }
+                Step::Inline => {
+                    let first = e.claude_hunks.first().map_or(0, |h| h.new_lines.start);
+                    e.go_to_claude_line(first, window, cx);
+                }
+                _ => {}
+            });
+        });
+        w.pump(1, &mut |_| false);
+        w.snap(name);
+    }
+}
+
+/// Wait for the engine: the run configurations, and the project's model.
+fn engine_ready(w: &mut Win, root: &Path, secs: u64) {
+    let runs = w.runs();
+    let started = Instant::now();
+    let ok = w.pump(secs, &mut |cx| {
+        !runs.read(cx).engine_configs.is_empty()
+            && snout_app::project_model::store(cx).is_some_and(|s| s.read(cx).current.is_some())
+    });
+    assert!(ok, "the engine of {} is ready", root.display());
+    println!("docs: engine of {} ready after {:.0} s", root.display(), started.elapsed().as_secs_f32());
+}
+
+fn expand(w: &mut Win, ids: Vec<snout_app::project_view::NodeId>) {
+    let ws = w.ws.clone();
+    w.cx.update(|cx| {
+        let project = ws.read(cx).side.read(cx).project.clone();
+        project.update(cx, |v, cx| {
+            v.expanded.extend(ids);
+            cx.notify();
+        });
+    });
+}
+
+/// The multi-module build: the Project view and the Gradle window.
+fn ledger(projects: &Path) {
+    use snout_app::project_view::NodeId;
+    let ledger = copy(projects, "ledger", "ledger");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![ledger.clone()], Some(ledger.clone())), true);
+    w.activity(Activity::Project);
+    engine_ready(&mut w, &ledger, 900);
+    let modules: Vec<(String, String)> = w.cx.update(|cx| {
+        let s = snout_app::project_model::store(cx).unwrap();
+        s.read(cx).current.as_ref().unwrap().modules.iter().map(|m| (m.id.clone(), m.name.clone())).collect()
+    });
+    println!("docs: ledger modules {modules:?}");
+    let mut ids: Vec<NodeId> = modules.iter().map(|(id, _)| NodeId::Module(id.clone())).collect();
+    let core = ledger.join("core");
+    for d in [
+        "src",
+        "src/main",
+        "src/main/java",
+        "src/main/java/com",
+        "src/main/java/com/example",
+        "src/main/java/com/example/ledger",
+        "src/main/java/com/example/ledger/core",
+    ] {
+        ids.push(NodeId::Dir(core.join(d)));
+    }
+    ids.push(NodeId::Libraries);
+    expand(&mut w, ids);
+    w.open(&core.join("src/main/java/com/example/ledger/core/Ledger.java"), Some((14, 0)));
+    w.pump(5, &mut |_| false);
+    w.snap("projects-project-view-light");
+    // The Gradle window, with a task run in the Build window.
+    let runs = w.runs();
+    let r = runs.clone();
+    w.pump(120, &mut |cx| !r.read(cx).gradle.builds.is_empty());
+    w.tool(Tool::Gradle);
+    let ws = w.ws.clone();
+    w.cx.update(|cx| {
+        let g = ws.read(cx).gradle.clone();
+        g.update(cx, |g, cx| {
+            g.reveal("run", cx);
+        })
+    });
+    w.cx.update(|cx| {
+        runs.update(cx, |r, cx| r.start(snout_app::run::Launch::Task { build: None, task: ":app:run".into() }, cx))
+    });
+    let r = runs.clone();
+    w.pump(300, &mut |cx| r.read(cx).sessions.last().is_some_and(|s| s.ended.is_some()));
+    w.pump(2, &mut |_| false);
+    w.snap("gradle-window-light");
+    w.shutdown();
+}
+
+/// The Spring Boot shop with the engine: the editor's Java features, Gradle, runs, tests,
+/// Spring, search and the processes.
+fn shop(projects: &Path) {
+    use snout_app::project_view::NodeId;
+    let shop = copy(projects, "java", "shop");
+    let pkg = shop.join("src/main/java/com/example/shop");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), true);
+    w.activity(Activity::Project);
+    let order_service = pkg.join("service/OrderService.java");
+    let e = w.open(&order_service, Some((24, 0)));
+    engine_ready(&mut w, &shop, 900);
+    let ws = w.ws.clone();
+    let hub = w.cx.update(|cx| ws.read(cx).hub.clone());
+    let s2 = shop.clone();
+    let ok = w.pump(600, &mut |cx| hub.read(cx).servers.get(&s2).is_some_and(|s| s.first_diagnostics.is_some()));
+    println!("docs: shop diagnostics {ok}");
+    let mut ids = vec![NodeId::Root];
+    for d in [
+        "src",
+        "src/main",
+        "src/main/java",
+        "src/main/java/com",
+        "src/main/java/com/example",
+        "src/main/java/com/example/shop",
+        "src/main/java/com/example/shop/service",
+        "src/main/java/com/example/shop/web",
+    ] {
+        ids.push(NodeId::Dir(shop.join(d)));
+    }
+    let root_module: Option<String> = w.cx.update(|cx| {
+        snout_app::project_model::store(cx)
+            .unwrap()
+            .read(cx)
+            .current
+            .as_ref()
+            .unwrap()
+            .modules
+            .first()
+            .map(|m| m.id.clone())
+    });
+    if let Some(m) = root_module.clone() {
+        ids.push(NodeId::Module(m));
+    }
+    expand(&mut w, ids);
+    w.pump(10, &mut |_| false);
+    let original = w.text(&e);
+
+    // Completion: the members of the injected service.
+    w.caret(&e, "        this.prices = prices;\n", "        this.prices = prices;\n".len());
+    w.insert(&e, "        productService.\n");
+    w.caret(&e, "productService.\n", "productService.".len());
+    w.pump(2, &mut |_| false);
+    let e2 = e.clone();
+    w.with(|_, window, cx| e2.update(cx, |e, cx| e.state.update(cx, |s, cx| s.show_completions(window, cx))));
+    let e2 = e.clone();
+    let ok = w.pump(60, &mut |cx| !e2.read(cx).state.read(cx).completion_menu_state().items.is_empty());
+    println!("docs: completion {ok}");
+    w.pump(2, &mut |_| false);
+    w.snap("java-completion-light");
+    w.key("escape");
+    w.set_text(&e, original.clone());
+    w.pump(3, &mut |_| false);
+
+    // Hover over a method.
+    w.hover(&e, "withTax(net", 2);
+    w.pump(1, &mut |_| false);
+    w.snap("java-hover-light");
+    w.with(|_, window, cx| {
+        window.dispatch_event(
+            gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                position: gpui::point(px(W - 20.), px(H - 10.)),
+                pressed_button: None,
+                modifiers: gpui::Modifiers::none(),
+            }),
+            cx,
+        );
+    });
+    w.caret(&e, "package", 0);
+    w.pump(1, &mut |_| false);
+
+    // An error and its quick fix: a type not imported.
+    w.caret(&e, "        int items = 0;\n", 0);
+    w.insert(&e, "        LocalDate placed = LocalDate.now();\n");
+    let e2 = e.clone();
+    let ok = w.pump(120, &mut |cx| !e2.read(cx).problems.is_empty());
+    println!("docs: problems {ok}");
+    w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.show_problems(window, cx)));
+    w.pump(2, &mut |_| false);
+    w.snap("java-problems-light");
+    w.caret(&e, "LocalDate placed", 2);
+    w.key("cmd-.");
+    let e2 = e.clone();
+    let ok = w.pump(60, &mut |cx| !e2.read(cx).state.read(cx).code_action_menu_state().items.is_empty());
+    println!("docs: quick fixes {ok}");
+    w.pump(1, &mut |_| false);
+    w.snap("java-quick-fix-light");
+    w.key("escape");
+    w.set_text(&e, original.clone());
+    let e2 = e.clone();
+    w.pump(60, &mut |cx| e2.read(cx).problems.is_empty());
+
+    w.tool(Tool::Problems);
+    w.pump(1, &mut |_| false);
+
+    // Rename.
+    w.caret(&e, "place(String", 2);
+    let e2 = e.clone();
+    w.with(|_, window, cx| e2.update(cx, |e, cx| e.start_rename(window, cx)));
+    w.pump(1, &mut |_| false);
+    let e2 = e.clone();
+    w.with(|_, window, cx| {
+        e2.update(cx, |e, cx| {
+            if let Some(input) = e.rename.clone() {
+                input.update(cx, |i, cx| i.set_value("placeOrder", window, cx));
+            }
+        })
+    });
+    w.pump(1, &mut |_| false);
+    w.snap("java-rename-light");
+    let e2 = e.clone();
+    w.with(|_, window, cx| e2.update(cx, |e, cx| e.cancel_rename(window, cx)));
+
+    // Find usages of the product service.
+    let refs = w.cx.update(|cx| ws.read(cx).references.clone());
+    for _ in 0..20 {
+        w.caret(&e, "ProductService productService", 3);
+        let e2 = e.clone();
+        w.cx.update(|cx| e2.update(cx, |e, cx| e.find_references(cx)));
+        let r = refs.clone();
+        if w.pump(4, &mut |cx| r.read(cx).len() >= 2) {
+            break;
+        }
+    }
+    w.pump(2, &mut |_| false);
+    w.snap("java-references-light");
+
+    // Tests: all of them, one failing.
+    let runs = w.runs();
+    let tests = w.cx.update(|cx| {
+        runs.read(cx).configurations().into_iter().find(|c| c.kind == snout_app::run::config::Kind::Tests)
+    });
+    println!("docs: test configuration {:?}", tests.as_ref().map(|c| (&c.name, &c.module)));
+    let module = tests.as_ref().map(|c| c.module.clone()).or(root_module.clone()).unwrap();
+    w.cx.update(|cx| {
+        runs.update(cx, |r, cx| {
+            r.start(
+                snout_app::run::Launch::Tests {
+                    module: module.clone(),
+                    filter: serde_json::Value::Null,
+                    label: "All tests in shop".into(),
+                    debug: false,
+                    rerun_failed: false,
+                },
+                cx,
+            )
+        })
+    });
+    let r = runs.clone();
+    let ok = w.pump(600, &mut |cx| r.read(cx).sessions.last().is_some_and(|s| s.ended.is_some()));
+    println!("docs: tests ended {ok}");
+    let test_file = shop.join("src/test/java/com/example/shop/service/OrderServiceTest.java");
+    w.open(&test_file, Some((24, 0)));
+    w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.show_bottom(ws.tabs.run, window, cx)));
+    w.pump(4, &mut |_| false);
+    w.snap("run-tests-light");
+
+    // The application, from the title bar's configuration.
+    let app = pkg.join("ShopApplication.java");
+    w.open(&app, Some((8, 0)));
+    let selected = w.cx.update(|cx| runs.read(cx).selected_config());
+    println!("docs: title bar configuration {:?}", selected.as_ref().map(|c| &c.name));
+    if let Some(config) = selected {
+        w.cx.update(|cx| runs.update(cx, |r, cx| r.start(snout_app::run::Launch::Config { config, debug: false }, cx)));
+        let r = runs.clone();
+        let ok = w.pump(300, &mut |cx| {
+            r.read(cx)
+                .sessions
+                .last()
+                .is_some_and(|s| s.lines.iter().any(|l| l.text().contains("Started ShopApplication")))
+        });
+        println!("docs: application started {ok}");
+        w.pump(3, &mut |_| false);
+        w.snap("run-window-light");
+        // The processes: the engine, its language server, Gradle, the application.
+        let p = w.cx.update(|cx| ws.read(cx).processes.clone());
+        w.cx.update(|cx| p.update(cx, |p, cx| p.look(cx)));
+        w.tool(Tool::Processes);
+        w.pump(6, &mut |_| false);
+        w.snap("processes-light");
+        w.tool(Tool::Processes);
+        let id = w.cx.update(|cx| runs.read(cx).sessions.last().unwrap().id);
+        w.cx.update(|cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        let r = runs.clone();
+        w.pump(30, &mut |cx| !r.read(cx).any_running());
+    }
+
+    // Gradle: the shop's tasks, a build run in the Build window.
+    w.tool(Tool::Gradle);
+    w.cx.update(|cx| {
+        let g = ws.read(cx).gradle.clone();
+        g.update(cx, |g, cx| {
+            g.reveal("bootRun", cx);
+            g.reveal("classes", cx);
+        })
+    });
+    w.cx.update(|cx| {
+        runs.update(cx, |r, cx| r.start(snout_app::run::Launch::Task { build: None, task: ":classes".into() }, cx))
+    });
+    let r = runs.clone();
+    w.pump(300, &mut |cx| r.read(cx).sessions.last().is_some_and(|s| s.ended.is_some()));
+    w.pump(2, &mut |_| false);
+    w.snap("gradle-shop-light");
+    w.tool(Tool::Gradle);
+    w.tool(Tool::Build);
+
+    // Spring: the gutter, the beans, the endpoints.
+    let spring = w.cx.update(|cx| ws.read(cx).spring.clone());
+    let s = spring.clone();
+    let ok = w.pump(900, &mut |cx| s.read(cx).loaded);
+    println!("docs: spring loaded {ok}");
+    let controller = pkg.join("web/OrderController.java");
+    let ce = w.open(&controller, Some((20, 0)));
+    let c2 = ce.clone();
+    w.pump(120, &mut |cx| c2.read(cx).spring.as_ref().is_some_and(|s| !s.lines.is_empty()));
+    w.tool(Tool::Spring);
+    let win = w.cx.update(|cx| ws.read(cx).spring_window.clone());
+    w.cx.update(|cx| win.update(cx, |w, cx| w.set_tab(snout_app::spring::window::Tab::Beans, cx)));
+    // Every package open.
+    let keys: Vec<String> = w.cx.update(|cx| {
+        win.read(cx)
+            .bean_rows(cx)
+            .into_iter()
+            .filter_map(|r| match r {
+                snout_app::spring::window::BeanRow::Group { key, open: false, .. } => Some(key),
+                _ => None,
+            })
+            .collect()
+    });
+    for k in keys {
+        w.cx.update(|cx| win.update(cx, |w, cx| w.toggle(&k, cx)));
+    }
+    w.pump(2, &mut |_| false);
+    w.snap("spring-beans-light");
+    w.with(|_, window, cx| win.update(cx, |w, cx| w.show_endpoints(None, window, cx)));
+    w.pump(2, &mut |_| false);
+    w.snap("spring-endpoints-light");
+    w.tool(Tool::Spring);
+    // The injection gutter: the service's constructor, and the beans it takes.
+    let oe = w.open(&order_service, Some((16, 0)));
+    let o2 = oe.clone();
+    w.pump(120, &mut |cx| o2.read(cx).spring.as_ref().is_some_and(|s| !s.lines.is_empty()));
+    w.pump(2, &mut |_| false);
+    let text = w.text(&oe);
+    let line = text.lines().position(|l| l.contains("public OrderService(")).unwrap() as u32;
+    let o3 = oe.clone();
+    let at = w.cx.update(|cx| {
+        let e = o3.read(cx);
+        let (a, z) = e.lanes.get().spring();
+        let s = e.state.read(cx);
+        let off = text.find("public OrderService(").unwrap();
+        let b = s.range_to_bounds(&(off..off)).unwrap();
+        gpui::point((a + z) / 2., b.center().y)
+    });
+    let o4 = oe.clone();
+    w.cx.update(|cx| {
+        o4.update(cx, |e, cx| {
+            if let Some(l) = e.spring.as_ref().and_then(|s| s.line(line)).cloned() {
+                let items = snout_app::editor::spring_items(&l);
+                e.gutter_menu = Some(snout_app::editor::GutterMenu::Spring { at, items, filter: None });
+            } else {
+                println!("docs: no Spring marks on line {}", line + 1);
+            }
+            cx.notify();
+        })
+    });
+    w.pump(1, &mut |_| false);
+    w.snap("spring-injections-light");
+    w.cx.update(|cx| o4.update(cx, |e, _| e.gutter_menu = None));
+
+    // application.yml: completion of Spring's keys.
+    let yml = shop.join("src/main/resources/application.yml");
+    let ye = w.open(&yml, Some((3, 0)));
+    w.pump(10, &mut |_| false);
+    w.caret(&ye, "    default-property-inclusion: non_null\n", "    default-property-inclusion: non_null\n".len());
+    w.insert(&ye, "  mvc:\n    \n");
+    w.caret(&ye, "  mvc:\n    \n", "  mvc:\n    ".len());
+    let y2 = ye.clone();
+    w.with(|_, window, cx| y2.update(cx, |e, cx| e.state.update(cx, |s, cx| s.show_completions(window, cx))));
+    let y3 = ye.clone();
+    let ok = w.pump(60, &mut |cx| !y3.read(cx).state.read(cx).completion_menu_state().items.is_empty());
+    println!("docs: yml completion {ok}");
+    w.pump(1, &mut |_| false);
+    w.snap("spring-yml-completion-light");
+    w.key("escape");
+    let y4 = ye.clone();
+    w.with(|_, window, cx| y4.update(cx, |e, cx| e.reload(window, cx)));
+
+    // Search Everywhere, and the command palette.
+    w.open(&order_service, None);
+    w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.search_everywhere(window, cx)));
+    w.pump(1, &mut |_| false);
+    w.with(|ws, window, cx| {
+        if let Some(s) = ws.read(cx).search.clone() {
+            s.update(cx, |s, cx| s.set_query("Order", window, cx));
+        }
+    });
+    w.pump(10, &mut |_| false);
+    w.snap("editor-search-everywhere-light");
+    w.key("escape");
+    w.shutdown();
+}
+
+/// The command palette, over the shop's editor.
+fn palette(projects: &Path) {
+    let shop = copy(projects, "palette", "shop");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);
+    w.activity(Activity::Project);
+    w.open(&shop.join("src/main/java/com/example/shop/service/OrderService.java"), Some((22, 0)));
+    w.pump(2, &mut |_| false);
+    w.with(|ws, window, cx| {
+        // Drawn once, so the palette finds the editor's own shortcuts.
+        window.draw(cx).clear(cx);
+        ws.update(cx, |ws, cx| ws.open_palette(window, cx));
+    });
+    w.pump(1, &mut |_| false);
+    w.with(|ws, window, cx| {
+        if let Some(s) = ws.read(cx).search.clone() {
+            s.update(cx, |s, cx| s.set_query("go to", window, cx));
+        }
+    });
+    w.pump(3, &mut |_| false);
+    w.snap("editor-command-palette-light");
+}
+
+/// The debugger, stopped at a breakpoint in the greeter's loop.
+fn debug(projects: &Path, theme: ThemeChoice, mode: &str) {
+    let greeter = copy(projects, &format!("debug-{mode}"), "greeter");
+    let mut w = Win::new(settings(theme, vec![greeter.clone()], Some(greeter.clone())), true);
+    w.activity(Activity::Project);
+    let main = greeter.join("src/main/java/demo/Main.java");
+    w.open(&main, Some((9, 0)));
+    engine_ready(&mut w, &greeter, 900);
+    let text = std::fs::read_to_string(&main).unwrap();
+    let line = text.lines().position(|l| l.contains("total = add(total, i);")).unwrap() as u32;
+    let runs = w.runs();
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&main, line, cx)));
+    let config = w.cx.update(|cx| runs.read(cx).configurations().into_iter().find(|c| c.main_class.is_some()).unwrap());
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.select_config(Some(config.id.clone()), cx)));
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.start(snout_app::run::Launch::Config { config, debug: true }, cx)));
+    let stopped = w.pump(300, &mut |cx| {
+        let m = snout_app::run::marks(cx).unwrap();
+        m.read(cx).exec.is_some() && !m.read(cx).locals.is_empty()
+    });
+    assert!(stopped, "the breakpoint is hit");
+    let id = w.cx.update(|cx| runs.read(cx).sessions.last().unwrap().id);
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.step(id, "continue", cx)));
+    w.pump(30, &mut |cx| snout_app::run::marks(cx).unwrap().read(cx).locals.iter().any(|(n, v)| n == "i" && v == "2"));
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.add_watch(id, "total * 10".into(), cx)));
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.add_watch(id, "names.get(i - 1)".into(), cx)));
+    w.pump(4, &mut |_| false);
+    w.snap(&format!("debug-paused-{mode}"));
+    w.shutdown();
+}
+
+/// Remote SSH against a Linux container (`crates/snout-server/tests/docker`) as `devbox`.
+fn remote(projects: &Path) {
+    use snout_app::remote::{Connection, Recents, Remote, RemoteProject};
+    let ssh_dir = PathBuf::from(std::env::var_os("SNOUT_DOCS_SSH_DIR").expect("SNOUT_DOCS_SSH_DIR: a short folder"));
+    let _ = std::fs::remove_dir_all(&ssh_dir);
+    std::fs::create_dir_all(&ssh_dir).unwrap();
+    let key = ssh_dir.join("key");
+    let here = Path::new(".");
+    sh(here, &["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "docs", "-f", key.to_str().unwrap()]);
+    let public = std::fs::read_to_string(ssh_dir.join("key.pub")).unwrap();
+    let docker = Path::new(env!("CARGO_MANIFEST_DIR")).join("../snout-server/tests/docker");
+    sh(here, &["docker", "build", "-q", "-t", "snout-remote-test:2", docker.to_str().unwrap()]);
+    let name = format!("snout-docs-{}", std::process::id());
+    struct Container(String);
+    impl Drop for Container {
+        fn drop(&mut self) {
+            let _ = Command::new("docker").args(["unpause", &self.0]).output();
+            let _ = Command::new("docker").args(["rm", "-f", &self.0]).output();
+        }
+    }
+    let container = Container(name.clone());
+    sh(
+        here,
+        &[
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            &name,
+            "--hostname",
+            "devbox",
+            "-p",
+            "127.0.0.1::22",
+            "-e",
+            &format!("AUTHORIZED_KEY={}", public.trim()),
+            "snout-remote-test:2",
+        ],
+    );
+    // The demo projects in the home folder there.
+    sh(here, &["docker", "exec", &name, "sh", "-c", "rm -rf /home/dev/demo && mkdir -p /home/dev/projects"]);
+    for p in ["shop", "ledger", "greeter"] {
+        sh(here, &["docker", "cp", projects.join(p).to_str().unwrap(), &format!("{name}:/home/dev/projects/{p}")]);
+    }
+    sh(here, &["docker", "exec", &name, "chown", "-R", "dev:dev", "/home/dev/projects"]);
+    let port = sh(here, &["docker", "port", &name, "22"]);
+    let port = port.lines().next().unwrap().rsplit(':').next().unwrap().to_owned();
+    let config = ssh_dir.join("config");
+    std::fs::write(
+        &config,
+        format!(
+            "Host devbox\n  HostName 127.0.0.1\n  Port {port}\n  User dev\n  IdentityFile {}\n  IdentitiesOnly yes\n  \
+             IdentityAgent none\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n\
+             Host build-arm build-x86\n  User ci\nHost staging\n  User deploy\n",
+            key.display()
+        ),
+    )
+    .unwrap();
+    // SAFETY: set before the app starts its threads.
+    unsafe {
+        std::env::set_var(snout_app::remote::SSH_CONFIG_ENV, &config);
+        std::env::set_var("SNOUT_SSH_CONTROL_DIR", ssh_dir.join("c"));
+    }
+    let start = Instant::now();
+    while !Command::new("ssh").arg("-F").arg(&config).args(["devbox", "true"]).status().is_ok_and(|s| s.success()) {
+        assert!(start.elapsed() < Duration::from_secs(30), "sshd did not come up");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+
+    let greeter = copy(projects, "remote", "greeter");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![greeter.clone()], Some(greeter.clone())), false);
+    w.cx.update(|cx| snout_app::remote::init(None, cx));
+    w.cx.update(|cx| {
+        cx.global_mut::<Remote>().recents = Recents {
+            hosts: vec!["devbox".into()],
+            projects: vec![RemoteProject { host: "devbox".into(), path: "/home/dev/projects/ledger".into() }],
+        }
+    });
+    // The Connect dialog, devbox typed.
+    w.with(|ws, window, cx| ws.update(cx, |w, cx| w.open_connect(window, cx)));
+    w.pump(2, &mut |_| false);
+    w.with(|ws, window, cx| {
+        if let Some(d) = ws.read(cx).connect_dialog.clone() {
+            d.update(cx, |d, cx| d.input.update(cx, |i, cx| i.set_value("devbox", window, cx)));
+        }
+    });
+    w.pump(1, &mut |_| false);
+    w.snap("remote-connect-light");
+    w.with(|ws, _, cx| {
+        ws.update(cx, |w, cx| {
+            w.connect_dialog = None;
+            cx.notify();
+        })
+    });
+    // Connect for real; the folder picker on the projects there.
+    type Connected = Option<Result<Arc<snout_remote::RemoteHost>, String>>;
+    let got: Rc<RefCell<Connected>> = Rc::default();
+    let g2 = got.clone();
+    w.cx.update(|cx| snout_app::remote::connect("devbox".into(), move |r, _| *g2.borrow_mut() = Some(r), cx));
+    let g3 = got.clone();
+    assert!(w.pump(240, &mut |_| g3.borrow().is_some()), "connected");
+    let host = got.borrow_mut().take().unwrap().expect("connected to devbox");
+    let h2: snout_host::HostRef = host.clone();
+    w.with(|ws, window, cx| {
+        let picker = cx.new(|cx| {
+            snout_app::remote::picker::FolderPicker::new(h2, "devbox".into(), "/home/dev/projects".into(), window, cx)
+        });
+        ws.update(cx, |w, cx| {
+            w.remote_picker = Some(picker);
+            cx.notify();
+        });
+    });
+    let ws = w.ws.clone();
+    w.pump(30, &mut |cx| {
+        ws.read(cx).remote_picker.as_ref().is_some_and(|p| p.read(cx).folders.as_ref().is_some_and(|f| !f.is_empty()))
+    });
+    w.with(|ws, _, cx| {
+        let p = ws.read(cx).remote_picker.clone().unwrap();
+        p.update(cx, |p, cx| {
+            p.selected = Some("shop".into());
+            cx.notify();
+        });
+    });
+    w.pump(1, &mut |_| false);
+    w.snap("remote-picker-light");
+    w.with(|ws, _, cx| {
+        ws.update(cx, |w, cx| {
+            w.remote_picker = None;
+            cx.notify();
+        })
+    });
+    // The window on the remote project, as Open makes it.
+    let folder = PathBuf::from("/home/dev/projects/shop");
+    let Win { mut cx, .. } = w;
+    let h3: snout_host::HostRef = host.clone();
+    cx.update(|cx| {
+        cx.set_global(snout_app::host::HostGlobal(h3));
+        cx.global_mut::<Remote>().connection = Some(Connection {
+            name: "devbox".into(),
+            host: Some(host.clone()),
+            status: snout_remote::Status::Connected,
+        });
+    });
+    let mut s = settings(ThemeChoice::Light, vec![folder.clone()], Some(folder.clone()));
+    s.project_jdks.clear();
+    // The engine there, on the Java it put there.
+    cx.update(|cx| cx.set_global(snout_app::lang::hub::LangEnabled(true)));
+    let mut w = Win::window(cx, s);
+    w.activity(Activity::Project);
+    w.act(Action::Refresh);
+    engine_ready(&mut w, &folder, 900);
+    expand(
+        &mut w,
+        vec![
+            snout_app::project_view::NodeId::Root,
+            snout_app::project_view::NodeId::Dir(folder.join("src")),
+            snout_app::project_view::NodeId::Dir(folder.join("src/main")),
+            snout_app::project_view::NodeId::Dir(folder.join("src/main/java")),
+            snout_app::project_view::NodeId::Dir(folder.join("src/main/java/com")),
+            snout_app::project_view::NodeId::Dir(folder.join("src/main/java/com/example")),
+            snout_app::project_view::NodeId::Dir(folder.join("src/main/java/com/example/shop")),
+            snout_app::project_view::NodeId::Dir(folder.join("src/main/java/com/example/shop/web")),
+        ],
+    );
+    w.open(&folder.join("src/main/java/com/example/shop/web/ProductController.java"), Some((20, 0)));
+    w.pump(5, &mut |_| false);
+    w.snap("remote-project-light");
+    w.activity(Activity::Git);
+    w.pump(5, &mut |_| false);
+    w.snap("remote-git-light");
+    w.activity(Activity::Project);
+    // The window while the connection comes back. Drawn as the app draws it: here, with
+    // the harness running background work on this thread, a real drop would stall it.
+    w.cx.update(|cx| {
+        let r = cx.global_mut::<Remote>();
+        if let Some(c) = r.connection.as_mut() {
+            c.host = None;
+            c.status = snout_remote::Status::Reconnecting { attempt: 3, error: None };
+        }
+        cx.refresh_windows();
+    });
+    w.pump(2, &mut |_| false);
+    w.snap("remote-reconnecting-light");
+    w.cx.update(|cx| {
+        if let Some(c) = cx.global_mut::<Remote>().connection.as_mut() {
+            c.host = Some(host.clone());
+            c.status = snout_remote::Status::Connected;
+        }
+    });
+    w.shutdown();
+    host.close();
+    drop(container);
+    let _ = std::fs::remove_dir_all(&ssh_dir);
+}
