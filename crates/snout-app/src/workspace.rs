@@ -1749,7 +1749,7 @@ impl Workspace {
         let remote = crate::remote::recents(cx).projects;
         let checks = menus::checks(&m.settings, &recent, &remote);
         if self.menu_checks.as_ref() != Some(&checks) {
-            cx.set_menus(menus::bar(&m.settings, &recent, &remote));
+            crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote), cx);
             self.menu_checks = Some(checks);
         }
     }

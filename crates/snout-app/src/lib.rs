@@ -19,6 +19,7 @@ pub mod icons;
 pub mod keymap;
 pub mod lang;
 pub mod look;
+pub mod menu_icons;
 pub mod menus;
 pub mod model;
 pub mod new_project;
@@ -94,7 +95,8 @@ pub fn init(settings: &Settings, cx: &mut App) {
     keymap::init(&settings.keymap, cx);
     editor::register_languages();
     workspace::app_actions(cx);
-    cx.set_menus(menus::bar(settings, &model::recent_projects(settings), &remote::recents(cx).projects));
+    let bar = menus::bar(settings, &model::recent_projects(settings), &remote::recents(cx).projects);
+    menu_icons::install(bar, cx);
 }
 
 /// The model over the settings in `store`, opening `open` (a path from the command line).

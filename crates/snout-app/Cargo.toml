@@ -63,10 +63,13 @@ sha2 = "0.10"
 tempfile.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Open in External Terminal: the terminal apps installed, by bundle id (LaunchServices).
+# Open in External Terminal: the terminal apps installed, by bundle id (LaunchServices); and
+# the menu bar's icons, set on the NSMenuItems GPUI makes.
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSData", "NSGeometry", "NSArray"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSApplication", "NSResponder", "NSMenu", "NSMenuItem", "NSImage"] }
+# Lucide icons drawn for menu items that have no SF Symbol (GPUI's own SVG renderer).
+resvg = { version = "0.46", default-features = false }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
