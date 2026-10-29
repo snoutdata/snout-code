@@ -58,7 +58,8 @@ Choose in Settings (⌘,) ▸ Tools ▸ Terminal ▸ **Terminal engine**, or set
 `"Builtin"` or `"Ghostty"` in your settings file (see
 [Settings and keymap](settings-and-keymap.md#tools--terminal)). The choice holds for the
 terminals started after it: an open terminal keeps the engine it started with until you
-click **New** in its header. The Terminal page lists the terminals running and their engines.
+click **New** in its header. The Terminal page previews a terminal drawn by the engine chosen,
+and lists the terminals running and their engines.
 
 Both engines draw the same way and give the same colours (the 16 colours, the 256-colour
 palette and true colour), scrollback, selection, find, links in plain text, the window title

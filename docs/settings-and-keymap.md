@@ -11,7 +11,9 @@ Any of these opens the Settings sheet:
 - **Settings…** in the command palette (⇧⌘P)
 
 The pages are listed on the left. Type in **Search settings** to find a page by what it holds,
-for example "jdk" or "font".
+for example "jdk" or "font". Each page opens with a drawing of its subject and a line saying
+what it is for. The pages with only a few settings show what they change (the Editor and
+Terminal pages have a live preview) or a few tips under **Good to know**.
 
 The sheet edits a copy of your settings:
 
@@ -142,6 +144,10 @@ and warnings differ in lightness as well as colour.
 - **Show parameter names of literal arguments (Java)**: on by default. See
   [Java](java.md#parameter-name-hints). View ▸ Parameter Name Hints switches it too.
 
+**Preview** shows a few lines of Java as the editor shows them with the settings on the page:
+the indentation at the tab size, dots for the spaces when whitespace shows, the parameter name
+hints, and a long line wrapped or cut at the edge.
+
 ## Version Control
 
 **Git**
@@ -190,16 +196,20 @@ removes and downloads JDKs on its SDKs page (see [Project Structure](project-str
 
 ![The Terminal page](images/settings-and-keymap-terminal.png)
 
-*The terminal engine: Built-in or Ghostty.*
+*The terminal engine: Built-in or Ghostty, and a preview of a terminal drawn by the one chosen.*
 
-**Engine**
+**Terminal engine**
 
-- **Terminal engine**: what reads the output of the programs in the Terminal tab and the
-  Claude Code console, and keeps their screens. **Built-in** is in every build of SnoutCode.
+- **Built-in** or **Ghostty**: the engine, what reads the output of the programs in the
+  Terminal tab and the Claude Code console, and keeps their screens. **Built-in** is in every build of SnoutCode.
   **Ghostty**, the terminal emulation of the Ghostty terminal, is in release builds, and is
   their default: it reflows lines on resize, speaks the kitty keyboard protocol, keeps
   hyperlinks, and draws more text styles. In `settings.json` it is `terminal_engine`, with
   `"Builtin"` or `"Ghostty"`. See [Terminal](terminal.md#terminal-engine).
+
+**Preview** shows a short session (a Gradle test run and `git status`) as the chosen engine
+draws it, in the colours of the theme in use. Its last line but one has a strikethrough, a
+curly underline and a link, which only Ghostty draws.
 
 A new choice holds for the terminals started after it. A terminal already open keeps the
 engine it started with until you click **New** in its header; **Running now** lists the open
