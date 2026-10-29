@@ -7,7 +7,9 @@
 //! [`RemoteHost::reconnect`]. Processes and terminals live in the server's daemon, so they
 //! keep running meanwhile: their streams attach again on the new connection and carry on
 //! where they were (output waits on the server). A file watch starts again and reports a
-//! change at its root, since what happened in between is unknown. TCP tunnels end.
+//! change at its root, since what happened in between is unknown. TCP tunnels end; a port
+//! forwarded back to the app ([`Host::forward_to_app`]) stays, the server keeping its
+//! listener.
 //!
 //! Calls that can be repeated without harm (reads, metadata, listings, writes of a whole
 //! file) are made again on the new connection when the connection dropped under them;
@@ -241,6 +243,9 @@ pub struct RemoteHost {
     link: Arc<Link>,
     info: HostInfo,
     remote: proto::HostInfo,
+    /// The ports forwarded back to the app ([`Host::forward_to_app`]) the server still
+    /// listens on.
+    forwards: Arc<Mutex<Vec<u16>>>,
 }
 
 impl RemoteHost {
@@ -275,7 +280,7 @@ impl RemoteHost {
             pid: remote.server_pid,
             can_trash: true,
         };
-        Ok(RemoteHost { link, info, remote })
+        Ok(RemoteHost { link, info, remote, forwards: Default::default() })
     }
 
     /// The host as the user named it.
@@ -305,7 +310,17 @@ impl RemoteHost {
 
     /// End the connection for good: calls fail from now on. The server keeps running (it
     /// stops on its own when no client comes back).
+    /// The server's listeners for the ports forwarded back to the app go first, so this
+    /// waits for the server: call it off the UI thread.
     pub fn close(&self) {
+        let ports = std::mem::take(&mut *lock(&self.forwards));
+        if !ports.is_empty()
+            && let Some(c) = lock(&self.link.st).client.clone().filter(Client::is_alive)
+        {
+            for port in ports {
+                let _ = c.unlisten(port);
+            }
+        }
         self.link.close();
     }
 
@@ -537,6 +552,30 @@ impl Host for RemoteHost {
         Ok(Box::new(Tunnel(channel)))
     }
 
+    fn forward_to_app(&self, app_port: u16) -> io::Result<snout_host::Forward> {
+        let port = self.call(false, |c| c.listen(0))?;
+        lock(&self.forwards).push(port);
+        let generation = self.link.client()?.1;
+        let stop = Arc::new(AtomicBool::new(false));
+        let (link, s) = (self.link.clone(), stop.clone());
+        std::thread::Builder::new()
+            .name("snout-remote-forward".into())
+            .spawn(move || forward_loop(link, port, app_port, generation, s))?;
+        let (link, forwards) = (self.link.clone(), self.forwards.clone());
+        let keep = OnDrop(Some(Box::new(move || {
+            stop.store(true, Ordering::SeqCst);
+            // The listener goes off whatever thread drops this (the UI thread, maybe); one
+            // still there when the host closes goes then.
+            let _ = std::thread::Builder::new().name("snout-remote-unlisten".into()).spawn(move || {
+                if let Some(c) = lock(&link.st).client.clone().filter(Client::is_alive) {
+                    let _ = c.unlisten(port);
+                }
+                lock(&forwards).retain(|p| *p != port);
+            });
+        })));
+        Ok(snout_host::Forward::new(port, Box::new(keep)))
+    }
+
     fn processes(&self, cpu: bool) -> io::Result<Vec<ProcInfo>> {
         let list = self.call(true, |c| c.system_processes(cpu))?;
         Ok(list
@@ -612,6 +651,65 @@ fn forward_watch(
                     return;
                 }
             }
+        }
+    }
+}
+
+/// Runs its closure when dropped.
+struct OnDrop(Option<Box<dyn FnOnce() + Send + Sync>>);
+
+impl Drop for OnDrop {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f();
+        }
+    }
+}
+
+/// Take the connections to `port` on the remote machine to `app_port` on this one, one at
+/// a time, until `stop`. Through a reconnect the listener stays on the server (connections
+/// wait in its queue); on a new connection it is asked for again, in case the server
+/// started afresh.
+fn forward_loop(link: Arc<Link>, port: u16, app_port: u16, mut listened: u64, stop: Arc<AtomicBool>) {
+    let pause = |d: u64| std::thread::sleep(Duration::from_millis(d));
+    while !stop.load(Ordering::SeqCst) {
+        let (c, generation) = match link.client() {
+            Ok(x) => x,
+            Err(_) if link.status() == Status::Closed => return,
+            Err(_) => {
+                pause(1_000);
+                continue;
+            }
+        };
+        if generation != listened {
+            if let Err(e) = c.listen(port) {
+                eprintln!("[remote] port {port} for the app's {app_port}: {e}");
+                pause(1_000);
+                continue;
+            }
+            listened = generation;
+        }
+        match c.accept(port) {
+            Ok(channel) => {
+                if stop.load(Ordering::SeqCst) {
+                    channel.close();
+                    return;
+                }
+                match std::net::TcpStream::connect(("127.0.0.1", app_port)) {
+                    Ok(stream) => {
+                        if proto::tcp::carry(stream, channel.clone()).is_err() {
+                            channel.close();
+                        }
+                    }
+                    Err(_) => channel.close(),
+                }
+            }
+            // The listener went (the server started afresh): ask for it again.
+            Err(_) if c.is_alive() && !stop.load(Ordering::SeqCst) => {
+                listened = u64::MAX;
+                pause(200);
+            }
+            Err(_) => {}
         }
     }
 }

@@ -12,7 +12,7 @@
 //! they block) until a client attaches again with [`Request::Attach`]. They go when they
 //! have exited and a [`Request::Wait`] has returned their status, on
 //! [`Request::Release`], or when the server stops. File watches and TCP tunnels end with
-//! the connection.
+//! the connection; listeners ([`Request::Listen`]) stay until [`Request::Unlisten`].
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -108,6 +108,18 @@ pub enum Request {
     /// Connect to `host` (default 127.0.0.1) and `port` from the server, and carry the
     /// connection's bytes on `channel`. Reply `()`.
     ConnectTcp { host: Option<String>, port: u16, channel: ChannelId },
+    /// Listen on `port` of the server's loopback (a free one for 0), for [`Request::Accept`]:
+    /// the way back to a port of the client's machine. The listener belongs to the server,
+    /// not to the connection, so it stays through a reconnect (connections wait in its
+    /// queue meanwhile); listening on a port it already listens on is not an error. Reply
+    /// `u16`, the port.
+    Listen { port: u16 },
+    /// Wait for the next connection to the listener of `port` and carry its bytes on
+    /// `channel`. Fails when the listener stops ([`Request::Unlisten`]) or the channel
+    /// closes. Reply `()`.
+    Accept { port: u16, channel: ChannelId },
+    /// Stop listening on `port`. Reply `()`.
+    Unlisten { port: u16 },
     /// Stop the server and every process it runs. Reply `()`.
     Shutdown,
 }

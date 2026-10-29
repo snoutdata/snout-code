@@ -142,6 +142,19 @@ impl Handler for ServerHandler {
                     os_code: e.raw_os_error(),
                 }))
             }
+            Request::Listen { port } => reply(self.daemon.listeners.listen(port).map_err(|e| RemoteError {
+                kind: format!("{:?}", e.kind()),
+                message: format!("listening on {port}: {e}"),
+                os_code: e.raw_os_error(),
+            })),
+            Request::Accept { port, channel } => {
+                let r = mux.register_channel(channel).and_then(|ch| self.daemon.listeners.accept(mux, port, ch));
+                unit(r.map_err(RemoteError::from))
+            }
+            Request::Unlisten { port } => {
+                self.daemon.listeners.unlisten(port);
+                unit(Ok(()))
+            }
             Request::Shutdown => {
                 // Answer first, then go.
                 let daemon = self.daemon.clone();

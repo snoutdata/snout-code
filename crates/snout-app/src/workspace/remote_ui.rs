@@ -165,8 +165,10 @@ impl Workspace {
             this.stash_session(cx);
             this.save_layout(cx);
             this.hub.update(cx, |h, _| h.shutdown_all());
+            // Claude Code's lock file and ports on the host go while the connection is there.
+            let claude = this.claude.take().map(|b| Box::new(b.shut_down()) as Box<dyn FnOnce() + Send>);
             let old = window.window_handle();
-            cx.defer(move |cx| remote::disconnect(old, cx));
+            cx.defer(move |cx| remote::disconnect(old, claude, cx));
         });
     }
 }

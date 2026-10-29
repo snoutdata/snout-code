@@ -306,3 +306,51 @@ fn a_connection_that_cannot_come_back_is_lost_and_calls_fail_at_once() {
     assert_eq!(host.status(), Status::Closed);
     assert_eq!(host.metadata(&f.local.home).unwrap_err().kind(), io::ErrorKind::NotConnected);
 }
+
+#[test]
+fn a_port_forwarded_back_to_the_app_stays_through_a_reconnect() {
+    let f = fixture();
+    let host = &f.host;
+    // A server of the app's, on this side: it answers each line with the line in capitals.
+    let app = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let app_port = app.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in app.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut r = io::BufReader::new(stream.try_clone().unwrap());
+                let mut w = stream;
+                let mut line = String::new();
+                while io::BufRead::read_line(&mut r, &mut line).is_ok_and(|n| n > 0) {
+                    let _ = w.write_all(line.to_uppercase().as_bytes());
+                    line.clear();
+                }
+            });
+        }
+    });
+    let forward = host.forward_to_app(app_port).unwrap();
+    assert_ne!(forward.port, 0);
+    // A program on the host connects to the port there, as `claude` does.
+    let ask = |what: &str| {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", forward.port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        s.write_all(format!("{what}\n").as_bytes()).unwrap();
+        read_until(&mut s, &what.to_uppercase())
+    };
+    assert_eq!(ask("hello"), "HELLO\n");
+    assert_eq!(ask("again"), "AGAIN\n", "one connection after another");
+
+    // The connection drops: the port stays, and leads to the app again once it is back.
+    let connections = host.connections();
+    f.local.kill_proxy();
+    wait_until("the reconnect", Duration::from_secs(10), || {
+        host.connections() > connections && host.status() == Status::Connected
+    });
+    assert_eq!(ask("after"), "AFTER\n");
+
+    // Dropped: nothing listens there any more.
+    let port = forward.port;
+    drop(forward);
+    wait_until("the port to close", Duration::from_secs(5), || {
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_err()
+    });
+}

@@ -409,14 +409,22 @@ pub fn open_project(
     switch_window(store, Some(folder), old, cx);
 }
 
-/// Close the connection and open the window again on this Mac, in place of `old`.
-pub fn disconnect(old: AnyWindowHandle, cx: &mut App) {
+/// Close the connection and open the window again on this Mac, in place of `old`. `before`
+/// runs first (off the UI thread), while the connection is still there.
+pub fn disconnect(old: AnyWindowHandle, before: Option<Box<dyn FnOnce() + Send>>, cx: &mut App) {
     let Some(r) = cx.try_global::<Remote>() else { return };
     let local = r.local.clone().unwrap_or_else(snout_host::local);
     let store = r.main_store.clone();
     let conn = cx.global_mut::<Remote>().connection.take();
     if let Some(host) = conn.and_then(|c| c.host) {
-        host.close();
+        cx.background_executor()
+            .spawn(async move {
+                if let Some(before) = before {
+                    before();
+                }
+                host.close();
+            })
+            .detach();
     }
     cx.global_mut::<Remote>().tasks.clear();
     cx.set_global(crate::host::HostGlobal(local));

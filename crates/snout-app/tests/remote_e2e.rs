@@ -4,8 +4,11 @@
 //! folder. The app is driven as a user would: Connect to SSH Host, the folder picker, the
 //! project opens over the remote host, Java diagnostics and completion from the engine there,
 //! its main class and its tests run, the debugger stops at a breakpoint, a terminal runs there;
-//! then the ssh connection is killed and the app reconnects, the engine still the same
-//! process; Close Remote Connection brings the window back to this Mac.
+//! Claude Code there finds the window (the lock file in that machine's `~/.claude/ide`, the IDE
+//! server reached through a port of that machine) and its hooks report an edit, which the
+//! window plays out and reverts; then the ssh connection is killed and the app reconnects,
+//! the engine still the same process and the hooks' port still leading back;
+//! Close Remote Connection brings the window back to this Mac.
 //!
 //! It opens windows and needs Docker and the network, so it runs only when asked:
 //!
@@ -184,12 +187,15 @@ mod e2e {
             std::thread::sleep(Duration::from_millis(200));
         }
         let store = Store::in_home(&dir.join("home"));
+        let ide_dir = dir.join("ide");
 
         gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut gpui::App| {
             cx.set_global(snout_app::host::HostGlobal(snout_host::local()));
             let settings = Settings::default();
             snout_app::init(&settings, cx);
             cx.set_global(snout_app::lang::hub::LangEnabled(true));
+            // Claude Code's server, as the app runs it (its lock files on this Mac in scratch).
+            cx.set_global(snout_app::claude_ide::IdeConfig { lock_dir: ide_dir.clone() });
             snout_app::remote::init(Some(store.clone()), cx);
             let model = cx.new(|cx| Model::new(store.load(), Some(store.clone()), cx));
             snout_app::open_window(model, None, cx).expect("a window");
@@ -447,6 +453,8 @@ mod e2e {
         })
         .await;
 
+        let _ = claude_code_on_the_remote(cx, "Greeter.java").await;
+
         // The ssh connection dies: the app reconnects, the engine and the terminal live on.
         let before = cx.update(|cx| engine_pids(cx));
         say(&format!("the engine's pid there: {before:?}"));
@@ -499,6 +507,9 @@ mod e2e {
         })
         .await;
 
+        // The hooks' port on the remote machine still leads back to the window.
+        let ports = claude_code_on_the_remote(cx, "App.java").await;
+
         // File ▸ Close Remote Connection: back on this Mac.
         cx.update(|cx| in_window(cx, |w, cx| w.dispatch_action(Box::new(snout_app::menus::CloseRemote), cx)));
         until(cx, 60, "the window is back on this Mac", |cx| {
@@ -507,10 +518,164 @@ mod e2e {
                 && workspace(cx).is_some_and(|ws| ws.read(cx).model.read(cx).project_root().is_none())
         })
         .await;
+        // Claude Code's lock file and ports on the remote machine went with the connection.
+        let check = format!(
+            "ls $HOME/.claude/ide/ | grep -c lock; for p in {} {}; do nc -z 127.0.0.1 $p && echo open; done; true",
+            ports.0, ports.1
+        );
+        let start = Instant::now();
+        loop {
+            let left = in_container(&check, &[], "");
+            if left.trim() == "0" {
+                break;
+            }
+            if start.elapsed() > Duration::from_secs(20) {
+                fail(&format!("Claude Code's lock file or ports are left on the remote machine: {left}"));
+            }
+            wait(cx, 200).await;
+        }
+        say("Claude Code's lock file and ports went with the connection");
         let recent = cx.update(|cx| snout_app::remote::recents(cx));
         if !recent.projects.iter().any(|p| p.host == "devbox" && p.path == Path::new(PROJECT)) {
             fail(&format!("the remote project is not among the recent ones: {recent:?}"));
         }
         say("PASSED");
+    }
+
+    /// Run `cmd` in the container as the user `dev`, `input` on its stdin.
+    fn in_container(cmd: &str, env: &[(&str, String)], input: &str) -> String {
+        use std::io::Write as _;
+        let name = CONTAINER.get().cloned().unwrap_or_default();
+        let mut c = Command::new("docker");
+        c.args(["exec", "-i", "-u", "dev"]);
+        for (k, v) in env {
+            c.arg("-e").arg(format!("{k}={v}"));
+        }
+        let mut child = c
+            .args([&name, "sh", "-c", cmd])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        if !out.status.success() {
+            fail(&format!("in the container, {cmd}: {}", out.status));
+        }
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// Claude Code on the remote machine, faked: it finds the window by the lock file there,
+    /// calls a tool over the port of that machine that leads to the IDE server, and its hooks
+    /// report an edit of `file` (a file of the demo's sources), which the window plays out
+    /// and lists; Revert All puts the file back on the remote machine.
+    async fn claude_code_on_the_remote(cx: &mut AsyncApp, file: &str) -> (String, String) {
+        use snout_app::claude_ide::{IdeArgs, IdeEnv, IdeStatus, bridge};
+        let project = PathBuf::from(PROJECT);
+        let path = project.join("src/main/java/demo").join(file);
+        until(cx, 60, "the console's `claude` has its variables and the hooks' settings", |cx| {
+            cx.try_global::<IdeEnv>().is_some_and(|e| e.0.iter().any(|(k, _)| *k == "SNOUT_HOOK_PORT"))
+                && cx.try_global::<IdeArgs>().is_some_and(|a| !a.0.is_empty())
+        })
+        .await;
+        let (env, args) = cx.update(|cx| (cx.global::<IdeEnv>().0.clone(), cx.global::<IdeArgs>().0.clone()));
+        let port = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone()).unwrap();
+        let (sse, hook) = (port("CLAUDE_CODE_SSE_PORT"), port("SNOUT_HOOK_PORT"));
+        say(&format!("on the remote, the IDE server is at {sse}, the hooks at {hook}"));
+
+        // The lock file is on the remote machine, naming the port there and the remote folder.
+        let lock = in_container(&format!("cat $HOME/.claude/ide/{sse}.lock"), &[], "");
+        let lock: serde_json::Value = serde_json::from_str(&lock).unwrap_or_else(|e| fail(&format!("{e}: {lock}")));
+        if lock["workspaceFolders"] != serde_json::json!([PROJECT]) || lock["ideName"] != "SnoutCode" {
+            fail(&format!("the lock file: {lock}"));
+        }
+        let token = lock["authToken"].as_str().unwrap().to_owned();
+
+        // A client on the remote machine's loopback (a connection made there, as `claude` makes
+        // it), on a thread of its own: the window answers on this one.
+        let remote = cx.update(|cx| snout_app::host::host(cx));
+        let sse_port: u16 = sse.parse().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            use tungstenite::client::IntoClientRequest as _;
+            let stream = match remote.connect_tcp(sse_port, Duration::from_secs(10)) {
+                Ok(s) => s,
+                Err(e) => return tx.send(format!("no connection: {e}")).unwrap_or(()),
+            };
+            let mut req = format!("ws://127.0.0.1:{sse_port}").into_client_request().unwrap();
+            req.headers_mut().insert("x-claude-code-ide-authorization", token.parse().unwrap());
+            let mut ws = match tungstenite::client(req, stream) {
+                Ok((ws, _)) => ws,
+                Err(e) => return tx.send(format!("no handshake: {e}")).unwrap_or(()),
+            };
+            let mut call = |id: u64, method: &str, params: serde_json::Value| -> serde_json::Value {
+                let msg = serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+                ws.send(tungstenite::Message::text(msg.to_string())).unwrap();
+                loop {
+                    let Ok(tungstenite::Message::Text(t)) = ws.read() else { continue };
+                    let v: serde_json::Value = serde_json::from_str(t.as_str()).unwrap();
+                    if v.get("id") == Some(&serde_json::json!(id)) {
+                        return v;
+                    }
+                }
+            };
+            call(1, "initialize", serde_json::json!({ "protocolVersion": "2025-03-26", "capabilities": {} }));
+            let folders = call(2, "tools/call", serde_json::json!({ "name": "getWorkspaceFolders", "arguments": {} }));
+            let _ = tx.send(folders["result"]["content"][0]["text"].as_str().unwrap_or_default().to_owned());
+            // Stays connected, as `claude` does, until the window goes.
+            while ws.read().is_ok() {}
+        });
+        let folders = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let f = folders.clone();
+        until(cx, 30, "Claude Code on the remote machine is answered", move |_| {
+            if let Ok(text) = rx.try_recv() {
+                *f.lock().unwrap() = Some(text);
+            }
+            f.lock().unwrap().is_some()
+        })
+        .await;
+        let folders = folders.lock().unwrap().clone().unwrap();
+        if !folders.contains(PROJECT) {
+            fail(&format!("getWorkspaceFolders: {folders}"));
+        }
+        until(cx, 10, "the window counts the connection", |cx| cx.global::<IdeStatus>().clients >= 1).await;
+
+        // The hooks, as `claude` runs them there: the command its settings name.
+        let settings = in_container(&format!("cat '{}'", args[1]), &[], "");
+        let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+        let hook_cmd = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap().to_owned();
+        let hook_env = [("SNOUT_HOOK_PORT", hook.clone())];
+        let before = in_container(&format!("cat '{}'", path.display()), &[], "");
+        let input = |event: &str| {
+            serde_json::json!({ "hook_event_name": event, "session_id": "e2e", "cwd": PROJECT, "tool_name": "Edit",
+                "tool_input": { "file_path": path, "old_string": "a", "new_string": "b" } })
+            .to_string()
+        };
+        in_container(&hook_cmd, &hook_env, &input("PreToolUse"));
+        let edited = format!("// Edited by Claude Code on the remote machine.\n{before}");
+        in_container(&format!("cat > '{}'", path.display()), &[], &edited);
+        in_container(&hook_cmd, &hook_env, &input("PostToolUse"));
+        let (p, e) = (path.clone(), edited.clone());
+        until(cx, 30, "the edit is listed and plays out in its tab", move |cx| {
+            let ws = workspace(cx).unwrap();
+            let listed = bridge::changes_of(ws.read(cx), cx).read(cx).set.files.iter().any(|f| f.path == p);
+            listed && editor_of(&ws, &p, cx).is_some_and(|ed| ed.read(cx).live.is_none() && ed.read(cx).text(cx) == e)
+        })
+        .await;
+
+        // Revert All puts the file back, on the remote machine.
+        cx.update(|cx| {
+            let ws = workspace(cx).unwrap();
+            in_window(cx, |w, cx| ws.update(cx, |ws, cx| bridge::revert_all(ws, w, cx)));
+        });
+        let start = Instant::now();
+        while in_container(&format!("cat '{}'", path.display()), &[], "") != before {
+            if start.elapsed() > Duration::from_secs(30) {
+                fail("Revert All did not put the file back");
+            }
+            wait(cx, 200).await;
+        }
+        say(&format!("Claude Code on the remote machine: found the window, its edit of {file} shown and reverted"));
+        (sse, hook)
     }
 }

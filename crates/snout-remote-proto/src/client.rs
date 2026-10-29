@@ -287,6 +287,27 @@ impl Client {
         Ok(channel)
     }
 
+    /// Listen on `port` of the server's loopback (a free one for 0); returns the port.
+    pub fn listen(&self, port: u16) -> io::Result<u16> {
+        self.get(Request::Listen { port })
+    }
+
+    /// The next connection to the listener of `port`, once one comes (blocks until then).
+    pub fn accept(&self, port: u16) -> io::Result<Channel> {
+        let channel = self.mux.open_channel()?;
+        match self.get::<()>(Request::Accept { port, channel: channel.id() }) {
+            Ok(()) => Ok(channel),
+            Err(e) => {
+                channel.close();
+                Err(e)
+            }
+        }
+    }
+
+    pub fn unlisten(&self, port: u16) -> io::Result<()> {
+        self.get(Request::Unlisten { port })
+    }
+
     /// Stop the server and everything it runs.
     pub fn shutdown_server(&self) -> io::Result<()> {
         self.get(Request::Shutdown)

@@ -239,6 +239,7 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     assert_eq!(lock["workspaceFolders"], json!([repo.to_string_lossy()]));
     let token = lock["authToken"].as_str().unwrap().to_owned();
     assert_eq!(token.len(), 32);
+    pump_until(cx, "the variables", |cx| cx.update(|_, cx| cx.try_global::<IdeEnv>().is_some_and(|e| !e.0.is_empty())));
     let env = cx.update(|_, cx| cx.global::<IdeEnv>().0.clone());
     assert!(env.contains(&("CLAUDE_CODE_SSE_PORT", port.to_string())));
     assert!(env.contains(&("ENABLE_IDE_INTEGRATION", "true".into())));
@@ -450,7 +451,7 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     assert_eq!(mention["lineEnd"], line("public String"));
 
     // The server goes with the window; so does its lock file.
-    let lock_path = cx.update(|_, cx| ws.read(cx).claude.as_ref().unwrap().server.lock_path().unwrap().to_owned());
+    let lock_path = cx.update(|_, cx| ws.read(cx).claude.as_ref().unwrap().server.lock_path().unwrap());
     assert!(lock_path.exists());
     cx.update(|_, cx| ws.update(cx, |ws, _| ws.claude = None));
     let gone = std::time::Instant::now() + Duration::from_secs(5);
@@ -508,7 +509,9 @@ fn the_editor_follows_the_files_claude_changes(cx: &mut TestAppContext) {
 
 /// The hooks' endpoint of the window and the command `claude`'s settings run for a hook.
 fn hook_command(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> (u16, String) {
-    pump_until(cx, "the hooks' settings", |cx| cx.update(|_, cx| cx.try_global::<super::IdeArgs>().is_some()));
+    pump_until(cx, "the hooks' settings", |cx| {
+        cx.update(|_, cx| cx.try_global::<super::IdeArgs>().is_some_and(|a| !a.0.is_empty()))
+    });
     let (port, args, env) = cx.update(|_, cx| {
         let port = ws.read(cx).claude.as_ref().unwrap().hooks.as_ref().unwrap().port();
         (port, cx.global::<super::IdeArgs>().0.clone(), cx.global::<IdeEnv>().0.clone())
@@ -635,7 +638,7 @@ fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut Test
 
     // Revert All: the file Claude made goes, its tab too.
     cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::revert_all(ws, w, cx)));
-    pump(cx, 100);
+    pump_until(cx, "the created file gone", |_| !fresh.exists());
     assert!(!fresh.exists(), "a created file reverts to nothing");
     assert!(editor_of(&ws, &fresh, cx).is_none());
     assert!(listed(&ws, cx).is_empty());

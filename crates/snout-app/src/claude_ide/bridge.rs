@@ -70,6 +70,8 @@ pub struct Bridge {
     known: HashMap<PathBuf, String>,
     /// The hooks' endpoint, and the folder of the settings `claude` gets.
     pub hooks: Option<HookServer>,
+    /// The port of the host that leads to the hooks' endpoint.
+    hooks_forward: Option<snout_host::Forward>,
     settings_dir: Option<PathBuf>,
     /// The files the hooks reported, and when; the files the app wrote itself (a revert).
     hooked: HashMap<PathBuf, Instant>,
@@ -100,15 +102,38 @@ impl Bridge {
     pub fn clients(&self) -> usize {
         self.clients.len()
     }
+
+    /// End Claude Code's connection to the window now, before its host closes. What is left
+    /// to do on the host (wait for the lock file to go, remove the hooks' settings, give up
+    /// the hooks' port) comes back, to run off the UI thread.
+    pub fn shut_down(mut self) -> impl FnOnce() + Send + 'static {
+        let gone = self.server.stop();
+        let host = self.server.host();
+        let (dir, forward) = (self.settings_dir.take(), self.hooks_forward.take());
+        drop(self);
+        move || {
+            let _ = gone.recv_timeout(Duration::from_secs(5));
+            if let Some(dir) = dir {
+                let _ = host.remove_dir_all(&dir);
+            }
+            drop(forward);
+        }
+    }
 }
 
-/// Start the server for this window, if the app asks for one.
+/// Start the server for this window, if the app asks for one. On a remote machine the lock
+/// file goes into that machine's `~/.claude/ide`, and the server and the hooks' endpoint
+/// are reached through ports of that machine forwarded back here.
 pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     let Some(config) = cx.try_global::<IdeConfig>().cloned() else { return };
+    let host = crate::host::host(cx);
+    let lock_dir =
+        if crate::remote::is_remote(cx) { super::lockfile::default_dir(&*host) } else { Some(config.lock_dir) };
+    let Some(lock_dir) = lock_dir else { return };
     let root = ws.model.read(cx).project_root();
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
     let folders: Vec<PathBuf> = root.iter().cloned().collect();
-    let server = match Server::start(crate::host::host(cx), &config.lock_dir, &folders, move |e| {
+    let server = match Server::start(host.clone(), &lock_dir, &folders, move |e| {
         let _ = tx.unbounded_send(e);
     }) {
         Ok(server) => server,
@@ -117,10 +142,9 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             return;
         }
     };
-    let mut env = server.env();
     // Claude Code's hooks report every edit to the endpoint; `claude` gets their settings.
     let (htx, mut hrx) = futures::channel::mpsc::unbounded::<HookEvent>();
-    let hooks = match HookServer::start(crate::host::host(cx), move |e| {
+    let hooks = match HookServer::start(host.clone(), move |e| {
         let _ = htx.unbounded_send(e);
     }) {
         Ok(h) => Some(h),
@@ -129,24 +153,54 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             None
         }
     };
-    let host = crate::host::host(cx);
     let settings_dir = hooks
         .as_ref()
         .map(|h| host.info().temp_dir.join(format!("snout-code-claude-{}-{}", host.info().pid, h.port())));
-    if let (Some(h), Some(dir)) = (&hooks, &settings_dir) {
-        env.push((hooks::PORT_ENV, h.port().to_string()));
-        // Written off the UI thread; `claude` gets them once they are there.
-        let (host, dir, token) = (host.clone(), dir.clone(), h.token().to_owned());
-        let write = cx.background_spawn(async move { hooks::write_settings(&*host, &dir, &token) });
-        cx.spawn(async move |_, cx| match write.await {
-            Ok(file) => {
-                cx.update(|cx| cx.set_global(IdeArgs(vec!["--settings".into(), file.to_string_lossy().into_owned()])));
+    // What a `claude` started in the console needs (the ports on the host, the hooks'
+    // settings written there) is made off the UI thread; it gets them once they are there.
+    let (ready_tx, ready_rx) = futures::channel::oneshot::channel::<u16>();
+    server.when_ready(move |port| {
+        let _ = ready_tx.send(port);
+    });
+    let hooks_ready = match (&hooks, &settings_dir) {
+        (Some(h), Some(dir)) => {
+            let (host, dir, token, app_port) = (host.clone(), dir.clone(), h.token().to_owned(), h.port());
+            Some(cx.background_spawn(async move {
+                let forward = host.forward_to_app(app_port)?;
+                let file = hooks::write_settings(&*host, &dir, &token)?;
+                std::io::Result::Ok((forward, file))
+            }))
+        }
+        _ => None,
+    };
+    cx.spawn(async move |ws, cx| {
+        let Ok(ide_port) = ready_rx.await else { return };
+        let mut env = Server::env(ide_port);
+        let mut args = Vec::new();
+        if let Some(task) = hooks_ready {
+            match task.await {
+                Ok((forward, file)) => {
+                    env.push((hooks::PORT_ENV, forward.port.to_string()));
+                    args = vec!["--settings".into(), file.to_string_lossy().into_owned()];
+                    let _ = ws.update(cx, |ws, _| {
+                        if let Some(b) = ws.claude.as_mut() {
+                            b.hooks_forward = Some(forward);
+                        }
+                    });
+                }
+                Err(e) => eprintln!("Claude Code integration: could not set up the hooks: {e}"),
             }
-            Err(e) => eprintln!("Claude Code integration: could not write the hooks' settings: {e}"),
-        })
-        .detach();
-    }
-    cx.set_global(IdeEnv(env));
+        }
+        cx.update(|cx| {
+            cx.set_global(IdeEnv(env));
+            cx.set_global(IdeArgs(args));
+        });
+    })
+    .detach();
+    // Until then, a `claude` started in the console runs without them (not with those of
+    // the window before, on another host).
+    cx.set_global(IdeEnv::default());
+    cx.set_global(IdeArgs::default());
     cx.set_global(IdeStatus::default());
     let hook_events = cx.spawn_in(window, async move |this, cx| {
         while let Some(event) = hrx.next().await {
@@ -193,6 +247,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         watch: None,
         known: HashMap::new(),
         hooks,
+        hooks_forward: None,
         settings_dir,
         hooked: HashMap::new(),
         own_writes: HashMap::new(),

@@ -166,6 +166,11 @@ impl Host for LatencyHost {
         self.inner.connect_tcp(port, timeout)
     }
 
+    fn forward_to_app(&self, app_port: u16) -> io::Result<crate::Forward> {
+        self.wait("forward_to_app", &app_port);
+        self.inner.forward_to_app(app_port)
+    }
+
     fn processes(&self, cpu: bool) -> io::Result<Vec<ProcInfo>> {
         self.wait("processes", &cpu);
         self.inner.processes(cpu)

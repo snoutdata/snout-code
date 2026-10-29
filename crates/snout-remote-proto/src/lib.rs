@@ -17,7 +17,7 @@
 //!   output nobody reads is stopped by its pipe, not buffered without bound.
 //! - [`api`]: the requests and their replies: file system and host information, file
 //!   watching, processes and ptys (which outlive a connection and can be attached again),
-//!   and TCP connections from the remote machine.
+//!   and TCP connections from the remote machine and back to the client's ([`tcp`]).
 //! - [`client`]: the typed client the app uses.
 //!
 //! # Handshake
@@ -31,6 +31,7 @@ pub mod client;
 pub mod frame;
 pub mod message;
 pub mod mux;
+pub mod tcp;
 
 pub use api::*;
 pub use client::{Client, Pipes, RemoteProcess, RemotePty, Watch};

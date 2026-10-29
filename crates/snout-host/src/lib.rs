@@ -20,8 +20,9 @@
 //! [`from_env`]) and reports the calls made on the UI thread, to find the ones left.
 //!
 //! Deliberate exceptions, where the workspace side does not (yet) go through a [`Host`]:
-//! - Claude Code's IDE server (`snout-app`'s `claude_ide::server`) listens on 127.0.0.1 of
-//!   the Mac; a remote host tunnels the port it names in the lock file back to it.
+//! - Claude Code's IDE server and its hooks' endpoint (`snout-app`'s `claude_ide`) listen on
+//!   127.0.0.1 of the Mac; [`Host::forward_to_app`] gives a remote host a port of its own
+//!   that leads back to each, and the lock file and the hooks name that port.
 //! - The engine distribution is looked for next to the program serving the host
 //!   ([`HostInfo::exe`]), and in development in the source tree the app was built from; a
 //!   remote host gets its jars copied from the Mac's (`snout-app`'s `remote_engine`).
@@ -388,6 +389,27 @@ pub trait Stream: Read + Write + Send + Sync {
     fn shutdown(&self) -> io::Result<()>;
 }
 
+/// A port of the host whose connections arrive at a port of this Mac (see
+/// [`Host::forward_to_app`]); the forwarding ends when it is dropped.
+pub struct Forward {
+    /// The port on the host's loopback.
+    pub port: u16,
+    _keep: Box<dyn Send + Sync>,
+}
+
+impl Forward {
+    /// `port` on the host, forwarded while `keep` lives.
+    pub fn new(port: u16, keep: Box<dyn Send + Sync>) -> Self {
+        Self { port, _keep: keep }
+    }
+}
+
+impl std::fmt::Debug for Forward {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Forward").field("port", &self.port).finish()
+    }
+}
+
 /// A process of the host, as a listing of them sees it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProcInfo {
@@ -517,6 +539,14 @@ pub trait Host: Send + Sync {
 
     /// Connect to `port` on the host's loopback, waiting up to `timeout`.
     fn connect_tcp(&self, port: u16, timeout: Duration) -> io::Result<Box<dyn Stream>>;
+
+    /// Make connections to a port of the host's loopback arrive at `app_port` on this Mac's
+    /// (the way back for a program on the host to a server of the app: Claude Code's IDE
+    /// server and its hooks' endpoint). Returns the port on the host, kept through a
+    /// reconnect. On this Mac itself that is `app_port`.
+    fn forward_to_app(&self, app_port: u16) -> io::Result<Forward> {
+        Ok(Forward::new(app_port, Box::new(())))
+    }
 
     /// Every process of the host; with `cpu`, after measuring their CPU use if the listing
     /// before is too old to measure against.

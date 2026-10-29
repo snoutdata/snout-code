@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 
 pub struct Daemon {
     pub procs: Procs,
+    /// Listeners whose connections go back to the client's machine.
+    pub listeners: crate::tcp::Listeners,
     /// This machine, for the requests the app's own host code answers.
     pub local: Arc<snout_host::LocalHost>,
     /// The login shell's environment, read on first use.
@@ -78,6 +80,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
     ));
     let daemon = Arc::new(Daemon {
         procs: Procs::default(),
+        listeners: Default::default(),
         local: Arc::new(snout_host::LocalHost::new()),
         login_env: OnceLock::new(),
         dir: opts.dir.clone(),
