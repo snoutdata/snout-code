@@ -43,6 +43,8 @@ pub mod workspace;
 #[cfg(test)]
 mod code_tests;
 #[cfg(test)]
+mod java_tools_tests;
+#[cfg(test)]
 mod lang_tests;
 #[cfg(test)]
 mod project_tests;

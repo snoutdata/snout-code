@@ -10,7 +10,7 @@ The engine reads the build's Gradle model first, so it knows the source folders,
 
 Spring Boot configuration files (`application.properties`, `application.yml` and their profile variants) get completion and checks from the same engine. See [Spring](spring.md).
 
-Most commands below are in the **Code** menu, and in the command palette (⇧⌘P).
+Most commands below are in the **Code** and **Refactor** menus, and in the command palette (⇧⌘P).
 
 ## Completion
 
@@ -52,7 +52,7 @@ Put the caret on a name and press ⇧F12 (Code ▸ Find References). Every use o
 
 ## Rename
 
-1. Put the caret on a name and press F2 (Code ▸ Rename Symbol…).
+1. Put the caret on a name and press F2 (Refactor ▸ Rename Symbol…).
 2. Type the new name in the field that opens over the caret.
 3. Press ↩ to rename it everywhere the engine finds it, in every file. Esc cancels.
 
@@ -61,6 +61,28 @@ Put the caret on a name and press ⇧F12 (Code ▸ Find References). Every use o
 *Renaming `place` to `placeOrder`.*
 
 Files that are open take the change as an edit you can undo. Files that are not open are changed on disk.
+
+## Extract and inline
+
+The **Refactor** menu, the command palette and the editor's right click menu (under Refactor) have these:
+
+| Shortcut | Command | Select | What it does |
+|---|---|---|---|
+| ⌥⌘M | Extract Method | Whole statements, or an expression | Moves them into a new method, and calls it in their place. |
+| ⌥⌘V | Extract Variable | An expression | Puts it in a new local variable, declared just before. |
+| ⌥⌘C | Extract Constant | An expression of constants, such as a literal | Makes it a `static final` field of the class. |
+| ⌥⇧⌘F | Extract Field | An expression | Makes it a field of the class. |
+| ⌥⌘N | Inline | Nothing: put the caret on a name | Puts a local variable's value, a method's body or a constant's value in place of its uses, and removes it. |
+
+Extract Field is ⌥⇧⌘F rather than ⌥⌘F, because ⌥⌘F is Replace in File.
+
+After an extraction, the new name is selected in the rename field over the caret, as with F2: type a better one and press ↩ to rename it everywhere, or Esc to keep the name the engine chose.
+
+When the expression appears more than once in the method, a small menu asks whether to replace this occurrence only or all of them. Use ↑ ↓ and ↩, or click; Esc cancels.
+
+When the refactoring is not possible with what is selected, nothing changes, and a note under the caret says why, such as `Cannot extract a variable here: select an expression`.
+
+![Extract Method: the new method, and its name ready to rename](images/extract-method.png)
 
 ## Quick fixes
 

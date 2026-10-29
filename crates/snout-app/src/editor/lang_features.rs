@@ -500,7 +500,7 @@ impl EditorPanel {
     }
 
     /// Where the caret is drawn, in window coordinates.
-    fn caret_bounds(&self, cx: &App) -> Option<gpui::Bounds<gpui::Pixels>> {
+    pub(super) fn caret_bounds(&self, cx: &App) -> Option<gpui::Bounds<gpui::Pixels>> {
         let s = self.state.read(cx);
         let c = s.cursor();
         s.range_to_bounds(&(c..c))

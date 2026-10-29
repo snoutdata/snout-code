@@ -64,6 +64,11 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⇧F12 | Find References | Editor |
 | F2 | Rename Symbol… | Editor |
 | Esc | Cancel the rename | In the rename box |
+| ⌥⌘M | Extract Method | Editor |
+| ⌥⌘V | Extract Variable | Editor |
+| ⌥⌘C | Extract Constant | Editor |
+| ⌥⇧⌘F | Extract Field (⌥⌘F is Replace in File) | Editor |
+| ⌥⌘N | Inline | Editor |
 | ⌘. | Quick Fix… | Editor |
 | ⌥⇧F | Format Document | Editor |
 | ⌥⇧O | Organize Imports | Editor |

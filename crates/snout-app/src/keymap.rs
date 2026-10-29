@@ -63,6 +63,12 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("shift-alt-f", Box::new(e::FormatDocument), Some("EditorPanel")),
         ("shift-alt-o", Box::new(e::OrganizeImports), Some("EditorPanel")),
         ("cmd-shift-space", Box::new(e::ShowSignature), Some("EditorPanel")),
+        // Refactoring. Extract Field is ⌥⇧⌘F: ⌥⌘F is Replace in the editor.
+        ("cmd-alt-m", Box::new(e::ExtractMethod), Some("EditorPanel")),
+        ("cmd-alt-v", Box::new(e::ExtractVariable), Some("EditorPanel")),
+        ("cmd-alt-c", Box::new(e::ExtractConstant), Some("EditorPanel")),
+        ("cmd-alt-shift-f", Box::new(e::ExtractField), Some("EditorPanel")),
+        ("cmd-alt-n", Box::new(e::Inline), Some("EditorPanel")),
         ("ctrl-space", Box::new(i::ShowCompletions), Some("EditorPanel > Input")),
         ("escape", Box::new(e::CancelRename), Some("RenameBox > Input")),
         ("cmd-t", Box::new(GoToSymbol), None),

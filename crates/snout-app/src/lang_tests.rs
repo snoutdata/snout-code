@@ -16,7 +16,7 @@ use crate::tests::{act, git, open, scratch_dir, with_repo};
 use crate::workspace::Workspace;
 
 /// The JDK 17 the fixture builds with, if this machine has one.
-fn jdk17() -> Option<PathBuf> {
+pub(crate) fn jdk17() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("SNOUT_TEST_JDK17").map(PathBuf::from) {
         return java::jdk_at(&*snout_host::local(), &home)
             .or_else(|| java::jdk_at(&*snout_host::local(), &home.join("Contents/Home")))
@@ -56,7 +56,11 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// Let real time pass (the server works in other processes) while the app's tasks run.
-fn pump_until(cx: &mut VisualTestContext, secs: u64, mut done: impl FnMut(&mut VisualTestContext) -> bool) -> bool {
+pub(crate) fn pump_until(
+    cx: &mut VisualTestContext,
+    secs: u64,
+    mut done: impl FnMut(&mut VisualTestContext) -> bool,
+) -> bool {
     let deadline = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < deadline {
         cx.executor().advance_clock(Duration::from_millis(200));
@@ -70,21 +74,31 @@ fn pump_until(cx: &mut VisualTestContext, secs: u64, mut done: impl FnMut(&mut V
 }
 
 /// The workspace under test, for the helpers.
-struct TestWorkspace(Entity<Workspace>);
+pub(crate) struct TestWorkspace(pub Entity<Workspace>);
 
 impl gpui::Global for TestWorkspace {}
 
-fn editor_of(ws: &Entity<Workspace>, path: &Path, cx: &mut VisualTestContext) -> Option<Entity<EditorPanel>> {
+pub(crate) fn editor_of(
+    ws: &Entity<Workspace>,
+    path: &Path,
+    cx: &mut VisualTestContext,
+) -> Option<Entity<EditorPanel>> {
     cx.update(|_, cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == path))
 }
 
-fn text(editor: &Entity<EditorPanel>, cx: &mut VisualTestContext) -> String {
+pub(crate) fn text(editor: &Entity<EditorPanel>, cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| editor.read(cx).text(cx))
 }
 
 /// Bring the editor's tab forward and put the caret at the `nth` match of `find` (plus
 /// `offset` bytes).
-fn caret_at(editor: &Entity<EditorPanel>, find: &str, nth: usize, offset: usize, cx: &mut VisualTestContext) {
+pub(crate) fn caret_at(
+    editor: &Entity<EditorPanel>,
+    find: &str,
+    nth: usize,
+    offset: usize,
+    cx: &mut VisualTestContext,
+) {
     cx.update(|window, cx| {
         let ws = cx.global::<TestWorkspace>().0.clone();
         let id = gpui_component::dock::PanelId::from(editor.entity_id());

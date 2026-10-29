@@ -1488,6 +1488,162 @@ mod shots {
         println!("screenshot {name}: ok");
     }
 
+    /// The Java tools on the `shop` fixture (`tests/fixtures/shop`), for real: the engine
+    /// (`engine/build/dist`, or `SNOUT_ENGINE_DIST`) reads it, and each step is shot as the
+    /// user sees it. Only with `SNOUT_SHOT_JAVA=<JDK 17 to 21 home>`.
+    fn real_java_shots(theme: ThemeChoice) {
+        let Some(jdk) = std::env::var_os("SNOUT_SHOT_JAVA").map(PathBuf::from) else { return };
+        let mode = if theme == ThemeChoice::Dark { "dark" } else { "light" };
+        let dir = std::env::temp_dir().join(format!("snout-app-shot-java-{mode}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shop");
+        assert!(Command::new("cp").arg("-R").arg(&from).arg(&dir).status().unwrap().success());
+        let repo = dir.join("shop").canonicalize().unwrap();
+        std::fs::write(repo.join("gradle.properties"), "org.gradle.daemon.idletimeout=60000\n").unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        let c = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
+        git(&repo, &[&c[..], &["add", "-A"]].concat());
+        git(&repo, &[&c[..], &["commit", "-qm", "f"]].concat());
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let mut settings =
+            Settings { theme, repos: vec![repo.clone()], current: Some(repo.clone()), ..Settings::default() };
+        settings.project_jdks.insert(repo.clone(), jdk);
+        cx.update(|cx| snout_app::init(&settings, cx));
+        cx.update(|cx| cx.set_global(snout_app::lang::hub::LangEnabled(true)));
+        let model = cx.update(|cx| {
+            let settings = settings.clone();
+            cx.new(|cx| snout_app::model::Model::new(settings, None, cx))
+        });
+        let mut ws = None;
+        let handle = cx
+            .open_window(size(px(1400.), px(900.)), |window, cx| {
+                let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+                ws = Some(view.clone());
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        let ws = ws.unwrap();
+        cx.allow_parking();
+        let pump = |cx: &mut HeadlessAppContext, secs: u64, done: &dyn Fn(&mut HeadlessAppContext) -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+            while std::time::Instant::now() < deadline {
+                cx.advance_clock(Duration::from_millis(200));
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                })
+                .unwrap();
+                if done(cx) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            false
+        };
+        let save = |cx: &mut HeadlessAppContext, name: &str| {
+            let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
+            if let Some(out) = std::env::var_os("SNOUT_SCREENSHOT") {
+                let out = PathBuf::from(out);
+                std::fs::create_dir_all(&out).unwrap();
+                image.save(out.join(format!("{name}-{mode}.png"))).unwrap();
+            }
+            println!("screenshot {name}-{mode}: ok");
+        };
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.show_activity(Activity::Project, window, cx));
+        })
+        .unwrap();
+        let file = repo.join("src/main/java/demo/shop/Shop.java");
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((22, 0))), cx)));
+        let hub = cx.update(|cx| ws.read(cx).hub.clone());
+        let r = repo.clone();
+        assert!(
+            pump(&mut cx, 300, &|cx| cx.update(|cx| hub
+                .read(cx)
+                .servers
+                .get(&r)
+                .is_some_and(|s| s.first_diagnostics.is_some()))),
+            "the engine is ready"
+        );
+        let editor = cx
+            .update(|cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == file))
+            .expect("Shop.java is open");
+        let original = cx.update(|cx| editor.read(cx).text(cx));
+        // Select `find` (its `nth` match) and run `then` on the editor.
+        let on_selection = |cx: &mut HeadlessAppContext,
+                            find: &str,
+                            nth: usize,
+                            then: &dyn Fn(
+            &mut snout_app::editor::EditorPanel,
+            &mut gpui::Window,
+            &mut gpui::Context<snout_app::editor::EditorPanel>,
+        )| {
+            cx.update_window(handle.into(), |_, window, cx| {
+                editor.update(cx, |e, cx| {
+                    let t = e.text(cx);
+                    let at = t.match_indices(find).nth(nth).map(|(i, _)| i).expect("the text is there");
+                    e.state.update(cx, |s, cx| {
+                        s.set_selected_range(at..at + find.len(), cx);
+                        s.focus(window, cx);
+                    });
+                    then(e, window, cx);
+                })
+            })
+            .unwrap();
+        };
+        let put_back = |cx: &mut HeadlessAppContext| {
+            cx.update_window(handle.into(), |_, window, cx| {
+                editor.update(cx, |e, cx| {
+                    e.rename = None;
+                    e.choices = None;
+                    e.state.update(cx, |s, cx| s.set_value(original.clone(), window, cx));
+                })
+            })
+            .unwrap();
+        };
+        use snout_app::editor::Refactoring;
+
+        // Extract Method on the loop of `total()`: the new method, its name in the field.
+        // Right after the start the engine may still be indexing: ask until it answers.
+        for _ in 0..10 {
+            on_selection(
+                &mut cx,
+                "for (Shape s : shapes) {\n            sum += s.area();\n        }",
+                0,
+                &|e, w, cx| e.refactor(Refactoring::ExtractMethod, w, cx),
+            );
+            if pump(&mut cx, 6, &|cx| cx.update(|cx| editor.read(cx).rename.is_some())) {
+                break;
+            }
+        }
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-extract-method");
+        put_back(&mut cx);
+
+        // Extract Variable on an expression used twice: which occurrences to replace.
+        cx.update_window(handle.into(), |_, window, cx| {
+            let twice = original.replace("int tax = 7;", "int tax = 7 * 6;\n        int fee = 7 * 6;");
+            editor.update(cx, |e, cx| e.state.update(cx, |s, cx| s.set_value(twice, window, cx)));
+        })
+        .unwrap();
+        pump(&mut cx, 1, &|_| false);
+        on_selection(&mut cx, "7 * 6", 0, &|e, w, cx| e.refactor(Refactoring::ExtractVariable, w, cx));
+        pump(&mut cx, 30, &|cx| cx.update(|cx| editor.read(cx).choices.is_some()));
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-extract-choices");
+        put_back(&mut cx);
+        pump(&mut cx, 1, &|_| false);
+
+        cx.update(|cx| hub.update(cx, |h, _| h.shutdown_all()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// The debugger stopped on a breakpoint in the engine's run-app fixture, for real: the
     /// engine (`engine/build/dist`, or `SNOUT_ENGINE_DIST`) runs and debugs it. Only with
     /// `SNOUT_SHOT_DEBUG=<JDK 17 to 21 home>`.
@@ -2128,6 +2284,7 @@ mod shots {
         shot("project-model-light", ThemeChoice::Light, Activity::Project, Some(Select::ProjectModel));
         real_project_shot("project-real-dark", ThemeChoice::Dark);
         real_debug_shot("debug-real-dark", ThemeChoice::Dark);
+        real_java_shots(ThemeChoice::Dark);
         real_boot_shot(ThemeChoice::Dark);
         shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));

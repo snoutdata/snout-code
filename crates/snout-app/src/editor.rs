@@ -31,12 +31,14 @@ use crate::lang::providers::DocLink;
 
 mod claude;
 mod lang_features;
+mod refactor;
 mod run_gutter;
 mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
 pub use claude::{Answer, ClaudeRequest, LIVE_TICK, Outcome, Proposal, Review, STREAM_TICK};
 pub use lang_features::{class_file_name, is_class_file_path};
+pub use refactor::{Refactoring, new_name};
 pub use run_gutter::{CODE_PAD, GutterMenu, Lanes, PLAIN_PAD, runnables_of};
 pub use spring_gutter::{SpringItem, spring_items, spring_of};
 
@@ -58,6 +60,11 @@ actions!(
         AcceptChanges,
         RejectChanges,
         SendToClaude,
+        ExtractMethod,
+        ExtractVariable,
+        ExtractConstant,
+        ExtractField,
+        Inline,
     ]
 );
 
@@ -247,6 +254,12 @@ pub struct EditorPanel {
     signature_line: Option<u32>,
     /// The new name being typed for the symbol at the caret (F2).
     pub rename: Option<Entity<InputState>>,
+    /// The ways a refactoring can go, while the menu at the caret asks which.
+    pub choices: Option<refactor::Choices>,
+    /// A note at the caret: why a command did nothing.
+    pub hint: Option<String>,
+    _hint: Option<Task<()>>,
+    _refactor: Option<Task<()>>,
     /// A class file of a library (`jdt://`), shown read only.
     pub class_file: Option<(lsp_types::Uri, PathBuf)>,
     /// A change Claude proposes, under review, and the ones waiting after it.
@@ -433,6 +446,10 @@ impl EditorPanel {
             _signature: None,
             signature_line: None,
             rename: None,
+            choices: None,
+            hint: None,
+            _hint: None,
+            _refactor: None,
             class_file: None,
             review: None,
             queue: VecDeque::new(),
@@ -1349,6 +1366,19 @@ impl Render for EditorPanel {
                     .on_action(cx.listener(|this, _: &OrganizeImports, _, cx| this.organize_imports(cx)))
                     .on_action(cx.listener(|this, _: &ShowSignature, _, cx| this.ask_signature(cx)))
                     .on_action(cx.listener(|this, _: &CancelRename, w, cx| this.cancel_rename(w, cx)))
+                    .on_action(
+                        cx.listener(|this, _: &ExtractMethod, w, cx| this.refactor(Refactoring::ExtractMethod, w, cx)),
+                    )
+                    .on_action(cx.listener(|this, _: &ExtractVariable, w, cx| {
+                        this.refactor(Refactoring::ExtractVariable, w, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &ExtractConstant, w, cx| {
+                        this.refactor(Refactoring::ExtractConstant, w, cx)
+                    }))
+                    .on_action(
+                        cx.listener(|this, _: &ExtractField, w, cx| this.refactor(Refactoring::ExtractField, w, cx)),
+                    )
+                    .on_action(cx.listener(|this, _: &Inline, w, cx| this.refactor(Refactoring::Inline, w, cx)))
             })
             .when_some(self.error.clone(), |d, e| d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(e)))
             .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
@@ -1398,7 +1428,9 @@ impl Render for EditorPanel {
                     .children(self.gutter_popup(cx))
                     .children(self.signature_popup(cx))
                     .children(self.inspections(cx))
-                    .children(self.rename_box(cx)),
+                    .children(self.rename_box(cx))
+                    .children(self.hint_popup(cx))
+                    .children(self.choices_popup(cx)),
             )
     }
 }
@@ -1419,8 +1451,17 @@ fn context_menu(
         None => menu,
     };
     let menu = if lang {
+        let refactor = gpui_component::native_menu::NativeMenu::new()
+            .menu("Rename Symbol…", Box::new(RenameSymbol))
+            .separator()
+            .menu("Extract Method", Box::new(ExtractMethod))
+            .menu("Extract Variable", Box::new(ExtractVariable))
+            .menu("Extract Constant", Box::new(ExtractConstant))
+            .menu("Extract Field", Box::new(ExtractField))
+            .menu("Inline", Box::new(Inline));
         menu.menu("Go to Definition", Box::new(i::GoToDefinition))
             .menu("Quick Fix…", Box::new(i::ToggleCodeActions))
+            .submenu("Refactor", refactor)
             .separator()
     } else {
         menu
