@@ -51,7 +51,26 @@ impl Tool {
         }
     }
 
-    fn icon(self) -> Icon {
+    /// The tool window whose panel is called `name` in the dock.
+    pub fn of_panel(name: &str) -> Option<Tool> {
+        Some(match name {
+            "Run" => Tool::Run,
+            "Debug" => Tool::Debug,
+            "Build" => Tool::Build,
+            "Output" => Tool::Output,
+            "Terminal" => Tool::Terminal,
+            "Problems" | "References" => Tool::Problems,
+            "Claude" => Tool::Claude,
+            "Gradle" => Tool::Gradle,
+            "Spring" => Tool::Spring,
+            "Notifications" => Tool::Notifications,
+            "Claude Changes" => Tool::ClaudeChanges,
+            "Processes" => Tool::Processes,
+            _ => return None,
+        })
+    }
+
+    pub fn icon(self) -> Icon {
         match self {
             Tool::Run => Icon::RunWindow,
             Tool::Debug => Icon::Bug,
@@ -69,7 +88,7 @@ impl Tool {
     }
 
     /// The hue its icon takes when icons are in colour.
-    fn hue(self) -> usize {
+    pub fn hue(self) -> usize {
         match self {
             Tool::Run => 1,
             Tool::Debug => 3,

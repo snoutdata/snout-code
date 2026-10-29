@@ -18,7 +18,7 @@ use super::Runs;
 use super::config::{self, Kind, RunConfig};
 use crate::glyphs::{Icon, icon};
 use crate::look;
-use crate::theme::{mix, palette};
+use crate::theme::palette;
 
 pub enum ConfigEvent {
     Close,
@@ -344,22 +344,9 @@ impl Render for ConfigDialog {
             );
         }
         let button = |id: &'static str, text: &'static str, primary: bool| {
-            let hover = if primary { mix(p.accent, 0.88, p.fg) } else { p.button_hover };
-            div()
-                .id(id)
-                .debug_selector(move || id.to_owned())
-                .h(px(28.))
-                .min_w(px(76.))
-                .px(px(14.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(5.))
-                .cursor_pointer()
-                .when(primary, |d| d.bg(p.accent).text_color(p.on_accent))
-                .when(!primary, |d| d.bg(p.button).border_1().border_color(p.border))
-                .hover(move |s| s.bg(hover))
-                .child(text)
+            use crate::components::{Variant, button_base};
+            let variant = if primary { Variant::Primary } else { Variant::Secondary };
+            button_base(id, variant, false, false, false, false, &p).child(text)
         };
         let small = |id: &'static str, g: Icon, tip: &'static str| crate::tabs::tool_button(id, g, tip, &p);
         div()
@@ -376,23 +363,22 @@ impl Render for ConfigDialog {
             .bg(p.card)
             .border_1()
             .border_color(p.border)
-            .rounded(px(10.))
+            .rounded(px(12.))
             .shadow_lg()
             .overflow_hidden()
             .text_size(px(look::BODY))
             .text_color(p.fg)
             .child(
-                div()
-                    .h(px(34.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .border_b_1()
-                    .border_color(p.border)
-                    .bg(p.ground)
-                    .text_color(p.fg_dim)
-                    .child("Run Configurations"),
+                crate::components::dialog_header_icon(
+                    crate::components::Tone::Success,
+                    crate::components::IconName::Play,
+                    "Run Configurations",
+                    Some("What Run and Debug start: an application, a Gradle task, tests.".into()),
+                    &p,
+                )
+                .pb(px(12.))
+                .border_b_1()
+                .border_color(p.border),
             )
             .child(
                 div()
@@ -441,14 +427,16 @@ impl Render for ConfigDialog {
             .child(
                 div()
                     .flex_none()
-                    .h(px(52.))
-                    .px(px(16.))
+                    .min_h(px(56.))
+                    .px(px(20.))
+                    .py(px(12.))
                     .flex()
                     .items_center()
                     .justify_end()
                     .gap(px(8.))
                     .border_t_1()
                     .border_color(p.border)
+                    .bg(p.dialog_footer())
                     .child(
                         button("config-cancel", "Cancel", false)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ConfigEvent::Close))),

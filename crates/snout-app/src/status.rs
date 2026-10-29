@@ -531,6 +531,9 @@ impl Render for StatusBar {
                 .gap(px(6.))
                 .min_w_0()
                 .when(busy, |d| d.child(Spinner::new().xsmall()))
+                .when_some(message_icon(m).filter(|_| !busy), |d, (i, c)| {
+                    d.child(crate::components::icon(i, 13., c(&p)))
+                })
                 .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(m.message.clone()))
                 .when_some(m.branch_summary().filter(|_| self.git), |d, s| {
                     d.child(div().w(px(10.))).child(
@@ -697,4 +700,21 @@ impl StatusBar {
             })
             .into_any_element()
     }
+}
+
+/// The icon of the status bar's message: a failure (Git said no) or a job done, as the
+/// output's last line has it; nothing for other news.
+type Ink = fn(&crate::theme::Palette) -> gpui::Hsla;
+
+fn message_icon(m: &crate::model::Model) -> Option<(crate::components::IconName, Ink)> {
+    use crate::components::IconName;
+    let last = m.output.last()?;
+    if m.message.is_empty() || !last.text.starts_with(m.message.as_str()) {
+        return None;
+    }
+    Some(if last.error {
+        (IconName::OctagonAlert, |p: &crate::theme::Palette| p.error)
+    } else {
+        (IconName::CircleCheck, |p: &crate::theme::Palette| p.ok)
+    })
 }

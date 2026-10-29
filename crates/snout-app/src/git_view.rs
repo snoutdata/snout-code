@@ -575,19 +575,30 @@ impl GitView {
                         };
                         menu.item(
                             PopupMenuItem::new(checkout_label.clone())
+                                .icon(crate::components::menu_icon(crate::components::IconName::ArrowRightLeft))
                                 .disabled(b.is_head)
                                 .on_click(send(Action::RequestCheckout((&b).into()))),
                         )
-                        .item(PopupMenuItem::new("Create branch from here…").on_click(send(Action::ShowNewBranch(
-                            Some(StartPoint { label: b.name.clone(), rev: b.name.clone() }),
-                        ))))
+                        .item(
+                            PopupMenuItem::new("Create branch from here…")
+                                .icon(crate::components::menu_icon(crate::components::IconName::GitBranch))
+                                .on_click(send(Action::ShowNewBranch(Some(StartPoint {
+                                    label: b.name.clone(),
+                                    rev: b.name.clone(),
+                                })))),
+                        )
                         .item(
                             PopupMenuItem::new(delete_label.clone())
+                                .icon(crate::components::menu_icon(crate::components::IconName::Trash))
                                 .disabled(b.is_head)
                                 .on_click(send(Action::AskDeleteBranch(b.clone()))),
                         )
                         .separator()
-                        .item(PopupMenuItem::new("Copy name").on_click(send(Action::Copy(b.name.clone()))))
+                        .item(
+                            PopupMenuItem::new("Copy name")
+                                .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                .on_click(send(Action::Copy(b.name.clone()))),
+                        )
                     }),
             )
             .child(div().flex_1())
@@ -643,14 +654,20 @@ impl GitView {
                         let start = StartPoint { label: format!("tag {name}"), rev: format!("refs/tags/{name}") };
                         menu.item(
                             PopupMenuItem::new("Check out (detached)")
+                                .icon(crate::components::menu_icon(crate::components::IconName::ArrowRightLeft))
                                 .on_click(send(Action::RequestCheckout(target.clone()))),
                         )
                         .item(
                             PopupMenuItem::new("Create branch from tag…")
+                                .icon(crate::components::menu_icon(crate::components::IconName::GitBranch))
                                 .on_click(send(Action::ShowNewBranch(Some(start)))),
                         )
                         .separator()
-                        .item(PopupMenuItem::new("Copy name").on_click(send(Action::Copy(name.clone()))))
+                        .item(
+                            PopupMenuItem::new("Copy name")
+                                .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                .on_click(send(Action::Copy(name.clone()))),
+                        )
                     }),
             )
             .into_any_element()
@@ -757,20 +774,24 @@ impl GitView {
                                 let mut menu = menu
                                     .item(
                                         PopupMenuItem::new("Stage")
+                                            .icon(crate::components::menu_icon(crate::components::IconName::Plus))
                                             .disabled(!entries.iter().any(FileEntry::has_unstaged))
                                             .on_click(send(Action::Stage(stage_paths(&entries)))),
                                     )
                                     .item(
                                         PopupMenuItem::new("Unstage")
+                                            .icon(crate::components::menu_icon(crate::components::IconName::Minus))
                                             .disabled(!entries.iter().any(FileEntry::has_staged))
                                             .on_click(send(Action::Unstage(unstage_paths(&entries)))),
                                     )
                                     .item(
                                         PopupMenuItem::new("Discard…")
+                                            .icon(crate::components::menu_icon(crate::components::IconName::Undo2))
                                             .on_click(send(Action::AskDiscard(entries.clone()))),
                                     )
                                     .item(
                                         PopupMenuItem::new("Delete…")
+                                            .icon(crate::components::menu_icon(crate::components::IconName::Trash))
                                             .disabled(!entries.iter().any(on_disk))
                                             .on_click(send(Action::AskDeleteFiles(entries.clone()))),
                                     )
@@ -778,10 +799,15 @@ impl GitView {
                                 if let Some(root) = &root {
                                     menu = menu.item(
                                         PopupMenuItem::new("Reveal in Finder")
+                                            .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
                                             .on_click(send(Action::Reveal(root.join(&f2.path)))),
                                     );
                                 }
-                                menu.item(PopupMenuItem::new("Copy path").on_click(send(Action::Copy(f2.path.clone()))))
+                                menu.item(
+                                    PopupMenuItem::new("Copy path")
+                                        .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                        .on_click(send(Action::Copy(f2.path.clone()))),
+                                )
                             })
                             .into_any_element()
                     })
@@ -843,7 +869,7 @@ impl GitView {
         });
         let commit =
             div().flex_1().flex().items_center().justify_end().gap(px(8.)).child(weak(scope.label(), &p)).child(
-                look::primary_button("commit", "Commit", can_commit, &p)
+                look::primary_button_with("commit", Some(crate::components::IconName::Check), "Commit", can_commit, &p)
                     .tooltip(move |w, cx| Tooltip::new(commit_tip.clone()).build(w, cx))
                     .when(can_commit, |b| b.on_click(self.on_click(Action::Commit))),
             );
@@ -921,7 +947,16 @@ impl GitView {
             .child(compare)
             .child(look::vseparator(&p))
             .child(diff_controls(&self.model, cx));
-        let body = diff_body("diff-lines", m.diff.as_ref(), base.sides(), m.settings.side_by_side, &empty, cx);
+        let body = if base == DiffBase::HeadToIndex && m.status.staged_count() == 0 && m.diff.is_none() {
+            look::art_note(
+                snout_core::art::spots::nothing_staged(),
+                "Nothing staged",
+                "Stage files to see what the next commit holds.",
+                cx,
+            )
+        } else {
+            diff_body("diff-lines", m.diff.as_ref(), base.sides(), m.settings.side_by_side, &empty, cx)
+        };
         pane(&p).child(header).child(separator(&p)).child(body).into_any_element()
     }
 
@@ -1068,19 +1103,33 @@ impl GitView {
                                 }
                             };
                             let start = StartPoint { label: format!("{short} {summary}"), rev: id.clone() };
-                            menu.item(PopupMenuItem::new("Show changes").on_click(send(Action::ShowCommit(id.clone()))))
-                                .separator()
-                                .item(
-                                    PopupMenuItem::new("Check out this commit (detached)")
-                                        .on_click(send(Action::RequestCheckout(CheckoutTarget::Commit(id.clone())))),
-                                )
-                                .item(
-                                    PopupMenuItem::new("Create branch here…")
-                                        .on_click(send(Action::ShowNewBranch(Some(start)))),
-                                )
-                                .separator()
-                                .item(PopupMenuItem::new("Copy SHA").on_click(send(Action::Copy(id.clone()))))
-                                .item(PopupMenuItem::new("Copy message").on_click(send(Action::Copy(summary.clone()))))
+                            menu.item(
+                                PopupMenuItem::new("Show changes")
+                                    .icon(crate::components::menu_icon(crate::components::IconName::FileDiff))
+                                    .on_click(send(Action::ShowCommit(id.clone()))),
+                            )
+                            .separator()
+                            .item(
+                                PopupMenuItem::new("Check out this commit (detached)")
+                                    .icon(crate::components::menu_icon(crate::components::IconName::ArrowRightLeft))
+                                    .on_click(send(Action::RequestCheckout(CheckoutTarget::Commit(id.clone())))),
+                            )
+                            .item(
+                                PopupMenuItem::new("Create branch here…")
+                                    .icon(crate::components::menu_icon(crate::components::IconName::GitBranch))
+                                    .on_click(send(Action::ShowNewBranch(Some(start)))),
+                            )
+                            .separator()
+                            .item(
+                                PopupMenuItem::new("Copy SHA")
+                                    .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                    .on_click(send(Action::Copy(id.clone()))),
+                            )
+                            .item(
+                                PopupMenuItem::new("Copy message")
+                                    .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                    .on_click(send(Action::Copy(summary.clone()))),
+                            )
                         })
                         .into_any_element()
                 })
@@ -1149,11 +1198,16 @@ impl GitView {
                                 let menu = match &root {
                                     Some(root) => menu.item(
                                         PopupMenuItem::new("Reveal in Finder")
+                                            .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
                                             .on_click(send(Action::Reveal(root.join(&path)))),
                                     ),
                                     None => menu,
                                 };
-                                menu.item(PopupMenuItem::new("Copy path").on_click(send(Action::Copy(path.clone()))))
+                                menu.item(
+                                    PopupMenuItem::new("Copy path")
+                                        .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                        .on_click(send(Action::Copy(path.clone()))),
+                                )
                             })
                             .into_any_element()
                     })

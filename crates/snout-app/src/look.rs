@@ -191,44 +191,62 @@ pub fn toggle(id: impl Into<ElementId>, text: impl Into<SharedString>, on: bool,
         .child(text.into())
 }
 
-/// egui's plain small button.
+/// A small framed button, for bars and rows: the shared button's look, compact.
 pub fn small_button(id: impl Into<ElementId>, text: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
-    let (hover_bg, hover_line) = (p.button_hover, mix(p.fg, 0.25, p.button_hover));
+    let (hover_bg, pressed) = (p.button_hover, p.active);
     div()
         .id(id)
         .flex_none()
-        .px(px(4.))
-        .h(px(18.))
+        .px(px(8.))
+        .h(px(22.))
         .flex()
         .items_center()
         .rounded(px(6.))
         .border_1()
-        .border_color(mix(p.fg, 0.08, p.button))
+        .border_color(mix(p.fg, 0.14, p.button))
         .bg(p.button)
+        .text_size(px(12.))
+        .font_weight(gpui::FontWeight::MEDIUM)
         .cursor_pointer()
-        .hover(move |s| s.bg(hover_bg).border_color(hover_line))
+        .hover(move |s| s.bg(hover_bg))
+        .active(move |s| s.bg(pressed))
         .whitespace_nowrap()
         .child(text.into())
 }
 
-/// The primary action of a pane: an accent pill, grey while it cannot be pressed.
+/// The primary action of a pane: the accent, solid, grey while it cannot be pressed.
 pub fn primary_button(id: impl Into<ElementId>, text: &'static str, enabled: bool, p: &Palette) -> Stateful<Div> {
-    let (fill, ink) = if enabled { (p.accent, p.on_accent) } else { (p.button, p.fg_dim) };
-    let hover = mix(p.accent, 0.88, p.fg);
+    primary_button_with(id, None, text, enabled, p)
+}
+
+/// [`primary_button`] with an icon before its label.
+pub fn primary_button_with(
+    id: impl Into<ElementId>,
+    icon: Option<crate::components::IconName>,
+    text: &'static str,
+    enabled: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let b = p.primary();
+    let (fill, ink) = if enabled { (b.fill, b.ink) } else { (p.button, p.fg_dim) };
+    let (hover, pressed) = (b.hover, b.pressed);
     div()
         .id(id)
         .flex_none()
         .min_w(px(88.))
         .h(px(28.))
-        .px(px(10.))
+        .px(px(12.))
         .flex()
         .items_center()
         .justify_center()
-        .rounded_full()
+        .gap(px(6.))
+        .rounded(px(7.))
         .bg(fill)
+        .font_weight(gpui::FontWeight::MEDIUM)
         .when(enabled, |d| d.shadow(p.glow_of(p.accent)))
         .text_color(ink)
-        .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
+        .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed)))
+        .when_some(icon, |d, i| d.child(crate::components::icon(i, 14., ink)))
         .child(text)
 }
 
@@ -302,7 +320,8 @@ pub fn ref_badge(r: &str, p: &Palette) -> Div {
         .child(text.to_owned())
 }
 
-/// A centred drawing above a short message: how an empty pane says what goes there.
+/// A centred drawing above a short message: how an empty pane says what goes there. With
+/// no title, the message is the title.
 pub fn art_note(
     drawing: &'static snout_core::art::Drawing,
     title: impl Into<SharedString>,
@@ -310,19 +329,13 @@ pub fn art_note(
     cx: &App,
 ) -> AnyElement {
     let p = palette(cx);
-    let title: SharedString = title.into();
-    let ratio = drawing.size.x / drawing.size.y;
-    div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(3.))
-        .child(crate::art::drawing(drawing, 150. * ratio.min(1.5), 150. * ratio.min(1.5) / ratio, None))
-        .when(!title.is_empty(), |d| d.child(div().child(title)))
-        .child(weak(text, &p))
-        .into_any_element()
+    let (title, text): (SharedString, SharedString) = (title.into(), text.into());
+    let state = if title.is_empty() {
+        crate::components::EmptyState::new(drawing, text)
+    } else {
+        crate::components::EmptyState::new(drawing, title).hint(text)
+    };
+    state.on(p.panel).compact().into_any_element()
 }
 
 /// A dimmed message centred in what is left of a pane.

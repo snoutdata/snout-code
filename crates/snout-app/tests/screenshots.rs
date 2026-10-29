@@ -132,6 +132,19 @@ mod shots {
         Remote(u8),
         /// Claude Code editing on its own, live, with the Claude Changes window open.
         Claude(ClaudeShot),
+        /// A dialog over the Git view, by name: `discard`, `discard-many`, `delete-files`,
+        /// `delete-branch`, `new-branch`, `clone`, `error`, `info`, `pull`, `checkout`, `about`.
+        Dialog(&'static str),
+        /// Two tool windows with nothing in them yet: one in the bottom dock, one on the right.
+        Tools(snout_app::workspace::Tool, snout_app::workspace::Tool),
+        /// The Git view of a repository with nothing to commit.
+        Clean,
+        /// Find in Files on a word no file holds.
+        NoResults,
+        /// Connect to SSH Host while it connects.
+        Connecting,
+        /// The bar offering a JDK the project needs.
+        JdkBar,
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -1034,6 +1047,101 @@ mod shots {
                 })
                 .unwrap();
             }
+            Some(Select::Dialog(which)) => {
+                use snout_app::model::{Dialog, ModelEvent, Mood};
+                // A file deep in the tree, for a long path.
+                let deep = "src/main/java/com/example/billing/service/internal/InvoiceReconciliationService.java";
+                std::fs::create_dir_all(repo.join(deep).parent().unwrap()).unwrap();
+                std::fs::write(repo.join(deep), "class InvoiceReconciliationService {}\n").unwrap();
+                git(&repo, &["add", deep]);
+                git(&repo, &["commit", "-qm", "Add the reconciliation service"]);
+                std::fs::write(repo.join(deep), "class InvoiceReconciliationService { int total; }\n").unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+                cx.run_until_parked();
+                let dialog = cx.update(|cx| {
+                    let m = model.read(cx);
+                    let entry = |path: &str| m.status.files.iter().find(|f| f.path == path).cloned().unwrap();
+                    match which {
+                        "discard" => Dialog::ConfirmDiscard(vec![entry(deep)]),
+                        "discard-many" => Dialog::ConfirmDiscard(m.status.files.clone()),
+                        "delete-files" => Dialog::ConfirmDeleteFiles(vec![entry("NOTES.md")]),
+                        "delete-branch" => Dialog::DeleteBranch { name: "feature/diff-view".into(), upstream: None },
+                        "new-branch" => Dialog::NewBranch(None),
+                        "clone" => Dialog::Clone { parent: "/Users/demo/dev".into() },
+                        "error" => Dialog::Error(
+                            "To github.com:demo/demo.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'github.com:demo/demo.git'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally.".into(),
+                        ),
+                        "info" => Dialog::Info {
+                            title: "No repositories found".into(),
+                            text: "Nothing under /Users/demo/Downloads is a Git repository.".into(),
+                            mood: Mood::Empty,
+                        },
+                        "pull" => Dialog::PullProblem {
+                            problem: snout_core::PullProblem::Divergent,
+                            details: "hint: You have divergent branches and need to specify how to reconcile them.\nfatal: Need to specify how to reconcile divergent branches.".into(),
+                        },
+                        "checkout" => Dialog::ConfirmCheckout(snout_core::CheckoutTarget::Branch("feature/diff-view".into())),
+                        "about" => Dialog::About,
+                        other => panic!("no dialog {other}"),
+                    }
+                });
+                cx.update(|cx| {
+                    model.update(cx, |m, cx| {
+                        m.dialog = Some(dialog);
+                        cx.emit(ModelEvent::Dialog);
+                    })
+                });
+            }
+            Some(Select::Tools(bottom, right)) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| {
+                        ws.toggle_tool(bottom, window, cx);
+                        ws.toggle_tool(right, window, cx);
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::Clean) => {
+                git(&repo, &["add", "-A"]);
+                git(&repo, &["commit", "-qm", "Everything in"]);
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+            }
+            Some(Select::NoResults) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.open_search(snout_app::search::Mode::FindInFiles, window, cx));
+                    let view = ws.read(cx).search.clone().unwrap();
+                    view.update(cx, |v, cx| v.input.update(cx, |i, cx| i.set_value("zebraPattern", window, cx)));
+                })
+                .unwrap();
+            }
+            Some(Select::JdkBar) => {
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let hub = ws.read(cx).hub.clone();
+                    hub.update(cx, |h, cx| {
+                        h.jdk_prompt = Some(snout_app::lang::hub::JdkPrompt {
+                            root: repo.clone(),
+                            major: 21,
+                            resync: false,
+                            progress: None,
+                            error: None,
+                        });
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::Connecting) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |w, cx| w.open_connect(window, cx));
+                    let dialog = ws.read(cx).connect_dialog.clone().unwrap();
+                    dialog.update(cx, |d, cx| {
+                        d.input.update(cx, |i, cx| i.set_value("devbox", window, cx));
+                        d.connecting = Some("devbox".into());
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -1905,7 +2013,7 @@ mod shots {
         let settings = Settings { theme, ..Settings::default() };
         cx.update(|cx| snout_app::init(&settings, cx));
         let handle = cx
-            .open_window(size(px(460.), px(200.)), |window, cx| {
+            .open_window(size(px(460.), px(if prompt.contains("yes/no") { 270. } else { 210. })), |window, cx| {
                 let view = cx.new(|cx| snout_app::remote::askpass::Askpass::new(prompt.into(), window, cx));
                 cx.new(|cx| gpui_component::Root::new(view, window, cx))
             })
@@ -1957,6 +2065,45 @@ mod shots {
         let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
         let first = image.get_pixel(0, 0);
         assert!(image.pixels().any(|p| p != first), "{name}: the splash is blank");
+        if let Some(dir) = std::env::var_os("SNOUT_SCREENSHOT") {
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(dir.join(format!("{name}.png"))).unwrap();
+        }
+        println!("screenshot {name}: ok");
+    }
+
+    /// The shared components and every spot drawing, on one page.
+    fn gallery_shot(name: &str, colors: ColorTheme, theme: ThemeChoice) {
+        if std::env::var("SNOUT_SHOT_ONLY").is_ok_and(|only| !name.contains(&only)) {
+            return;
+        }
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let settings = Settings { theme, colors, ..Settings::default() };
+        cx.update(|cx| snout_app::init(&settings, cx));
+        let handle = cx
+            .open_window(size(px(1500.), px(1060.)), |window, cx| {
+                let view = cx.new(|_| snout_app::components::Gallery);
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        cx.allow_parking();
+        for _ in 0..3 {
+            cx.advance_clock(Duration::from_millis(300));
+            cx.run_until_parked();
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        }
+        let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
+        let first = image.get_pixel(0, 0);
+        assert!(image.pixels().any(|p| p != first), "{name}: the gallery is blank");
         if let Some(dir) = std::env::var_os("SNOUT_SCREENSHOT") {
             let dir = PathBuf::from(dir);
             std::fs::create_dir_all(&dir).unwrap();
@@ -2053,6 +2200,61 @@ mod shots {
             Activity::Project,
             Some(Select::Spring(SpringShot::Properties)),
         );
+        // The dialogs and the empty tool windows (`SNOUT_SHOT_ONLY=ui-` takes these alone).
+        for (colors, c) in [(ColorTheme::Studio, "studio"), (ColorTheme::Vivid, "vivid")] {
+            gallery_shot(&format!("ui-gallery-{c}-dark"), colors, ThemeChoice::Dark);
+            gallery_shot(&format!("ui-gallery-{c}-light"), colors, ThemeChoice::Light);
+        }
+        use snout_app::workspace::Tool;
+        for which in [
+            "discard",
+            "discard-many",
+            "delete-files",
+            "delete-branch",
+            "new-branch",
+            "clone",
+            "error",
+            "info",
+            "pull",
+            "checkout",
+            "about",
+        ] {
+            shot(&format!("ui-dialog-{which}-dark"), ThemeChoice::Dark, Activity::Git, Some(Select::Dialog(which)));
+            shot(&format!("ui-dialog-{which}-light"), ThemeChoice::Light, Activity::Git, Some(Select::Dialog(which)));
+        }
+        for (bottom, right, name) in [
+            (Tool::Run, Tool::Spring, "run-spring"),
+            (Tool::Debug, Tool::Gradle, "debug-gradle"),
+            (Tool::Problems, Tool::ClaudeChanges, "problems-claude"),
+            (Tool::Processes, Tool::Notifications, "processes-notifications"),
+            (Tool::Build, Tool::Spring, "build-spring"),
+        ] {
+            for (theme, mode) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+                shot(&format!("ui-empty-{name}-{mode}"), theme, Activity::Project, Some(Select::Tools(bottom, right)));
+            }
+        }
+        for (theme, mode) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+            shot(&format!("ui-empty-clean-{mode}"), theme, Activity::Git, Some(Select::Clean));
+            shot(&format!("ui-empty-search-{mode}"), theme, Activity::Project, Some(Select::NoResults));
+            shot(&format!("ui-remote-connecting-{mode}"), theme, Activity::Project, Some(Select::Connecting));
+            shot(&format!("ui-jdk-bar-{mode}"), theme, Activity::Project, Some(Select::JdkBar));
+            shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
+            shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
+            themed_shot(
+                ColorTheme::Vivid,
+                &format!("ui-vivid-dialog-discard-{mode}"),
+                theme,
+                Activity::Git,
+                Some(Select::Dialog("discard")),
+            );
+            themed_shot(
+                ColorTheme::Vivid,
+                &format!("ui-vivid-empty-run-spring-{mode}"),
+                theme,
+                Activity::Project,
+                Some(Select::Tools(Tool::Run, Tool::Spring)),
+            );
+        }
         // The other colour themes, on the editor and the Git view.
         for (colors, name) in
             [(ColorTheme::Vivid, "vivid"), (ColorTheme::Deep, "deep"), (ColorTheme::Classic, "classic")]

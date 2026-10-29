@@ -443,6 +443,36 @@ fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn discarding_takes_a_click_or_cmd_backspace_never_enter(cx: &mut TestAppContext) {
+    let repo = demo_repo("discard-keys");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    let status = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| model.read(cx).status.files.iter().find(|f| f.path == "status.rs").cloned())
+    };
+    let entry = status(cx).expect("status.rs is modified");
+    act(&model, cx, Action::AskDiscard(vec![entry.clone()]));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(model.read(cx).dialog.is_none(), "Esc cancels"));
+    assert!(status(cx).is_some(), "and keeps the change");
+    act(&model, cx, Action::AskDiscard(vec![entry]));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("danger").is_some(), "the dialog has its Discard button");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(model.read(cx).dialog.is_some(), "⏎ does not discard"));
+    assert!(status(cx).is_some(), "and the change is still there");
+    cx.simulate_keystrokes("cmd-backspace");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(model.read(cx).dialog.is_none(), "⌘⌫ discards and closes it"));
+    assert!(status(cx).is_none(), "the change is gone");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
 fn the_changed_files_sort_by_the_clicked_column(cx: &mut TestAppContext) {
     use crate::model::SortColumn;
     let repo = demo_repo("sort");

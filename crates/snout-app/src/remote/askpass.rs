@@ -71,25 +71,33 @@ impl Render for Askpass {
         let p = palette(cx);
         let confirm = self.input.is_none();
         let input = self.input.clone();
+        use crate::components::{IconName, Tone, dialog_header_icon, kbd};
+        let (tone, ico) =
+            if confirm { (Tone::Warning, IconName::ShieldAlert) } else { (Tone::Info, IconName::KeyRound) };
         div()
             .id("askpass")
             .debug_selector(|| "askpass".into())
             .track_focus(&self.focus)
             .size_full()
-            .p(px(18.))
-            .pt(px(34.))
+            .pt(px(22.))
             .flex()
             .flex_col()
-            .gap(px(12.))
             .bg(p.card)
             .text_size(px(look::BODY))
             .text_color(p.fg)
-            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(title_of(&self.prompt)))
-            .child(div().text_color(p.fg_dim).child(self.prompt.trim().to_owned()))
-            .when_some(self.input.as_ref(), |d, i| d.child(look::field(i, false, None, &p)))
+            .child(dialog_header_icon(
+                tone,
+                ico,
+                title_of(&self.prompt),
+                Some(self.prompt.trim().to_owned().into()),
+                &p,
+            ))
+            .when_some(self.input.as_ref(), |d, i| d.child(div().px(px(20.)).child(look::field(i, false, None, &p))))
             .child(div().flex_1())
             .child(
                 div()
+                    .px(px(20.))
+                    .pb(px(16.))
                     .flex()
                     .justify_end()
                     .gap(px(8.))
@@ -101,12 +109,14 @@ impl Render for Askpass {
                             cancel()
                         },
                     ))
-                    .child(button("askpass-ok", if confirm { "Yes" } else { "OK" }, true, true, cx).on_click(
-                        move |_, _, cx| match &input {
-                            Some(i) => answer(&i.read(cx).value()),
-                            None => answer("yes"),
-                        },
-                    )),
+                    .child(
+                        button("askpass-ok", if confirm { "Yes" } else { "OK" }, true, true, cx)
+                            .when(!confirm, |d| d.child(kbd("⏎", p.primary().ink.opacity(0.85))))
+                            .on_click(move |_, _, cx| match &input {
+                                Some(i) => answer(&i.read(cx).value()),
+                                None => answer("yes"),
+                            }),
+                    ),
             )
     }
 }
@@ -124,7 +134,8 @@ pub fn run() {
         crate::init(&settings, cx);
         cx.set_menus(Vec::new());
         cx.on_window_closed(|_, _| cancel()).detach();
-        let bounds = Bounds::centered(None, size(px(460.), px(200.)), cx);
+        let tall = is_confirmation_reply();
+        let bounds = Bounds::centered(None, size(px(460.), px(if tall { 270. } else { 210. })), cx);
         let opened = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

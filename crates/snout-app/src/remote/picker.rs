@@ -13,7 +13,7 @@ use gpui_component::input::{InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement as _;
 use snout_host::HostRef;
 
-use super::dialog::{button, footer, frame};
+use super::dialog::{button, footer};
 use crate::glyphs::{Icon, icon};
 use crate::look;
 use crate::theme::palette;
@@ -201,72 +201,85 @@ impl Render for FolderPicker {
             None => Some((self.chosen().to_string_lossy().into_owned(), p.fg_dim)),
         };
         let has_parent = self.dir.parent().is_some();
-        frame("remote-picker", format!("{} a Folder on {}", self.verb, self.name), 560., 480., cx)
-            .key_context("RemotePicker")
-            .track_focus(&self.focus)
-            .on_action(cx.listener(|_, _: &crate::search::SearchClose, _, cx| cx.emit(PickerEvent::Cancel)))
-            .child(
-                div()
-                    .flex_none()
-                    .px(px(16.))
-                    .pt(px(14.))
-                    .pb(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .id("remote-picker-up")
-                            .debug_selector(|| "remote-picker-up".into())
-                            .flex_none()
-                            .size(px(24.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(5.))
-                            .when(has_parent, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
-                            .when(!has_parent, |d| d.opacity(0.4))
-                            .child(icon(Icon::ChevronUp, 14., p.fg))
-                            .on_click(cx.listener(|this, _, window, cx| this.up(window, cx))),
+        crate::components::dialog_frame_icon(
+            "remote-picker",
+            crate::components::Tone::Accent,
+            crate::components::IconName::FolderOpen,
+            format!("{} a Folder on {}", self.verb, self.name),
+            None,
+            560.,
+            Some(480.),
+            cx,
+        )
+        .key_context("RemotePicker")
+        .track_focus(&self.focus)
+        .on_action(cx.listener(|_, _: &crate::search::SearchClose, _, cx| cx.emit(PickerEvent::Cancel)))
+        .child(
+            div()
+                .flex_none()
+                .px(px(20.))
+                .pt(px(12.))
+                .pb(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .id("remote-picker-up")
+                        .debug_selector(|| "remote-picker-up".into())
+                        .flex_none()
+                        .size(px(24.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(5.))
+                        .when(has_parent, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
+                        .when(!has_parent, |d| d.opacity(0.4))
+                        .child(icon(Icon::ChevronUp, 14., p.fg))
+                        .on_click(cx.listener(|this, _, window, cx| this.up(window, cx))),
+                )
+                .child(div().flex_1().min_w_0().child(look::field(&self.input, false, None, &p))),
+        )
+        .child(
+            div()
+                .id("remote-picker-folders")
+                .flex_1()
+                .min_h_0()
+                .pb(px(6.))
+                .overflow_y_scrollbar()
+                .children(rows)
+                .when(loading, |d| d.child(div().px(px(16.)).py(px(10.)).text_color(p.fg_dim).child("Reading…")))
+                .when(empty, |d| {
+                    d.child(
+                        crate::components::EmptyState::new(snout_core::art::spots::no_results(), "No folders here")
+                            .on(p.card)
+                            .compact(),
                     )
-                    .child(div().flex_1().min_w_0().child(look::field(&self.input, false, None, &p))),
-            )
-            .child(
-                div()
-                    .id("remote-picker-folders")
-                    .flex_1()
-                    .min_h_0()
-                    .pb(px(6.))
-                    .overflow_y_scrollbar()
-                    .children(rows)
-                    .when(loading, |d| d.child(div().px(px(16.)).py(px(10.)).text_color(p.fg_dim).child("Reading…")))
-                    .when(empty, |d| {
-                        d.child(div().px(px(16.)).py(px(10.)).text_color(p.fg_dim).child("No folders here"))
-                    }),
-            )
-            .child(div().flex_none().px(px(16.)).pb(px(8.)).child(
-                look::checkbox("remote-picker-hidden", "Show hidden folders", self.show_hidden, true, &p).on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.show_hidden = !this.show_hidden;
-                        cx.notify();
-                    }),
-                ),
-            ))
-            .child(footer(
-                status,
-                vec![
-                    button("remote-picker-cancel", "Cancel", false, true, cx)
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(PickerEvent::Cancel)))
-                        .into_any_element(),
-                    button("remote-picker-open", "Open", true, self.error.is_none(), cx)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if this.error.is_none() {
-                                cx.emit(PickerEvent::Open(this.chosen()))
-                            }
-                        }))
-                        .into_any_element(),
-                ],
-                cx,
-            ))
+                }),
+        )
+        .child(div().flex_none().px(px(16.)).pb(px(8.)).child(
+            look::checkbox("remote-picker-hidden", "Show hidden folders", self.show_hidden, true, &p).on_click(
+                cx.listener(|this, _, _, cx| {
+                    this.show_hidden = !this.show_hidden;
+                    cx.notify();
+                }),
+            ),
+        ))
+        .child(footer(
+            status,
+            vec![
+                button("remote-picker-cancel", "Cancel", false, true, cx)
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(PickerEvent::Cancel)))
+                    .into_any_element(),
+                button("remote-picker-open", "Open", true, self.error.is_none(), cx)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.error.is_none() {
+                            cx.emit(PickerEvent::Open(this.chosen()))
+                        }
+                    }))
+                    .into_any_element(),
+            ],
+            cx,
+        ))
     }
 }

@@ -13,7 +13,7 @@ use gpui_component::scroll::ScrollableElement as _;
 
 use crate::glyphs::{Icon, icon};
 use crate::look;
-use crate::theme::{mix, palette};
+use crate::theme::palette;
 
 pub enum ConnectEvent {
     Connect(String),
@@ -109,9 +109,9 @@ impl ConnectDialog {
                 div()
                     .id(SharedString::from(id))
                     .debug_selector(move || sel.clone())
-                    .h(px(28.))
+                    .h(px(30.))
                     .px(px(10.))
-                    .mx(px(6.))
+                    .mx(px(10.))
                     .flex()
                     .items_center()
                     .gap(px(10.))
@@ -134,10 +134,19 @@ impl ConnectDialog {
 
 fn heading(text: &'static str, cx: &App) -> AnyElement {
     let p = palette(cx);
-    div().px(px(16.)).pt(px(8.)).pb(px(4.)).text_size(px(11.5)).text_color(p.fg_dim).child(text).into_any_element()
+    div()
+        .px(px(20.))
+        .pt(px(8.))
+        .pb(px(4.))
+        .text_size(px(11.5))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(p.fg_dim)
+        .child(text)
+        .into_any_element()
 }
 
-/// A dialog button: the accent for the main one.
+/// A dialog button: the accent for the main one. The shared [`crate::components::Button`]'s
+/// look, as an element to add a handler to.
 pub fn button(
     id: &'static str,
     text: &'static str,
@@ -145,86 +154,27 @@ pub fn button(
     enabled: bool,
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
+    use crate::components::{Variant, button_base};
     let p = palette(cx);
-    let hover = if primary { mix(p.accent, 0.88, p.fg) } else { p.button_hover };
-    div()
-        .id(id)
-        .debug_selector(move || id.to_owned())
-        .h(px(28.))
-        .min_w(px(76.))
-        .px(px(14.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(5.))
-        .when(primary, |d| d.bg(p.accent).text_color(p.on_accent))
-        .when(!primary, |d| d.bg(p.button).border_1().border_color(p.border))
-        .when(!enabled, |d| d.opacity(0.5))
-        .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
-        .child(text)
+    let variant = if primary { Variant::Primary } else { Variant::Secondary };
+    button_base(id, variant, !enabled, false, false, false, &p).child(text)
 }
 
-/// A dialog's frame: a title strip, its body, and a footer.
+/// A dialog's frame: a header with its title and an icon, its body, and a footer.
 pub fn frame(id: &'static str, title: String, w: f32, h: f32, cx: &App) -> gpui::Stateful<gpui::Div> {
-    let p = palette(cx);
-    div()
-        .id(id)
-        .debug_selector(move || id.to_owned())
-        .occlude()
-        .w(px(w))
-        .h(px(h))
-        .flex()
-        .flex_col()
-        .bg(p.card)
-        .border_1()
-        .border_color(p.border)
-        .rounded(px(10.))
-        .shadow_lg()
-        .overflow_hidden()
-        .text_size(px(look::BODY))
-        .text_color(p.fg)
-        .child(
-            div()
-                .h(px(34.))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .border_b_1()
-                .border_color(p.border)
-                .bg(p.ground)
-                .text_color(p.fg_dim)
-                .child(title),
-        )
+    let tone = crate::components::Tone::Info;
+    crate::components::dialog_frame_icon(id, tone, tone.icon(), title, None, w, Some(h), cx)
 }
 
 /// A dialog's footer: a status line, then its buttons.
 pub fn footer(status: Option<(String, gpui::Hsla)>, buttons: Vec<AnyElement>, cx: &App) -> gpui::Div {
-    let p = palette(cx);
-    div()
-        .h(px(52.))
-        .flex_none()
-        .px(px(16.))
-        .flex()
-        .items_center()
-        .gap(px(8.))
-        .border_t_1()
-        .border_color(p.border)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .text_size(px(12.))
-                .whitespace_nowrap()
-                .overflow_hidden()
-                .text_ellipsis()
-                .children(status.map(|(t, c)| div().text_color(c).child(t))),
-        )
-        .children(buttons)
+    crate::components::dialog_footer(status, buttons, &palette(cx))
 }
 
 impl Render for ConnectDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::components::{EmptyState, IconName, Tone, dialog_frame, field_label, icon as ico};
+        use snout_core::art::spots;
         let p = palette(cx);
         let busy = self.connecting.is_some();
         let can = !busy && !self.host(cx).is_empty();
@@ -235,56 +185,96 @@ impl Render for ConnectDialog {
         };
         let rows = self.rows(cx);
         let empty = rows.is_empty();
-        frame("connect-ssh", "Connect to SSH Host".into(), 520., 440., cx)
-            .key_context("ConnectSsh")
-            .track_focus(&self.focus)
-            .on_action(cx.listener(|_, _: &crate::search::SearchClose, _, cx| cx.emit(ConnectEvent::Cancel)))
-            .child(
-                div()
-                    .flex_none()
-                    .px(px(16.))
-                    .pt(px(14.))
-                    .pb(px(8.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .child(div().text_color(p.fg_dim).child("Host"))
-                    .child(look::field(&self.input, false, None, &p)),
-            )
-            .child(
-                div().id("connect-ssh-hosts").flex_1().min_h_0().pb(px(6.)).overflow_y_scrollbar().children(rows).when(
-                    empty,
-                    |d| {
-                        d.child(
-                            div()
-                                .px(px(16.))
-                                .py(px(10.))
-                                .text_color(p.fg_dim)
-                                .child("No hosts in your ssh config: type one."),
-                        )
-                    },
-                ),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .px(px(16.))
-                    .pb(px(8.))
-                    .text_size(px(11.5))
-                    .text_color(p.fg_dim)
-                    .child("SnoutCode installs its server on the host the first time (Linux, x86_64 or aarch64)."),
-            )
-            .child(footer(
-                status,
-                vec![
-                    button("connect-ssh-cancel", "Cancel", false, true, cx)
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ConnectEvent::Cancel)))
-                        .into_any_element(),
-                    button("connect-ssh-connect", "Connect", true, can, cx)
-                        .when(can, |d| d.on_click(cx.listener(|this, _, _, cx| this.connect(cx))))
-                        .into_any_element(),
-                ],
-                cx,
-            ))
+        let list = match &self.connecting {
+            Some(host) => div()
+                .id("connect-ssh-hosts")
+                .flex_1()
+                .min_h_0()
+                .child(
+                    EmptyState::new(spots::remote_connecting(), format!("Connecting to {host}…"))
+                        .hint("The first time takes a little longer: SnoutCode installs its server there.")
+                        .on(p.card)
+                        .compact(),
+                )
+                .into_any_element(),
+            None => div()
+                .id("connect-ssh-hosts")
+                .flex_1()
+                .min_h_0()
+                .pb(px(6.))
+                .overflow_y_scrollbar()
+                .children(rows)
+                .when(empty, |d| {
+                    d.child(
+                        div()
+                            .px(px(20.))
+                            .py(px(10.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .text_color(p.fg_dim)
+                            .child(ico(IconName::Info, 14., p.fg_dim))
+                            .child("No hosts in your ssh config: type one."),
+                    )
+                })
+                .into_any_element(),
+        };
+        dialog_frame(
+            "connect-ssh",
+            Tone::Info,
+            Some(spots::ssh()),
+            "Connect to SSH Host",
+            Some("SnoutCode installs its server on the host the first time (Linux, x86_64 or aarch64).".into()),
+            520.,
+            Some(480.),
+            cx,
+        )
+        .key_context("ConnectSsh")
+        .track_focus(&self.focus)
+        .on_action(cx.listener(|_, _: &crate::search::SearchClose, _, cx| cx.emit(ConnectEvent::Cancel)))
+        .child(
+            div()
+                .flex_none()
+                .px(px(20.))
+                .pt(px(4.))
+                .pb(px(8.))
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(field_label("Host", &p))
+                .child(look::field(&self.input, false, None, &p)),
+        )
+        .child(list)
+        .child(footer(
+            status,
+            vec![
+                button("connect-ssh-cancel", "Cancel", false, true, cx)
+                    .child(crate::components::kbd("Esc", p.fg_dim))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ConnectEvent::Cancel)))
+                    .into_any_element(),
+                crate::components::button_base(
+                    "connect-ssh-connect",
+                    crate::components::Variant::Primary,
+                    !can,
+                    false,
+                    false,
+                    false,
+                    &p,
+                )
+                .child(ico(
+                    IconName::Plug,
+                    14.,
+                    crate::components::button_ink(crate::components::Variant::Primary, !can, &p),
+                ))
+                .child("Connect")
+                .child(crate::components::kbd(
+                    "⏎",
+                    crate::components::button_ink(crate::components::Variant::Primary, !can, &p).opacity(0.85),
+                ))
+                .when(can, |d| d.on_click(cx.listener(|this, _, _, cx| this.connect(cx))))
+                .into_any_element(),
+            ],
+            cx,
+        ))
     }
 }

@@ -607,17 +607,9 @@ impl Render for ChangesPanel {
                  change to accept or revert."
             };
             return base.child(
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.))
-                    .px(px(24.))
-                    .child(crate::art::glyph(Glyph::Spark, 22., c.mark))
-                    .child(div().text_color(p.fg).child("No changes from Claude yet"))
-                    .child(div().text_color(p.fg_dim).text_size(px(12.)).text_center().child(note)),
+                crate::components::EmptyState::new(snout_core::art::spots::claude_idle(), "No changes from Claude yet")
+                    .hint(note)
+                    .compact(),
             );
         }
         base.child(div().id("claude-changes-list").flex_1().min_h_0().pb(px(8.)).overflow_y_scrollbar().children(rows))

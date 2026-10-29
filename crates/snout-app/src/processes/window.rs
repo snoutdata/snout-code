@@ -68,17 +68,9 @@ impl Render for ProcessesWindow {
             .text_color(p.fg);
         if procs.rows.is_empty() {
             return base.child(
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(4.))
-                    .child("Looking at the processes")
-                    .child(div().text_color(p.fg_dim).text_size(px(12.)).child(
-                        "SnoutCode's own processes show here: the Java engine, Gradle daemons, runs and terminals.",
-                    )),
+                crate::components::EmptyState::new(snout_core::art::spots::no_processes(), "Looking at the processes")
+                    .hint("SnoutCode's own processes show here: the Java engine, Gradle daemons, runs and terminals.")
+                    .compact(),
             );
         }
         let rows: Rc<Vec<Row>> = Rc::new(procs.rows.clone());
@@ -234,7 +226,17 @@ impl Render for ProcessesWindow {
             .text_size(px(12.))
             .text_color(p.fg_dim)
             .child(div().debug_selector(|| "processes-totals".into()).child(summary))
-            .when_some(notice, |d, n| d.child(div().text_color(p.fg).child(n)))
+            .when_some(notice, |d, n| {
+                d.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .text_color(p.fg)
+                        .child(crate::components::icon(crate::components::IconName::Info, 13., p.info()))
+                        .child(n),
+                )
+            })
             .child(div().flex_1())
             .child(
                 crate::look::small_button("processes-stop-idle", "Stop Idle Processes", &p)

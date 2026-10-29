@@ -711,22 +711,20 @@ impl Render for NewProjectView {
             })
             .collect();
         let button = |id: &'static str, text: &'static str, primary: bool, enabled: bool| {
-            let hover = if primary { mix(p.accent, 0.88, p.fg) } else { p.button_hover };
-            div()
-                .id(id)
-                .debug_selector(move || id.to_owned())
-                .h(px(28.))
-                .min_w(px(76.))
-                .px(px(14.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(5.))
-                .when(primary, |d| d.bg(p.accent).text_color(p.on_accent))
-                .when(!primary, |d| d.bg(p.button).border_1().border_color(p.border))
-                .when(!enabled, |d| d.opacity(0.5))
-                .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
+            use crate::components::{IconName, Variant, button_base, button_ink, icon as ico};
+            let variant = if primary { Variant::Primary } else { Variant::Secondary };
+            let ink = button_ink(variant, !enabled, &p);
+            let lead = match id {
+                "new-project-create" => Some(IconName::FolderPlus),
+                "new-project-next" => Some(IconName::ArrowRight),
+                "new-project-back" => Some(IconName::ArrowLeft),
+                "new-project-offline" => Some(IconName::WifiOff),
+                _ => None,
+            };
+            button_base(id, variant, !enabled, false, false, false, &p)
+                .when_some(lead, |d, i| d.child(ico(i, 14., ink)))
                 .child(text)
+                .when(id == "new-project-cancel", |d| d.child(crate::components::kbd("Esc", p.fg_dim)))
         };
         let status: Option<(String, gpui::Hsla)> = if self.creating {
             Some((
@@ -758,23 +756,22 @@ impl Render for NewProjectView {
             .bg(p.card)
             .border_1()
             .border_color(p.border)
-            .rounded(px(10.))
+            .rounded(px(12.))
             .shadow_lg()
             .overflow_hidden()
             .text_size(px(look::BODY))
             .text_color(p.fg)
             .child(
-                div()
-                    .h(px(34.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .border_b_1()
-                    .border_color(p.border)
-                    .bg(p.ground)
-                    .text_color(p.fg_dim)
-                    .child("New Project"),
+                crate::components::dialog_header_icon(
+                    crate::components::Tone::Accent,
+                    crate::components::IconName::FolderPlus,
+                    "New Project",
+                    Some("A Java or Spring Boot project, built with Gradle.".into()),
+                    &p,
+                )
+                .pb(px(12.))
+                .border_b_1()
+                .border_color(p.border),
             )
             .child(
                 div()
@@ -808,14 +805,16 @@ impl Render for NewProjectView {
             )
             .child(
                 div()
-                    .h(px(52.))
+                    .min_h(px(56.))
                     .flex_none()
-                    .px(px(16.))
+                    .px(px(20.))
+                    .py(px(12.))
                     .flex()
                     .items_center()
                     .gap(px(8.))
                     .border_t_1()
                     .border_color(p.border)
+                    .bg(p.dialog_footer())
                     .child(
                         div()
                             .id("new-project-status")

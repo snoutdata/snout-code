@@ -459,6 +459,7 @@ impl Render for ProjectView {
         let Some(model) = self.project_model(cx) else {
             // The plain tree until the model is read, with a note saying so.
             let store = self.store.read(cx);
+            let failed = store.sync_error.is_some();
             let note = match (&store.sync_error, root.is_some()) {
                 (Some(e), true) => Some(format!("The Gradle model could not be read: {e}")),
                 (None, true) if root.as_deref().is_some_and(|r| crate::project_model::project_has_gradle(r, cx)) => {
@@ -483,8 +484,15 @@ impl Render for ProjectView {
                             .gap(px(6.))
                             .text_size(px(11.5))
                             .text_color(p.fg_dim)
-                            .child(gpui_component::spinner::Spinner::new().xsmall())
-                            .child(note),
+                            .when(failed, |d| {
+                                d.child(crate::components::icon(
+                                    crate::components::IconName::TriangleAlert,
+                                    13.,
+                                    p.warn,
+                                ))
+                            })
+                            .when(!failed, |d| d.child(gpui_component::spinner::Spinner::new().xsmall()))
+                            .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(note)),
                     )
                 })
                 .child(div().flex_1().min_h_0().child(self.files.clone()))
@@ -845,13 +853,25 @@ impl ProjectView {
                     }
                 };
                 let menu = if menu_file {
-                    menu.item(PopupMenuItem::new("Open").on_click(send(Action::OpenFile(path.clone(), None))))
-                        .separator()
+                    menu.item(
+                        PopupMenuItem::new("Open")
+                            .icon(crate::components::menu_icon(crate::components::IconName::File))
+                            .on_click(send(Action::OpenFile(path.clone(), None))),
+                    )
+                    .separator()
                 } else {
                     menu
                 };
-                menu.item(PopupMenuItem::new("Reveal in Finder").on_click(send(Action::Reveal(path.clone()))))
-                    .item(PopupMenuItem::new("Copy path").on_click(send(Action::Copy(path.display().to_string()))))
+                menu.item(
+                    PopupMenuItem::new("Reveal in Finder")
+                        .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
+                        .on_click(send(Action::Reveal(path.clone()))),
+                )
+                .item(
+                    PopupMenuItem::new("Copy path")
+                        .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                        .on_click(send(Action::Copy(path.display().to_string()))),
+                )
             })
             .into_any_element()
     }

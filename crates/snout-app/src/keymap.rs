@@ -108,6 +108,8 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         // All of them at once, wherever the keyboard is.
         ("cmd-alt-shift-y", Box::new(c::AcceptAllClaude), None),
         ("cmd-alt-shift-z", Box::new(c::RevertAllClaude), None),
+        // A dialog that destroys something takes ⌘⌫ (or a click), never ⏎.
+        ("cmd-backspace", Box::new(crate::dialogs::ConfirmDestructive), Some("SnoutDialog")),
     ]
 }
 

@@ -99,10 +99,23 @@ fn paint_sparks(d: &Drawing, bounds: Bounds<Pixels>, ink: Hsla, secs: Option<f32
 /// A drawing as an element of `w` by `h`, its line in `ink` (the palette's when `None`).
 /// Its sparks twinkle, unless the system asks for reduced motion.
 pub fn drawing(d: &'static Drawing, w: f32, h: f32, ink: Option<Hsla>) -> impl IntoElement {
+    drawing_with(d, w, h, ink, None)
+}
+
+/// A drawing as [`drawing`] paints it, its soft blob made for the `surface` it sits on (a
+/// dialog's card, a tool window's ground), so the blob shows in dark as in light.
+pub fn drawing_on(d: &'static Drawing, w: f32, h: f32, surface: Hsla) -> impl IntoElement {
+    drawing_with(d, w, h, None, Some(surface))
+}
+
+fn drawing_with(d: &'static Drawing, w: f32, h: f32, ink: Option<Hsla>, surface: Option<Hsla>) -> impl IntoElement {
     canvas(
         |_, _, _| {},
         move |bounds, _, window, cx: &mut App| {
-            let p = palette(cx);
+            let mut p = palette(cx);
+            if let Some(surface) = surface {
+                p.ill_blob = crate::theme::mix(p.fg, if p.dark { 0.075 } else { 0.055 }, surface);
+            }
             let ink = ink.unwrap_or(p.ill_ink);
             paint(d, bounds, ink, &p, window);
             if !d.sparks.is_empty() {

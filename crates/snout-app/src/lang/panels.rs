@@ -149,8 +149,15 @@ impl Render for ProblemsPanel {
             .flex()
             .flex_col()
             .text_size(px(12.5))
-            .child(div().flex_none().px(px(10.)).py(px(4.)).text_color(p.weak()).child(summary))
-            .when(empty, |d| d.child(look::centered_note("Nothing to fix in the files the Java server checked", &p)))
+            .when(!empty, |d| d.child(div().flex_none().px(px(10.)).py(px(4.)).text_color(p.weak()).child(summary)))
+            .when(empty, |d| {
+                d.child(
+                    crate::components::EmptyState::new(snout_core::art::spots::no_problems(), "No problems")
+                        .hint("Nothing to fix in the files the Java server checked.")
+                        .on(p.panel)
+                        .compact(),
+                )
+            })
             .when(!empty, |d| d.child(rows_view("problem", rows, self.hub.clone(), cx)))
     }
 }

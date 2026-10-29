@@ -421,27 +421,28 @@ fn tab(
 /// Tool windows that show as tabs of one header when either is in front.
 const TABBED: [&str; 2] = ["Problems", "References"];
 
-/// A small icon button of a tool window's header.
+/// A small icon button of a tool window's header: quiet until the pointer is on it.
 pub fn tool_button(
     id: &'static str,
     g: crate::glyphs::Icon,
     tip: &'static str,
     p: &crate::theme::Palette,
 ) -> Stateful<Div> {
-    let hover = p.button_hover;
+    let (hover, pressed) = (p.button_hover, p.active);
     div()
         .id(id)
         .debug_selector(move || id.to_owned())
         .flex_none()
-        .size(px(22.))
+        .size(px(24.))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(4.))
+        .rounded(px(6.))
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
+        .active(move |s| s.bg(pressed))
         .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
-        .child(crate::glyphs::icon(g, 14., p.fg_dim))
+        .child(crate::glyphs::icon(g, 14., crate::theme::mix(p.fg, 0.7, p.fg_dim)))
 }
 
 /// A tool window's header, in place of a tab bar (the stripes open tool windows): its
@@ -491,8 +492,10 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
             );
         }
     } else {
-        row =
-            row.child(div().font_weight(gpui::FontWeight::MEDIUM).child(crate::tool_windows::title(active).to_owned()));
+        let tool = crate::workspace::Tool::of_panel(active);
+        row = row
+            .when_some(tool, |d, t| d.child(div().mr(px(2.)).child(crate::glyphs::icon(t.icon(), 14., p.hue(t.hue())))))
+            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(crate::tool_windows::title(active).to_owned()));
     }
     row = row.child(div().flex_1());
     match active {
@@ -536,11 +539,12 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
         }
         _ => {}
     }
-    row.child(
-        tool_button("tool-hide", Icon::Minus, "Hide", &p)
-            .on_click(move |_, w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow(right)), cx)),
-    )
-    .into_any_element()
+    row.child(div().mx(px(2.)).w(px(1.)).h(px(16.)).bg(p.border))
+        .child(
+            tool_button("tool-hide", Icon::Minus, "Hide", &p)
+                .on_click(move |_, w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow(right)), cx)),
+        )
+        .into_any_element()
 }
 
 /// The id a panel has in the dock.

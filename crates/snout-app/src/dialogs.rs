@@ -1,27 +1,36 @@
-//! The dialogs the model asks for, on GPUI Kit's dialog layer. Each dialog's content is
-//! its own view ([`DialogBody`]), so its fields and toggles redraw it as they change.
+//! The dialogs the model asks for, on GPUI Kit's dialog layer, drawn with the app's own
+//! components: a header with the dialog's spot drawing and title, its body, and a footer of
+//! buttons with their keys. Each dialog's content is its own view ([`DialogBody`]), so its
+//! fields and toggles redraw it as they change.
+//!
+//! ⏎ does what the main button does, unless that destroys something: Discard, Delete and
+//! the like take a click or ⌘⌫. Esc cancels.
 
 use std::path::Path;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, AppContext as _, ClickEvent, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, AppContext as _, ClickEvent, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, actions, div, px,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::WindowExt as _;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::{Disableable as _, Sizable as _, WindowExt as _};
+use snout_core::art::{Drawing, spots};
 use snout_core::groups::{dir_name, group_name_problem};
 use snout_core::{BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, branch_name_problem, repo_dir_name};
 
+use crate::components::{
+    Button, FileChip, IconButton, IconName, Tone, badge, callout, choice_card, dialog_body, dialog_footer,
+    dialog_header, field_label,
+};
 use crate::menus::{SOURCE_URL, WEBSITE_URL};
-use snout_core::art::Glyph;
-
 use crate::model::{Action, Dialog, Model, Mood};
 use crate::theme::palette;
-use crate::ui::{chip, state_color};
+use crate::ui::state_color;
+
+actions!(snout_dialog, [ConfirmDestructive]);
 
 /// Put up the dialog the model is waiting with.
 pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
@@ -30,21 +39,110 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
         window.close_all_dialogs(cx);
     }
     let width = match dialog {
-        Dialog::Checkout => 580.,
-        Dialog::About | Dialog::Error(_) | Dialog::PullProblem { .. } | Dialog::Clone { .. } => 520.,
-        _ => 460.,
+        Dialog::Checkout => 600.,
+        Dialog::Error(_) | Dialog::PullProblem { .. } | Dialog::Clone { .. } | Dialog::ConfirmCheckout(_) => 560.,
+        _ => 520.,
     };
-    let title = title(&dialog, model.read(cx));
+    let p = palette(cx);
     let body = cx.new(|cx| DialogBody::new(model.clone(), dialog, window, cx));
+    let body_focus = body.clone();
     let m = model.clone();
     window.open_dialog(cx, move |d, _, _| {
         let m = m.clone();
-        d.title(div().font_weight(FontWeight::SEMIBOLD).child(title.clone())).w(px(width)).child(body.clone()).on_close(
-            move |_, _, cx| {
+        let enter = body.clone();
+        d.w(px(width))
+            .p_0()
+            .bg(p.card)
+            .rounded(px(12.))
+            .close_button(false)
+            .child(body.clone())
+            .on_ok(move |_, window, cx| {
+                enter.update(cx, |b, cx| b.enter(window, cx));
+                false
+            })
+            .on_close(move |_, _, cx| {
                 m.update(cx, |m, _| m.dialog = None);
-            },
-        )
+            })
     });
+    // After the dialog layer has taken the keyboard for itself.
+    window.defer(cx, move |window, cx| body_focus.update(cx, |b, cx| b.take_focus(window, cx)));
+}
+
+/// What a dialog looks like: its tone, its drawing, and the line under its title.
+fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<SharedString>) {
+    let files = |n: usize| if n == 1 { "this file".to_owned() } else { format!("these {n} files") };
+    match d {
+        Dialog::About => (
+            Tone::Neutral,
+            Some(snout_core::art::mark()),
+            Some(format!("Version {}", env!("CARGO_PKG_VERSION")).into()),
+        ),
+        Dialog::Error(msg) => {
+            let art = if msg.contains("[rejected]") || msg.contains("failed to push") {
+                spots::push_rejected()
+            } else if msg.contains("CONFLICT") || msg.contains("conflict") {
+                spots::merge_conflict()
+            } else {
+                spots::warning()
+            };
+            (Tone::Danger, Some(art), Some("Git stopped and said why.".into()))
+        }
+        Dialog::Info { mood: Mood::Warning, .. } => (Tone::Warning, Some(spots::warning()), None),
+        Dialog::Info { mood: Mood::Done, .. } => (Tone::Success, Some(spots::success()), None),
+        Dialog::Info { .. } => (Tone::Info, Some(spots::no_results()), None),
+        Dialog::ConfirmDiscard(entries) => {
+            let it = if entries.len() == 1 { "it is" } else { "they are" };
+            let text = format!("This puts {} back as {it} in HEAD. Untracked files are deleted.", files(entries.len()));
+            (Tone::Danger, Some(spots::discard()), Some(text.into()))
+        }
+        Dialog::ConfirmDeleteFiles(entries) => {
+            let one = entries.len() == 1;
+            let what = capital(&files(entries.len()));
+            let text = if snout_core::can_trash(&*m.host) {
+                format!(
+                    "{what} {} to the Trash. Tracked files then show as deleted, ready to commit.",
+                    if one { "goes" } else { "go" }
+                )
+            } else {
+                format!(
+                    "{what} {} deleted from disk. Tracked files then show as deleted, ready to commit.",
+                    if one { "is" } else { "are" }
+                )
+            };
+            (Tone::Danger, Some(spots::discard()), Some(text.into()))
+        }
+        Dialog::ConfirmCheckout(_) => {
+            (Tone::Git, Some(spots::stash()), Some("You have uncommitted changes. What should happen to them?".into()))
+        }
+        Dialog::Checkout => (Tone::Git, None, Some("A branch, a tag, or any commit.".into())),
+        Dialog::NewBranch(_) => {
+            (Tone::Git, Some(spots::new_branch()), Some("A line of work of its own, from where you choose.".into()))
+        }
+        Dialog::DeleteBranch { .. } => {
+            (Tone::Danger, Some(spots::discard()), Some("Its commits stay wherever else they are reachable.".into()))
+        }
+        Dialog::DeleteRemoteBranch(_) => (
+            Tone::Danger,
+            Some(spots::discard()),
+            Some("It goes for everyone who uses the remote. Local branches stay as they are.".into()),
+        ),
+        Dialog::PullProblem { problem: PullProblem::Divergent, .. } => {
+            (Tone::Warning, Some(spots::merge_conflict()), None)
+        }
+        Dialog::PullProblem { .. } => (Tone::Warning, Some(spots::push_rejected()), None),
+        Dialog::InitRepo(path) => (Tone::Git, Some(spots::no_project()), Some(path.display().to_string().into())),
+        Dialog::GroupName { .. } => (Tone::Info, Some(spots::no_project()), None),
+        Dialog::Clone { .. } => (
+            Tone::Git,
+            Some(spots::clone_repo()),
+            Some("Copy a remote repository to this computer and open it.".into()),
+        ),
+    }
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
 fn title(d: &Dialog, m: &Model) -> SharedString {
@@ -83,6 +181,8 @@ pub struct DialogBody {
     with_upstream: bool,
     local: LocalChanges,
     cursor: usize,
+    /// Holds the keyboard in a dialog with no field, so ⌘⌫ and ⏎ reach it.
+    focus: FocusHandle,
 }
 
 impl DialogBody {
@@ -127,9 +227,9 @@ impl DialogBody {
             })
             .detach();
         }
-        let focus = if matches!(dialog, Dialog::Clone { .. }) { &url } else { &name };
-        focus.update(cx, |s, cx| s.focus(window, cx));
+        let focus = cx.focus_handle();
         Self {
+            focus,
             model,
             dialog,
             name,
@@ -140,6 +240,18 @@ impl DialogBody {
             with_upstream: false,
             local: LocalChanges::Keep,
             cursor: 0,
+        }
+    }
+
+    /// Put the keyboard in the dialog: its first field, else the dialog itself (so ⌘⌫
+    /// and ⏎ reach it).
+    fn take_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.dialog {
+            Dialog::Clone { .. } => self.url.update(cx, |s, cx| s.focus(window, cx)),
+            Dialog::NewBranch(_) | Dialog::GroupName { .. } | Dialog::Checkout => {
+                self.name.update(cx, |s, cx| s.focus(window, cx))
+            }
+            _ => window.focus(&self.focus, cx),
         }
     }
 
@@ -188,6 +300,32 @@ impl DialogBody {
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(a) = self.primary(cx) {
             self.act(a, window, cx);
+        }
+    }
+
+    /// ⏎: the main button, unless it destroys something.
+    fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.dialog {
+            Dialog::About | Dialog::Error(_) | Dialog::Info { .. } => self.close(window, cx),
+            Dialog::NewBranch(_) | Dialog::GroupName { .. } | Dialog::Clone { .. } | Dialog::Checkout => {
+                self.confirm(window, cx)
+            }
+            _ => {}
+        }
+    }
+
+    /// What the destructive button does, for ⌘⌫.
+    fn destructive(&self) -> Option<Action> {
+        match self.dialog.clone() {
+            Dialog::ConfirmDiscard(entries) => Some(Action::Discard(entries)),
+            Dialog::ConfirmDeleteFiles(entries) => Some(Action::DeleteFiles(entries)),
+            Dialog::DeleteBranch { name, upstream } => Some(Action::DeleteBranch {
+                name,
+                force: self.force,
+                upstream: upstream.filter(|_| self.with_upstream),
+            }),
+            Dialog::DeleteRemoteBranch(r) => Some(Action::DeleteRemoteBranch(r)),
+            _ => None,
         }
     }
 }
@@ -242,31 +380,30 @@ impl Render for DialogBody {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let m = self.model.read(cx);
-        let dim = |t: String| div().text_color(p.fg_dim).child(t);
+        let (tone, art, subtitle) = look(&self.dialog, m);
+        let heading = title(&self.dialog, m);
+        let dim = |t: String| div().text_color(p.fg_dim).line_height(px(19.)).child(t);
         let code = |t: &str| {
             div()
                 .id("code")
-                .max_h(px(260.))
+                .max_h(px(220.))
                 .overflow_y_scrollbar()
-                .p(px(8.))
+                .px(px(10.))
+                .py(px(8.))
                 .rounded(px(8.))
                 .bg(p.input)
                 .border_1()
                 .border_color(p.border)
                 .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
                 .text_size(px(12.))
+                .line_height(px(18.))
                 .child(t.to_owned())
         };
-        let callout =
-            |t: &str, color| div().p(px(8.)).rounded(px(8.)).bg(p.wash(color)).text_color(color).child(t.to_owned());
+        // The files a dialog is about, each as a chip; a long list scrolls.
         let files = |entries: &[snout_core::FileEntry]| {
-            div().id("files").max_h(px(200.)).overflow_y_scrollbar().p(px(6.)).rounded(px(8.)).bg(p.input).children(
-                entries.iter().map(|e| {
-                    div()
-                        .flex()
-                        .gap(px(8.))
-                        .child(div().w(px(90.)).text_color(state_color(e, &p)).child(e.state_label()))
-                        .child(e.path.clone())
+            div().id("files").max_h(px(204.)).overflow_y_scrollbar().flex().flex_col().gap(px(6.)).children(
+                entries.iter().enumerate().map(|(i, e)| {
+                    FileChip::new(("file", i), e.path.clone()).status(e.state_label(), state_color(e, &p)).max_chars(46)
                 }),
             )
         };
@@ -277,120 +414,112 @@ impl Render for DialogBody {
         let has_changes = !m.status.files.is_empty();
 
         let mut body: Vec<AnyElement> = Vec::new();
-        let mut buttons: Vec<Button> = Vec::new();
-        let ok = |label: &str| Button::new("ok").primary().label(label.to_owned());
-        let danger = |label: &str| Button::new("danger").danger().label(label.to_owned());
-        let cancel = Button::new("cancel").label("Cancel").on_click(cx.listener(|this, _, w, cx| this.close(w, cx)));
+        let mut buttons: Vec<AnyElement> = Vec::new();
+        let ok = |label: &str| Button::new("ok").primary().focusable().label(label.to_owned()).kbd("⏎");
+        let danger = |label: &str| {
+            Button::new("danger").danger().focusable().icon(IconName::Trash).label(label.to_owned()).kbd("⌘⌫")
+        };
+        let cancel = Button::new("cancel")
+            .focusable()
+            .label("Cancel")
+            .kbd("Esc")
+            .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
+            .into_any_element();
         macro_rules! on {
             ($b:expr, $action:expr) => {{
                 let action = $action;
                 $b.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.act(action.clone(), w, cx)))
+                    .into_any_element()
             }};
         }
-        let choice = |id: &'static str, g: Glyph, title: &str, detail: &str| {
-            div()
-                .id(id)
-                .flex()
-                .gap(px(10.))
-                .p(px(10.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(p.border)
-                .hover(|s| s.bg(p.button_hover))
-                .child(crate::art::glyph(g, 20., p.fg))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(title.to_owned()))
-                        .child(div().text_color(p.fg_dim).child(detail.to_owned())),
-                )
-        };
 
         match self.dialog.clone() {
             Dialog::About => {
-                body.push(dim(format!("Version {}", env!("CARGO_PKG_VERSION"))).into_any_element());
                 body.push(
                     div()
+                        .line_height(px(19.))
                         .child("An IDE for Java, Gradle and Spring Boot, with Git and Claude Code built in.")
                         .into_any_element(),
                 );
                 body.push(
-                    Button::new("src")
-                        .link()
-                        .label("github.com/snoutdata/snout-code")
-                        .on_click(|_, _, cx| cx.open_url(SOURCE_URL))
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .child(
+                            Button::new("src")
+                                .compact()
+                                .icon(IconName::Github)
+                                .label("github.com/snoutdata/snout-code")
+                                .on_click(|_, _, cx| cx.open_url(SOURCE_URL)),
+                        )
+                        .child(
+                            Button::new("web")
+                                .compact()
+                                .icon(IconName::Globe)
+                                .label("snoutdata.com")
+                                .on_click(|_, _, cx| cx.open_url(WEBSITE_URL)),
+                        )
                         .into_any_element(),
                 );
-                body.push(
-                    Button::new("web")
-                        .link()
-                        .label("snoutdata.com")
-                        .on_click(|_, _, cx| cx.open_url(WEBSITE_URL))
-                        .into_any_element(),
-                );
-                body.push(dim("Made by SnoutData. MIT License.".into()).into_any_element());
-                buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))));
+                body.push(dim("Made by SnoutData. MIT License.".into()).text_size(px(12.)).into_any_element());
+                buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
             }
             Dialog::Error(msg) => {
-                body.push(dim("Git reported this:".into()).into_any_element());
                 body.push(code(&msg).into_any_element());
                 let copy = msg.clone();
                 buttons.push(
                     Button::new("copy")
+                        .ghost()
+                        .icon(IconName::Copy)
                         .label("Copy")
-                        .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()))),
-                );
-                buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))));
-            }
-            Dialog::Info { text, mood, .. } => {
-                let color = if mood == Mood::Warning { p.warn } else { p.fg_dim };
-                body.push(div().text_color(color).child(text).into_any_element());
-                buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))));
-            }
-            Dialog::ConfirmDiscard(entries) => {
-                let what =
-                    if entries.len() == 1 { "this file".to_owned() } else { format!("these {} files", entries.len()) };
-                body.push(
-                    dim(format!("This puts {what} back as they are in HEAD. Untracked files are deleted."))
+                        .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone())))
                         .into_any_element(),
                 );
+                buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
+            }
+            Dialog::Info { text, .. } => {
+                body.push(dim(text).into_any_element());
+                buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
+            }
+            Dialog::ConfirmDiscard(entries) => {
                 body.push(files(&entries).into_any_element());
-                body.push(
-                    div().text_color(p.error).text_size(px(12.)).child("This cannot be undone.").into_any_element(),
-                );
+                body.push(callout(Tone::Danger, "This cannot be undone.", &p).into_any_element());
                 buttons.push(cancel);
                 buttons.push(on!(danger("Discard"), Action::Discard(entries)));
             }
             Dialog::ConfirmDeleteFiles(entries) => {
-                let what =
-                    if entries.len() == 1 { "This file".to_owned() } else { format!("These {} files", entries.len()) };
-                let (text, label) = if snout_core::can_trash(&*crate::host::host(cx)) {
-                    (format!("{what} go to the Trash, where you can still get them back."), "Move to Trash")
-                } else {
-                    (format!("{what} are deleted from disk for good."), "Delete")
-                };
-                body.push(
-                    dim(format!("{text} Tracked files then show as deleted, ready to commit.")).into_any_element(),
-                );
+                let trash = snout_core::can_trash(&*crate::host::host(cx));
                 body.push(files(&entries).into_any_element());
+                body.push(if trash {
+                    callout(Tone::Info, "You can still get them back from the Trash.", &p).into_any_element()
+                } else {
+                    callout(Tone::Danger, "This cannot be undone.", &p).into_any_element()
+                });
                 buttons.push(cancel);
-                buttons.push(on!(danger(label), Action::DeleteFiles(entries)));
+                buttons.push(on!(danger(if trash { "Move to Trash" } else { "Delete" }), Action::DeleteFiles(entries)));
             }
             Dialog::ConfirmCheckout(target) => {
-                body.push(dim("You have uncommitted changes. What should happen to them?".into()).into_any_element());
                 let (t1, t2) = (target.clone(), target.clone());
                 body.push(
-                    choice("stash", Glyph::Stage, "Stash, check out, re-apply", "Put the changes aside, switch, then bring them back. Works even if they touch files that differ on the target.")
-                        .on_click(cx.listener(move |this, _, w, cx| this.act(Action::Checkout(t1.clone(), LocalChanges::Stash), w, cx)))
-                        .into_any_element(),
+                    choice_card(
+                        "stash",
+                        IconName::Archive,
+                        "Stash, check out, re-apply",
+                        "Put the changes aside, switch, then bring them back. Works even if they touch files that differ on the target.",
+                        &p,
+                    )
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        this.act(Action::Checkout(t1.clone(), LocalChanges::Stash), w, cx)
+                    }))
+                    .into_any_element(),
                 );
                 body.push(
-                    choice(
+                    choice_card(
                         "keep",
-                        Glyph::Switch,
+                        IconName::ArrowRightLeft,
                         "Check out, keep changes",
                         "Carry the changes across as they are. Git refuses if they would be overwritten.",
+                        &p,
                     )
                     .on_click(cx.listener(move |this, _, w, cx| {
                         this.act(Action::Checkout(t2.clone(), LocalChanges::Keep), w, cx)
@@ -399,8 +528,12 @@ impl Render for DialogBody {
                 );
                 if target.detaches() {
                     body.push(
-                        callout("This leaves HEAD detached. Create a branch if you want to keep new commits.", p.warn)
-                            .into_any_element(),
+                        callout(
+                            Tone::Warning,
+                            "This leaves HEAD detached. Create a branch if you want to keep new commits.",
+                            &p,
+                        )
+                        .into_any_element(),
                     );
                 }
                 buttons.push(cancel);
@@ -408,21 +541,23 @@ impl Render for DialogBody {
             Dialog::PullProblem { problem: PullProblem::Divergent, details } => {
                 body.push(dim(format!("{branch} and {upstream} have each moved on, and this repository's settings do not say how to combine them.")).into_any_element());
                 body.push(
-                    choice(
+                    choice_card(
                         "merge",
-                        Glyph::Commit,
+                        IconName::GitMerge,
                         "Merge",
                         "Join both histories with a merge commit. Nothing is rewritten.",
+                        &p,
                     )
                     .on_click(cx.listener(|this, _, w, cx| this.act(Action::Pull(PullMode::Merge), w, cx)))
                     .into_any_element(),
                 );
                 body.push(
-                    choice(
+                    choice_card(
                         "rebase",
-                        Glyph::Branch,
+                        IconName::GitBranch,
                         "Rebase",
                         "Replay your commits on top of the remote ones, for a straight history.",
+                        &p,
                     )
                     .on_click(cx.listener(|this, _, w, cx| this.act(Action::Pull(PullMode::Rebase), w, cx)))
                     .into_any_element(),
@@ -432,39 +567,56 @@ impl Render for DialogBody {
             }
             Dialog::PullProblem { details, .. } => {
                 body.push(dim(format!("{branch} and {upstream} have no commit in common, so they cannot be merged. This usually means the remote repository was recreated or its history was rewritten.")).into_any_element());
-                body.push(div().child(format!("Resetting makes {branch} match {upstream} exactly. Your current commits stay on a backup branch, so nothing is lost.")).into_any_element());
+                body.push(
+                    callout(
+                        Tone::Info,
+                        format!("Resetting makes {branch} match {upstream} exactly. Your current commits stay on a backup branch, so nothing is lost."),
+                        &p,
+                    )
+                    .into_any_element(),
+                );
                 if has_tracked {
                     body.push(
                         callout(
+                            Tone::Danger,
                             "Commit or stash your uncommitted changes first; resetting would discard them.",
-                            p.error,
+                            &p,
                         )
                         .into_any_element(),
                     );
                 }
                 body.push(code(&details).into_any_element());
                 buttons.push(cancel);
-                buttons.push(on!(ok(&format!("Reset to {upstream}")).disabled(has_tracked), Action::ResetToUpstream));
+                buttons.push(on!(
+                    Button::new("ok")
+                        .primary()
+                        .focusable()
+                        .icon(IconName::RotateCcw)
+                        .label(format!("Reset to {upstream}"))
+                        .disabled(has_tracked),
+                    Action::ResetToUpstream
+                ));
             }
             Dialog::InitRepo(path) => {
-                body.push(dim(path.display().to_string()).into_any_element());
                 let (a, b) = (path.clone(), path.clone());
                 body.push(
-                    choice(
+                    choice_card(
                         "find",
-                        Glyph::Search,
+                        IconName::Search,
                         "Find repositories inside",
                         "Look through its subfolders and add every repository found.",
+                        &p,
                     )
                     .on_click(cx.listener(move |this, _, w, cx| this.act(Action::Scan(a.clone()), w, cx)))
                     .into_any_element(),
                 );
                 body.push(
-                    choice(
+                    choice_card(
                         "init",
-                        Glyph::Spark,
+                        IconName::Sparkles,
                         "Initialize a repository here",
                         "Start a fresh history in this folder with git init.",
+                        &p,
                     )
                     .on_click(cx.listener(move |this, _, w, cx| this.act(Action::InitRepo(b.clone()), w, cx)))
                     .into_any_element(),
@@ -473,19 +625,20 @@ impl Render for DialogBody {
             }
             Dialog::NewBranch(start) => {
                 let from = start.as_ref().map_or("HEAD".to_owned(), |s| s.label.clone());
+                body.push(field_label("Name", &p).into_any_element());
+                body.push(Input::new(&self.name).into_any_element());
+                if let Some(problem) = branch_name_problem(&Self::value(&self.name, cx)) {
+                    body.push(callout(Tone::Warning, problem, &p).into_any_element());
+                }
                 body.push(
                     div()
                         .flex()
-                        .gap(px(6.))
+                        .gap(px(8.))
                         .items_center()
                         .child(dim("Starting at".into()))
-                        .child(chip(from, p.fg_dim, &p))
+                        .child(badge(from, Tone::Git, &p))
                         .into_any_element(),
                 );
-                body.push(Input::new(&self.name).into_any_element());
-                if let Some(problem) = branch_name_problem(&Self::value(&self.name, cx)) {
-                    body.push(div().text_color(p.warn).text_size(px(12.)).child(problem).into_any_element());
-                }
                 body.push(
                     Checkbox::new("checkout")
                         .label("Check out the new branch")
@@ -498,7 +651,11 @@ impl Render for DialogBody {
                 );
                 buttons.push(cancel);
                 buttons.push(
-                    ok("Create").disabled(!primary_enabled).on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx))),
+                    ok("Create")
+                        .icon(IconName::GitBranch)
+                        .disabled(!primary_enabled)
+                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
+                        .into_any_element(),
                 );
             }
             Dialog::GroupName { rename, repo } => {
@@ -512,22 +669,27 @@ impl Render for DialogBody {
                 if let Some(problem) =
                     group_name_problem(&m.settings.groups, &Self::value(&self.name, cx), rename.as_deref())
                 {
-                    body.push(div().text_color(p.warn).text_size(px(12.)).child(problem).into_any_element());
+                    body.push(callout(Tone::Warning, problem, &p).into_any_element());
                 }
                 buttons.push(cancel);
-                let verb = if rename.is_some() { "Rename" } else { "Create" };
+                let (verb, icon) =
+                    if rename.is_some() { ("Rename", IconName::Pencil) } else { ("Create", IconName::FolderPlus) };
                 buttons.push(
-                    ok(verb).disabled(!primary_enabled).on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx))),
+                    ok(verb)
+                        .icon(icon)
+                        .disabled(!primary_enabled)
+                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
+                        .into_any_element(),
                 );
             }
             Dialog::DeleteBranch { name, upstream } => {
                 body.push(
                     div()
                         .flex()
-                        .gap(px(6.))
+                        .gap(px(8.))
                         .items_center()
-                        .child(chip(name.clone(), p.fg_dim, &p))
-                        .child(dim("goes away. Its commits stay wherever else they are reachable.".into()))
+                        .child(badge(name.clone(), Tone::Git, &p))
+                        .child(dim("goes away.".into()))
                         .into_any_element(),
                 );
                 body.push(
@@ -553,7 +715,7 @@ impl Render for DialogBody {
                     );
                     if self.with_upstream {
                         body.push(
-                            callout("Removing it from the remote affects everyone who uses it.", p.error)
+                            callout(Tone::Danger, "Removing it from the remote affects everyone who uses it.", &p)
                                 .into_any_element(),
                         );
                     }
@@ -564,48 +726,44 @@ impl Render for DialogBody {
                 buttons.push(on!(danger("Delete branch"), action));
             }
             Dialog::DeleteRemoteBranch(r) => {
-                body.push(
-                    div()
-                        .flex()
-                        .gap(px(6.))
-                        .items_center()
-                        .child(chip(r.label(), p.fg_dim, &p))
-                        .child(dim(
-                            "is removed from the remote for everyone who uses it. Local branches stay as they are."
-                                .into(),
-                        ))
-                        .into_any_element(),
-                );
+                body.push(badge(r.label(), Tone::Git, &p).into_any_element());
                 buttons.push(cancel);
                 buttons.push(on!(danger(&format!("Delete from {}", r.remote)), Action::DeleteRemoteBranch(r.clone())));
             }
             Dialog::Clone { .. } => {
-                body.push(dim("Copy a remote repository to this computer and open it.".into()).into_any_element());
-                body.push(div().text_size(px(12.)).text_color(p.fg_dim).child("URL").into_any_element());
+                body.push(field_label("Repository URL", &p).into_any_element());
                 body.push(Input::new(&self.url).into_any_element());
-                body.push(div().text_size(px(12.)).text_color(p.fg_dim).child("Into folder").into_any_element());
+                body.push(field_label("Into folder", &p).into_any_element());
                 body.push(Input::new(&self.parent).into_any_element());
                 if let Some(Action::Clone { dest, .. }) = self.primary(cx) {
                     body.push(
                         div()
                             .flex()
-                            .gap(px(6.))
+                            .gap(px(8.))
                             .items_center()
                             .child(dim("Lands in".into()))
-                            .child(chip(dest.display().to_string(), p.fg_dim, &p))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(FileChip::new("dest", dest.display().to_string()).max_chars(52)),
+                            )
                             .into_any_element(),
                     );
                 }
                 buttons.push(cancel);
                 buttons.push(
-                    ok("Clone").disabled(!primary_enabled).on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx))),
+                    ok("Clone")
+                        .icon(IconName::Download)
+                        .disabled(!primary_enabled)
+                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
+                        .into_any_element(),
                 );
             }
             Dialog::Checkout => {
                 let query = Self::value(&self.name, cx);
                 let items = pick_items(m, &query);
                 self.cursor = self.cursor.min(items.len().saturating_sub(1));
-                body.push(dim("A branch, a tag, or any commit.".into()).into_any_element());
                 body.push(Input::new(&self.name).into_any_element());
                 let mut list = div().id("picks").flex().flex_col().h(px(280.)).overflow_y_scrollbar();
                 let mut section = "";
@@ -613,21 +771,34 @@ impl Render for DialogBody {
                     if item.section != section {
                         section = item.section;
                         list = list.child(
-                            div().pt(px(8.)).text_size(px(10.5)).text_color(p.fg_dim).child(section.to_uppercase()),
+                            div()
+                                .pt(px(10.))
+                                .pb(px(2.))
+                                .px(px(8.))
+                                .text_size(px(10.5))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(p.fg_dim)
+                                .child(section.to_uppercase()),
                         );
                     }
                     let selected = i == self.cursor;
+                    let kind = match item.target {
+                        CheckoutTarget::Tag(_) => IconName::Tag,
+                        CheckoutTarget::Commit(_) => IconName::GitCommitHorizontal,
+                        _ => IconName::GitBranch,
+                    };
                     list = list.child(
                         div()
                             .id(("pick", i))
                             .flex()
                             .gap(px(8.))
                             .px(px(8.))
-                            .h(px(28.))
+                            .h(px(30.))
                             .items_center()
                             .rounded(px(6.))
                             .when(selected, |d| d.bg(p.selection()))
                             .hover(|s| s.bg(p.button_hover))
+                            .child(crate::components::icon(kind, 14., p.fg_dim))
                             .child(item.label.clone())
                             .child(
                                 div()
@@ -648,13 +819,15 @@ impl Render for DialogBody {
                     );
                 }
                 if items.is_empty() {
-                    list =
-                        list.child(div().p(px(30.)).text_color(p.fg_dim).child("No matching branch, tag, or commit"));
+                    list = list.child(
+                        crate::components::EmptyState::new(spots::no_results(), "No matching branch, tag, or commit")
+                            .compact(),
+                    );
                 }
                 body.push(list.into_any_element());
                 if has_changes {
                     let seg = |id: &'static str, label: &'static str, value: LocalChanges, current: LocalChanges| {
-                        Button::new(id).small().label(label).when(value == current, |b| b.primary()).on_click(
+                        Button::new(id).compact().label(label).when(value == current, |b| b.primary()).on_click(
                             cx.listener(move |this, _, _, cx| {
                                 this.local = value;
                                 cx.notify();
@@ -674,24 +847,45 @@ impl Render for DialogBody {
                 }
                 if items.get(self.cursor).is_some_and(|i| i.target.detaches()) {
                     body.push(
-                        callout("This leaves HEAD detached. Create a branch if you want to keep new commits.", p.warn)
-                            .into_any_element(),
+                        callout(
+                            Tone::Warning,
+                            "This leaves HEAD detached. Create a branch if you want to keep new commits.",
+                            &p,
+                        )
+                        .into_any_element(),
                     );
                 }
                 buttons.push(cancel);
                 buttons.push(
                     ok("Check Out")
+                        .icon(IconName::ArrowRightLeft)
                         .disabled(items.is_empty())
-                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx))),
+                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
+                        .into_any_element(),
                 );
             }
         }
         let _ = window;
         div()
+            .relative()
+            .track_focus(&self.focus)
+            .key_context("SnoutDialog")
+            .on_action(cx.listener(|this, _: &ConfirmDestructive, w, cx| {
+                if let Some(a) = this.destructive() {
+                    this.act(a, w, cx);
+                }
+            }))
             .flex()
             .flex_col()
-            .gap(px(10.))
-            .children(body)
-            .child(div().flex().justify_end().gap(px(8.)).pt(px(6.)).children(buttons))
+            .text_color(p.fg)
+            .child(dialog_header(tone, art, heading, subtitle, &p))
+            .child(dialog_body().children(body))
+            .child(dialog_footer(None, buttons, &p))
+            .child(
+                div().absolute().top(px(10.)).right(px(10.)).child(
+                    IconButton::new("dialog-close", IconName::X, "Close")
+                        .on_click(cx.listener(|this, _, w, cx| this.close(w, cx))),
+                ),
+            )
     }
 }

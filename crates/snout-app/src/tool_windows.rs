@@ -7,7 +7,6 @@ use gpui::{
 };
 use gpui_component::scroll::ScrollableElement as _;
 
-use crate::glyphs::{Icon, icon};
 use crate::model::Model;
 use crate::theme::palette;
 
@@ -20,19 +19,9 @@ pub fn title(panel_name: &str) -> &str {
     }
 }
 
-/// An empty tool window's note, centred.
-fn empty(title: &'static str, text: &'static str, cx: &App) -> gpui::Div {
-    let p = palette(cx);
-    div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(4.))
-        .px(px(24.))
-        .child(div().text_color(p.fg).child(title))
-        .child(div().text_color(p.fg_dim).text_size(px(12.)).text_center().child(text))
+/// An empty tool window's note: its drawing, centred.
+fn empty(title: &'static str, text: &'static str, _: &App) -> crate::components::EmptyState {
+    crate::components::EmptyState::new(snout_core::art::spots::quiet_bell(), title).hint(text).compact()
 }
 
 pub struct NotificationsPanel {
@@ -73,8 +62,8 @@ impl Render for NotificationsPanel {
                     .bg(p.card)
                     .border_1()
                     .border_color(p.border)
-                    .child(icon(Icon::Problems, 15., p.error))
-                    .child(div().flex_1().min_w_0().text_size(px(12.5)).child(text))
+                    .child(crate::components::icon(crate::components::IconName::OctagonAlert, 15., p.error))
+                    .child(div().flex_1().min_w_0().text_size(px(12.5)).line_height(px(18.)).child(text))
             }),
         ))
     }

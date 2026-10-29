@@ -947,24 +947,32 @@ impl RunWindow {
     }
 
     fn empty(&self, cx: &App) -> AnyElement {
-        let p = palette(cx);
-        let (title, text) = match self.place {
-            Place::Run => ("Nothing running", "Run a configuration from the title bar, or a test from the gutter."),
-            Place::Debug => {
-                ("No debug session", "Debug a configuration from the title bar, or a test from the gutter.")
-            }
-            Place::Build => ("No build output", "Double click a task in the Gradle tool window to run it."),
+        use crate::components::{Button, EmptyState, IconName};
+        use snout_core::art::spots;
+        let _ = cx;
+        let state = match self.place {
+            Place::Run => EmptyState::new(spots::no_tests(), "Nothing running")
+                .hint("Run a configuration from the title bar, or a test from the gutter.")
+                .action(
+                    Button::new("run-empty-run")
+                        .compact()
+                        .icon(IconName::Play)
+                        .label("Run")
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RunSelected), cx)),
+                ),
+            Place::Debug => EmptyState::new(spots::debugger_idle(), "No debug session")
+                .hint("Debug a configuration from the title bar, or a test from the gutter.")
+                .action(
+                    Button::new("debug-empty-debug")
+                        .compact()
+                        .icon(IconName::Bug)
+                        .label("Debug")
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::DebugSelected), cx)),
+                ),
+            Place::Build => EmptyState::new(snout_core::art::building(), "No build output")
+                .hint("Double click a task in the Gradle tool window to run it."),
         };
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(4.))
-            .child(div().text_color(p.fg).child(title))
-            .child(div().text_color(p.fg_dim).text_size(px(12.)).child(text))
-            .into_any_element()
+        state.compact().into_any_element()
     }
 }
 

@@ -99,9 +99,21 @@ fn send(model: &Entity<Model>, action: Action) -> impl Fn(&ClickEvent, &mut Wind
 
 /// The items to open or find repositories, in the + menu and on the welcome page.
 pub fn open_items(menu: PopupMenu, model: &Entity<Model>) -> PopupMenu {
-    menu.item(PopupMenuItem::new("Open local repository…").on_click(send(model, Action::PickFolder)))
-        .item(PopupMenuItem::new("Find repositories in folder…").on_click(send(model, Action::PickScanFolder)))
-        .item(PopupMenuItem::new("Clone from GitHub…").on_click(send(model, Action::ShowClone)))
+    menu.item(
+        PopupMenuItem::new("Open local repository…")
+            .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
+            .on_click(send(model, Action::PickFolder)),
+    )
+    .item(
+        PopupMenuItem::new("Find repositories in folder…")
+            .icon(crate::components::menu_icon(crate::components::IconName::FolderSearch))
+            .on_click(send(model, Action::PickScanFolder)),
+    )
+    .item(
+        PopupMenuItem::new("Clone from GitHub…")
+            .icon(crate::components::menu_icon(crate::components::IconName::Download))
+            .on_click(send(model, Action::ShowClone)),
+    )
 }
 
 impl Render for ProjectsView {
@@ -171,14 +183,21 @@ impl Render for ProjectsView {
                     let model = model.clone();
                     move |menu, _, _| {
                         menu.item(
-                            PopupMenuItem::new("Rename…").on_click(send(&model, Action::ShowRenameGroup(name.clone()))),
+                            PopupMenuItem::new("Rename…")
+                                .icon(crate::components::menu_icon(crate::components::IconName::Pencil))
+                                .on_click(send(&model, Action::ShowRenameGroup(name.clone()))),
                         )
                         .item(
                             PopupMenuItem::new("Delete group")
+                                .icon(crate::components::menu_icon(crate::components::IconName::Trash))
                                 .on_click(send(&model, Action::DeleteGroup(name.clone()))),
                         )
                         .separator()
-                        .item(PopupMenuItem::new("New group…").on_click(send(&model, Action::ShowNewGroup(None))))
+                        .item(
+                            PopupMenuItem::new("New group…")
+                                .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
+                                .on_click(send(&model, Action::ShowNewGroup(None))),
+                        )
                     }
                 });
                 rows.push(row.into_any_element());
@@ -209,9 +228,11 @@ impl Render for ProjectsView {
             .dropdown_menu({
                 let model = model.clone();
                 move |menu, _, _| {
-                    open_items(menu, &model)
-                        .separator()
-                        .item(PopupMenuItem::new("New group…").on_click(send(&model, Action::ShowNewGroup(None))))
+                    open_items(menu, &model).separator().item(
+                        PopupMenuItem::new("New group…")
+                            .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
+                            .on_click(send(&model, Action::ShowNewGroup(None))),
+                    )
                 }
             });
         div()
@@ -424,8 +445,16 @@ fn dir_tree(m: &Model) -> (BTreeMap<String, Vec<String>>, HashMap<String, usize>
 }
 
 pub fn reveal_items(menu: PopupMenu, model: &Entity<Model>, path: &Path) -> PopupMenu {
-    menu.item(PopupMenuItem::new("Reveal in Finder").on_click(send(model, Action::Reveal(path.to_owned()))))
-        .item(PopupMenuItem::new("Copy path").on_click(send(model, Action::Copy(path.display().to_string()))))
+    menu.item(
+        PopupMenuItem::new("Reveal in Finder")
+            .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
+            .on_click(send(model, Action::Reveal(path.to_owned()))),
+    )
+    .item(
+        PopupMenuItem::new("Copy path")
+            .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+            .on_click(send(model, Action::Copy(path.display().to_string()))),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -440,7 +469,11 @@ fn repo_menu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let menu = if openable {
-        menu.item(PopupMenuItem::new("Open").on_click(send(model, Action::OpenRepo(path.to_owned()))))
+        menu.item(
+            PopupMenuItem::new("Open")
+                .icon(crate::components::menu_icon(crate::components::IconName::File))
+                .on_click(send(model, Action::OpenRepo(path.to_owned()))),
+        )
     } else {
         menu
     };
@@ -461,10 +494,18 @@ fn repo_menu(
             if names2.iter().any(|n| Some(n.as_str()) != group2.as_deref()) || group2.is_some() {
                 menu = menu.separator();
             }
-            menu.item(PopupMenuItem::new("New group…").on_click(send(&m2, Action::ShowNewGroup(Some(path2.clone())))))
+            menu.item(
+                PopupMenuItem::new("New group…")
+                    .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
+                    .on_click(send(&m2, Action::ShowNewGroup(Some(path2.clone())))),
+            )
         })
         .separator()
-        .item(PopupMenuItem::new("Remove from list").on_click(send(model, Action::RemoveRepo(path.to_owned()))))
+        .item(
+            PopupMenuItem::new("Remove from list")
+                .icon(crate::components::menu_icon(crate::components::IconName::X))
+                .on_click(send(model, Action::RemoveRepo(path.to_owned()))),
+        )
 }
 
 /// A row of the tree: arrow column, icon, name (cut to fit), and chips at the right end.

@@ -368,6 +368,8 @@ impl Render for SearchView {
             Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),
             Mode::Symbols => "No symbol matches".into(),
         };
+        // Nothing typed yet: a plain line saying what to type, no drawing.
+        let blank = self.input.read(cx).value().trim().is_empty();
         if self.mode == Mode::GoToLine {
             let hint = match parse_line(&self.input.read(cx).value()) {
                 Some((line, column)) => format!("Go to line {}, column {}", line + 1, column + 1),
@@ -475,7 +477,15 @@ impl Render for SearchView {
             .text_size(px(look::BODY))
             .text_color(p.fg)
             .child(look::field(&self.input, true, None, &p))
-            .when(count == 0, |d| d.child(look::centered_note(empty, &p)))
+            .when(count == 0 && !blank, |d| {
+                d.child(
+                    crate::components::EmptyState::new(snout_core::art::spots::no_results(), empty.clone())
+                        .hint("Try fewer letters, or another word.")
+                        .on(p.card)
+                        .compact(),
+                )
+            })
+            .when(count == 0 && blank, |d| d.child(look::centered_note(empty, &p)))
             .when(count > 0, |d| d.child(list))
     }
 }

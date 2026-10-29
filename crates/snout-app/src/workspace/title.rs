@@ -165,7 +165,11 @@ impl Workspace {
                         model.update(cx, |m, cx| m.handle(action.clone(), cx))
                     }
                 };
-                menu = menu.item(PopupMenuItem::new("Open Project…").on_click(send(Action::PickFolder)));
+                menu = menu.item(
+                    PopupMenuItem::new("Open Project…")
+                        .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
+                        .on_click(send(Action::PickFolder)),
+                );
                 if !recent.is_empty() {
                     menu = menu.separator().label("Recent Projects");
                     for path in recent.iter().take(10) {
@@ -178,6 +182,7 @@ impl Workspace {
                 }
                 menu.separator().item(
                     PopupMenuItem::new("Close Project")
+                        .icon(crate::components::menu_icon(crate::components::IconName::X))
                         .disabled(!has_project)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(CloseProject), cx)),
                 )
@@ -200,12 +205,17 @@ impl Workspace {
             .dropdown_menu(move |menu, _, _| {
                 let menu = menu.item(PopupMenuItem::new(text.clone()).disabled(true)).separator();
                 let menu = if lost {
-                    menu.item(PopupMenuItem::new("Reconnect").on_click(|_, _, cx| crate::remote::reconnect(cx)))
+                    menu.item(
+                        PopupMenuItem::new("Reconnect")
+                            .icon(crate::components::menu_icon(crate::components::IconName::RefreshCw))
+                            .on_click(|_, _, cx| crate::remote::reconnect(cx)),
+                    )
                 } else {
                     menu
                 };
                 menu.item(
                     PopupMenuItem::new("Close Remote Connection")
+                        .icon(crate::components::menu_icon(crate::components::IconName::Unplug))
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::CloseRemote), cx)),
                 )
             })
@@ -295,6 +305,7 @@ impl Workspace {
                 }
                 menu.separator().item(
                     PopupMenuItem::new("Edit Configurations…")
+                        .icon(crate::components::menu_icon(crate::components::IconName::Settings))
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::EditConfigurations), cx)),
                 )
             })

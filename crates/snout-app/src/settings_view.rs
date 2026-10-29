@@ -36,6 +36,19 @@ impl Page {
     pub const ALL: [Page; 6] =
         [Page::Appearance, Page::Keymap, Page::Editor, Page::VersionControl, Page::Gradle, Page::ClaudeCode];
 
+    /// The page's icon, in the list and over the page.
+    pub fn icon(self) -> crate::components::IconName {
+        use crate::components::IconName;
+        match self {
+            Page::Appearance => IconName::Palette,
+            Page::Keymap => IconName::Keyboard,
+            Page::Editor => IconName::FileCode,
+            Page::VersionControl => IconName::GitBranch,
+            Page::Gradle => IconName::Hammer,
+            Page::ClaudeCode => IconName::Sparkles,
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Page::Appearance => "Appearance",
@@ -917,8 +930,10 @@ impl SettingsView {
                     .rounded(px(4.))
                     .cursor_pointer()
                     .font_weight(if page.group().is_some() { FontWeight::NORMAL } else { FontWeight::MEDIUM })
+                    .gap(px(8.))
                     .when(on, |d| d.bg(p.selection()))
                     .when(!on, |d| d.hover(move |s| s.bg(hover)))
+                    .child(crate::components::icon(page.icon(), 14., if on { p.fg } else { p.fg_dim }))
                     .child(page.title())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.page = page;
@@ -954,22 +969,9 @@ impl Render for SettingsView {
         let page = self.page_body(cx);
         let tree = self.tree(cx);
         let button = |id: &'static str, text: &'static str, primary: bool, enabled: bool| {
-            let hover = if primary { mix(p.accent, 0.88, p.fg) } else { p.button_hover };
-            div()
-                .id(id)
-                .debug_selector(move || id.to_owned())
-                .h(px(28.))
-                .min_w(px(76.))
-                .px(px(14.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(5.))
-                .when(primary, |d| d.bg(p.accent).text_color(p.on_accent))
-                .when(!primary, |d| d.bg(p.button).border_1().border_color(p.border))
-                .when(!enabled, |d| d.opacity(0.5))
-                .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
-                .child(text)
+            use crate::components::{Variant, button_base};
+            let variant = if primary { Variant::Primary } else { Variant::Secondary };
+            button_base(id, variant, !enabled, false, false, false, &p).child(text)
         };
         div()
             .id("settings")
@@ -985,23 +987,23 @@ impl Render for SettingsView {
             .bg(p.card)
             .border_1()
             .border_color(p.border)
-            .rounded(px(10.))
+            .rounded(px(12.))
             .shadow_lg()
             .overflow_hidden()
             .text_size(px(look::BODY))
             .text_color(p.fg)
             .child(
-                div()
-                    .h(px(34.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .border_b_1()
-                    .border_color(p.border)
-                    .bg(p.ground)
-                    .text_color(p.fg_dim)
-                    .child("Settings"),
+                crate::components::dialog_header_icon(
+                    crate::components::Tone::Accent,
+                    crate::components::IconName::Settings,
+                    "Settings",
+                    None,
+                    &p,
+                )
+                .pt(px(14.))
+                .pb(px(12.))
+                .border_b_1()
+                .border_color(p.border),
             )
             .child(
                 div().flex_1().min_h_0().flex().child(tree).child(
@@ -1014,9 +1016,23 @@ impl Render for SettingsView {
                             div()
                                 .px(px(20.))
                                 .pt(px(14.))
-                                .text_size(px(15.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(self.page.title()),
+                                .pb(px(4.))
+                                .flex()
+                                .items_center()
+                                .gap(px(10.))
+                                .child(
+                                    div()
+                                        .size(px(28.))
+                                        .rounded(px(8.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .bg(p.wash(p.accent))
+                                        .child(crate::components::icon(self.page.icon(), 15., p.accent)),
+                                )
+                                .child(
+                                    div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(self.page.title()),
+                                ),
                         )
                         .child(
                             div()
@@ -1032,15 +1048,17 @@ impl Render for SettingsView {
             )
             .child(
                 div()
-                    .h(px(52.))
+                    .min_h(px(56.))
                     .flex_none()
-                    .px(px(16.))
+                    .px(px(20.))
+                    .py(px(12.))
                     .flex()
                     .items_center()
                     .justify_end()
                     .gap(px(8.))
                     .border_t_1()
                     .border_color(p.border)
+                    .bg(p.dialog_footer())
                     .child(
                         button("settings-cancel", "Cancel", false, true)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Cancel))),

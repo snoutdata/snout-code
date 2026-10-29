@@ -442,16 +442,25 @@ impl Render for FileTree {
                             }
                         };
                         let menu = if !dir {
-                            menu.item(PopupMenuItem::new("Open").on_click(send(Action::OpenFile(path.clone(), None))))
-                                .separator()
+                            menu.item(
+                                PopupMenuItem::new("Open")
+                                    .icon(crate::components::menu_icon(crate::components::IconName::File))
+                                    .on_click(send(Action::OpenFile(path.clone(), None))),
+                            )
+                            .separator()
                         } else {
                             menu
                         };
-                        menu.item(PopupMenuItem::new("Reveal in Finder").on_click(send(Action::Reveal(path.clone()))))
-                            .item(
-                                PopupMenuItem::new("Copy path")
-                                    .on_click(send(Action::Copy(path.display().to_string()))),
-                            )
+                        menu.item(
+                            PopupMenuItem::new("Reveal in Finder")
+                                .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
+                                .on_click(send(Action::Reveal(path.clone()))),
+                        )
+                        .item(
+                            PopupMenuItem::new("Copy path")
+                                .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                .on_click(send(Action::Copy(path.display().to_string()))),
+                        )
                     })
                     .into_any_element()
             })
@@ -469,7 +478,40 @@ impl Render for FileTree {
                     .child(title(name.clone().unwrap_or_else(|| "Files".into()))),
             )
             .child(separator(&p))
-            .when(name.is_none(), |d| d.child(look::weak("Open a project to see its files", &p)))
-            .child(div().id("file-tree").flex_1().min_h_0().flex().flex_col().overflow_y_scrollbar().children(items))
+            .when(name.is_none(), |d| {
+                use crate::components::{Button, EmptyState, IconName};
+                d.child(
+                    EmptyState::new(snout_core::art::spots::no_project(), "No project open")
+                        .hint("Open a project to see its files.")
+                        .action(
+                            Button::new("files-open")
+                                .compact()
+                                .icon(IconName::FolderOpen)
+                                .label("Open Project…")
+                                .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::Open), cx)),
+                        )
+                        .compact(),
+                )
+            })
+            .map(|d| match crate::remote::connection(cx) {
+                Some((host, snout_remote::Status::Lost(_))) => {
+                    use crate::components::{Button, EmptyState, IconName};
+                    d.child(
+                        EmptyState::new(snout_core::art::spots::remote_lost(), "The connection is lost")
+                            .hint(format!("The files on {host} come back when it reconnects."))
+                            .action(
+                                Button::new("files-reconnect")
+                                    .compact()
+                                    .icon(IconName::RefreshCw)
+                                    .label("Reconnect")
+                                    .on_click(|_, _, cx| crate::remote::reconnect(cx)),
+                            )
+                            .compact(),
+                    )
+                }
+                _ => d.child(
+                    div().id("file-tree").flex_1().min_h_0().flex().flex_col().overflow_y_scrollbar().children(items),
+                ),
+            })
     }
 }

@@ -916,17 +916,19 @@ impl SpringWindow {
 
 /// A note in the middle of an empty tab.
 fn note(title: &'static str, text: &'static str, cx: &App) -> AnyElement {
-    let p = palette(cx);
+    use snout_core::art::spots;
+    let art = if title.contains("matches") {
+        spots::no_results()
+    } else if title.starts_with("Reading") {
+        snout_core::art::building()
+    } else {
+        spots::no_beans()
+    };
+    let _ = cx;
     div()
         .flex_1()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(4.))
-        .px(px(24.))
-        .child(div().child(title))
-        .when(!text.is_empty(), |d| d.child(div().text_color(p.fg_dim).text_size(px(12.)).text_center().child(text)))
+        .min_h_0()
+        .child(crate::components::EmptyState::new(art, title).hint(text).compact())
         .into_any_element()
 }
 

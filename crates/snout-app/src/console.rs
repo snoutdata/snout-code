@@ -409,7 +409,12 @@ impl Render for ConsolePanel {
                 .flex()
                 .flex_col()
                 .child(header(String::new(), None, vec![hide]))
-                .child(look::centered_note(format!("Open a repository to run {} in it", kind.title()), &p));
+                .child(
+                    crate::components::EmptyState::new(snout_core::art::spots::no_project(), "No repository open")
+                        .hint(format!("Open a repository to run {} in it.", kind.title()))
+                        .on(p.panel)
+                        .compact(),
+                );
         };
         let wanted = kind == Kind::Shell || self.model.read(cx).settings.console_open;
         if wanted && !self.sessions.contains_key(&root) && !self.starting.contains(&root) && self.error.is_none() {

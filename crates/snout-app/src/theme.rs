@@ -260,6 +260,50 @@ impl Palette {
         }
     }
 
+    /// The colour of a note that informs: the cool blue the diffs add with, never a state.
+    pub fn info(&self) -> Hsla {
+        self.added
+    }
+
+    /// A destructive button, solid so it reads as one you can press: its fill, under the
+    /// pointer, pressed, and its label (WCAG AA on all three).
+    pub fn danger(&self) -> Pressable {
+        let fill = self.badge(self.error);
+        let black = hex(0x000000);
+        Pressable { fill, hover: mix(fill, 0.86, black), pressed: mix(fill, 0.74, black), ink: self.on_badge }
+    }
+
+    /// The main button: the accent, deepened under the pointer and when pressed.
+    pub fn primary(&self) -> Pressable {
+        Pressable {
+            fill: self.accent,
+            hover: mix(self.accent, 0.88, self.fg),
+            pressed: mix(self.accent, 0.78, self.fg),
+            ink: self.on_accent,
+        }
+    }
+
+    /// The ring round a control the keyboard is on.
+    pub fn focus_ring(&self) -> Hsla {
+        mix(self.accent, 0.75, self.card)
+    }
+
+    /// Claude's hue as text: on its wash, on cards and panels (WCAG AA).
+    pub fn claude_ink(&self) -> Hsla {
+        let mark = self.claude().mark;
+        let toward = if self.dark { hex(0xffffff) } else { hex(0x000000) };
+        let mut c = mark;
+        while contrast(c, self.wash(mark)) < 4.6 || contrast(c, self.card) < 4.6 {
+            c = mix(c, 0.94, toward);
+        }
+        c
+    }
+
+    /// The footer strip of a dialog: between the card and the ground.
+    pub fn dialog_footer(&self) -> Hsla {
+        mix(self.ground, 0.45, self.card)
+    }
+
     /// Lane colours of the commit graph: the drawings' tones, then two quiet extras.
     pub fn lanes(&self) -> [Hsla; 6] {
         if self.tinted {
@@ -270,6 +314,15 @@ impl Palette {
         let strong = |c: Hsla| if self.dark { c } else { mix(c, 0.7, self.fg) };
         [strong(self.ill_accent), strong(self.ill_warm), blue, strong(self.ill_clay), violet, self.fg_dim]
     }
+}
+
+/// A filled button's colours: its fill, under the pointer, pressed, and its label.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pressable {
+    pub fill: Hsla,
+    pub hover: Hsla,
+    pub pressed: Hsla,
+    pub ink: Hsla,
 }
 
 /// Claude Code's own hue, for what it changed: a warm clay that no Git state uses.
@@ -607,6 +660,23 @@ mod tests {
                 need(&format!("{t} chip"), c, p.wash(c), AA, &p);
             }
             need("on_accent on accent", p.on_accent, p.accent, AA, &p);
+            for (what, b) in [("primary", p.primary()), ("danger", p.danger())] {
+                for (state, bg) in [("", b.fill), (" hover", b.hover), (" pressed", b.pressed)] {
+                    need(&format!("{what} button{state}"), b.ink, bg, AA, &p);
+                }
+            }
+            for (t, c) in [("info", p.info()), ("Claude", p.claude_ink())] {
+                need(&format!("{t} chip"), c, p.wash(c), AA, &p);
+            }
+            let footer = p.dialog_footer();
+            need("fg_dim on a dialog's footer", p.fg_dim, footer, AA, &p);
+            need("error on a dialog's footer", p.error, footer, AA, &p);
+            for (t, c) in [("accent", p.accent), ("ok", p.ok), ("warn", p.warn), ("error", p.error), ("info", p.info())]
+            {
+                need(&format!("{t} callout text"), p.fg, mix(c, 0.14, p.card), AA, &p);
+                need(&format!("{t} callout icon"), c, mix(c, 0.14, p.card), 3.0, &p);
+            }
+            need("the focus ring", p.focus_ring(), p.card, 3.0, &p);
             need("Spring's hints", p.spring, p.panel, if p.theme == ColorTheme::Classic { 3.0 } else { AA }, &p);
             let s = syntax_colors(&p);
             for (t, c) in [

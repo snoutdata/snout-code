@@ -7,6 +7,8 @@
 //! thing the picture is about; a couple of sparks. Spot drawings use a `0 0 240 160` box, icons
 //! a `0 0 24 24` box.
 
+pub mod spots;
+
 use std::ops::{Add, Mul, Sub};
 use std::sync::LazyLock;
 

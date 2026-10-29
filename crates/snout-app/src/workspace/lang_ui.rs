@@ -362,6 +362,14 @@ impl Workspace {
                 .border_1()
                 .border_color(mix(p.accent, 0.4, p.panel))
                 .text_size(px(12.5))
+                .map(|d| {
+                    if prompt.error.is_some() {
+                        d.child(crate::components::icon(crate::components::IconName::TriangleAlert, 14., p.warn))
+                    } else {
+                        // The cup of Java, the download on its way to it.
+                        d.child(crate::art::drawing_on(snout_core::art::spots::jdk(), 48., 32., p.wash(p.accent)))
+                    }
+                })
                 .child(div().flex_1().min_w_0().child(text))
                 .when_some(prompt.progress.as_ref().and_then(|pr| pr.percent()), |d, pct| {
                     d.child(
@@ -420,7 +428,16 @@ impl Workspace {
                 .border_1()
                 .border_color(mix(p.accent, 0.4, p.panel))
                 .text_size(px(12.5))
-                .child(crate::glyphs::icon(crate::glyphs::Icon::Build, 14., p.accent))
+                .when(!changed, |d| d.bg(p.wash(p.warn)).border_color(mix(p.warn, 0.4, p.panel)))
+                .child(crate::components::icon(
+                    if changed {
+                        crate::components::IconName::RefreshCw
+                    } else {
+                        crate::components::IconName::TriangleAlert
+                    },
+                    14.,
+                    if changed { p.accent } else { p.warn },
+                ))
                 .child(div().flex_1().min_w_0().child(text))
                 .child(
                     look::small_button("gradle-sync", if changed { "Sync" } else { "Try again" }, &p)

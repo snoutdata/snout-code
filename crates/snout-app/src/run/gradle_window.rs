@@ -118,27 +118,38 @@ impl Render for GradleWindow {
         let p = palette(cx);
         let runs = self.runs.read(cx);
         let base = div().size_full().bg(p.ground).text_size(px(crate::look::BODY)).text_color(p.fg);
-        let note = |title: &'static str, text: String| {
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(px(4.))
-                .px(px(24.))
-                .child(div().child(title))
-                .child(div().text_color(p.fg_dim).text_size(px(12.)).text_center().child(text))
+        use crate::components::{Button, EmptyState, IconName};
+        use snout_core::art::spots;
+        let note = |art: &'static snout_core::art::Drawing, title: &'static str, text: String, sync: bool| {
+            EmptyState::new(art, title).hint(text).compact().when(sync, |e| {
+                e.action(
+                    Button::new("gradle-empty-sync")
+                        .compact()
+                        .icon(IconName::RefreshCw)
+                        .label("Sync the Gradle Project")
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
+                )
+            })
         };
         if runs.gradle.builds.is_empty() {
             let ready = runs.engine(cx).is_some();
             return base.child(match (&runs.gradle.error, runs.gradle.loading, ready) {
-                (_, true, _) => note("Reading the Gradle tasks", "The builds are being configured.".into()),
-                (Some(e), _, _) => note("The tasks could not be read", e.clone()),
-                (None, _, false) => {
-                    note("No tasks yet", "The tasks appear once the Java engine has imported the project.".into())
+                (_, true, _) => note(
+                    snout_core::art::building(),
+                    "Reading the Gradle tasks",
+                    "The builds are being configured.".into(),
+                    false,
+                ),
+                (Some(e), _, _) => note(spots::gradle_failed(), "The tasks could not be read", e.clone(), true),
+                (None, _, false) => note(
+                    snout_core::art::building(),
+                    "No tasks yet",
+                    "The tasks appear once the Java engine has imported the project.".into(),
+                    false,
+                ),
+                (None, _, true) => {
+                    note(spots::no_project(), "No Gradle tasks", "This project has no Gradle build.".into(), false)
                 }
-                (None, _, true) => note("No Gradle tasks", "This project has no Gradle build.".into()),
             });
         }
         let rows: Rc<Vec<Row>> = Rc::new(self.rows(&runs.gradle.builds));
