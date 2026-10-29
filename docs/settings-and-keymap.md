@@ -70,6 +70,8 @@ and warnings differ in lightness as well as colour.
 - **Soft wrap long lines**: new editor tabs wrap long lines. View ▸ Soft Wrap (⌥Z) switches it
   for the tab in front.
 - **Show whitespace**: editors show spaces and tabs.
+- **Show parameter names of literal arguments (Java)**: on by default. See
+  [Java](java.md#parameter-name-hints). View ▸ Parameter Name Hints switches it too.
 
 ## Version Control
 

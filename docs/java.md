@@ -26,6 +26,16 @@ When you accept a class the file does not import yet, SnoutCode adds the import.
 
 When you type `(` or `,` in a call, the method's signature shows over the caret with the current parameter in bold. It stays while the caret is on that line. Press ⇧⌘Space (Code ▸ Show Parameter Hints) to show it again.
 
+## Parameter name hints
+
+Where a call passes a literal, such as a string, a number or `true`, the name of the parameter it is passed to shows after the end of the line, in a quiet chip: `new Shop("Ada");` is followed by `owner: "Ada"`, and a call with several literals gets a chip for each, in order. Arguments that are names or expressions get none, since they usually say what they are.
+
+The hints follow your typing: they move with their arguments at once, and the engine is asked again when you pause.
+
+To turn them off or on, choose View ▸ Parameter Name Hints, run **Toggle Parameter Name Hints** from the command palette, or use the setting in Settings ▸ Editor. It has no shortcut until you give it one in the keymap.
+
+![Parameter name hints after the lines of a method](images/parameter-hints.png)
+
 ## Hover
 
 Rest the pointer on a name to see its type and documentation. On a squiggle, you see the problem's message.

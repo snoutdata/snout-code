@@ -1215,10 +1215,14 @@ impl Workspace {
             self.menu_checks = None;
         }
         let wrap_changed = (before.soft_wrap, before.show_whitespace) != (next.soft_wrap, next.show_whitespace);
+        let hints_changed = before.param_hints != next.param_hints;
         for editor in self.editors(cx) {
             editor.update(cx, |e, cx| {
                 if wrap_changed {
                     e.apply_defaults(defaults, window, cx);
+                }
+                if hints_changed {
+                    e.refresh_param_hints(cx);
                 }
                 cx.notify();
             });
@@ -1474,6 +1478,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToSymbol, w, cx| this.open_symbols(false, w, cx)))
             .on_action(cx.listener(|this, _: &GoToSymbolInFile, w, cx| this.open_symbols(true, w, cx)))
             .on_action(cx.listener(|this, _: &ShowProblems, w, cx| this.show_problems(w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleParamHints, w, cx| {
+                let mut next = this.model.read(cx).settings.clone();
+                next.param_hints = !next.param_hints;
+                this.apply_settings(next, w, cx);
+            }))
             .on_action(cx.listener(|this, _: &ClearRecent, _, cx| this.send(Action::ClearRecent, cx)))
             .on_action(cx.listener(|this, a: &OpenRecent, _, cx| this.send(Action::OpenRepo(a.0.clone()), cx)))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(Some(1.), cx)))

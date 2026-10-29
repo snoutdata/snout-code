@@ -112,6 +112,8 @@ impl EditorPanel {
     /// hover) and a dot in the gutter.
     pub fn set_diagnostics(&mut self, list: Vec<lsp_types::Diagnostic>, cx: &mut Context<Self>) {
         self.problems = list;
+        // The engine has checked the file: its hints are known now.
+        self.param_hints_soon(cx);
         let problems = self.problems.clone();
         self.state.update(cx, |s, cx| {
             let rope = s.text().clone();

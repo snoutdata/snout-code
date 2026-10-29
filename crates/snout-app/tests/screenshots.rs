@@ -1609,6 +1609,15 @@ mod shots {
         };
         use snout_app::editor::Refactoring;
 
+        // Parameter name hints after the lines of `main`, whose arguments are literals.
+        pump(&mut cx, 60, &|cx| cx.update(|cx| !editor.read(cx).param_hints.is_empty()));
+        cx.update_window(handle.into(), |_, window, cx| {
+            editor.update(cx, |e, cx| e.go_to(40, 8, window, cx));
+        })
+        .unwrap();
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-param-hints");
+
         // Extract Method on the loop of `total()`: the new method, its name in the field.
         // Right after the start the engine may still be indexing: ask until it answers.
         for _ in 0..10 {

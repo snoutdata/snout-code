@@ -627,14 +627,8 @@ pub fn parse_hints(v: &Value) -> Vec<(u32, String)> {
     let list: Vec<lsp_types::InlayHint> = serde_json::from_value(v.clone()).unwrap_or_default();
     let mut out: Vec<(u32, String)> = list
         .into_iter()
-        .filter(|h| h.kind != Some(lsp_types::InlayHintKind::PARAMETER))
-        .map(|h| {
-            let text = match h.label {
-                lsp_types::InlayHintLabel::String(s) => s,
-                lsp_types::InlayHintLabel::LabelParts(parts) => parts.into_iter().map(|p| p.value).collect(),
-            };
-            (h.position.line, text)
-        })
+        .filter(|h| !crate::editor::is_param_hint(h))
+        .map(|h| (h.position.line, crate::editor::hint_label(&h)))
         .collect();
     out.sort();
     out

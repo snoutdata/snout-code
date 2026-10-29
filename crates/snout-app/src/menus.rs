@@ -91,6 +91,7 @@ actions!(
         RestartJava,
         ConnectSsh,
         CloseRemote,
+        ToggleParamHints,
     ]
 );
 
@@ -148,6 +149,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Move Line Up", Box::new(e::MoveLineUp)),
         ("Move Line Down", Box::new(e::MoveLineDown)),
         ("Toggle Soft Wrap", Box::new(e::ToggleSoftWrap)),
+        ("Toggle Parameter Name Hints", Box::new(ToggleParamHints)),
         ("Go to Definition", Box::new(i::GoToDefinition)),
         ("Find References", Box::new(e::FindReferences)),
         ("Rename Symbol…", Box::new(e::RenameSymbol)),
@@ -317,6 +319,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Zoom Out", ZoomOut),
             MenuItem::action("Actual Size", ZoomReset),
             MenuItem::action("Soft Wrap", crate::editor::ToggleSoftWrap),
+            check(MenuItem::action("Parameter Name Hints", ToggleParamHints), s.param_hints),
             MenuItem::action("Split Editor Right", SplitRight),
             MenuItem::separator(),
             MenuItem::action("Processes", ShowProcesses),
@@ -400,8 +403,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
 }
 
 /// What the bar shows that can change, to rebuild it only then.
-pub type MenuState = (bool, bool, bool, ThemeChoice, Vec<std::path::PathBuf>, Vec<crate::remote::RemoteProject>);
+pub type MenuState = (bool, bool, bool, bool, ThemeChoice, Vec<std::path::PathBuf>, Vec<crate::remote::RemoteProject>);
 
 pub fn checks(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> MenuState {
-    (s.console_open, s.side_by_side, s.compact, s.theme, recent.to_vec(), remote.to_vec())
+    (s.console_open, s.side_by_side, s.compact, s.param_hints, s.theme, recent.to_vec(), remote.to_vec())
 }

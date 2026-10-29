@@ -13,8 +13,8 @@ use gpui::{
 use gpui_component::input::RopeExt as _;
 use serde_json::json;
 
+use super::EditorPanel;
 use super::run_gutter::{GutterMenu, Lanes, visible_lines};
-use super::{EditorPanel, font_size};
 use crate::glyphs::{Icon, icon};
 use crate::spring::{self, FileSpring, MarkKind, SpringLine, Target};
 use crate::theme::{mix, palette};
@@ -113,15 +113,13 @@ impl EditorPanel {
         }
     }
 
-    /// The marks, and the `@Value` hints, drawn over the editor from its own layout.
+    /// The marks, drawn over the editor from its own layout (the `@Value` hints are
+    /// drawn with the parameter hints, see `inlay`).
     pub(super) fn spring_gutter(&self, cx: &App) -> impl IntoElement {
         let p = palette(cx);
         let green = spring::green(&p);
         let marks = self.spring.clone();
-        let hints = self.hints.clone();
         let (state, pad) = (self.state.clone(), self.gutter_pad);
-        let mono = crate::look::mono_font(cx);
-        let size_pt = font_size(cx);
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
@@ -143,32 +141,6 @@ impl EditorPanel {
                         };
                         crate::glyphs::paint(g, b, ink, window);
                     }
-                }
-                // `@Value` hints: after the end of their line, quiet and in italics.
-                let rope = s.text();
-                let places: Vec<(gpui::Bounds<Pixels>, &String)> = hints
-                    .iter()
-                    .filter_map(|(line, text)| {
-                        let line = *line as usize;
-                        if top_of(line as u32).is_none() || line >= rope.lines_len() {
-                            return None;
-                        }
-                        let end = rope.line_end_offset(line);
-                        s.range_to_bounds(&(end..end)).map(|b| (b, text))
-                    })
-                    .collect();
-                for (b, text) in places {
-                    let run = gpui::TextRun {
-                        len: text.len(),
-                        font: gpui::Font { style: gpui::FontStyle::Italic, ..gpui::font(mono.clone()) },
-                        color: mix(green, 0.75, p.panel),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    };
-                    let shaped = window.text_system().shape_line(text.clone().into(), px(size_pt * 0.92), &[run], None);
-                    let at = point(b.right() + px(16.), b.top());
-                    let _ = shaped.paint(at, line_height, gpui::TextAlign::Left, None, window, cx);
                 }
             },
         )

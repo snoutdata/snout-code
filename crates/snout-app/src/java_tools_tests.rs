@@ -245,3 +245,73 @@ fn formats_the_selection_or_else_the_file(cx: &mut TestAppContext) {
     assert!(names.iter().any(|n| n == "Format Selection"));
     t.stop();
 }
+
+/// The parameter hints of the editor, as (name, argument).
+fn param_hints(editor: &Entity<EditorPanel>, cx: &mut VisualTestContext) -> Vec<(String, String)> {
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        let text = e.text(cx);
+        e.param_hints
+            .iter()
+            .map(|h| {
+                let start = text[..h.at].rfind('\n').map_or(0, |i| i + 1);
+                let end = text[h.at..].find('\n').map_or(text.len(), |i| h.at + i);
+                (h.name.clone(), crate::editor::argument_at(&text[start..end], h.at - start))
+            })
+            .collect()
+    })
+}
+
+#[gpui::test]
+fn parameter_names_of_literals_show_and_follow_the_text(cx: &mut TestAppContext) {
+    let _engine = crate::tests::engine_lock();
+    let Some(mut t) = start(cx, "java-hints", "Shop.java") else { return };
+    let editor = t.editor.clone();
+    let expected: Vec<(String, String)> = [
+        ("owner", "\"Ada\""),
+        ("radius", "2.0"),
+        ("side", "3.0"),
+        ("name", "\"Total\""),
+        ("count", "42"),
+        ("loud", "true"),
+    ]
+    .iter()
+    .map(|(a, b)| (a.to_string(), b.to_string()))
+    .collect();
+    let e2 = editor.clone();
+    let shown = pump_until(t.cx, 60, |cx| param_hints(&e2, cx) == expected);
+    assert!(shown, "the hints of the literal arguments: {:?}", param_hints(&editor, t.cx));
+
+    // Typing above them: they move with their arguments at once, before the engine is asked
+    // again (nothing blinks), and stay once it answers.
+    caret_at(&editor, "package", 0, 0, t.cx);
+    t.cx.simulate_input("// A note.\n");
+    assert_eq!(param_hints(&editor, t.cx), expected, "moved with the text");
+    let e3 = editor.clone();
+    pump_until(t.cx, 3, |_| false);
+    assert!(pump_until(t.cx, 30, |cx| param_hints(&e3, cx) == expected), "{:?}", param_hints(&editor, t.cx));
+    // Typing before an argument moves the hint with it; typing over one drops its hint until
+    // the engine answers again.
+    caret_at(&editor, "42", 0, 0, t.cx);
+    t.cx.simulate_input("4");
+    assert!(param_hints(&editor, t.cx).iter().any(|(n, a)| n == "count" && a == "442"));
+    t.select("442", 0);
+    t.cx.simulate_input("9");
+    assert_eq!(param_hints(&editor, t.cx).len(), expected.len() - 1);
+    let e4 = editor.clone();
+    assert!(pump_until(t.cx, 30, |cx| param_hints(&e4, cx).iter().any(|(n, a)| n == "count" && a == "9")));
+
+    // The setting off (View ▸ Parameter Name Hints): they go, and stay gone while typing.
+    t.cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::ToggleParamHints), cx));
+    t.cx.run_until_parked();
+    assert!(t.cx.update(|_, cx| !t.model.read(cx).settings.param_hints));
+    assert!(param_hints(&editor, t.cx).is_empty());
+    t.cx.simulate_input("2");
+    pump_until(t.cx, 3, |_| false);
+    assert!(param_hints(&editor, t.cx).is_empty());
+    // And on again.
+    t.cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::ToggleParamHints), cx));
+    let e5 = editor.clone();
+    assert!(pump_until(t.cx, 30, |cx| !param_hints(&e5, cx).is_empty()));
+    t.stop();
+}

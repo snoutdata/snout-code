@@ -204,6 +204,7 @@ impl SettingsView {
         next.tab_size = d.tab_size;
         next.soft_wrap = d.soft_wrap;
         next.show_whitespace = d.show_whitespace;
+        next.param_hints = d.param_hints;
         next.fetch_minutes = d.fetch_minutes;
         next.daemon_idle_minutes = d.daemon_idle_minutes;
         next.claude_path = d.claude_path.clone();
@@ -522,6 +523,19 @@ impl SettingsView {
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.set(cx, |s| s.show_whitespace = !s.show_whitespace)
                                 })),
+                        ),
+                    )
+                    .child(
+                        div().py(px(6.)).child(
+                            look::checkbox(
+                                "settings-param-hints",
+                                "Show parameter names of literal arguments (Java)",
+                                d.param_hints,
+                                true,
+                                &p,
+                            )
+                            .debug_selector(|| "settings-param-hints".into())
+                            .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.param_hints = !s.param_hints))),
                         ),
                     )
                     .into_any_element()

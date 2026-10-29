@@ -96,6 +96,8 @@ pub struct Settings {
     pub soft_wrap: bool,
     /// Editors show spaces and tabs.
     pub show_whitespace: bool,
+    /// Java editors show the names of the parameters literal arguments are passed to.
+    pub param_hints: bool,
     /// How often the projects are fetched in the background, in minutes.
     pub fetch_minutes: u64,
     /// The `claude` program to run; looked up on the usual paths when unset.
@@ -141,6 +143,7 @@ impl Default for Settings {
             tab_size: 4,
             soft_wrap: false,
             show_whitespace: false,
+            param_hints: true,
             fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,
             claude_path: None,
             follow_claude: true,

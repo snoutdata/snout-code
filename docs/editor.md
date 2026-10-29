@@ -116,6 +116,7 @@ Press ⇧⌘P (File ▸ Command Palette…) and type part of a command's name. E
 
 - **Zoom In** (⌘= or ⌘+), **Zoom Out** (⌘-) and **Actual Size** (⌘0), in the View menu, change the font size of every editor by one point, from 8 to 32. The size is kept for next time.
 - **Soft Wrap** (⌥Z, View ▸ Soft Wrap) wraps long lines in the tab in front, or stops wrapping them.
-- Settings ▸ Editor has **Soft wrap long lines** and **Show whitespace** for all editors, and the editor font and size are under Settings ▸ Appearance. See [Settings and keymap](settings-and-keymap.md).
+- **Parameter Name Hints** (View menu) shows or hides the names of the parameters that literal arguments are passed to, in Java files. See [Java](java.md#parameter-name-hints).
+- Settings ▸ Editor has **Soft wrap long lines**, **Show whitespace** and the parameter name hints for all editors, and the editor font and size are under Settings ▸ Appearance. See [Settings and keymap](settings-and-keymap.md).
 
 Every shortcut on this page can be changed. See [Keyboard shortcuts](keyboard-shortcuts.md).

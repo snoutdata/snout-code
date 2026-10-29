@@ -30,6 +30,7 @@ use crate::editing::{self, Edit};
 use crate::lang::providers::DocLink;
 
 mod claude;
+mod inlay;
 mod lang_features;
 mod refactor;
 mod run_gutter;
@@ -37,6 +38,7 @@ mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
 pub use claude::{Answer, ClaudeRequest, LIVE_TICK, Outcome, Proposal, Review, STREAM_TICK};
+pub use inlay::{ParamHint, argument_at, hint_label, is_param_hint};
 pub use lang_features::{class_file_name, is_class_file_path};
 pub use refactor::{Refactoring, new_name};
 pub use run_gutter::{CODE_PAD, GutterMenu, Lanes, PLAIN_PAD, runnables_of};
@@ -84,17 +86,29 @@ pub struct EditorDefaults {
     pub tab_size: usize,
     pub soft_wrap: bool,
     pub show_whitespace: bool,
+    /// Java editors show the names of the parameters literal arguments are passed to.
+    pub param_hints: bool,
 }
 
 impl Global for EditorDefaults {}
 
 impl EditorDefaults {
     pub fn of(s: &crate::settings::Settings) -> Self {
-        Self { tab_size: s.tab_size.clamp(1, 8), soft_wrap: s.soft_wrap, show_whitespace: s.show_whitespace }
+        Self {
+            tab_size: s.tab_size.clamp(1, 8),
+            soft_wrap: s.soft_wrap,
+            show_whitespace: s.show_whitespace,
+            param_hints: s.param_hints,
+        }
     }
 
     pub fn now(cx: &App) -> Self {
-        cx.try_global::<Self>().copied().unwrap_or(Self { tab_size: 4, soft_wrap: false, show_whitespace: false })
+        cx.try_global::<Self>().copied().unwrap_or(Self {
+            tab_size: 4,
+            soft_wrap: false,
+            show_whitespace: false,
+            param_hints: true,
+        })
     }
 }
 
@@ -310,6 +324,15 @@ pub struct EditorPanel {
     /// The resolved values of `@Value` placeholders, by line.
     pub hints: Rc<Vec<(u32, String)>>,
     _hints: Option<Task<()>>,
+    /// The names of the parameters literal arguments are passed to, where the arguments
+    /// start.
+    pub param_hints: Rc<Vec<ParamHint>>,
+    _param_hints: Option<Task<()>>,
+    _param_settle: Option<Task<()>>,
+    /// How many times in a row the engine could not answer for the hints yet.
+    param_tries: u32,
+    /// The text the hints' places count in.
+    param_text: gpui_component::input::Rope,
     /// The Spring mark under the pointer: its line, where the pointer is, and what it says.
     pub gutter_tip: Option<(u32, gpui::Point<Pixels>, String)>,
     /// Where the caret was when last looked at, to tell when it moves.
@@ -355,6 +378,7 @@ impl EditorPanel {
             cx.subscribe(&state, |this, state, e: &InputEvent, cx| match e {
                 InputEvent::Change => {
                     this.revision += 1;
+                    this.param_hints_changed(cx);
                     this.lang_changed(cx);
                     this.spring_changed(cx);
                     if this.writing > 0 {
@@ -480,6 +504,11 @@ impl EditorPanel {
             _spring_settle: None,
             hints: Rc::new(Vec::new()),
             _hints: None,
+            param_hints: Rc::new(Vec::new()),
+            _param_hints: None,
+            _param_settle: None,
+            param_tries: 0,
+            param_text: Default::default(),
             gutter_tip: None,
             caret_seen: 0,
             pending_scroll: None,
@@ -524,6 +553,7 @@ impl EditorPanel {
         self.runnables = None;
         self.spring = None;
         self.hints = Rc::new(Vec::new());
+        self.param_hints = Rc::new(Vec::new());
         if path.as_os_str().is_empty() {
             // A tab about to show something else (a class file).
             self.loading = false;
@@ -583,6 +613,8 @@ impl EditorPanel {
         self.attach_lang(cx);
         self.refresh_runnables(cx);
         self.refresh_spring(cx);
+        self.param_tries = 0;
+        self.refresh_param_hints(cx);
         if let Some(text) = self.pending_sync.take() {
             self.sync_from(&text, window, cx);
         }
@@ -1426,6 +1458,7 @@ impl Render for EditorPanel {
                     .child(self.problem_marks(cx))
                     .child(self.run_gutter(cx))
                     .child(self.spring_gutter(cx))
+                    .child(self.end_of_line_hints(cx))
                     .children(self.spring_tooltip(cx))
                     .children(self.gutter_popup(cx))
                     .children(self.signature_popup(cx))

@@ -1435,9 +1435,10 @@ fn initialize_params(root: &Path) -> Value {
                 "autobuild": { "enabled": true },
                 "format": { "enabled": true },
                 "signatureHelp": { "enabled": true },
-                // Inlay hints are the engine's Spring `@Value` values only; the editor draws
-                // them at the end of their lines.
-                "inlayHints": { "parameterNames": { "enabled": "none" } },
+                // Inlay hints: the names of the parameters literal arguments are passed to,
+                // and the engine's Spring `@Value` values. The editor draws them at the end of
+                // their lines (a setting turns the parameter names off).
+                "inlayHints": { "parameterNames": { "enabled": "literals" } },
                 "completion": { "enabled": true, "guessMethodArguments": false },
                 "configuration": { "updateBuildConfiguration": "disabled" }
             } },
