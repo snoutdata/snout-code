@@ -585,12 +585,17 @@ impl LangHub {
                 self.spawn(root, cx);
             }
             None => {
-                server.stage = Stage::NeedsJdk(req.wanted());
+                server.stage =
+                    Stage::NeedsJdk(req.wanted_on(self.host.info().arch == "aarch64" && self.host.info().is_mac()));
                 if self.jdk_prompt.is_none() {
-                    eprintln!("[java] no JDK fits {}: offering JDK {}", root.display(), req.wanted());
+                    eprintln!(
+                        "[java] no JDK fits {}: offering JDK {}",
+                        root.display(),
+                        req.wanted_on(self.host.info().arch == "aarch64" && self.host.info().is_mac())
+                    );
                     self.jdk_prompt = Some(JdkPrompt {
                         root: root.to_owned(),
-                        major: req.wanted(),
+                        major: req.wanted_on(self.host.info().arch == "aarch64" && self.host.info().is_mac()),
                         resync: false,
                         progress: None,
                         error: None,
@@ -1190,7 +1195,7 @@ impl LangHub {
         prompt.progress = Some(progress.clone());
         prompt.error = None;
         let (major, root, resync) = (prompt.major, prompt.root.clone(), prompt.resync);
-        let dir = java::downloads_dir(&self.home);
+        let dir = java::downloads_dir(self.host.info());
         let host = self.host.clone();
         // The builds without a JDK: those the new one fits are found with it, off the UI thread.
         let without: Vec<PathBuf> = self.servers.values().filter(|s| s.jdk.is_none()).map(|s| s.root.clone()).collect();

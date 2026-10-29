@@ -15,6 +15,7 @@ path = "src/main.rs"
 snout-core.workspace = true
 snout-lang.workspace = true
 snout-host.workspace = true
+snout-remote.workspace = true
 # The protocol's types, the version GPUI Kit's editor speaks.
 lsp-types = { version = "0.97", features = ["proposed"] }
 serde.workspace = true
@@ -50,12 +51,13 @@ similar.workspace = true
 libc = "0.2"
 # The engine's daemon registry names (SHA-256 of the project folder), for the Processes window.
 sha2 = "0.10"
+# A scratch folder for a JDK fetched on the Mac for a remote machine.
+tempfile.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 gpui-component = { workspace = true, features = ["test-support"] }
 gpui-platform = { workspace = true, features = ["test-support"] }
-tempfile.workspace = true
 
 [[test]]
 name = "screenshots"

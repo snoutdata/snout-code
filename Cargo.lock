@@ -7418,6 +7418,7 @@ dependencies = [
  "snout-core",
  "snout-host",
  "snout-lang",
+ "snout-remote",
  "tempfile",
  "tree-sitter",
  "tree-sitter-properties",

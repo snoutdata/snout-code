@@ -71,6 +71,11 @@ impl Host for LatencyHost {
         self.inner.write_mode(path, data, mode)
     }
 
+    fn append(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        self.wait("append", &path);
+        self.inner.append(path, data)
+    }
+
     fn create_dir_all_mode(&self, path: &Path, mode: Option<u32>) -> io::Result<()> {
         self.wait("create_dir_all", &path);
         self.inner.create_dir_all_mode(path, mode)

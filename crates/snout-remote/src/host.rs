@@ -379,6 +379,10 @@ impl Host for RemoteHost {
         self.call(true, |c| c.write_mode(path, data.to_vec(), mode))
     }
 
+    fn append(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        self.call(false, |c| c.append(path, data.to_vec()))
+    }
+
     fn create_dir_all_mode(&self, path: &Path, mode: Option<u32>) -> io::Result<()> {
         self.call(true, |c| c.create_dir_all_mode(path, mode))
     }

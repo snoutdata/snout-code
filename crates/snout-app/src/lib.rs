@@ -24,6 +24,7 @@ pub mod processes;
 pub mod project_model;
 pub mod project_view;
 pub mod projects;
+pub mod remote;
 pub mod run;
 pub mod search;
 pub mod settings;

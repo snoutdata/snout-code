@@ -246,6 +246,10 @@ impl Host for LocalHost {
         written
     }
 
+    fn append(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        std::fs::OpenOptions::new().append(true).create(true).open(path)?.write_all(data)
+    }
+
     fn create_dir_all_mode(&self, path: &Path, mode: Option<u32>) -> io::Result<()> {
         use std::os::unix::fs::DirBuilderExt as _;
         let mut b = std::fs::DirBuilder::new();

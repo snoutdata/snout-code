@@ -398,9 +398,15 @@ pub fn jar_index(host: &dyn Host, file: &Path) -> Option<JarIndex> {
 
 // ----- Where models are -------------------------------------------------------------------
 
-/// SnoutCode's cache folder under `home`.
-pub fn cache_dir(home: &Path) -> PathBuf {
-    home.join("Library/Caches/SnoutCode")
+/// SnoutCode's cache folder on a host, where the engine keeps its builds, models and jdtls
+/// data: `~/Library/Caches/SnoutCode` on a Mac, the XDG cache elsewhere (as the engine has
+/// it by default).
+pub fn cache_dir(info: &snout_host::HostInfo) -> PathBuf {
+    if info.is_mac() {
+        return info.home.join("Library/Caches/SnoutCode");
+    }
+    let xdg = info.var("XDG_CACHE_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
+    xdg.unwrap_or_else(|| info.home.join(".cache")).join("SnoutCode")
 }
 
 /// A short, stable name for a folder (FNV-1a of its path).
@@ -414,8 +420,8 @@ fn folder_key(root: &Path) -> String {
 }
 
 /// Where the app's own sync of `root` writes its model.
-pub fn synced_model(home: &Path, root: &Path) -> PathBuf {
-    cache_dir(home).join("project").join(folder_key(root)).join("model.json")
+pub fn synced_model(info: &snout_host::HostInfo, root: &Path) -> PathBuf {
+    cache_dir(info).join("project").join(folder_key(root)).join("model.json")
 }
 
 /// The `rootDir` a model file names, read from its first lines.
@@ -430,11 +436,11 @@ fn root_dir_of(host: &dyn Host, file: &Path) -> Option<PathBuf> {
 
 /// The model files written for `root`: the Java engine's and the app's own sync, with
 /// when each was written.
-pub fn model_files(host: &dyn Host, home: &Path, root: &Path) -> Vec<(PathBuf, SystemTime)> {
+pub fn model_files(host: &dyn Host, root: &Path) -> Vec<(PathBuf, SystemTime)> {
     let want = host.canonicalize(root).unwrap_or_else(|_| root.to_owned());
     let mut out = Vec::new();
     let stamp = |f: &Path| modified(host, f);
-    if let Ok(entries) = host.read_dir(&cache_dir(home).join("jdtls")) {
+    if let Ok(entries) = host.read_dir(&cache_dir(host.info()).join("jdtls")) {
         for e in entries {
             let file = e.path.join("model.json");
             if let Some(dir) = root_dir_of(host, &file)
@@ -445,7 +451,7 @@ pub fn model_files(host: &dyn Host, home: &Path, root: &Path) -> Vec<(PathBuf, S
             }
         }
     }
-    let own = synced_model(home, &want);
+    let own = synced_model(host.info(), &want);
     if let Some(t) = stamp(&own) {
         out.push((own, t));
     }
@@ -527,7 +533,6 @@ pub struct ProjectModels {
     /// Sync on its own when the project has no model yet (the app; not the tests).
     pub auto_sync: bool,
     tried: bool,
-    home: PathBuf,
     host: HostRef,
     _poll: Option<Task<()>>,
     _sync: Option<Task<()>>,
@@ -548,7 +553,6 @@ impl ProjectModels {
     pub fn new(model: Entity<Model>, hub: Option<Entity<LangHub>>, cx: &mut Context<Self>) -> Self {
         let auto_sync = hub.as_ref().is_some_and(|h| h.read(cx).enabled);
         let host = crate::host::host(cx);
-        let home = hub.as_ref().map(|h| h.read(cx).home.clone()).unwrap_or_else(|| host.info().home.clone());
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 if this.update(cx, |this, cx| this.poll(cx)).is_err() {
@@ -582,7 +586,6 @@ impl ProjectModels {
             scripts_changed: false,
             auto_sync,
             tried: false,
-            home,
             host,
             _poll: Some(poll),
             _sync: None,
@@ -646,12 +649,12 @@ impl ProjectModels {
         }
         // What the host holds is looked at off the UI thread.
         self.polling = true;
-        let (host, home) = (self.host.clone(), self.home.clone());
+        let host = self.host.clone();
         let stamps = if self.current.is_some() && !self.scripts_changed { self.stamps.clone() } else { Vec::new() };
         let look = cx.background_executor().spawn({
             let root = root.clone();
             async move {
-                let newest = model_files(&*host, &home, &root).into_iter().max_by_key(|(_, t)| *t);
+                let newest = model_files(&*host, &root).into_iter().max_by_key(|(_, t)| *t);
                 let gradle = (has_gradle(&*host, &root), crate::lang::java::is_gradle_root(&*host, &root));
                 let changed = stamps.iter().any(|(path, t)| modified(&*host, path) != *t);
                 (newest, gradle, changed)
@@ -769,7 +772,7 @@ impl ProjectModels {
             return;
         }
         let host = self.host.clone();
-        let out = synced_model(&self.home, &root);
+        let out = synced_model(self.host.info(), &root);
         let jdk = self.model.read(cx).settings.project_jdks.get(&root).cloned();
         self.syncing = Some(Instant::now());
         let run = cx.background_executor().spawn({
@@ -829,7 +832,7 @@ fn stamps(host: &dyn Host, model: &ProjectModel) -> Vec<(PathBuf, Option<SystemT
 
 /// Run `snout-engine sync` on `root`, its model to `out`, Gradle's project caches kept
 /// beside it so nothing is written into the project.
-fn run_sync(host: &dyn Host, dist: &Path, root: &Path, out: &Path, jdk: Option<&Path>) -> Result<(), String> {
+pub fn run_sync(host: &dyn Host, dist: &Path, root: &Path, out: &Path, jdk: Option<&Path>) -> Result<(), String> {
     let dir = out.parent().ok_or("no folder for the model")?;
     host.create_dir_all(dir).map_err(|e| e.to_string())?;
     let partial = dir.join("model.json.part");

@@ -5,7 +5,10 @@
 #
 # The app is the release snout-code binary with the Java engine in Contents/Resources/engine:
 # the engine distribution (snout-engine, jdtls with our bundles, java-debug and a Java 21 runtime)
-# without what never runs on a Mac. The engine is built afresh beside the bundle, never in
+# without what never runs on a Mac or on the Linux machines of Remote SSH (which run its jars on
+# a Java of their own). The Linux builds of snout-server, which Remote SSH installs on the remote
+# machine, are in Contents/Resources/server (built with scripts/build-server-linux.sh, so Docker
+# is needed). The engine is built afresh beside the bundle, never in
 # engine/build/dist, which a running development app may be using. Its runtime is linked from the
 # build JDK, so the app is for this Mac's architecture.
 #
@@ -63,6 +66,10 @@ fi
 
 (cd engine && JAVA_HOME="$JDK" ./gradlew --no-daemon --quiet :sync-cli:snoutDist -PsnoutDistDir="$ENGINE_DIST")
 
+# snout-server for Linux, x86_64 and aarch64 (static musl builds, made in Docker).
+"$ROOT/scripts/build-server-linux.sh"
+SERVER_DIST="$ROOT/target/snout-server-dist"
+
 # --- The bundle -----------------------------------------------------------------------------
 
 rm -rf "$APP"
@@ -71,19 +78,23 @@ cp "$BIN" "$APP/Contents/MacOS/snout-code"
 cp assets/icon/snout.icns "$APP/Contents/Resources/snout.icns"
 
 # What never runs here: jdtls's launch scripts, its feature archives (Equinox runs without
-# them; one carries Eclipse's own native launchers), the configurations for other systems and
-# for jdtls's syntax server, and the native launcher fragments for Linux and Windows. The
+# them; one carries Eclipse's own native launchers), the configurations for Windows and for
+# jdtls's syntax server, and the native launcher fragments for Linux and Windows. The Linux
+# configurations stay: a remote machine runs the engine's jars with them. The
 # runtime stays whole: it is also the JDK that Gradle, run configurations and the debugger fall
 # back to when the machine has none, and jdtls's default system library.
 ENGINE="$APP/Contents/Resources/engine"
 rsync -a \
   --exclude '/jdtls/bin/' \
   --exclude '/jdtls/features/' \
-  --exclude '/jdtls/config_linux*/' --exclude '/jdtls/config_win/' --exclude '/jdtls/config_ss_*/' \
+  --exclude '/jdtls/config_win/' --exclude '/jdtls/config_ss_*/' \
   --exclude '/jdtls/plugins/org.eclipse.equinox.launcher.gtk.*' \
   --exclude '/jdtls/plugins/org.eclipse.equinox.launcher.win32.*' \
   "$ENGINE_DIST/" "$ENGINE/"
 cp engine/NOTICE "$ENGINE/NOTICE"
+mkdir -p "$APP/Contents/Resources/server"
+cp "$SERVER_DIST"/snout-server-linux-x86_64 "$SERVER_DIST"/snout-server-linux-aarch64 "$SERVER_DIST"/SHA256SUMS \
+  "$APP/Contents/Resources/server/"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 
 cat >"$APP/Contents/Info.plist" <<PLIST

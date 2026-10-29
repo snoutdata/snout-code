@@ -17,6 +17,10 @@ pub fn engine_dist(host: &dyn Host) -> Option<PathBuf> {
     if let Some(d) = host.info().var("SNOUT_ENGINE_DIST").map(PathBuf::from) {
         return ok(&d).then_some(d);
     }
+    // On a remote machine: the copy SnoutCode installed there (see `remote_engine`).
+    if is_remote(host) {
+        return super::remote_engine::installed(host);
+    }
     let exe = host.info().exe.clone()?;
     for dir in exe.ancestors().skip(1) {
         for candidate in [dir.join("Resources/engine"), dir.join("engine/build/dist")] {
@@ -58,12 +62,12 @@ pub fn engine_command(host: &dyn Host, dist: &Path, project: &Path, jdk: &Path, 
 
 /// The JDKs the app downloaded, under the user's home on `host`.
 pub fn downloaded_jdks(host: &dyn Host) -> Vec<Jdk> {
-    jdks_in(host, &downloads_dir(&host.info().home))
+    jdks_in(host, &downloads_dir(host.info()))
 }
 
 /// SnoutCode's cache folder on `host`, where the engine keeps its builds, models and jdtls data.
 pub fn engine_cache(host: &dyn Host) -> PathBuf {
-    crate::project_model::cache_dir(&host.info().home)
+    crate::project_model::cache_dir(host.info())
 }
 
 const SETTINGS: [&str; 2] = ["settings.gradle", "settings.gradle.kts"];
@@ -136,16 +140,35 @@ pub fn jdks_in(host: &dyn Host, dir: &Path) -> Vec<Jdk> {
     out
 }
 
-/// Where SnoutCode keeps the JDKs it downloads.
-pub fn downloads_dir(home: &Path) -> PathBuf {
-    home.join("Library/Application Support/SnoutCode/jdks")
+/// Where SnoutCode keeps the JDKs it downloads on a host: in its folder of Application
+/// Support on a Mac, in `~/.snout-code/jdks` on a remote machine.
+pub fn downloads_dir(info: &snout_host::HostInfo) -> PathBuf {
+    downloads_under(info.is_mac(), &info.home)
 }
 
-/// Every JDK `host` has where JDKs usually are: what `java_home` lists, the user's and
-/// the system's JavaVirtualMachines, SDKMAN, Gradle's toolchains, and SnoutCode's own.
+fn downloads_under(mac: bool, home: &Path) -> PathBuf {
+    if mac { home.join("Library/Application Support/SnoutCode/jdks") } else { home.join(".snout-code/jdks") }
+}
+
+/// Every JDK `host` has where JDKs usually are. On a Mac: what `java_home` lists, the
+/// user's and the system's JavaVirtualMachines. On Linux: `JAVA_HOME` (of the login shell),
+/// the `java` on `PATH`, and the distributions' folders (`/usr/lib/jvm`, …). On both:
+/// SDKMAN, Gradle's toolchains, and SnoutCode's own.
 pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
     let mut found = Vec::new();
-    if let Ok(out) = host.run(&Cmd::new("/usr/libexec/java_home").arg("-V"), None) {
+    if !host.info().is_mac() {
+        let mut homes: Vec<PathBuf> = host.info().var("JAVA_HOME").map(PathBuf::from).into_iter().collect();
+        if let Some(java) = snout_host::which(host, &["java"], &[])
+            && let Ok(real) = host.canonicalize(&java)
+            && let Some(home) = real.parent().and_then(Path::parent)
+        {
+            homes.push(home.to_owned());
+        }
+        found.extend(homes.iter().filter_map(|h| jdk_at(host, h)));
+        for dir in ["/usr/lib/jvm", "/usr/java", "/usr/local/java", "/opt/java", "/opt/jdk"] {
+            found.extend(jdks_in(host, Path::new(dir)));
+        }
+    } else if let Ok(out) = host.run(&Cmd::new("/usr/libexec/java_home").arg("-V"), None) {
         // It lists on stderr: `    17.0.2 (arm64) "Vendor" - "Name" /path/to/home`.
         for line in String::from_utf8_lossy(&out.stderr).lines() {
             if let Some(at) = line.find(" /")
@@ -155,13 +178,13 @@ pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
             }
         }
     }
-    for dir in [
-        home.join("Library/Java/JavaVirtualMachines"),
-        PathBuf::from("/Library/Java/JavaVirtualMachines"),
+    let mac = host.info().is_mac();
+    let mac_dirs = [home.join("Library/Java/JavaVirtualMachines"), PathBuf::from("/Library/Java/JavaVirtualMachines")];
+    for dir in mac_dirs.into_iter().filter(|_| mac).chain([
         home.join(".sdkman/candidates/java"),
         home.join(".gradle/jdks"),
-        downloads_dir(home),
-    ] {
+        downloads_under(mac, home),
+    ]) {
         found.extend(jdks_in(host, &dir));
     }
     let mut seen = std::collections::HashSet::new();
@@ -303,8 +326,105 @@ impl DownloadProgress {
     }
 }
 
+/// Whether `host` is another machine than the one the app runs on.
+pub fn is_remote(host: &dyn Host) -> bool {
+    host.info().pid != std::process::id()
+}
+
+/// The text at `url`, fetched on `host` with curl (else wget).
+fn fetch_text(host: &dyn Host, url: &str) -> anyhow::Result<Vec<u8>> {
+    let curl = Cmd::new("curl").args(["-fsSL", "--max-time", "60", url]);
+    let wget = Cmd::new("wget").args(["-q", "-T", "60", "-O", "-", url]);
+    let mut last = anyhow::anyhow!("neither curl nor wget is installed");
+    for cmd in [curl, wget] {
+        match host.run(&cmd, None) {
+            Ok(out) if out.status.success() => return Ok(out.stdout),
+            Ok(out) if out.status.code == Some(127) => {}
+            Ok(out) => last = anyhow::anyhow!("{}", String::from_utf8_lossy(&out.stderr).trim().to_owned()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => last = e.into(),
+        }
+    }
+    Err(last)
+}
+
+/// Fetch `url` into `out` on `host` with curl (else wget), counting its bytes in `progress`.
+fn fetch_file(host: &dyn Host, url: &str, out: &Path, progress: &DownloadProgress) -> anyhow::Result<()> {
+    let curl = Cmd::new("curl").args(["-fsSL", "-o"]).arg(out).arg(url);
+    let wget = Cmd::new("wget").args(["-q", "-O"]).arg(out).arg(url);
+    let mut last = anyhow::anyhow!("neither curl nor wget is installed");
+    for cmd in [curl, wget] {
+        let mut child = match host.spawn(&cmd.stdout(Stdio::Null).stderr(Stdio::Null)) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e.into()),
+        };
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if let Ok(m) = host.metadata(out) {
+                progress.done.store(m.len, Ordering::Relaxed);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        };
+        if status.success() {
+            return Ok(());
+        }
+        let _ = host.remove_file(out);
+        if status.code == Some(127) {
+            continue;
+        }
+        last = anyhow::anyhow!("the download failed ({status})");
+        break;
+    }
+    Err(last)
+}
+
+/// The SHA-256 of `path` on `host`, in hex.
+pub fn sha256_on(host: &dyn Host, path: &Path) -> anyhow::Result<String> {
+    for cmd in [Cmd::new("sha256sum").arg(path), Cmd::new("shasum").args(["-a", "256"]).arg(path)] {
+        if let Ok(out) = host.run(&cmd, None)
+            && out.status.success()
+        {
+            let hash = String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or_default().to_owned();
+            return Ok(hash.to_ascii_lowercase());
+        }
+    }
+    anyhow::bail!("neither sha256sum nor shasum could read {}", path.display())
+}
+
+/// Copy the local file `from` to `to` on `host`, in pieces, counting them in `progress`.
+pub fn upload(host: &dyn Host, from: &Path, to: &Path, progress: &DownloadProgress) -> anyhow::Result<()> {
+    use std::io::Read as _;
+    const PIECE: usize = 4 << 20;
+    let mut file = std::fs::File::open(from)?;
+    progress.total.store(file.metadata()?.len(), Ordering::Relaxed);
+    progress.done.store(0, Ordering::Relaxed);
+    let _ = host.remove_file(to);
+    host.write(to, b"")?;
+    let mut buf = vec![0u8; PIECE];
+    loop {
+        let mut n = 0;
+        while n < PIECE {
+            let got = file.read(&mut buf[n..])?;
+            if got == 0 {
+                break;
+            }
+            n += got;
+        }
+        if n == 0 {
+            return Ok(());
+        }
+        host.append(to, &buf[..n])?;
+        progress.done.fetch_add(n as u64, Ordering::Relaxed);
+    }
+}
+
 /// Download Eclipse Temurin `major` for `host` from api.adoptium.net into `dir` there, check
-/// its SHA-256, unpack it, and return the new JDK. Blocking; run it off the main thread.
+/// its SHA-256, unpack it, and return the new JDK. A remote machine fetches it itself; one
+/// that cannot reach the internet gets it fetched on this Mac and copied over. Blocking;
+/// run it off the main thread.
 pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &DownloadProgress) -> anyhow::Result<Jdk> {
     use anyhow::{Context as _, bail};
     let arch = if host.info().arch == "aarch64" { "aarch64" } else { "x64" };
@@ -312,45 +432,39 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
     let api = format!(
         "https://api.adoptium.net/v3/assets/latest/{major}/hotspot?architecture={arch}&image_type=jdk&os={os}&vendor=eclipse"
     );
-    let out = host.run(&Cmd::new("curl").args(["-fsSL", "--max-time", "60", &api]), None).context("run curl")?;
-    if !out.status.success() {
-        bail!("Adoptium did not answer: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let assets: serde_json::Value = serde_json::from_slice(&out.stdout).context("read Adoptium's answer")?;
+    let remote = is_remote(host);
+    let local = snout_host::local();
+    let answer = match fetch_text(host, &api) {
+        Ok(a) => a,
+        Err(_) if remote => fetch_text(&*local, &api).context("ask Adoptium")?,
+        Err(e) => return Err(e.context("ask Adoptium")),
+    };
+    let assets: serde_json::Value = serde_json::from_slice(&answer).context("read Adoptium's answer")?;
     let package = assets.get(0).and_then(|a| a.pointer("/binary/package")).context("no JDK for this machine")?;
     let link = package.get("link").and_then(|v| v.as_str()).context("no download link")?;
-    let sha = package.get("checksum").and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+    let sha = package.get("checksum").and_then(|v| v.as_str()).unwrap_or_default().to_ascii_lowercase();
     let size = package.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
     progress.total.store(size, Ordering::Relaxed);
 
     host.create_dir_all(dir)?;
     let part = dir.join(format!(".temurin-{major}.tar.gz.part"));
-    let mut curl = host
-        .spawn(
-            &Cmd::new("curl").args(["-fsSL", "-o"]).arg(&part).arg(link).stdout(Stdio::Inherit).stderr(Stdio::Inherit),
-        )
-        .context("run curl")?;
-    let status = loop {
-        if let Some(status) = curl.try_wait()? {
-            break status;
+    if let Err(e) = fetch_file(host, link, &part, progress) {
+        if !remote {
+            return Err(e);
         }
-        if let Ok(m) = host.metadata(&part) {
-            progress.done.store(m.len, Ordering::Relaxed);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    };
-    if !status.success() {
-        let _ = host.remove_file(&part);
-        bail!("the download failed");
-    }
-    progress.done.store(size, Ordering::Relaxed);
-    if !sha.is_empty() {
-        let out = host.run(&Cmd::new("shasum").args(["-a", "256"]).arg(&part), None)?;
-        let actual = String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or_default().to_owned();
-        if !actual.eq_ignore_ascii_case(&sha) {
-            let _ = host.remove_file(&part);
+        // The remote machine cannot fetch it: this Mac does, and copies it over.
+        let tmp = tempfile::Builder::new().prefix("snout-temurin").tempdir()?;
+        let file = tmp.path().join("jdk.tar.gz");
+        fetch_file(&*local, link, &file, progress).context("download the JDK on this Mac")?;
+        if !sha.is_empty() && sha256_on(&*local, &file)? != sha {
             bail!("the download is damaged (its checksum does not match)");
         }
+        upload(host, &file, &part, progress).context("copy the JDK to the remote machine")?;
+    }
+    progress.done.store(size, Ordering::Relaxed);
+    if !sha.is_empty() && sha256_on(host, &part)? != sha {
+        let _ = host.remove_file(&part);
+        bail!("the download is damaged (its checksum does not match)");
     }
     let unpack = dir.join(format!(".temurin-{major}.unpack"));
     let _ = host.remove_dir_all(&unpack);

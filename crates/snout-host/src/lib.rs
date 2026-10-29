@@ -23,7 +23,8 @@
 //! - Claude Code's IDE server (`snout-app`'s `claude_ide::server`) listens on 127.0.0.1 of
 //!   the Mac; a remote host tunnels the port it names in the lock file back to it.
 //! - The engine distribution is looked for next to the program serving the host
-//!   ([`HostInfo::exe`]), and in development in the source tree the app was built from.
+//!   ([`HostInfo::exe`]), and in development in the source tree the app was built from; a
+//!   remote host gets its jars copied from the Mac's (`snout-app`'s `remote_engine`).
 //! - The legacy egui app (`snout-gui`) works on this Mac only: it passes a [`LocalHost`]
 //!   and keeps its own `std::fs` and `std::process` calls.
 //! - The start.spring.io catalog New Project offers is fetched on the Mac (`curl`) and kept
@@ -427,6 +428,17 @@ pub trait Host: Send + Sync {
 
     fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         self.write_mode(path, data, None)
+    }
+
+    /// Add `data` to the end of `path`, made if missing (a large file written in pieces).
+    fn append(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        let mut all = match self.read(path) {
+            Ok(d) => d,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e),
+        };
+        all.extend_from_slice(data);
+        self.write(path, &all)
     }
 
     /// Create `path` and its missing parents, those it creates with the permission bits `mode`.
