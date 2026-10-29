@@ -523,7 +523,7 @@ impl LangHub {
             return;
         }
         // What the build needs and which JDK fits are asked of the host off the UI thread.
-        let saved = self.model.read(cx).settings.project_jdks.get(root).cloned();
+        let saved = self.model.read(cx).jdk_for(root);
         let (host, home, root_buf) = (self.host.clone(), self.home.clone(), root.to_owned());
         let look = cx.background_executor().spawn(async move {
             // On a remote machine the engine and its Java may still be on their way there:

@@ -19,6 +19,69 @@ The sheet edits a copy of your settings:
 - **OK** puts them in place and closes it.
 - **Cancel**, or Esc, closes it without changing anything.
 
+## Your settings and the project's
+
+The switch at the top right of each page picks whose settings it shows:
+
+- **User**: your settings, for every project. This is where the sheet opens.
+- **Project**: the open project's own settings, kept in `.snout/settings.json` in the
+  project's folder. A value set there overrides yours, for that project only. Commit the file
+  and everyone who opens the project in SnoutCode gets the same values.
+
+![The Editor page in the Project scope](images/settings-and-keymap-project.png)
+
+*The shop sets its own tab size and soft wrap; whitespace and parameter hints are yours.*
+
+In the **Project** scope, each setting a project can set says where its value comes from:
+
+- **Set for this project**: the project's file sets it. The round arrow beside it resets it to
+  your setting (the file no longer sets it).
+- **Your setting**: the project leaves it to you. Change it here to set it for the project.
+
+In the **User** scope, a setting the open project sets for itself says **Overridden by this
+project**. You can still change your value: it holds in the projects that do not set it.
+
+![The Editor page in the User scope](images/settings-and-keymap-overridden.png)
+
+*Your tab size is 4, but in the shop it is 2.*
+
+A project can set these, by their names in the file:
+
+| Setting | In the file | Values |
+| --- | --- | --- |
+| Editor ▸ Tab size | `tab_size` | 1 to 8 |
+| Editor ▸ Soft wrap long lines | `soft_wrap` | `true` or `false` |
+| Editor ▸ Show whitespace | `show_whitespace` | `true` or `false` |
+| Editor ▸ Show parameter names of literal arguments | `param_hints` | `true` or `false` |
+| Version Control ▸ Fetch every | `fetch_minutes` | 5 to 120 |
+| Gradle ▸ JDK, every build | `jdk` | the JDK's home folder |
+| Gradle ▸ Stop idle daemons after | `daemon_idle_minutes` | 1 to 240 |
+| Spring ▸ Active profiles | `spring_profiles` | `"any"`, `"config"`, or a list of names |
+
+The other pages (Appearance, Keymap, Claude Code) hold settings that are yours alone; in the
+**Project** scope they say so. Run configurations are kept per project already: see
+[Run and debug](run-and-debug.md).
+
+A project's file looks like this:
+
+```json
+{
+  "tab_size": 2,
+  "soft_wrap": true,
+  "jdk": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+  "spring_profiles": ["dev"]
+}
+```
+
+SnoutCode reads the file again whenever it changes, within a second, whoever changed it: you
+in an editor, a `git pull`, a teammate's commit. When it cannot be read (it is not JSON, or a
+value has the wrong type), SnoutCode keeps the values it read last, says what is wrong in the
+status bar and over the **Project** scope's pages, and reads it again once you fix it. Keys
+SnoutCode does not know are kept when it writes the file.
+
+On a project opened over [Remote SSH](remote-ssh.md), the file is on the remote machine, in
+the project's folder there, and SnoutCode reads and writes it there.
+
 ## Appearance
 
 ![The Appearance page](images/settings-and-keymap-appearance.png)
@@ -88,12 +151,15 @@ and warnings differ in lightness as well as colour.
 
 ## Build Tools ▸ Gradle
 
-**JDK per project**
+**JDK per project** (User scope)
 
 Each Gradle build of the open project has a row. Pick the JDK its Gradle runs on, or
 **Automatic (the build's Java level)** to let SnoutCode choose. SnoutCode remembers the JDK it
 chose for a build, so that JDK shows here once the build has run. The list holds the JDKs
 found on this Mac (see [Getting started](getting-started.md#java-for-your-builds)).
+
+In the **Project** scope, one row, **Every build**, sets the JDK of all the project's builds
+(`jdk` in its file); **Each build's own (your settings)** leaves the choice to the rows above.
 
 The chosen JDK is used the next time the Java engine starts for the project: when you open
 the project again, or start SnoutCode again. A JDK that cannot run the build's Gradle version,
@@ -105,6 +171,17 @@ or is older than the Java level the build asks for, is passed over for one that 
   before they stop. From 1 to 240 minutes, a minute at a time up to 5, then in steps of 5. The
   default is 15. **Apply** or **OK** saves it; a new value holds for the daemons started after
   the Java engine starts again. See [Processes](processes.md).
+
+## Frameworks ▸ Spring
+
+**Active profiles**
+
+- **Evaluate beans under**: the profiles the open project's Spring model is evaluated under.
+  **Any (no profile chosen)**, **Those the application files make active**, or **These
+  profiles**, with their names in **Profiles**, separated by commas. It is the same setting
+  as the Spring window's **Active profiles** switch: see [Spring](spring.md#profiles). Set it
+  in the **Project** scope to share it in the project's file; then the switch in the Spring
+  window changes the file too.
 
 ## Tools ▸ Claude Code
 
@@ -159,7 +236,9 @@ For the default shortcuts, see [Keyboard shortcuts](keyboard-shortcuts.md).
 
 ## Where settings are kept
 
-SnoutCode keeps its settings in `~/Library/Application Support/SnoutCode/settings.json`. It
+SnoutCode keeps your settings in `~/Library/Application Support/SnoutCode/settings.json`, and
+a project's own in `.snout/settings.json` in the project (see
+[Your settings and the project's](#your-settings-and-the-projects)). It
 writes the file as you work: your recent projects, each project's tabs, the window's layout,
 your choices in the menus and the Settings sheet.
 

@@ -773,7 +773,7 @@ impl ProjectModels {
         }
         let host = self.host.clone();
         let out = synced_model(self.host.info(), &root);
-        let jdk = self.model.read(cx).settings.project_jdks.get(&root).cloned();
+        let jdk = self.model.read(cx).jdk_for(&root);
         self.syncing = Some(Instant::now());
         let run = cx.background_executor().spawn({
             let root = root.clone();

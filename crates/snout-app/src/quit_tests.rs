@@ -12,7 +12,7 @@ use crate::tests::{act, demo_repo, with_repo};
 use crate::workspace::Workspace;
 
 /// The window over `settings`, as the app opens it, saving its settings to `store`.
-fn open_stored(
+pub fn open_stored(
     cx: &mut TestAppContext,
     settings: Settings,
     store: Store,
@@ -29,7 +29,7 @@ fn open_stored(
     (model, ws.unwrap(), vcx)
 }
 
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
+pub fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let at = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn")).center();
     cx.simulate_click(at, Modifiers::none());
 }

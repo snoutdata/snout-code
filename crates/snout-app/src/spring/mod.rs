@@ -699,25 +699,25 @@ impl Spring {
 
     /// The profile mode the open project keeps.
     fn saved_mode(model: &Entity<crate::model::Model>, cx: &App) -> ProfileMode {
-        let m = model.read(cx);
-        m.project_root().and_then(|r| m.settings.spring_profiles.get(&r).cloned()).unwrap_or_default()
+        model.read(cx).spring_mode()
     }
 
     /// Evaluate the beans under `mode` from now on (kept with the project), and read the
     /// model again.
     pub fn set_profile_mode(&mut self, mode: ProfileMode, cx: &mut Context<Self>) {
         self.profile_mode = mode.clone();
-        self.model.update(cx, |m, _| {
-            if let Some(root) = m.project_root() {
-                if mode == ProfileMode::Any {
-                    m.settings.spring_profiles.remove(&root);
-                } else {
-                    m.settings.spring_profiles.insert(root, mode);
-                }
-                m.persist();
-            }
-        });
+        self.model.update(cx, |m, cx| m.set_spring_mode(mode, cx));
         self.reload(cx);
+    }
+
+    /// Evaluate the beans under `mode`, as the project's settings now say, and read the model
+    /// again if it was read.
+    pub fn use_mode(&mut self, mode: ProfileMode, cx: &mut Context<Self>) {
+        self.profile_mode = mode;
+        if self.loaded {
+            self.reload(cx);
+        }
+        cx.notify();
     }
 
     /// Read the beans and the endpoints again, the engine told the profiles first.

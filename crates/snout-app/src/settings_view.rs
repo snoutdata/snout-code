@@ -1,6 +1,11 @@
 //! The Settings sheet (the gear, or ⌘,): a searchable tree of pages on the left, the page
 //! on the right, and Cancel, Apply and OK at the foot. It edits a copy of the settings;
 //! Apply and OK put the copy in place, save it to `settings.json`, and the window follows.
+//!
+//! A switch over the page picks the scope: the user's settings, for every project, or the
+//! open project's own (`.snout/settings.json`, see [`crate::project_settings`]). Each row a
+//! project may set says so: in the user's scope, that this project overrides it; in the
+//! project's, whether the project sets it (with a button to reset it to the user's value).
 
 use std::path::PathBuf;
 
@@ -14,11 +19,14 @@ use gpui_component::input::{InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::scroll::ScrollableElement as _;
 
+use crate::components::IconName;
 use crate::glyphs::{Icon, icon};
 use crate::lang::java::Jdk;
 use crate::look::{self, Trigger};
 use crate::model::Model;
+use crate::project_settings::{self as ps, Key, ProjectSettings};
 use crate::settings::{ColorTheme, Settings, ThemeChoice};
+use crate::spring::ProfileMode;
 use crate::theme::{Palette, palette};
 
 /// A page of the sheet.
@@ -29,12 +37,32 @@ pub enum Page {
     Editor,
     VersionControl,
     Gradle,
+    Spring,
     ClaudeCode,
 }
 
+/// Whose settings the sheet shows: the user's, for every project, or the open project's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    User,
+    Project,
+}
+
 impl Page {
-    pub const ALL: [Page; 6] =
-        [Page::Appearance, Page::Keymap, Page::Editor, Page::VersionControl, Page::Gradle, Page::ClaudeCode];
+    pub const ALL: [Page; 7] = [
+        Page::Appearance,
+        Page::Keymap,
+        Page::Editor,
+        Page::VersionControl,
+        Page::Gradle,
+        Page::Spring,
+        Page::ClaudeCode,
+    ];
+
+    /// The page has settings a project may set for itself.
+    pub fn per_project(self) -> bool {
+        matches!(self, Page::Editor | Page::VersionControl | Page::Gradle | Page::Spring)
+    }
 
     /// The page's icon, in the list and over the page.
     pub fn icon(self) -> crate::components::IconName {
@@ -45,6 +73,7 @@ impl Page {
             Page::Editor => IconName::FileCode,
             Page::VersionControl => IconName::GitBranch,
             Page::Gradle => IconName::Hammer,
+            Page::Spring => IconName::Leaf,
             Page::ClaudeCode => IconName::Sparkles,
         }
     }
@@ -56,6 +85,7 @@ impl Page {
             Page::Editor => "Editor",
             Page::VersionControl => "Version Control",
             Page::Gradle => "Gradle",
+            Page::Spring => "Spring",
             Page::ClaudeCode => "Claude Code",
         }
     }
@@ -64,6 +94,7 @@ impl Page {
     fn group(self) -> Option<&'static str> {
         match self {
             Page::Gradle => Some("Build Tools"),
+            Page::Spring => Some("Frameworks"),
             Page::ClaudeCode => Some("Tools"),
             _ => None,
         }
@@ -79,6 +110,7 @@ impl Page {
             Page::Editor => "tab size indent soft wrap whitespace font",
             Page::VersionControl => "git fetch interval background",
             Page::Gradle => "build tools jdk java daemon idle timeout",
+            Page::Spring => "frameworks boot profiles active beans",
             Page::ClaudeCode => "tools agent console program path",
         }
     }
@@ -98,16 +130,27 @@ const UI_FONTS: [(&str, &str); 2] = [("Inter", "Inter"), (".SystemUIFont", "Syst
 const EDITOR_FONTS: [(&str, &str); 2] = [("Hack", "Hack"), ("Menlo", "Menlo")];
 
 pub enum SettingsEvent {
-    /// Put the copy in place (and close when the flag says so).
-    Apply(Box<Settings>, bool),
+    /// Put the copies in place: the user's settings and, when they changed, the project's
+    /// (and close when `close` says so).
+    Apply {
+        user: Box<Settings>,
+        project: Option<ProjectSettings>,
+        close: bool,
+    },
     Cancel,
 }
 
 pub struct SettingsView {
     model: Entity<Model>,
-    /// The settings as the sheet shows them.
+    /// The user's settings as the sheet shows them.
     pub draft: Settings,
+    /// The project's own settings as the sheet shows them, and the project's root.
+    pub project: ProjectSettings,
+    root: Option<PathBuf>,
+    pub scope: Scope,
     pub page: Page,
+    /// The Spring page's profile names, when chosen.
+    profiles: Entity<InputState>,
     pub search: Entity<InputState>,
     claude: Entity<InputState>,
     /// The JDKs on this Mac, for the Gradle page.
@@ -140,7 +183,14 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let draft = model.read(cx).settings.clone();
+        let m = model.read(cx);
+        let draft = m.user_settings();
+        let project = m.project_settings.clone();
+        let root = m.project_root();
+        let chosen = match m.spring_mode() {
+            ProfileMode::Chosen(names) => names.join(", "),
+            _ => String::new(),
+        };
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
         cx.subscribe(&search, |this, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -166,6 +216,16 @@ impl SettingsView {
             }
         })
         .detach();
+        let profiles = cx.new(|cx| InputState::new(window, cx).placeholder("dev, local").default_value(chosen));
+        cx.subscribe(&profiles, |this, input, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change) {
+                let names = profile_names(&input.read(cx).value());
+                if matches!(this.spring_mode(), ProfileMode::Chosen(_)) {
+                    this.set_spring_mode(ProfileMode::Chosen(names), cx);
+                }
+            }
+        })
+        .detach();
         let key_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search commands or shortcuts"));
         cx.subscribe(&key_search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -176,6 +236,10 @@ impl SettingsView {
         Self {
             model,
             draft,
+            project,
+            root,
+            scope: Scope::User,
+            profiles,
             page: Page::Appearance,
             search,
             claude,
@@ -190,12 +254,34 @@ impl SettingsView {
 
     /// The settings differ from those in use.
     pub fn changed(&self, cx: &App) -> bool {
-        self.draft != self.model.read(cx).settings
+        let m = self.model.read(cx);
+        self.draft != m.user_settings() || self.project != m.project_settings
+    }
+
+    /// The settings the page shows: the user's, or the project's over them.
+    pub fn shown(&self) -> Settings {
+        let mut s = self.draft.clone();
+        if self.scope == Scope::Project {
+            ps::put_over(&self.project, &mut s);
+        }
+        s
+    }
+
+    /// Show the user's settings or the project's (there is none without a project).
+    pub fn set_scope(&mut self, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
+        if scope == Scope::Project && self.root.is_none() {
+            return;
+        }
+        self.scope = scope;
+        self.sync_profiles_field(window, cx);
+        cx.notify();
     }
 
     pub fn apply(&mut self, close: bool, cx: &mut Context<Self>) {
         // Only what the sheet edits: the rest may have moved on while it was open.
-        let mut next = self.model.read(cx).settings.clone();
+        let m = self.model.read(cx);
+        let mut next = m.user_settings();
+        let project = (self.project != m.project_settings).then(|| self.project.clone());
         let d = &self.draft;
         next.theme = d.theme;
         next.colors = d.colors;
@@ -211,15 +297,219 @@ impl SettingsView {
         next.daemon_idle_minutes = d.daemon_idle_minutes;
         next.claude_path = d.claude_path.clone();
         next.project_jdks = d.project_jdks.clone();
+        next.spring_profiles = d.spring_profiles.clone();
         next.keymap = d.keymap.clone();
+        next.confirm_quit = d.confirm_quit;
         self.draft = next.clone();
-        cx.emit(SettingsEvent::Apply(Box::new(next), close));
+        cx.emit(SettingsEvent::Apply { user: Box::new(next), project, close });
     }
 
+    /// Change what the page shows: the user's settings, or in the project's scope, the
+    /// project's (a value changed there is set for the project).
     fn set(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Settings)) {
-        f(&mut self.draft);
+        match self.scope {
+            Scope::User => f(&mut self.draft),
+            Scope::Project => {
+                let before = self.shown();
+                let mut after = before.clone();
+                f(&mut after);
+                ps::take_changes(&before, &after, &mut self.project);
+            }
+        }
         cx.notify();
     }
+
+    /// Leave `key` to the user's settings in the project's scope.
+    pub fn reset(&mut self, key: Key, window: &mut Window, cx: &mut Context<Self>) {
+        key.clear(&mut self.project);
+        if key == Key::SpringProfiles {
+            self.sync_profiles_field(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// The Spring profiles the page shows.
+    fn spring_mode(&self) -> ProfileMode {
+        match (self.scope, &self.project.spring_profiles) {
+            (Scope::Project, Some(p)) => p.into(),
+            _ => self.root.as_ref().and_then(|r| self.draft.spring_profiles.get(r).cloned()).unwrap_or_default(),
+        }
+    }
+
+    fn set_spring_mode(&mut self, mode: ProfileMode, cx: &mut Context<Self>) {
+        match self.scope {
+            Scope::Project => self.project.spring_profiles = Some((&mode).into()),
+            Scope::User => {
+                let Some(root) = self.root.clone() else { return };
+                if mode == ProfileMode::Any {
+                    self.draft.spring_profiles.remove(&root);
+                } else {
+                    self.draft.spring_profiles.insert(root, mode);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The profile names field shows those of the scope's mode.
+    fn sync_profiles_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let names = match self.spring_mode() {
+            ProfileMode::Chosen(names) => names.join(", "),
+            _ => String::new(),
+        };
+        self.profiles.update(cx, |i, cx| i.set_value(names, window, cx));
+    }
+
+    /// What a row the project may set says of it: overridden by the project (the user's
+    /// scope), or set for the project with a reset button, or the user's value (the
+    /// project's).
+    fn mark(&self, key: Key, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::components::{IconButton, Tone, badge_with_icon};
+        let p = palette(cx);
+        let model = self.model.read(cx);
+        match self.scope {
+            Scope::User => key.is_set(&model.project_settings).then(|| {
+                badge_with_icon("Overridden by this project", IconName::FolderCog, Tone::Warning, &p)
+                    .debug_selector(move || format!("settings-overridden-{}", key.name()))
+                    .into_any_element()
+            }),
+            Scope::Project if key.is_set(&self.project) => Some(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(
+                        badge_with_icon("Set for this project", IconName::FolderCog, Tone::Accent, &p)
+                            .debug_selector(move || format!("settings-project-set-{}", key.name())),
+                    )
+                    .child(
+                        IconButton::new(
+                            SharedString::from(format!("settings-reset-{}", key.name())),
+                            IconName::RotateCcw,
+                            "Reset to your setting",
+                        )
+                        .size(22.)
+                        .on_click(cx.listener(move |this, _, w, cx| this.reset(key, w, cx))),
+                    )
+                    .into_any_element(),
+            ),
+            Scope::Project => Some(
+                badge_with_icon("Your setting", IconName::User, Tone::Neutral, &p)
+                    .debug_selector(move || format!("settings-inherited-{}", key.name()))
+                    .into_any_element(),
+            ),
+        }
+    }
+}
+
+impl SettingsView {
+    /// User or Project: whose settings the sheet shows.
+    fn scope_switch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let has_project = self.root.is_some();
+        let segment = |scope: Scope, id: &'static str, ico: IconName, text: &'static str, cx: &mut Context<Self>| {
+            let on = self.scope == scope;
+            let enabled = scope == Scope::User || has_project;
+            let hover = p.button_hover;
+            let ink = if on {
+                p.fg
+            } else if enabled {
+                p.fg_dim
+            } else {
+                p.fg_dim.opacity(0.5)
+            };
+            div()
+                .id(id)
+                .debug_selector(move || id.to_owned())
+                .h(px(24.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(5.))
+                .text_size(px(12.5))
+                .text_color(ink)
+                .when(on, |d| d.bg(p.card).shadow_sm().font_weight(FontWeight::MEDIUM))
+                .when(!on && enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
+                .child(crate::components::icon(ico, 13., if on { p.accent } else { ink }))
+                .child(text)
+                .when(enabled, |d| d.on_click(cx.listener(move |this, _, w, cx| this.set_scope(scope, w, cx))))
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .p(px(2.))
+            .rounded(px(7.))
+            .border_1()
+            .border_color(p.border)
+            .bg(p.ground)
+            .child(segment(Scope::User, "settings-scope-user", IconName::User, "User", cx))
+            .child(segment(Scope::Project, "settings-scope-project", IconName::FolderCog, "Project", cx))
+            .into_any_element()
+    }
+
+    /// Under the page's title: whose settings these are and where they are kept, and the
+    /// project file's error if it has one.
+    fn scope_line(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let error = self.model.read(cx).project_settings_error.clone();
+        let (ico, text) = match (self.scope, &self.root) {
+            (Scope::Project, Some(root)) => (
+                IconName::FolderCog,
+                format!(
+                    "For {} only, kept in {} in the project. What it sets overrides your settings.",
+                    Model::dir_name(root),
+                    ps::FILE
+                ),
+            ),
+            _ => (IconName::User, "Your settings, for every project. A project can override some of them.".to_owned()),
+        };
+        div()
+            .px(px(20.))
+            .pb(px(8.))
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .debug_selector(|| "settings-scope-line".into())
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(crate::components::icon(ico, 12., p.fg_dim))
+                    .child(text),
+            )
+            .when_some(error.filter(|_| self.scope == Scope::Project), |d, e| {
+                d.child(
+                    crate::components::callout_with(
+                        crate::components::Tone::Warning,
+                        Some(format!("{} cannot be read", ps::FILE).into()),
+                        format!("The values it had before stay in use until it is fixed. {e}"),
+                        &p,
+                    )
+                    .debug_selector(|| "settings-project-error".into()),
+                )
+            })
+            .into_any_element()
+    }
+}
+
+/// Profile names typed in a field: separated by commas or spaces.
+fn profile_names(text: &str) -> Vec<String> {
+    text.split([',', ' ']).map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned).collect()
+}
+
+/// A row with what [`SettingsView::mark`] says after its control.
+fn marked(row: gpui::Div, mark: Option<AnyElement>) -> gpui::Div {
+    row.children(mark)
+}
+
+/// A check box line with its mark after it.
+fn check_line(check: impl IntoElement, mark: Option<AnyElement>) -> gpui::Div {
+    div().py(px(6.)).flex().items_center().gap(px(12.)).child(check).children(mark)
 }
 
 /// A labelled row of a page: the label on the left, the control after it.
@@ -391,7 +681,24 @@ fn swatch(t: ColorTheme, dark: bool, on: bool, p: &Palette) -> gpui::Stateful<gp
 impl SettingsView {
     fn page_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        let d = self.draft.clone();
+        if self.scope == Scope::Project && !self.page.per_project() {
+            let title = self.page.title();
+            return crate::components::EmptyState::new(
+                snout_core::art::spots::shared_settings(),
+                "The same in every project",
+            )
+            .hint(format!("{title} settings are yours: a project cannot set them for itself."))
+            .action(
+                crate::components::Button::new("settings-show-user")
+                    .debug_selector("settings-show-user")
+                    .icon(IconName::User)
+                    .label("Show Your Settings")
+                    .on_click(cx.listener(|this, _, w, cx| this.set_scope(Scope::User, w, cx))),
+            )
+            .on(p.card)
+            .into_any_element();
+        }
+        let d = self.shown();
         let view = cx.entity();
         let set = move |f: Box<dyn Fn(&mut Settings)>| {
             let view = view.clone();
@@ -505,20 +812,26 @@ impl SettingsView {
             Page::Keymap => body.child(self.keymap_page(cx)).into_any_element(),
             Page::Editor => {
                 let view = cx.entity();
+                let marks =
+                    [Key::TabSize, Key::SoftWrap, Key::ShowWhitespace, Key::ParamHints].map(|k| self.mark(k, cx));
+                let [tab_mark, wrap_mark, space_mark, hints_mark] = marks;
                 body.child(section("Indentation", &p))
-                    .child(row(
-                        "Tab size",
-                        stepper(
-                            "settings-tab-size",
-                            d.tab_size.to_string(),
-                            move |by, _, cx| {
-                                view.update(cx, |v, cx| {
-                                    v.set(cx, |s| s.tab_size = (s.tab_size as i32 + by).clamp(1, 8) as usize)
-                                })
-                            },
+                    .child(marked(
+                        row(
+                            "Tab size",
+                            stepper(
+                                "settings-tab-size",
+                                d.tab_size.to_string(),
+                                move |by, _, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.set(cx, |s| s.tab_size = (s.tab_size as i32 + by).clamp(1, 8) as usize)
+                                    })
+                                },
+                                &p,
+                            ),
                             &p,
                         ),
-                        &p,
+                        tab_mark,
                     ))
                     .child(
                         div()
@@ -528,61 +841,62 @@ impl SettingsView {
                             .child("For a file whose own indentation cannot be told."),
                     )
                     .child(section("Display", &p))
-                    .child(
-                        div().py(px(6.)).child(
-                            look::checkbox("settings-soft-wrap", "Soft wrap long lines", d.soft_wrap, true, &p)
-                                .debug_selector(|| "settings-soft-wrap".into())
-                                .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.soft_wrap = !s.soft_wrap))),
-                        ),
-                    )
-                    .child(
-                        div().py(px(6.)).child(
-                            look::checkbox("settings-whitespace", "Show whitespace", d.show_whitespace, true, &p)
-                                .debug_selector(|| "settings-whitespace".into())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.set(cx, |s| s.show_whitespace = !s.show_whitespace)
-                                })),
-                        ),
-                    )
-                    .child(
-                        div().py(px(6.)).child(
-                            look::checkbox(
-                                "settings-param-hints",
-                                "Show parameter names of literal arguments (Java)",
-                                d.param_hints,
-                                true,
-                                &p,
-                            )
-                            .debug_selector(|| "settings-param-hints".into())
-                            .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.param_hints = !s.param_hints))),
-                        ),
-                    )
+                    .child(check_line(
+                        look::checkbox("settings-soft-wrap", "Soft wrap long lines", d.soft_wrap, true, &p)
+                            .debug_selector(|| "settings-soft-wrap".into())
+                            .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.soft_wrap = !s.soft_wrap))),
+                        wrap_mark,
+                    ))
+                    .child(check_line(
+                        look::checkbox("settings-whitespace", "Show whitespace", d.show_whitespace, true, &p)
+                            .debug_selector(|| "settings-whitespace".into())
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.set(cx, |s| s.show_whitespace = !s.show_whitespace)),
+                            ),
+                        space_mark,
+                    ))
+                    .child(check_line(
+                        look::checkbox(
+                            "settings-param-hints",
+                            "Show parameter names of literal arguments (Java)",
+                            d.param_hints,
+                            true,
+                            &p,
+                        )
+                        .debug_selector(|| "settings-param-hints".into())
+                        .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.param_hints = !s.param_hints))),
+                        hints_mark,
+                    ))
                     .into_any_element()
             }
             Page::VersionControl => {
                 let view = cx.entity();
+                let fetch_mark = self.mark(Key::FetchMinutes, cx);
                 body.child(section("Git", &p))
-                    .child(row(
-                        "Fetch every",
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            .child(stepper(
-                                "settings-fetch",
-                                d.fetch_minutes.to_string(),
-                                move |by, _, cx| {
-                                    view.update(cx, |v, cx| {
-                                        v.set(cx, |s| {
-                                            s.fetch_minutes =
-                                                (s.fetch_minutes as i64 + by as i64 * 5).clamp(5, 120) as u64
+                    .child(marked(
+                        row(
+                            "Fetch every",
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(stepper(
+                                    "settings-fetch",
+                                    d.fetch_minutes.to_string(),
+                                    move |by, _, cx| {
+                                        view.update(cx, |v, cx| {
+                                            v.set(cx, |s| {
+                                                s.fetch_minutes =
+                                                    (s.fetch_minutes as i64 + by as i64 * 5).clamp(5, 120) as u64
+                                            })
                                         })
-                                    })
-                                },
-                                &p,
-                            ))
-                            .child(div().text_color(p.fg_dim).child("minutes")),
-                        &p,
+                                    },
+                                    &p,
+                                ))
+                                .child(div().text_color(p.fg_dim).child("minutes")),
+                            &p,
+                        ),
+                        fetch_mark,
                     ))
                     .child(
                         div()
@@ -594,11 +908,46 @@ impl SettingsView {
                     .into_any_element()
             }
             Page::Gradle => {
-                let mut body = body.child(section("JDK per project", &p));
-                if self.builds.is_empty() {
-                    body = body.child(div().text_color(p.fg_dim).child("No Gradle build is open."));
+                let mut body = body;
+                if self.scope == Scope::Project {
+                    body = body.child(section("JDK", &p));
+                    let current = self.project.jdk.as_ref().map(|h| h.display().to_string()).unwrap_or_default();
+                    let mut choices = vec![(String::new(), "Each build's own (your settings)".to_owned())];
+                    choices.extend(
+                        self.jdks
+                            .iter()
+                            .map(|j| (j.home.display().to_string(), format!("JDK {} ({})", j.major, j.version))),
+                    );
+                    let view = cx.entity();
+                    let mark = self.mark(Key::Jdk, cx);
+                    body = body.child(marked(
+                        row(
+                            "Every build",
+                            choice(
+                                "settings-project-jdk",
+                                &current,
+                                choices,
+                                move |v, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.project.jdk = (!v.is_empty()).then(|| PathBuf::from(&v));
+                                        cx.notify();
+                                    })
+                                },
+                                &p,
+                            ),
+                            &p,
+                        ),
+                        mark,
+                    ));
+                } else {
+                    body = body.child(section("JDK per project", &p));
+                    if self.builds.is_empty() {
+                        body = body.child(div().text_color(p.fg_dim).child("No Gradle build is open."));
+                    }
                 }
-                for (i, root) in self.builds.clone().into_iter().enumerate() {
+                let project_jdk = self.model.read(cx).project_settings.jdk.is_some();
+                let builds = if self.scope == Scope::User { self.builds.clone() } else { Vec::new() };
+                for (i, root) in builds.into_iter().enumerate() {
                     let ids = ["settings-jdk-0", "settings-jdk-1", "settings-jdk-2", "settings-jdk-3"];
                     let Some(id) = ids.get(i).copied() else { break };
                     let current = d.project_jdks.get(&root).map(|h| h.display().to_string()).unwrap_or_default();
@@ -610,35 +959,41 @@ impl SettingsView {
                     );
                     let pick = set.clone();
                     let key = root.clone();
-                    body = body.child(row(
-                        "Project",
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.))
-                            .child(div().text_color(p.fg_dim).child(Model::dir_name(&root)))
-                            .child(choice(
-                                id,
-                                &current,
-                                choices,
-                                move |v, cx| {
-                                    let key = key.clone();
-                                    pick(Box::new(move |s: &mut Settings| {
-                                        if v.is_empty() {
-                                            s.project_jdks.remove(&key);
-                                        } else {
-                                            s.project_jdks.insert(key.clone(), PathBuf::from(&v));
-                                        }
-                                    }))(cx)
-                                },
-                                &p,
-                            )),
-                        &p,
+                    let overridden = project_jdk && self.root.as_ref().is_some_and(|r| root.starts_with(r));
+                    let mark = if overridden { self.mark(Key::Jdk, cx) } else { None };
+                    body = body.child(marked(
+                        row(
+                            "Project",
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(4.))
+                                .child(div().text_color(p.fg_dim).child(Model::dir_name(&root)))
+                                .child(choice(
+                                    id,
+                                    &current,
+                                    choices,
+                                    move |v, cx| {
+                                        let key = key.clone();
+                                        pick(Box::new(move |s: &mut Settings| {
+                                            if v.is_empty() {
+                                                s.project_jdks.remove(&key);
+                                            } else {
+                                                s.project_jdks.insert(key.clone(), PathBuf::from(&v));
+                                            }
+                                        }))(cx)
+                                    },
+                                    &p,
+                                )),
+                            &p,
+                        ),
+                        mark,
                     ));
                 }
                 if self.jdks.is_empty() {
                     body = body.child(div().pt(px(8.)).text_color(p.fg_dim).child("No JDK was found on this Mac."));
                 }
+                let idle_mark = self.mark(Key::DaemonIdleMinutes, cx);
                 let view = cx.entity();
                 body.child(
                     div()
@@ -648,30 +1003,89 @@ impl SettingsView {
                         .child("The Java server restarts on the chosen JDK the next time it starts."),
                 )
                 .child(section("Gradle daemons", &p))
-                .child(row(
-                    "Stop idle daemons after",
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(stepper(
-                            "settings-daemon-idle",
-                            d.daemon_idle_minutes.to_string(),
-                            move |by, _, cx| {
-                                view.update(cx, |v, cx| {
-                                    v.set(cx, |s| s.daemon_idle_minutes = step_idle(s.daemon_idle_minutes, by))
-                                })
-                            },
-                            &p,
-                        ))
-                        .child(div().text_color(p.fg_dim).child("minutes")),
-                    &p,
+                .child(marked(
+                    row(
+                        "Stop idle daemons after",
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(stepper(
+                                "settings-daemon-idle",
+                                d.daemon_idle_minutes.to_string(),
+                                move |by, _, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.set(cx, |s| s.daemon_idle_minutes = step_idle(s.daemon_idle_minutes, by))
+                                    })
+                                },
+                                &p,
+                            ))
+                            .child(div().text_color(p.fg_dim).child("minutes")),
+                        &p,
+                    ),
+                    idle_mark,
                 ))
                 .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
                     "SnoutCode's own Gradle daemons stop after this long without a build. A new value \
                              holds for the daemons started after the Java engine starts again.",
                 ))
                 .into_any_element()
+            }
+            Page::Spring => {
+                if self.root.is_none() {
+                    return body
+                        .child(section("Active profiles", &p))
+                        .child(div().text_color(p.fg_dim).child("Open a project to choose its profiles."))
+                        .into_any_element();
+                }
+                let mode = self.spring_mode();
+                let current = match &mode {
+                    ProfileMode::Any => "any",
+                    ProfileMode::Config => "config",
+                    ProfileMode::Chosen(_) => "chosen",
+                };
+                let choices = vec![
+                    ("any".to_owned(), "Any (no profile chosen)".to_owned()),
+                    ("config".to_owned(), "Those the application files make active".to_owned()),
+                    ("chosen".to_owned(), "These profiles".to_owned()),
+                ];
+                let view = cx.entity();
+                let mark = self.mark(Key::SpringProfiles, cx);
+                let names = profile_names(&self.profiles.read(cx).value());
+                body.child(section("Active profiles", &p))
+                    .child(marked(
+                        row(
+                            "Evaluate beans under",
+                            choice(
+                                "settings-spring-mode",
+                                current,
+                                choices,
+                                move |v, cx| {
+                                    let mode = match v.as_str() {
+                                        "config" => ProfileMode::Config,
+                                        "chosen" => ProfileMode::Chosen(names.clone()),
+                                        _ => ProfileMode::Any,
+                                    };
+                                    view.update(cx, |this, cx| this.set_spring_mode(mode, cx))
+                                },
+                                &p,
+                            ),
+                            &p,
+                        ),
+                        mark,
+                    ))
+                    .when(matches!(mode, ProfileMode::Chosen(_)), |d| {
+                        d.child(row(
+                            "Profiles",
+                            div().w(px(260.)).child(look::field(&self.profiles, false, None, &p)),
+                            &p,
+                        ))
+                    })
+                    .child(div().pl(px(162.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                        "The Spring window evaluates the beans under these profiles and dims those they leave out. \
+                         Its profile menu changes the same setting.",
+                    ))
+                    .into_any_element()
             }
             Page::ClaudeCode => body
                 .child(section("Program", &p))
@@ -1000,6 +1414,8 @@ impl Render for SettingsView {
         let changed = self.changed(cx);
         let page = self.page_body(cx);
         let tree = self.tree(cx);
+        let scope_switch = self.scope_switch(cx);
+        let scope_line = self.scope_line(cx);
         let button = |id: &'static str, text: &'static str, primary: bool, enabled: bool| {
             use crate::components::{Variant, button_base};
             let variant = if primary { Variant::Primary } else { Variant::Secondary };
@@ -1064,8 +1480,11 @@ impl Render for SettingsView {
                                 )
                                 .child(
                                     div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(self.page.title()),
-                                ),
+                                )
+                                .child(div().flex_1())
+                                .child(scope_switch),
                         )
+                        .child(scope_line)
                         .child(
                             div()
                                 .id("settings-page")

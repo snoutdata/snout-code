@@ -407,6 +407,32 @@ fn settings_pages(projects: &Path) {
         w.pump(2, &mut |_| false);
         w.snap(name);
     }
+    // The project's own settings: the Editor page in the Project scope, then in the User's.
+    for (scope, name) in [
+        (snout_app::settings_view::Scope::Project, "settings-project-light"),
+        (snout_app::settings_view::Scope::User, "settings-overridden-light"),
+    ] {
+        let shop = copy(projects, "settings", "shop");
+        std::fs::create_dir_all(shop.join(".snout")).unwrap();
+        std::fs::write(
+            shop.join(snout_app::project_settings::FILE),
+            "{\n  \"tab_size\": 2,\n  \"soft_wrap\": true,\n  \"spring_profiles\": [\"dev\"]\n}\n",
+        )
+        .unwrap();
+        let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop)), false);
+        w.pump(2, &mut |_| false);
+        w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.open_settings(window, cx)));
+        w.pump(3, &mut |_| false);
+        w.with(|ws, window, cx| {
+            let sheet = ws.read(cx).settings_sheet.clone().unwrap();
+            sheet.update(cx, |s, cx| {
+                s.page = Page::Editor;
+                s.set_scope(scope, window, cx);
+            });
+        });
+        w.pump(2, &mut |_| false);
+        w.snap(name);
+    }
     // Quit SnoutCode?, with a file unsaved and the application running.
     let shop = copy(projects, "settings", "shop");
     let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);

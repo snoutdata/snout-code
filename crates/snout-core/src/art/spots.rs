@@ -549,8 +549,45 @@ drawing!(
     }
 );
 
+drawing!(
+    /// Settings the same in every project: a panel of sliders, its knobs set (one the green),
+    /// handing the same values along dotted threads to two project folders.
+    shared_settings,
+    |d| {
+        d.rect(30.0, 30.0, 92.0, 100.0, 8.0, Fill::Paper);
+        d.line("M44 56H108").line("M44 80H108").line("M44 104H108");
+        d.circle(66.0, 56.0, 7.0, Fill::Tint);
+        d.circle(94.0, 80.0, 7.0, Fill::Accent);
+        d.circle(56.0, 104.0, 7.0, Fill::Tint);
+        thread(d, "M126 64C146 64 146 48 162 48");
+        thread(d, "M126 96C146 96 146 112 162 112");
+        for (x, y) in [(162.0, 32.0), (162.0, 96.0)] {
+            d.path(
+                &format!(
+                    "M{x} {}Q{x} {y} {} {y}H{}L{} {}H{}Q{} {} {} {}V{}H{x}Z",
+                    y + 4.0,
+                    x + 4.0,
+                    x + 16.0,
+                    x + 21.0,
+                    y + 5.0,
+                    x + 44.0,
+                    x + 48.0,
+                    y + 5.0,
+                    x + 48.0,
+                    y + 9.0,
+                    y + 34.0
+                ),
+                Fill::Tint,
+            );
+            d.line(&format!("M{} {}H{}", x + 10.0, y + 21.0, x + 38.0));
+            d.circle(x + 30.0, y + 21.0, 4.0, Fill::Paper);
+        }
+        d.twinkling_spark(206.0, 82.0, 0.6).twinkling_spark(140.0, 24.0, 0.5).twinkling_spark(24.0, 140.0, 0.55);
+    }
+);
+
 /// Every spot drawing of this module, by name: for tests and the gallery.
-pub fn all() -> [(&'static str, &'static Drawing); 25] {
+pub fn all() -> [(&'static str, &'static Drawing); 26] {
     [
         ("discard", discard()),
         ("push_rejected", push_rejected()),
@@ -577,6 +614,7 @@ pub fn all() -> [(&'static str, &'static Drawing); 25] {
         ("no_beans", no_beans()),
         ("gradle_failed", gradle_failed()),
         ("quiet_bell", quiet_bell()),
+        ("shared_settings", shared_settings()),
     ]
 }
 

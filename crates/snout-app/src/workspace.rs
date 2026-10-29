@@ -138,6 +138,9 @@ pub struct Workspace {
     pub quitting: bool,
     /// Quitting hid the window (and the app): the first thing it does.
     pub hidden: bool,
+    /// The project's settings file is being read.
+    reading_project_settings: bool,
+    _project_settings_poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -487,10 +490,24 @@ impl Workspace {
             _save_layout: None,
             quitting: false,
             hidden: false,
+            reading_project_settings: false,
+            _project_settings_poll: Task::ready(()),
             _subscriptions: subscriptions,
         };
         crate::claude_ide::bridge::start(&mut this, window, cx);
         this.model.update(cx, |m, _| m.confirm_switch = true);
+        // The project's own settings: read now, and again when the project or the file
+        // changes (its stamp is looked at every second; a project change at once).
+        this.check_project_settings(true, window, cx);
+        this._project_settings_poll = cx.spawn_in(window, async move |this, cx| {
+            for tick in 1u64.. {
+                cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
+                let ok = this.update_in(cx, |this, window, cx| this.check_project_settings(tick % 4 == 0, window, cx));
+                if ok.is_err() {
+                    break;
+                }
+            }
+        });
         this.adopt_editors(restored.1, window, cx);
         for path in reopen {
             let editor = this.reveal_file(path, false, true, window, cx);
@@ -1266,8 +1283,8 @@ impl Workspace {
         let sheet = cx.new(|cx| SettingsView::new(model, builds, jdks, window, cx));
         cx.subscribe_in(&sheet, window, |this, _, e: &SettingsEvent, window, cx| {
             let close = match e {
-                SettingsEvent::Apply(next, close) => {
-                    this.apply_settings((**next).clone(), window, cx);
+                SettingsEvent::Apply { user, project, close } => {
+                    this.apply_layers((**user).clone(), project.clone(), window, cx);
                     *close
                 }
                 SettingsEvent::Cancel => true,
@@ -1315,16 +1332,53 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Put `next` in place, save it, and make the window follow it.
+    /// Put the settings in use `next` in place (as a command or the Settings sheet changed
+    /// them), save them, and make the window follow. A change to a value the project sets
+    /// for itself goes to the project's file; any other to the user's settings.
     pub fn apply_settings(&mut self, next: crate::settings::Settings, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::project_settings as ps;
+        let (user, project) = {
+            let m = self.model.read(cx);
+            let mut changes = ps::ProjectSettings::default();
+            ps::take_changes(&m.settings, &next, &mut changes);
+            let mut project = m.project_settings.clone();
+            ps::route(&changes, &mut project);
+            // The user's own values stay under those the project sets.
+            let mut user = next;
+            ps::take_back(m.project_under(), &mut user);
+            (user, (project != m.project_settings).then_some(project))
+        };
+        self.apply_layers(user, project, window, cx);
+    }
+
+    /// Put the user's settings `user` and, when given, the project's `project` in place, save
+    /// them, and make the window follow what is in use.
+    pub fn apply_layers(
+        &mut self,
+        user: crate::settings::Settings,
+        project: Option<crate::project_settings::ProjectSettings>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let before = self.model.read(cx).settings.clone();
         self.model.update(cx, |m, cx| {
-            m.settings = next.clone();
-            if m.fetch_every.is_some() {
-                m.fetch_every = Some(std::time::Duration::from_secs(next.fetch_minutes.max(1) * 60));
+            m.set_user_settings(user);
+            if let Some(project) = project {
+                m.save_project_settings(project, cx);
             }
             m.persist();
             cx.notify();
+        });
+        self.follow_settings(before, window, cx);
+    }
+
+    /// The settings in use changed from `before`: the window follows them.
+    pub fn follow_settings(&mut self, before: crate::settings::Settings, window: &mut Window, cx: &mut Context<Self>) {
+        let next = self.model.read(cx).settings.clone();
+        self.model.update(cx, |m, _| {
+            if m.fetch_every.is_some() {
+                m.fetch_every = Some(std::time::Duration::from_secs(next.fetch_minutes.max(1) * 60));
+            }
         });
         theme::set_fonts(&next, cx);
         theme::apply(next.colors, next.theme, Some(window), cx);
@@ -1352,6 +1406,109 @@ impl Workspace {
             });
         }
         window.refresh();
+    }
+
+    /// Read the open project's settings file again when the project or the file changed
+    /// (`stat`: look at the file's stamp; else only a project change reads it).
+    pub fn check_project_settings(&mut self, stat: bool, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::project_settings as ps;
+        if self.reading_project_settings {
+            return;
+        }
+        let m = self.model.read(cx);
+        let root = m.project_root();
+        let moved = root != m.project_settings_root;
+        if !moved && !stat {
+            return;
+        }
+        let Some(root) = root else {
+            let before = m.settings.clone();
+            self.model.update(cx, |m, _| {
+                m.project_settings_root = None;
+                m.project_settings_stamp = None;
+                m.project_settings_error = None;
+                m.set_project_settings(Default::default());
+            });
+            self.follow_settings(before, window, cx);
+            return;
+        };
+        let known = (!moved).then_some(m.project_settings_stamp);
+        let host = m.host.clone();
+        self.reading_project_settings = true;
+        let read = cx.background_executor().spawn({
+            let root = root.clone();
+            async move {
+                let stamp = ps::stamp(&*host, &root);
+                if known == Some(stamp) {
+                    return None;
+                }
+                Some((stamp, ps::read(&*host, &root)))
+            }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let read = read.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.reading_project_settings = false;
+                if let Some((stamp, disk)) = read {
+                    this.took_project_settings(root, stamp, disk, window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The project's settings file as read: in place, or its error shown and the values read
+    /// last kept.
+    fn took_project_settings(
+        &mut self,
+        root: PathBuf,
+        stamp: crate::project_settings::Stamp,
+        disk: crate::project_settings::OnDisk,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::project_settings::{self as ps, OnDisk};
+        if self.model.read(cx).project_root().as_ref() != Some(&root) {
+            return;
+        }
+        let parsed = match &disk {
+            OnDisk::Missing => Ok(ps::ProjectSettings::default()),
+            OnDisk::Text(text) => ps::parse(text),
+        };
+        let before = self.model.read(cx).settings.clone();
+        let spring_before = self.model.read(cx).spring_mode();
+        self.model.update(cx, |m, cx| {
+            let moved = m.project_settings_root.as_ref() != Some(&root);
+            m.project_settings_root = Some(root.clone());
+            m.project_settings_stamp = stamp;
+            match parsed {
+                Ok(values) => {
+                    if m.project_settings_error.take().is_some() {
+                        m.message = "The project's settings are read again".into();
+                    }
+                    if values != m.project_settings {
+                        m.set_project_settings(values);
+                    }
+                }
+                Err(e) => {
+                    if moved {
+                        m.set_project_settings(Default::default());
+                    }
+                    m.message = format!("{} has an error, so its last good values stay: {e}", ps::FILE);
+                    m.project_settings_error = Some(e);
+                }
+            }
+            cx.notify();
+        });
+        if before != self.model.read(cx).settings {
+            self.follow_settings(before, window, cx);
+        }
+        let mode = self.model.read(cx).spring_mode();
+        if mode != spring_before
+            && let Some(spring) = crate::spring::spring(cx)
+        {
+            spring.update(cx, |s, cx| s.use_mode(mode, cx));
+        }
     }
 
     /// The tab in front of each of the center's tab groups.

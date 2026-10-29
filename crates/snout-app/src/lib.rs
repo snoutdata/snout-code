@@ -24,6 +24,7 @@ pub mod new_project;
 pub mod panels;
 pub mod processes;
 pub mod project_model;
+pub mod project_settings;
 pub mod project_view;
 pub mod projects;
 pub mod remote;
@@ -47,6 +48,8 @@ mod code_tests;
 mod java_tools_tests;
 #[cfg(test)]
 mod lang_tests;
+#[cfg(test)]
+mod project_settings_tests;
 #[cfg(test)]
 mod project_tests;
 #[cfg(test)]

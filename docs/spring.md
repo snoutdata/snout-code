@@ -128,7 +128,8 @@ While profiles are evaluated:
 - A profile file or document the active profiles leave out gets a quiet note on its first key, **Not read now**, naming the active profiles.
 - Completion offers the known profiles as values of `spring.profiles.active`, `include`, `default`, `group` and `spring.config.activate.on-profile`.
 
-Your choice is kept with the project. The Spring window's **profile** filter chip is something else: it shows only the beans of one profile, or only those with no `@Profile`, whatever is active.
+Your choice is kept with the project, in your settings, or in the project's own
+`.snout/settings.json` when that sets `spring_profiles` (see [Settings](settings-and-keymap.md#your-settings-and-the-projects)): then the switch changes the file. The Spring window's **profile** filter chip is something else: it shows only the beans of one profile, or only those with no `@Profile`, whatever is active.
 
 ## See also
 

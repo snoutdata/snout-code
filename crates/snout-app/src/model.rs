@@ -397,6 +397,16 @@ pub struct Model {
     pub fetch_every: Option<Duration>,
     /// The host the projects are on.
     pub host: snout_core::HostRef,
+    /// What the open project's `.snout/settings.json` sets, as read last (see
+    /// [`crate::project_settings`]); `settings` has it put over the user's own values.
+    pub project_settings: crate::project_settings::ProjectSettings,
+    /// The project those values are of, and the file's stamp when they were read.
+    pub project_settings_root: Option<PathBuf>,
+    pub project_settings_stamp: crate::project_settings::Stamp,
+    /// Why the project's file could not be read (its last good values stay in use).
+    pub project_settings_error: Option<String>,
+    /// The user's own values under those the project sets, given back when saving.
+    project_under: crate::project_settings::ProjectSettings,
     /// The `claude` to run; looked up when `None`.
     pub claude: Option<PathBuf>,
     /// A file given on the command line, to open once the window is there.
@@ -424,6 +434,11 @@ impl Model {
     pub fn new(settings: Settings, store: Option<Store>, cx: &mut Context<Self>) -> Self {
         let mut model = Self {
             host: crate::host::host(cx),
+            project_settings: Default::default(),
+            project_settings_root: None,
+            project_settings_stamp: None,
+            project_settings_error: None,
+            project_under: Default::default(),
             pending_file: None,
             confirm_switch: false,
             saved: settings.clone(),
@@ -1065,17 +1080,108 @@ impl Model {
         cx.emit(ModelEvent::Dialog);
     }
 
-    /// Save the settings when they changed.
+    /// Save the user's settings when they changed (the values the project sets for itself
+    /// are not the user's: the user's own go to the file).
     pub fn persist(&mut self) {
-        if self.saved == self.settings {
+        let user = self.user_settings();
+        if self.saved == user {
             return;
         }
         if let Some(store) = &self.store
-            && let Err(e) = store.save(&self.settings)
+            && let Err(e) = store.save(&user)
         {
             self.log_output(format!("Could not save settings: {e}"), true);
         }
-        self.saved = self.settings.clone();
+        self.saved = user;
+    }
+
+    /// The user's own values under those the project sets.
+    pub fn project_under(&self) -> &crate::project_settings::ProjectSettings {
+        &self.project_under
+    }
+
+    /// The user's own settings: those in use, but for what the project sets, the user's.
+    pub fn user_settings(&self) -> Settings {
+        let mut s = self.settings.clone();
+        crate::project_settings::take_back(&self.project_under, &mut s);
+        s
+    }
+
+    /// Put the user's settings `user` in place, the project's values over them.
+    pub fn set_user_settings(&mut self, user: Settings) {
+        self.settings = user;
+        self.project_under = crate::project_settings::put_over(&self.project_settings, &mut self.settings);
+    }
+
+    /// Put the project's values `values` in place of those it set before.
+    pub fn set_project_settings(&mut self, values: crate::project_settings::ProjectSettings) {
+        let user = self.user_settings();
+        self.project_settings = values;
+        self.set_user_settings(user);
+    }
+
+    /// Set the project's values and write them to its file, off the UI thread. The file's
+    /// stamp is taken again once written, so the write does not read as a change.
+    pub fn save_project_settings(&mut self, values: crate::project_settings::ProjectSettings, cx: &mut Context<Self>) {
+        let Some(root) = self.project_root() else { return };
+        self.set_project_settings(values.clone());
+        self.project_settings_error = None;
+        let host = self.host.clone();
+        let write = cx.background_executor().spawn({
+            let root = root.clone();
+            async move {
+                let done = crate::project_settings::write(&*host, &root, &values);
+                (done, crate::project_settings::stamp(&*host, &root))
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let (done, stamp) = write.await;
+            let _ = this.update(cx, |m, cx| {
+                match done {
+                    Ok(()) if m.project_settings_root.as_ref() == Some(&root) => m.project_settings_stamp = stamp,
+                    Ok(()) => {}
+                    Err(e) => m.log_output(format!("Could not save the project's settings: {e}"), true),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The JDK the Gradle build at `root` runs on, as chosen: for the project when it sets
+    /// one, else for the build in the user's settings.
+    pub fn jdk_for(&self, root: &Path) -> Option<PathBuf> {
+        let project = self.project_settings_root.as_ref().filter(|p| root.starts_with(p));
+        match (project, &self.project_settings.jdk) {
+            (Some(_), Some(jdk)) => Some(jdk.clone()),
+            _ => self.settings.project_jdks.get(root).cloned(),
+        }
+    }
+
+    /// The profiles the open project's Spring model is evaluated under.
+    pub fn spring_mode(&self) -> crate::spring::ProfileMode {
+        if let Some(p) = &self.project_settings.spring_profiles {
+            return p.into();
+        }
+        self.project_root().and_then(|r| self.settings.spring_profiles.get(&r).cloned()).unwrap_or_default()
+    }
+
+    /// Keep `mode` for the open project: in its settings file when that sets the profiles,
+    /// else in the user's settings.
+    pub fn set_spring_mode(&mut self, mode: crate::spring::ProfileMode, cx: &mut Context<Self>) {
+        let Some(root) = self.project_root() else { return };
+        if self.project_settings.spring_profiles.is_some() {
+            let mut values = self.project_settings.clone();
+            values.spring_profiles = Some((&mode).into());
+            self.save_project_settings(values, cx);
+            return;
+        }
+        if mode == crate::spring::ProfileMode::Any {
+            self.settings.spring_profiles.remove(&root);
+        } else {
+            self.settings.spring_profiles.insert(root, mode);
+        }
+        self.persist();
     }
 
     /// Run a slow operation on the background executor.
