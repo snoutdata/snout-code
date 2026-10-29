@@ -451,6 +451,11 @@ pub fn reveal_items(menu: PopupMenu, model: &Entity<Model>, path: &Path) -> Popu
             .on_click(send(model, Action::Reveal(path.to_owned()))),
     )
     .item(
+        PopupMenuItem::new("Open in External Terminal")
+            .icon(crate::components::menu_icon(crate::components::IconName::SquareTerminal))
+            .on_click(send(model, Action::OpenInTerminal(path.to_owned()))),
+    )
+    .item(
         PopupMenuItem::new("Copy path")
             .icon(crate::components::menu_icon(crate::components::IconName::Copy))
             .on_click(send(model, Action::Copy(path.display().to_string()))),

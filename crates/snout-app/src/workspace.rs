@@ -1987,6 +1987,9 @@ impl Render for Workspace {
                 this.apply_settings(next, w, cx);
             }))
             .on_action(cx.listener(|this, _: &ClearRecent, _, cx| this.send(Action::ClearRecent, cx)))
+            .on_action(
+                cx.listener(|this, a: &OpenInTerminalAt, _, cx| this.send(Action::OpenInTerminal(a.0.clone()), cx)),
+            )
             .on_action(cx.listener(|this, a: &OpenRecent, _, cx| this.send(Action::OpenRepo(a.0.clone()), cx)))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(Some(1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(Some(-1.), cx)))
@@ -2019,6 +2022,13 @@ impl Render for Workspace {
             d.on_action(cx.listener(|this, _: &Reveal, _, cx| {
                 if let Some(root) = this.model.read(cx).project_root() {
                     this.send(Action::Reveal(root), cx);
+                }
+            }))
+            // The external terminal at the file in front's folder, else the project's.
+            .on_action(cx.listener(|this, _: &OpenInTerminal, window, cx| {
+                let file = this.active_editor(window, cx).map(|e| e.read(cx).path.clone());
+                if let Some(path) = file.or_else(|| this.model.read(cx).project_root()) {
+                    this.send(Action::OpenInTerminal(path), cx);
                 }
             }))
         });

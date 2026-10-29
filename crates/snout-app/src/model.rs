@@ -203,6 +203,8 @@ pub enum Action {
     CloseCommit,
     SetTheme(ThemeChoice),
     Reveal(PathBuf),
+    /// Open the external terminal at a folder (a file: at its parent).
+    OpenInTerminal(PathBuf),
     Copy(String),
     /// Narrow the changed files to a directory, or show them all.
     FilterDir(Option<String>),
@@ -1072,6 +1074,37 @@ impl Model {
         }
     }
 
+    /// Open the external terminal the settings choose at `path` (a file: at its folder), on
+    /// the window's host: on a remote machine, an ssh session there.
+    pub fn open_in_terminal(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        use crate::external_terminal as et;
+        let term = self.settings.external_terminal;
+        let custom = self.settings.external_terminal_command.clone();
+        let remote = crate::remote::connection(cx).map(|(name, _)| crate::remote::target(&name));
+        let host = crate::host::host(cx);
+        let scripts = std::env::temp_dir().join("snoutcode-terminal");
+        let opened = cx.background_executor().spawn(async move {
+            let dir = match host.metadata(&path) {
+                Ok(m) if m.is_dir() => path,
+                _ => path.parent().map(Path::to_path_buf).unwrap_or(path),
+            };
+            let at = match remote {
+                Some(t) => et::Where::Remote { ssh: t.terminal_command(&et::remote_shell(&dir)), dir },
+                None => et::Where::Local(dir),
+            };
+            et::command(term, &custom, &at, &scripts).map_err(|e| e.to_string()).and_then(|argv| et::run(&argv))
+        });
+        cx.spawn(async move |this, cx| {
+            if let Err(e) = opened.await {
+                let _ = this.update(cx, |m, cx| {
+                    m.fail(e, cx);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     fn fail(&mut self, message: String, cx: &mut Context<Self>) {
         self.message = message.lines().next().unwrap_or_default().to_owned();
         self.log_output(message.clone(), true);
@@ -1538,6 +1571,7 @@ impl Model {
             }
             Action::Copy(text) => cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)),
             Action::Reveal(path) => cx.reveal_path(&path),
+            Action::OpenInTerminal(path) => self.open_in_terminal(path, cx),
             Action::OpenFile(path, at) => cx.emit(ModelEvent::OpenFile(path, at, false)),
             Action::PreviewFile(path) => cx.emit(ModelEvent::OpenFile(path, None, true)),
             Action::FilterDir(dir) => {

@@ -116,6 +116,7 @@ actions!(
         SpringAtCaret,
         SpringProfiles,
         ProjectStructure,
+        OpenInTerminal,
     ]
 );
 
@@ -141,6 +142,11 @@ pub struct OpenRemoteRecent(pub crate::remote::RemoteProject);
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = snout, no_json)]
 pub struct HideToolWindow(pub bool);
+
+/// Open in External Terminal at this file's folder (or this folder): from a tab's menu.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct OpenInTerminalAt(pub std::path::PathBuf);
 
 /// File ▸ Open Recent: open this project.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
@@ -290,6 +296,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Theme: Light", Box::new(ThemeLight)),
         ("Open on GitHub", Box::new(Github)),
         ("Reveal in Finder", Box::new(Reveal)),
+        ("Open in External Terminal", Box::new(OpenInTerminal)),
         ("About SnoutCode", Box::new(About)),
         ("Quit SnoutCode", Box::new(Quit)),
     ]
@@ -342,6 +349,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Close Project", CloseProject),
             MenuItem::separator(),
             MenuItem::action("Project Structure…", ProjectStructure),
+            MenuItem::action("Open in External Terminal", OpenInTerminal),
             MenuItem::separator(),
             MenuItem::action("Connect to SSH Host…", ConnectSsh),
             MenuItem::action("Close Remote Connection", CloseRemote),

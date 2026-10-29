@@ -873,6 +873,11 @@ impl ProjectView {
                         .on_click(send(Action::Reveal(path.clone()))),
                 )
                 .item(
+                    PopupMenuItem::new("Open in External Terminal")
+                        .icon(crate::components::menu_icon(crate::components::IconName::SquareTerminal))
+                        .on_click(send(Action::OpenInTerminal(path.clone()))),
+                )
+                .item(
                     PopupMenuItem::new("Copy path")
                         .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                         .on_click(send(Action::Copy(path.display().to_string()))),

@@ -100,6 +100,24 @@ impl SshTarget {
         sha256_hex(key.as_bytes())[..16].to_owned()
     }
 
+    /// The command line (program first) of an interactive session that runs `remote` on the
+    /// host in a terminal of its own (`ssh -t`): the same config file, options and shared
+    /// connection as the app's, prompts allowed.
+    pub fn terminal_command(&self, remote: &str) -> Vec<String> {
+        let mut v = vec![self.ssh_program.display().to_string()];
+        if let Some(f) = &self.config_file {
+            v.extend(["-F".to_owned(), f.display().to_string()]);
+        }
+        if let Some(dir) = &self.control_dir {
+            v.extend(["-o".to_owned(), "ControlMaster=auto".to_owned()]);
+            v.extend(["-o".to_owned(), format!("ControlPath={}", dir.join(self.control_name()).display())]);
+            v.extend(["-o".to_owned(), "ControlPersist=10m".to_owned()]);
+        }
+        v.extend(self.extra_args.iter().cloned());
+        v.extend(["-t".to_owned(), self.host.clone(), remote.to_owned()]);
+        v
+    }
+
     /// `ssh <host> <remote command>`, no terminal.
     pub fn command(&self, remote: &str) -> Command {
         let mut c = self.base_command();
@@ -372,6 +390,19 @@ mod tests {
         assert_eq!(pick("Linux", "riscv64").unwrap_err().kind(), io::ErrorKind::Unsupported);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(pick("Linux", "x86_64").unwrap_err().kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn a_terminal_session_shares_the_apps_connection() {
+        let mut t = SshTarget::new("devbox");
+        t.config_file = Some("/cfg/ssh".into());
+        t.control_dir = Some("/tmp/snout-ssh-1".into());
+        let argv = t.terminal_command("cd /srv; exec $SHELL -l");
+        let control = format!("ControlPath=/tmp/snout-ssh-1/{}", t.control_name());
+        assert_eq!(argv[..3], ["ssh", "-F", "/cfg/ssh"]);
+        assert!(argv.contains(&control), "{argv:?}");
+        assert!(!argv.iter().any(|a| a.starts_with("BatchMode")), "a terminal may ask for a password");
+        assert_eq!(argv[argv.len() - 3..], ["-t", "devbox", "cd /srv; exec $SHELL -l"]);
     }
 
     #[test]

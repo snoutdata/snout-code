@@ -173,6 +173,14 @@ pub struct Settings {
     /// Option sends Meta (Esc and the key) in the terminals, as shells and editors expect;
     /// off, Option types the characters of the keyboard layout (⌥E é, ⌥2 ™).
     pub terminal_option_as_meta: bool,
+    /// The terminal app Open in External Terminal opens: `Terminal`, `iTerm`, `Ghostty`,
+    /// `WezTerm`, `Alacritty`, `kitty`, `Warp`, or `Custom` (the command in
+    /// `external_terminal_command`).
+    pub external_terminal: crate::external_terminal::ExternalTerminal,
+    /// The command a `Custom` external terminal runs with `/bin/sh -c`: `{dir}` stands for
+    /// the folder (quoted), and on a remote machine `{ssh}` for the ssh command that opens a
+    /// shell there (`open -na MyTerm --args -e {ssh}`).
+    pub external_terminal_command: String,
 }
 
 /// The shape of a terminal's cursor.
@@ -249,6 +257,8 @@ impl Default for Settings {
             terminal_env: Default::default(),
             terminal_copy_on_select: false,
             terminal_option_as_meta: true,
+            external_terminal: Default::default(),
+            external_terminal_command: String::new(),
         }
     }
 }

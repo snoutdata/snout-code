@@ -822,11 +822,21 @@ impl GitView {
                                     )
                                     .separator();
                                 if let Some(root) = &root {
-                                    menu = menu.item(
-                                        PopupMenuItem::new("Reveal in Finder")
-                                            .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
-                                            .on_click(send(Action::Reveal(root.join(&f2.path)))),
-                                    );
+                                    menu = menu
+                                        .item(
+                                            PopupMenuItem::new("Reveal in Finder")
+                                                .icon(crate::components::menu_icon(
+                                                    crate::components::IconName::FolderOpen,
+                                                ))
+                                                .on_click(send(Action::Reveal(root.join(&f2.path)))),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Open in External Terminal")
+                                                .icon(crate::components::menu_icon(
+                                                    crate::components::IconName::SquareTerminal,
+                                                ))
+                                                .on_click(send(Action::OpenInTerminal(root.join(&f2.path)))),
+                                        );
                                 }
                                 menu.item(
                                     PopupMenuItem::new("Copy path")
@@ -1260,11 +1270,21 @@ impl GitView {
                                     }
                                 };
                                 let menu = match &root {
-                                    Some(root) => menu.item(
-                                        PopupMenuItem::new("Reveal in Finder")
-                                            .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
-                                            .on_click(send(Action::Reveal(root.join(&path)))),
-                                    ),
+                                    Some(root) => menu
+                                        .item(
+                                            PopupMenuItem::new("Reveal in Finder")
+                                                .icon(crate::components::menu_icon(
+                                                    crate::components::IconName::FolderOpen,
+                                                ))
+                                                .on_click(send(Action::Reveal(root.join(&path)))),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Open in External Terminal")
+                                                .icon(crate::components::menu_icon(
+                                                    crate::components::IconName::SquareTerminal,
+                                                ))
+                                                .on_click(send(Action::OpenInTerminal(root.join(&path)))),
+                                        ),
                                     None => menu,
                                 };
                                 menu.item(

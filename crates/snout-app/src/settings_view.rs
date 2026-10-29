@@ -153,7 +153,7 @@ impl Page {
             Page::Spring => "frameworks boot profiles active beans",
             Page::Terminal => {
                 "tools engine ghostty built-in builtin shell console emulator vt font cursor blink scrollback \
-                 environment variables copy select option meta"
+                 environment variables copy select option meta external iterm wezterm alacritty kitty warp"
             }
             Page::ClaudeCode => "tools agent console program path",
         }
@@ -203,6 +203,9 @@ pub struct SettingsView {
     shell: Entity<InputState>,
     shell_args: Entity<InputState>,
     new_var: Entity<InputState>,
+    /// The external terminal's custom command, and the terminal apps installed.
+    external_command: Entity<InputState>,
+    installed_terminals: Vec<crate::external_terminal::ExternalTerminal>,
     /// The JDKs on this Mac, for the Gradle page.
     jdks: Vec<Jdk>,
     /// The Gradle builds the Gradle page lists.
@@ -306,6 +309,18 @@ impl SettingsView {
             }
         })
         .detach();
+        let external_command = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("open -na MyTerm --args --cwd {dir}")
+                .default_value(shown.external_terminal_command.clone())
+        });
+        cx.subscribe(&external_command, |this, input, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change) {
+                let text = input.read(cx).value().trim().to_owned();
+                this.set(cx, |s| s.external_terminal_command = text);
+            }
+        })
+        .detach();
         let key_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search commands or shortcuts"));
         cx.subscribe(&key_search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -326,6 +341,8 @@ impl SettingsView {
             shell,
             shell_args,
             new_var,
+            external_command,
+            installed_terminals: crate::external_terminal::installed(),
             jdks,
             builds,
             key_search,
@@ -413,6 +430,8 @@ impl SettingsView {
         next.terminal_env = d.terminal_env.clone();
         next.terminal_copy_on_select = d.terminal_copy_on_select;
         next.terminal_option_as_meta = d.terminal_option_as_meta;
+        next.external_terminal = d.external_terminal;
+        next.external_terminal_command = d.external_terminal_command.clone();
         self.draft = next.clone();
         cx.emit(SettingsEvent::Apply { user: Box::new(next), project, close });
     }
@@ -1563,6 +1582,7 @@ impl SettingsView {
             .child(self.terminal_look_rows(d, cx))
             .child(shell)
             .child(self.terminal_behaviour_rows(d, cx))
+            .child(self.external_terminal_rows(d, cx))
             .child(self.terminal_running(d, cx))
             .into_any_element()
     }
@@ -1851,6 +1871,58 @@ impl SettingsView {
                     this.set(cx, |s| s.terminal_option_as_meta = !s.terminal_option_as_meta)
                 })),
                 None,
+            ))
+            .into_any_element()
+    }
+
+    /// The terminal app Open in External Terminal opens: those installed, or a command.
+    fn external_terminal_rows(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        use crate::external_terminal::ExternalTerminal;
+        let p = palette(cx);
+        let chosen = d.external_terminal;
+        let name = |t: ExternalTerminal| format!("{t:?}");
+        let mut apps: Vec<(String, String)> =
+            self.installed_terminals.iter().map(|t| (name(*t), t.label().to_owned())).collect();
+        if chosen != ExternalTerminal::Custom && !self.installed_terminals.contains(&chosen) {
+            apps.push((name(chosen), format!("{} (not installed)", chosen.label())));
+        }
+        apps.push((name(ExternalTerminal::Custom), ExternalTerminal::Custom.label().to_owned()));
+        let view = cx.entity();
+        let pick = move |v: String, cx: &mut App| {
+            let all = ExternalTerminal::APPS.into_iter().chain([ExternalTerminal::Custom]);
+            if let Some(t) = all.into_iter().find(|t| format!("{t:?}") == v) {
+                view.update(cx, |this, cx| this.set(cx, |s| s.external_terminal = t));
+            }
+        };
+        let custom = chosen == ExternalTerminal::Custom;
+        div()
+            .flex()
+            .flex_col()
+            .child(section("External terminal", &p))
+            .child(row(
+                "Open in",
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(crate::components::icon(IconName::SquareTerminal, 14., p.fg_dim))
+                    .child(choice("settings-external-terminal", &name(chosen), apps, pick, &p)),
+                &p,
+            ))
+            .when(custom, |b| {
+                b.child(row(
+                    "Command",
+                    div().w(px(360.)).child(look::field(&self.external_command, false, None, &p)),
+                    &p,
+                ))
+                .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                    "Run with /bin/sh. {dir} is the folder; on a remote machine, {ssh} is the ssh command that \
+                     opens a shell there.",
+                ))
+            })
+            .child(div().pl(px(162.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                "Open in External Terminal, in the File menu and on a file's or folder's menu, opens it at the \
+                 folder. On a remote project it opens an ssh session there.",
             ))
             .into_any_element()
     }

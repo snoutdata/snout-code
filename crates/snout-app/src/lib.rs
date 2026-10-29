@@ -9,6 +9,7 @@ pub mod console;
 pub mod dialogs;
 pub mod editing;
 pub mod editor;
+pub mod external_terminal;
 pub mod files;
 pub mod find_in_files;
 pub mod git_view;

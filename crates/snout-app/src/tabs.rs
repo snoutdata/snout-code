@@ -221,13 +221,16 @@ fn tab_menu(
         }));
     }
     if let Some(path) = path {
-        let (copy, reveal) = (path.to_owned(), path.to_owned());
+        let (copy, reveal, terminal) = (path.to_owned(), path.to_owned(), path.to_owned());
         menu = menu
             .separator()
             .item(menu_item("Copy Path", I::Copy, move |_, _, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.display().to_string()));
             }))
-            .item(menu_item("Reveal in Finder", I::FolderOpen, move |_, _, cx| cx.reveal_path(&reveal)));
+            .item(menu_item("Reveal in Finder", I::FolderOpen, move |_, _, cx| cx.reveal_path(&reveal)))
+            .item(menu_item("Open in External Terminal", I::SquareTerminal, move |_, window, cx| {
+                window.dispatch_action(Box::new(crate::menus::OpenInTerminalAt(terminal.clone())), cx)
+            }));
     }
     menu
 }
