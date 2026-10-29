@@ -21,6 +21,8 @@ pub enum Purpose {
     Connect(String, Arc<RemoteHost>),
     /// An action of the window already on the remote machine (Open Project…).
     Then(fn(PathBuf) -> Action),
+    /// A JDK to add in Project Structure.
+    Jdk(gpui::Entity<crate::structure::ProjectStructureView>),
 }
 
 impl Workspace {
@@ -74,7 +76,7 @@ impl Workspace {
                 cx.global_mut::<remote::Remote>().pending = Some((name.clone(), host.clone()));
                 (host.clone(), name.clone())
             }
-            Purpose::Then(_) => {
+            Purpose::Then(_) | Purpose::Jdk(_) => {
                 let Some((name, _)) = remote::connection(cx) else { return };
                 (crate::host::host(cx), name)
             }
@@ -87,6 +89,7 @@ impl Workspace {
                 .find(|p| p.host == name)
                 .and_then(|p| p.path.parent().map(PathBuf::from)),
             Purpose::Then(_) => self.model.read(cx).project_root().and_then(|p| p.parent().map(PathBuf::from)),
+            Purpose::Jdk(_) => None,
         }
         .unwrap_or_else(|| host.info().home.clone());
         let picker = cx.new(|cx| FolderPicker::new(host, name, start, window, cx));
@@ -98,8 +101,15 @@ impl Workspace {
                     this.open_remote(name.clone(), host.clone(), dir.clone(), window, cx)
                 }
                 (PickerEvent::Open(dir), Purpose::Then(then)) => this.send(then(dir.clone()), cx),
+                (PickerEvent::Open(dir), Purpose::Jdk(view)) => {
+                    view.update(cx, |v, cx| v.add_jdk(dir.clone(), cx));
+                    if let Some(v) = &this.project_structure {
+                        let focus = gpui::Focusable::focus_handle(v.read(cx), cx);
+                        window.focus(&focus, cx);
+                    }
+                }
                 (PickerEvent::Cancel, Purpose::Connect(..)) => remote::drop_pending(cx),
-                (PickerEvent::Cancel, Purpose::Then(_)) => {}
+                (PickerEvent::Cancel, Purpose::Then(_) | Purpose::Jdk(_)) => {}
             }
             cx.notify();
         })

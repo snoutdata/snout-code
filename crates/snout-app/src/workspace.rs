@@ -94,6 +94,10 @@ pub struct Workspace {
     pub settings_sheet: Option<Entity<crate::settings_view::SettingsView>>,
     /// The Settings sheet is about to come up (the host's JDKs are being looked for).
     settings_opening: bool,
+    /// The page the Settings sheet opens on when it comes up (from Project Structure).
+    settings_page: Option<crate::settings_view::Page>,
+    /// The Project Structure window, while it shows.
+    pub project_structure: Option<Entity<crate::structure::ProjectStructureView>>,
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::run::gradle_window::GradleWindow>,
     pub spring_window: Entity<crate::spring::window::SpringWindow>,
@@ -464,6 +468,8 @@ impl Workspace {
             branch_popup: None,
             settings_sheet: None,
             settings_opening: false,
+            settings_page: None,
+            project_structure: None,
             gradle,
             spring_window,
             spring,
@@ -1267,7 +1273,9 @@ impl Workspace {
         }
         self.settings_opening = true;
         let home = self.hub.read(cx).home.clone();
-        let found = cx.background_executor().spawn(async move { crate::lang::java::discover(&*host, &home) });
+        let added = crate::structure::window_added_jdks(cx);
+        let found =
+            cx.background_executor().spawn(async move { crate::lang::java::discover_with(&*host, &home, &added) });
         cx.spawn_in(window, async move |this, cx| {
             let jdks = found.await;
             let _ = this.update_in(cx, |this, window, cx| {
@@ -1290,7 +1298,17 @@ impl Workspace {
             return;
         }
         let model = self.model.clone();
-        let sheet = cx.new(|cx| SettingsView::new(model, builds, jdks, window, cx));
+        let page = self.settings_page.take();
+        let sheet = cx.new(|cx| {
+            let mut s = SettingsView::new(model, builds, jdks, window, cx);
+            if let Some(page) = page {
+                s.page = page;
+                if page.per_project() && s.has_project() {
+                    s.set_scope(crate::settings_view::Scope::Project, window, cx);
+                }
+            }
+            s
+        });
         cx.subscribe_in(&sheet, window, |this, _, e: &SettingsEvent, window, cx| {
             let close = match e {
                 SettingsEvent::Apply { user, project, close } => {
@@ -1313,6 +1331,71 @@ impl Workspace {
         let focus = gpui::Focusable::focus_handle(sheet.read(cx), cx);
         window.focus(&focus, cx);
         self.settings_sheet = Some(sheet);
+        cx.notify();
+    }
+
+    /// Put up the Settings sheet on `page`.
+    pub fn open_settings_at(&mut self, page: crate::settings_view::Page, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(sheet) = &self.settings_sheet {
+            sheet.update(cx, |s, cx| {
+                s.page = page;
+                cx.notify();
+            });
+            return;
+        }
+        self.settings_page = Some(page);
+        self.open_settings(window, cx);
+    }
+
+    /// Put up the Project Structure window (⌘;).
+    pub fn open_project_structure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::structure::{ProjectStructureView, StructureEvent};
+        if self.project_structure.is_some() {
+            return;
+        }
+        if self.model.read(cx).project_root().is_none() {
+            self.model.update(cx, |m, cx| {
+                m.message = "Open a project to see its structure".into();
+                cx.notify();
+            });
+            return;
+        }
+        let model = self.model.clone();
+        let view = cx.new(|cx| ProjectStructureView::new(model, window, cx));
+        cx.subscribe_in(&view, window, |this, view, e: &StructureEvent, window, cx| {
+            let close = match e {
+                StructureEvent::Apply { user, project, close } => {
+                    this.apply_layers((**user).clone(), project.clone(), window, cx);
+                    *close
+                }
+                StructureEvent::Open(place) => {
+                    let at = place.line.map(|l| (l, 0));
+                    this.open_file(place.file.clone(), at, false, window, cx);
+                    true
+                }
+                StructureEvent::Settings(page) => {
+                    this.project_structure = None;
+                    this.open_settings_at(*page, window, cx);
+                    cx.notify();
+                    return;
+                }
+                StructureEvent::PickRemoteJdk => {
+                    let view = view.clone();
+                    this.pick_remote(remote_ui::Purpose::Jdk(view), window, cx);
+                    false
+                }
+                StructureEvent::Cancel => true,
+            };
+            if close {
+                this.project_structure = None;
+                window.focus(&this.focus, cx);
+            }
+            cx.notify();
+        })
+        .detach();
+        let focus = gpui::Focusable::focus_handle(view.read(cx), cx);
+        window.focus(&focus, cx);
+        self.project_structure = Some(view);
         cx.notify();
     }
 
@@ -1759,6 +1842,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToClass, w, cx| this.open_classes(w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
+            .on_action(
+                cx.listener(|this, _: &crate::menus::ProjectStructure, w, cx| this.open_project_structure(w, cx)),
+            )
             .on_action(cx.listener(|this, _: &crate::menus::OpenSettingsJson, w, cx| {
                 this.open_settings_json(crate::settings_json::Which::User, w, cx)
             }))
@@ -2000,6 +2086,18 @@ impl Render for Workspace {
                     .bg(p.scrim)
                     .occlude()
                     .child(sheet)
+            }))
+            .children(self.project_structure.clone().map(|view| {
+                div()
+                    .id("project-structure-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(p.scrim)
+                    .occlude()
+                    .child(view)
             }))
             .children(self.connect_dialog.clone().map(|dialog| {
                 div()

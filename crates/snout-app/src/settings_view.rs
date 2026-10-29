@@ -254,6 +254,11 @@ impl SettingsView {
         }
     }
 
+    /// Whether a project is open, so the project's scope can show.
+    pub fn has_project(&self) -> bool {
+        self.root.is_some()
+    }
+
     /// The settings differ from those in use.
     pub fn changed(&self, cx: &App) -> bool {
         let m = self.model.read(cx);

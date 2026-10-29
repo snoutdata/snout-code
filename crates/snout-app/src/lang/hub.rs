@@ -524,6 +524,10 @@ impl LangHub {
         }
         // What the build needs and which JDK fits are asked of the host off the UI thread.
         let saved = self.model.read(cx).jdk_for(root);
+        let added = crate::structure::added_jdks(
+            &self.model.read(cx).settings,
+            crate::remote::connection(cx).map(|(n, _)| n).as_deref(),
+        );
         let (host, home, root_buf) = (self.host.clone(), self.home.clone(), root.to_owned());
         let look = cx.background_executor().spawn(async move {
             // On a remote machine the engine and its Java may still be on their way there:
@@ -537,7 +541,7 @@ impl LangHub {
             let saved = saved.and_then(|h| java::jdk_at(&*host, &h));
             let req = java::requirement(&*host, &root_buf);
             let jdk = saved.filter(|j| req.fits(j.major)).or_else(|| {
-                let all = java::discover(&*host, &home);
+                let all = java::discover_with(&*host, &home, &added);
                 java::choose(&req, &all).cloned()
             });
             (req, jdk)

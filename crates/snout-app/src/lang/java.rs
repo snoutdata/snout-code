@@ -192,6 +192,19 @@ pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
     found
 }
 
+/// [`discover`], and the JDKs added by hand at `added` (their homes) that it did not find.
+pub fn discover_with(host: &dyn Host, home: &Path, added: &[PathBuf]) -> Vec<Jdk> {
+    let mut found = discover(host, home);
+    for h in added {
+        if let Some(jdk) = jdk_at(host, h)
+            && !found.iter().any(|j| j.home == jdk.home)
+        {
+            found.push(jdk);
+        }
+    }
+    found
+}
+
 /// What a build asks of the JDK running Gradle.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Requirement {

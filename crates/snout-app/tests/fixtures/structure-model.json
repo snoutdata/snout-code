@@ -1,0 +1,122 @@
+{
+  "modelVersion": 2,
+  "pluginModelVersion": 1,
+  "rootDir": "$ROOT",
+  "name": "demo",
+  "gradleBuilds": [
+    {
+      "id": "demo", "status": "synced", "rootDir": "$ROOT", "gradleVersion": "8.10.2",
+      "gradleJavaHome": "$ROOT/jdk-21", "javaVersion": "21.0.2",
+      "builds": [
+        {
+          "name": "buildSrc", "kind": "buildSrc", "rootDir": "$ROOT/buildSrc", "errors": [],
+          "projects": [
+            {
+              "path": ":", "name": "buildSrc", "projectDir": "$ROOT/buildSrc", "buildFile": "$ROOT/buildSrc/build.gradle.kts",
+              "plugins": [ { "id": "org.gradle.kotlin.kotlin-dsl" } ],
+              "java": { "sourceCompatibility": "17", "targetCompatibility": "17" },
+              "sourceSets": [
+                {
+                  "name": "main",
+                  "roots": [ { "dir": "$ROOT/buildSrc/src/main/kotlin", "kind": "source", "exists": true } ],
+                  "output": { "classesDirs": ["$ROOT/buildSrc/build/classes/kotlin/main"], "resourcesDir": "$ROOT/buildSrc/build/resources/main" },
+                  "compile": { "kotlin": { "sourceCompatibility": "17", "targetCompatibility": "17" } }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "demo", "kind": "root", "rootDir": "$ROOT", "errors": [],
+          "projects": [
+            {
+              "path": ":core", "name": "core", "projectDir": "$ROOT/core", "buildFile": "$ROOT/core/build.gradle.kts",
+              "plugins": [ { "id": "org.gradle.java" } ],
+              "java": { "sourceCompatibility": "21", "targetCompatibility": "21" },
+              "testTasks": [ { "name": "test", "path": ":core:test", "sourceSets": ["test"] } ],
+              "sourceSets": [
+                {
+                  "name": "main",
+                  "roots": [
+                    { "dir": "$ROOT/core/src/main/java", "kind": "source", "exists": true },
+                    { "dir": "$ROOT/core/src/main/resources", "kind": "resource", "exists": false },
+                    { "dir": "$ROOT/core/build/generated/sources/annotationProcessor/java/main", "kind": "generated", "exists": false }
+                  ],
+                  "output": { "classesDirs": ["$ROOT/core/build/classes/java/main"], "resourcesDir": "$ROOT/core/build/resources/main" },
+                  "compile": { "java": { "sourceCompatibility": "21", "targetCompatibility": "21", "release": null } },
+                  "dependencyGraph": {
+                    "compileClasspath": {
+                      "roots": [ { "to": 0, "declaredIn": "implementation" } ],
+                      "nodes": [ { "kind": "module", "group": "com.google.guava", "name": "guava", "version": "33.0.0-jre", "deps": [] } ]
+                    }
+                  }
+                },
+                {
+                  "name": "test",
+                  "roots": [ { "dir": "$ROOT/core/src/test/java", "kind": "source", "exists": true } ],
+                  "output": { "classesDirs": ["$ROOT/core/build/classes/java/test"], "resourcesDir": "$ROOT/core/build/resources/test" },
+                  "compile": { "java": { "sourceCompatibility": "21", "targetCompatibility": "21" } }
+                }
+              ]
+            },
+            {
+              "path": ":", "name": "demo", "projectDir": "$ROOT", "buildFile": "$ROOT/build.gradle.kts",
+              "plugins": [], "java": null, "sourceSets": []
+            },
+            {
+              "path": ":app", "name": "app", "projectDir": "$ROOT/app", "buildFile": "$ROOT/app/build.gradle.kts",
+              "plugins": [ { "id": "org.gradle.java" }, { "id": "org.springframework.boot" } ],
+              "java": { "sourceCompatibility": "21", "targetCompatibility": "21" },
+              "springBoot": { "pluginVersion": "3.3.0" },
+              "sourceSets": [
+                {
+                  "name": "main",
+                  "roots": [
+                    { "dir": "$ROOT/app/src/main/java", "kind": "source", "exists": true },
+                    { "dir": "$ROOT/app/src/main/resources", "kind": "resource", "exists": true }
+                  ],
+                  "output": { "classesDirs": ["$ROOT/app/build/classes/java/main"], "resourcesDir": "$ROOT/app/build/resources/main" },
+                  "compile": { "java": { "sourceCompatibility": "21", "targetCompatibility": "17", "release": null } },
+                  "dependencyGraph": {
+                    "compileClasspath": {
+                      "roots": [
+                        { "to": 0, "declaredIn": "implementation" },
+                        { "to": 1, "declaredIn": "implementation" },
+                        { "unresolved": "demo:missing:1.0", "reason": "Could not find demo:missing:1.0." }
+                      ],
+                      "nodes": [
+                        { "kind": "project", "build": ":", "path": ":core", "deps": [ { "to": 2 } ] },
+                        { "kind": "module", "group": "org.springframework", "name": "spring-web", "version": "6.1.0", "deps": [ { "to": 3, "requested": "2.15.0" } ] },
+                        { "kind": "module", "group": "com.google.guava", "name": "guava", "version": "33.0.0-jre", "deps": [] },
+                        { "kind": "module", "group": "com.fasterxml.jackson.core", "name": "jackson-databind", "version": "2.17.0", "reason": "conflict", "deps": [] }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "tools", "kind": "included", "rootDir": "$ROOT/tools", "errors": [],
+          "projects": [
+            {
+              "path": ":", "name": "tools", "projectDir": "$ROOT/tools", "buildFile": "$ROOT/tools/build.gradle",
+              "plugins": [ { "id": "org.gradle.java-library" } ],
+              "java": { "sourceCompatibility": "17", "targetCompatibility": "17", "toolchain": { "languageVersion": "17" } },
+              "sourceSets": [
+                {
+                  "name": "main",
+                  "roots": [ { "dir": "$ROOT/tools/src/main/java", "kind": "source", "exists": true } ],
+                  "output": { "classesDirs": ["$ROOT/tools/build/classes/java/main"], "resourcesDir": "$ROOT/tools/build/resources/main" },
+                  "compile": { "java": { "sourceCompatibility": "17", "targetCompatibility": "17", "release": "17" } }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "modules": [], "sharedSourceRoots": [], "libraries": [], "gradleScripts": [], "failedBuilds": []
+}

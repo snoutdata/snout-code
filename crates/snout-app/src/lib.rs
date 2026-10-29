@@ -36,6 +36,7 @@ pub mod settings_view;
 pub mod splash;
 pub mod spring;
 pub mod status;
+pub mod structure;
 pub mod tabs;
 pub mod theme;
 pub mod tool_windows;

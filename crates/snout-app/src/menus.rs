@@ -115,6 +115,7 @@ actions!(
         SortStructure,
         SpringAtCaret,
         SpringProfiles,
+        ProjectStructure,
     ]
 );
 
@@ -235,6 +236,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Resume Program", Box::new(Resume)),
         ("Clear Output", Box::new(ClearOutput)),
         ("Sync Gradle Project", Box::new(SyncGradle)),
+        ("Project Structure…", Box::new(ProjectStructure)),
         ("Refresh Gradle Tasks", Box::new(RefreshGradle)),
         ("Collapse All Gradle Tasks", Box::new(CollapseGradle)),
         ("Spring Beans and Endpoints", Box::new(ShowSpring)),
@@ -338,6 +340,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Open Project…", Open),
             MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent, remote))),
             MenuItem::action("Close Project", CloseProject),
+            MenuItem::separator(),
+            MenuItem::action("Project Structure…", ProjectStructure),
             MenuItem::separator(),
             MenuItem::action("Connect to SSH Host…", ConnectSsh),
             MenuItem::action("Close Remote Connection", CloseRemote),

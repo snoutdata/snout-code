@@ -610,6 +610,11 @@ impl ProjectModels {
         cx.notify();
     }
 
+    /// The model file read last, and when it was written.
+    pub fn source(&self) -> Option<(PathBuf, SystemTime)> {
+        self.source.clone()
+    }
+
     /// The model, if it is the open project's.
     pub fn model_for(&self, root: &Path) -> Option<Rc<ProjectModel>> {
         self.current.clone().filter(|_| self.root.as_deref() == Some(root))

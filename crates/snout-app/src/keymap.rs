@@ -49,8 +49,10 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-alt-o", Box::new(GoToClass), None),
         ("cmd-shift-a", Box::new(SearchEverywhere), None),
         ("cmd-,", Box::new(OpenSettings), None),
+        ("cmd-;", Box::new(ProjectStructure), None),
         ("escape", Box::new(s::SearchClose), Some("BranchPopup")),
         ("escape", Box::new(s::SearchClose), Some("Settings")),
+        ("escape", Box::new(s::SearchClose), Some("ProjectStructure")),
         ("escape", Box::new(s::SearchClose), Some("NewProject")),
         ("cmd-shift-f", Box::new(FindInFiles), None),
         // GPUI Kit's editor takes ⇧⌘F for replace; here it stays find in files, and
@@ -380,6 +382,8 @@ mod tests {
                 "ctrl-alt-g",
                 "ctrl-alt-p",
                 "cmd-shift-r",
+                // Project Structure.
+                "cmd-;",
             ] {
                 let os = cx.platform_info().os;
                 let keys = Keystroke::parse_with_os(keys, os).unwrap().unparse(os);

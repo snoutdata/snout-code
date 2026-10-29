@@ -135,6 +135,10 @@ pub struct Settings {
     pub confirm_quit: bool,
     /// The profiles each project's Spring model is evaluated under (none kept: any profile).
     pub spring_profiles: std::collections::BTreeMap<PathBuf, crate::spring::ProfileMode>,
+    /// The JDKs added by hand in Project Structure, by their home folders, on this Mac.
+    pub sdks: Vec<PathBuf>,
+    /// The JDKs added by hand on each remote machine, by its SSH host name.
+    pub remote_sdks: std::collections::BTreeMap<String, Vec<PathBuf>>,
 }
 
 impl Default for Settings {
@@ -171,6 +175,8 @@ impl Default for Settings {
             daemon_idle_minutes: crate::processes::DEFAULT_IDLE_MINUTES,
             confirm_quit: true,
             spring_profiles: Default::default(),
+            sdks: Vec::new(),
+            remote_sdks: Default::default(),
         }
     }
 }
