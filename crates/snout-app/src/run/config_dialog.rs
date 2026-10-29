@@ -295,7 +295,6 @@ impl ConfigDialog {
 impl Render for ConfigDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        let hover = p.button_hover;
         let mut items: Vec<AnyElement> = Vec::new();
         let mut last_group = "";
         for (i, c) in self.list.iter().enumerate() {
@@ -315,32 +314,32 @@ impl Render for ConfigDialog {
             }
             let on = Some(i) == self.selected;
             items.push(
-                div()
-                    .id(("config-item", i))
-                    .debug_selector(move || format!("config-item-{i}"))
-                    .h(px(24.))
-                    .mx(px(4.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .rounded(px(4.))
-                    .cursor_pointer()
-                    .when(on, |d| d.bg(p.selection()))
-                    .when(!on, |d| d.hover(move |s| s.bg(hover)))
-                    .child(icon(
-                        match c.kind {
-                            Kind::Main => Icon::Play,
-                            Kind::Gradle => Icon::Build,
-                            Kind::Tests => Icon::Check,
-                        },
-                        12.,
-                        p.ok,
-                    ))
-                    .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(c.name.clone()))
-                    .when(c.user, |d| d.child(div().text_color(p.accent).child("•")))
-                    .on_click(cx.listener(move |this, _, w, cx| this.pick(i, w, cx)))
-                    .into_any_element(),
+                crate::components::list_row_h(
+                    ("config-item", i),
+                    crate::components::RowState::current(on),
+                    crate::components::TREE_ROW_H,
+                    &p,
+                )
+                .debug_selector(move || format!("config-item-{i}"))
+                .mx(px(4.))
+                .w_auto()
+                .px(px(8.))
+                .gap(px(6.))
+                .rounded(px(4.))
+                .cursor_pointer()
+                .child(icon(
+                    match c.kind {
+                        Kind::Main => Icon::Play,
+                        Kind::Gradle => Icon::Build,
+                        Kind::Tests => Icon::Check,
+                    },
+                    12.,
+                    p.ok,
+                ))
+                .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(c.name.clone()))
+                .when(c.user, |d| d.child(div().text_color(p.accent).child("•")))
+                .on_click(cx.listener(move |this, _, w, cx| this.pick(i, w, cx)))
+                .into_any_element(),
             );
         }
         let button = |id: &'static str, text: &'static str, primary: bool| {

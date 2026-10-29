@@ -156,7 +156,6 @@ impl Render for GradleWindow {
         let count = rows.len();
         let this = cx.entity();
         let runs_entity = self.runs.clone();
-        let hover = p.button_hover;
         base.child(
             uniform_list("gradle-tasks", count, move |range, _, _| {
                 range
@@ -183,40 +182,40 @@ impl Render for GradleWindow {
                             (Row::Build { .. } | Row::Project { .. }, _) => p.accent,
                             _ => p.fg_dim,
                         };
-                        div()
-                            .id(("gradle-row", i))
-                            .debug_selector(move || format!("gradle-row-{i}"))
-                            .h(px(24.))
-                            .pl(px(8. + 16. * depth as f32))
-                            .pr(px(8.))
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .cursor_pointer()
-                            .hover(move |s| s.bg(hover))
-                            .child(div().flex_none().w(px(12.)).when_some(chevron, |d, open| {
-                                d.child(icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, 12., p.fg_dim))
-                            }))
-                            .child(icon(glyph, 14., ink))
-                            .child(div().whitespace_nowrap().child(label))
-                            .when_some(tip, |d, tip| {
-                                let tip: SharedString = tip.into();
-                                d.tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
-                            })
-                            .on_click(move |e, _, cx| match &row {
-                                Row::Build { key, .. } | Row::Project { key, .. } | Row::Group { key, .. } => {
-                                    let key = key.clone();
-                                    this.update(cx, |w, cx| w.toggle(&key, cx));
+                        crate::components::list_row_h(
+                            ("gradle-row", i),
+                            crate::components::RowState::default(),
+                            crate::components::TREE_ROW_H,
+                            &p,
+                        )
+                        .debug_selector(move || format!("gradle-row-{i}"))
+                        .pl(px(8. + 16. * depth as f32))
+                        .pr(px(8.))
+                        .gap(px(5.))
+                        .cursor_pointer()
+                        .child(div().flex_none().w(px(12.)).when_some(chevron, |d, open| {
+                            d.child(icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, 12., p.fg_dim))
+                        }))
+                        .child(icon(glyph, 14., ink))
+                        .child(div().whitespace_nowrap().child(label))
+                        .when_some(tip, |d, tip| {
+                            let tip: SharedString = tip.into();
+                            d.tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
+                        })
+                        .on_click(move |e, _, cx| match &row {
+                            Row::Build { key, .. } | Row::Project { key, .. } | Row::Group { key, .. } => {
+                                let key = key.clone();
+                                this.update(cx, |w, cx| w.toggle(&key, cx));
+                            }
+                            Row::Task { build, path, .. } => {
+                                if e.click_count() >= 2 {
+                                    let launch = Launch::Task { build: Some(build.clone()), task: path.clone() };
+                                    runs.update(cx, |r, cx| {
+                                        r.start(launch, cx);
+                                    });
                                 }
-                                Row::Task { build, path, .. } => {
-                                    if e.click_count() >= 2 {
-                                        let launch = Launch::Task { build: Some(build.clone()), task: path.clone() };
-                                        runs.update(cx, |r, cx| {
-                                            r.start(launch, cx);
-                                        });
-                                    }
-                                }
-                            })
+                            }
+                        })
                     })
                     .collect()
             })

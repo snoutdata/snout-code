@@ -323,6 +323,18 @@ mod shots {
                     greeter.update(cx, |e, cx| e.set_diagnostics(diags, cx));
                 })
                 .unwrap();
+                // The editor's right-click menu, its Refactor submenu open.
+                if name.contains("editor-menu") {
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        let ws = ws.read(cx);
+                        let greeter =
+                            ws.editors(cx).into_iter().find(|e| e.read(cx).path.ends_with("Greeter.java")).unwrap();
+                        let at = gpui::point(px(620.), px(300.));
+                        greeter
+                            .update(cx, |e, cx| e.open_context_menu_at(at, true, Some("Greeter".into()), window, cx));
+                    })
+                    .unwrap();
+                }
                 // The palette shot: the file split in two, and the command palette over it.
                 if name.contains("palette") {
                     cx.update_window(handle.into(), |_, window, cx| {
@@ -2377,6 +2389,15 @@ mod shots {
         shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
         shot("palette-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
+        shot("editor-menu-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
+        shot("editor-menu-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
+        themed_shot(
+            ColorTheme::Vivid,
+            "vivid-editor-menu-light",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::Editor),
+        );
         use snout_app::settings_view::Page;
         shot("settings-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Appearance)));
         shot("settings-light", ThemeChoice::Light, Activity::Project, Some(Select::Settings(Page::Editor)));

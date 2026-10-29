@@ -25,7 +25,7 @@ use crate::look::{self, separator, title};
 use crate::model::{Action, Model};
 use crate::theme::{Palette, mix, palette};
 
-pub const ROW: f32 = 22.0;
+pub const ROW: f32 = crate::components::TREE_ROW_H;
 const INDENT: f32 = 12.0;
 
 /// A file or folder in the tree.
@@ -344,23 +344,15 @@ impl Render for FileTree {
                 let is_dir = e.dir;
                 let model = model.clone();
                 let tip: SharedString = e.path.display().to_string().into();
-                let hover_bg = p.button_hover;
                 let selector = label.clone();
-                div()
-                    .id(("file-row", i))
+                crate::components::list_row_h(("file-row", i), crate::components::RowState::current(selected), ROW, &p)
                     .debug_selector(move || format!("file-{selector}"))
                     .relative()
-                    .flex_none()
-                    .h(px(ROW))
+                    .gap_0()
                     .pl(px(2. + depth as f32 * INDENT))
                     .pr(px(4.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(5.))
                     .cursor_pointer()
                     .text_color(ink)
-                    .when(selected, |d| d.bg(p.selection()))
-                    .when(!selected, |d| d.hover(move |s| s.bg(hover_bg)))
                     // Indent guides: a hairline under each open folder above this row.
                     .children((0..depth).map(|d| {
                         div().absolute().top_0().bottom_0().left(px(2. + d as f32 * INDENT + 7.)).w(px(1.)).bg(guide)

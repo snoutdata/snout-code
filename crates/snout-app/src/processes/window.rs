@@ -13,7 +13,7 @@ use gpui_component::tooltip::Tooltip;
 
 use super::{Act, Kind, Processes, Row, bytes, duration, totals};
 use crate::glyphs::{Icon, icon};
-use crate::theme::palette;
+use crate::theme::{mix, palette};
 
 pub struct ProcessesWindow {
     pub processes: Entity<Processes>,
@@ -81,14 +81,16 @@ impl Render for ProcessesWindow {
         let cell = |w: f32| div().w(px(w)).flex_none().overflow_hidden().whitespace_nowrap();
         let header = div()
             .flex_none()
-            .h(px(24.))
-            .px(px(10.))
+            .h(px(crate::components::HEAD_H))
+            .mx(px(4.))
+            .px(px(crate::components::ROW_PAD + 1.))
             .flex()
             .items_center()
             .gap(px(8.))
             .border_b_1()
-            .border_color(p.border)
-            .text_size(px(11.5))
+            .border_color(mix(p.border, 0.7, p.ground))
+            .text_size(px(crate::components::HEAD_TEXT))
+            .font_weight(FontWeight::MEDIUM)
             .text_color(p.fg_dim)
             .child(div().flex_1().min_w_0().child("Process"))
             .child(cell(PID_W).text_right().child("PID"))
@@ -155,17 +157,8 @@ impl Render for ProcessesWindow {
                                 }),
                         );
                     }
-                    div()
-                        .id(("process-row", i))
+                    crate::components::list_row(("process-row", i), crate::components::RowState::default(), &p)
                         .debug_selector(move || format!("process-row-{i}"))
-                        .w_full()
-                        .h(px(24.))
-                        .px(px(10.))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .whitespace_nowrap()
-                        .hover(move |s| s.bg(hover))
                         .child(
                             div()
                                 .id(("process-what", i))
@@ -206,7 +199,8 @@ impl Render for ProcessesWindow {
         })
         .flex_1()
         .min_h_0()
-        .py(px(2.));
+        .px(px(4.))
+        .py(px(3.));
         let summary = format!(
             "{count} {}, {} of memory, {:.0}% CPU",
             if count == 1 { "process" } else { "processes" },

@@ -1159,6 +1159,19 @@ fn java_tools(projects: &Path) {
     let c4 = ce.clone();
     w.with(|_, window, cx| c4.update(cx, |e, cx| e.cancel_rename(window, cx)));
     w.set_text(&ce, original);
+
+    // The editor's right-click menu, on the price calculator.
+    w.caret(&ce, "withTax(BigDecimal net)", 2);
+    w.pump(2, &mut |_| false);
+    let c5 = ce.clone();
+    w.with(|_, window, cx| {
+        c5.update(cx, |e, cx| {
+            e.open_context_menu_at(gpui::point(gpui::px(760.), gpui::px(330.)), true, None, window, cx)
+        })
+    });
+    w.pump(1, &mut |_| false);
+    w.snap("editor-context-menu-light");
+    w.key("escape");
     w.shutdown();
 }
 

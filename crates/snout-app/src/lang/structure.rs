@@ -212,18 +212,19 @@ crate::panels::panel!(StructureWindow, "Structure", |_, _| "Structure".into(), t
 /// engine says of it.
 pub fn symbol_row(row: &Row, selected: bool, lead: gpui::AnyElement, p: &crate::theme::Palette) -> gpui::Div {
     let s = &row.symbol;
-    let hover = p.button_hover;
+    let hover = p.row_hover();
     let detail = s.detail.trim().to_owned();
     div()
-        .h(px(24.))
+        .h(px(crate::components::TREE_ROW_H))
         .w_full()
+        .rounded(px(6.))
         .pl(px(6. + 16. * row.depth as f32))
         .pr(px(8.))
         .flex()
         .items_center()
         .gap(px(5.))
         .cursor_pointer()
-        .when(selected, |d| d.bg(p.selection()))
+        .when(selected, |d| d.bg(p.row_selected()))
         .when(!selected, |d| d.hover(move |s| s.bg(hover)))
         .child(lead)
         .child(symbols::badge(s.kind, p))

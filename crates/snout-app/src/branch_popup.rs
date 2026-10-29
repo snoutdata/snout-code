@@ -84,22 +84,22 @@ fn row(
 ) -> gpui::Stateful<gpui::Div> {
     let p = palette(cx);
     let id: SharedString = id.into();
-    let hover = p.button_hover;
-    div()
-        .id(gpui::ElementId::Name(id.clone()))
-        .debug_selector(move || id.to_string())
-        .h(px(26.))
-        .px(px(8.))
-        .mx(px(4.))
-        .flex()
-        .items_center()
-        .gap(px(8.))
-        .rounded(px(4.))
-        .cursor_pointer()
-        .hover(move |s| s.bg(hover))
-        .child(div().flex_none().size(px(16.)).children(glyph.map(|g| icon(g, 16., p.fg_dim))))
-        .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(text))
-        .when(on, |d| d.child(icon(Icon::Check, 14., p.accent)))
+    crate::components::list_row_h(
+        gpui::ElementId::Name(id.clone()),
+        crate::components::RowState::default(),
+        crate::components::TREE_ROW_H,
+        &p,
+    )
+    .debug_selector(move || id.to_string())
+    .px(px(8.))
+    .mx(px(4.))
+    .w_auto()
+    .gap(px(8.))
+    .rounded(px(4.))
+    .cursor_pointer()
+    .child(div().flex_none().size(px(16.)).children(glyph.map(|g| icon(g, 16., p.fg_dim))))
+    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(text))
+    .when(on, |d| d.child(icon(Icon::Check, 14., p.accent)))
 }
 
 fn heading(text: &'static str, cx: &App) -> AnyElement {

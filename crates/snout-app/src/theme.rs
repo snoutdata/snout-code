@@ -244,6 +244,37 @@ impl Palette {
         mix(self.accent, self.sel_mix, self.panel)
     }
 
+    /// The selected row of a list, a tree or a table while it has the keyboard: a clear wash
+    /// of the accent that the text reads on (WCAG AA).
+    pub fn row_selected(&self) -> Hsla {
+        mix(self.accent, self.sel_mix + if self.dark { 0.02 } else { 0.07 }, self.panel)
+    }
+
+    /// The selected row while its list does not have the keyboard: a neutral, dimmer wash.
+    pub fn row_selected_dim(&self) -> Hsla {
+        mix(self.fg, if self.dark { 0.12 } else { 0.085 }, self.panel)
+    }
+
+    /// A row under the pointer: a faint wash.
+    pub fn row_hover(&self) -> Hsla {
+        mix(self.fg, if self.dark { 0.06 } else { 0.045 }, self.panel)
+    }
+
+    /// `color` as the text of a pill on its own [`Palette::wash`]: deepened (light) or
+    /// lightened (dark) until it reads (WCAG AA).
+    pub fn pill_ink(&self, color: Hsla) -> Hsla {
+        let toward = if self.dark { hex(0xffffff) } else { hex(0x000000) };
+        let wash = self.wash(color);
+        let mut c = color;
+        for _ in 0..40 {
+            if contrast(c, wash) >= 4.6 {
+                break;
+            }
+            c = mix(c, 0.94, toward);
+        }
+        c
+    }
+
     /// The colours of Claude Code's edits, by what they mark.
     pub fn claude(&self) -> ClaudeColors {
         let mark = if self.dark { hex(CLAUDE_DARK) } else { hex(CLAUDE_LIGHT) };
@@ -450,15 +481,15 @@ fn lay(theme: ColorTheme, choice: ThemeChoice, dark: bool, window: Option<&mut W
         t.popover = p.card;
         t.popover_foreground = p.fg;
         t.colors.list = p.panel;
-        t.list_hover = p.button_hover;
-        t.list_active = p.selection();
-        t.list_active_border = p.accent;
-        t.list_even = p.stripe;
+        t.list_hover = p.row_hover();
+        t.list_active = p.row_selected();
+        t.list_active_border = p.focus_ring();
+        t.list_even = p.panel;
         t.list_head = p.panel;
         t.table = p.panel;
-        t.table_even = p.stripe;
-        t.table_hover = p.button_hover;
-        t.table_active = p.selection();
+        t.table_even = p.panel;
+        t.table_hover = p.row_hover();
+        t.table_active = p.row_selected();
         t.table_head = p.panel;
         t.tab = p.ground;
         t.tab_active = p.ground;
@@ -650,6 +681,9 @@ mod tests {
                 ("removed line", p.diff_del()),
                 ("current line", active_line(&p)),
                 ("tab in front", p.tab_selected()),
+                ("a selected row", p.row_selected()),
+                ("a selected row, list unfocused", p.row_selected_dim()),
+                ("a row under the pointer", p.row_hover()),
             ] {
                 need(&format!("fg on {s}"), p.fg, bg, AA, &p);
                 need(&format!("fg_dim on {s}"), p.fg_dim, bg, AA, &p);
@@ -677,6 +711,10 @@ mod tests {
                 need(&format!("{t} callout icon"), c, mix(c, 0.14, p.card), 3.0, &p);
             }
             need("the focus ring", p.focus_ring(), p.card, 3.0, &p);
+            need("a selected row's ring", p.focus_ring(), p.panel, 3.0, &p);
+            for (t, c) in crate::components::StatePill::ALL.map(|s| (s.label(), s.color(&p))) {
+                need(&format!("the {t} pill"), p.pill_ink(c), p.wash(c), AA, &p);
+            }
             need("Spring's hints", p.spring, p.panel, if p.theme == ColorTheme::Classic { 3.0 } else { AA }, &p);
             let s = syntax_colors(&p);
             for (t, c) in [

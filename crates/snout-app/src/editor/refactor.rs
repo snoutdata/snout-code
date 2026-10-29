@@ -282,8 +282,8 @@ impl EditorPanel {
                 .items_center()
                 .rounded(px(4.))
                 .cursor_pointer()
-                .when(selected, |d| d.bg(p.selection()))
-                .when(!selected, |d| d.hover(|s| s.bg(p.button_hover)))
+                .when(selected, |d| d.bg(p.row_selected()))
+                .when(!selected, |d| d.hover(|s| s.bg(p.row_hover())))
                 .child(choice_label(&a.title, c.items.len()))
                 .on_click(cx.listener(move |this, _, window, cx| this.choose(i, window, cx)))
         });

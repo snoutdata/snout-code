@@ -17,6 +17,7 @@ Java files of a Gradle build also get the language features described in [Java](
 - **Save** with ⌘S (File ▸ Save). A dot on the tab means the file has unsaved changes.
 - **Close** a tab with ⌘W (File ▸ Close Tab), with the × that shows when the pointer is over the tab, or with a middle click. A tab with unsaved changes asks first: Save, Don't Save or Cancel.
 - **Reorder** tabs by dragging them. Drop a tab on another tab group to move it there.
+- **Right click** a tab for **Close**, **Close Others**, **Close Tabs to the Right** and **Close All**, **Keep Open** for a preview tab, and **Copy Path** and **Reveal in Finder**.
 - **Split** with ⌘\ (View ▸ Split Editor Right). The file in front opens a second time in a new group to the right. Both views show the same text: what you type in one shows in the other.
 
 The tab bar also shows what Claude Code is doing with a file: a badge with the number of changes it proposes, or a small dot when it changed the file while the editor did not follow. See [Claude Code](claude-code.md).
@@ -59,7 +60,9 @@ The indentation of a file is read from its own text. A file that shows none gets
 
 Each of these is one step that Undo takes back.
 
-Right click in the editor for a menu with Cut, Copy, Paste, Select All and Send Selection to Claude. In a Java file it also has Go to Definition and Quick Fix…, and Run and Debug for what the caret is in.
+Right click in the editor for a menu with Cut, Copy, Paste, Select All and Send Selection to Claude. In a Java file it also has Go to Definition, Quick Fix… and a **Refactor** submenu (Rename Symbol…, Extract Method, Extract Variable, Extract Constant, Extract Field and Inline), and Run and Debug for what the caret is in. Each item shows its icon and, on the right, its shortcut. The arrow keys move through the menu (→ opens a submenu), ↩ picks an item and Esc closes it.
+
+![The editor's right-click menu](images/editor-context-menu.png)
 
 ## Find and replace in a file
 

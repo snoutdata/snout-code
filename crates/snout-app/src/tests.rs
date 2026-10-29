@@ -591,11 +591,21 @@ fn the_git_view_sorts_switches_tabs_and_resizes_with_the_pointer(cx: &mut TestAp
     cx.run_until_parked();
     let git = cx.update(|_, cx| ws.read(cx).git.clone());
     // A click on a column header sorts by it; a second click flips the order.
-    let state = cx.debug_bounds("sort-1").expect("the State header is drawn").center();
+    let state = cx.debug_bounds("files-head-sort-1").expect("the State header is drawn").center();
     cx.simulate_click(state, Modifiers::none());
     cx.update(|_, cx| assert_eq!(model.read(cx).sort, (crate::model::SortColumn::State, true)));
     cx.simulate_click(state, Modifiers::none());
     cx.update(|_, cx| assert_eq!(model.read(cx).sort, (crate::model::SortColumn::State, false)));
+    // The handle between two columns' titles drags the first one wider.
+    let name_w = cx.update(|_, cx| git.read(cx).file_column_widths(cx)[0].unwrap());
+    let handle = cx.debug_bounds("files-head-resize-0").expect("the Name column's handle is drawn").center();
+    cx.simulate_mouse_down(handle, MouseButton::Left, Modifiers::none());
+    for dx in [10., 30., 40.] {
+        cx.simulate_mouse_move(point(handle.x + px(dx), handle.y), MouseButton::Left, Modifiers::none());
+    }
+    cx.simulate_mouse_up(point(handle.x + px(40.), handle.y), MouseButton::Left, Modifiers::none());
+    let wider = cx.update(|_, cx| git.read(cx).file_column_widths(cx)[0].unwrap());
+    assert!((wider - name_w - 40.).abs() <= 8., "the Name column follows the pointer: {name_w} to {wider}");
     // The bottom pane's tabs.
     let output = cx.debug_bounds("tab-output").expect("the Output tab is drawn").center();
     cx.simulate_click(output, Modifiers::none());

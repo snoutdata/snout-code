@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Context, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px, uniform_list,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, relative, uniform_list,
 };
 use lsp_types::{DiagnosticSeverity, Location, Position, Uri};
 use std::str::FromStr as _;
@@ -47,48 +47,61 @@ fn rows_view(id: &'static str, rows: Vec<Row>, hub: Entity<LangHub>, cx: &mut gp
             .map(|i| {
                 let row = rows[i].clone();
                 let hub = hub.clone();
-                let color = match row.severity {
-                    Some(DiagnosticSeverity::ERROR) => Some(p.error),
-                    Some(DiagnosticSeverity::WARNING) => Some(p.warn),
-                    Some(_) => Some(p.fg_dim),
+                use crate::components::IconName as I;
+                let sev = match row.severity {
+                    Some(DiagnosticSeverity::ERROR) => Some((I::CircleX, p.error)),
+                    Some(DiagnosticSeverity::WARNING) => Some((I::TriangleAlert, p.warn)),
+                    Some(_) => Some((I::Info, p.fg_dim)),
                     None => None,
                 };
-                div()
-                    .id((id, i))
-                    .debug_selector(move || format!("{id}-row-{i}"))
-                    .w_full()
-                    .h(px(24.))
-                    .px(px(10.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(p.button_hover))
-                    .when_some(color, |d, c| d.child(div().flex_none().size(px(8.)).rounded_full().bg(c)))
-                    .child(div().flex_none().whitespace_nowrap().text_color(p.fg).child(row.file.clone()))
-                    .child(div().flex_none().whitespace_nowrap().text_color(p.weak()).child(row.place.clone()))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .text_color(p.fg_dim)
-                            .when(row.severity.is_none(), |d| d.font_family(look::MONO))
-                            .child(row.text.clone()),
-                    )
-                    .on_click(move |_, _, cx| {
-                        let row = row.clone();
-                        hub.update(cx, |h, cx| {
-                            let root =
-                                h.root_of(&row.uri).or_else(|| h.servers.keys().next().cloned()).unwrap_or_default();
-                            cx.emit(HubEvent::Open { root, uri: row.uri, at: row.at });
-                        });
-                    })
+                let (dir, name) = match row.file.rsplit_once('/') {
+                    Some((d, n)) => (d.to_owned(), n.to_owned()),
+                    None => (String::new(), row.file.to_string()),
+                };
+                crate::components::list_row_h(
+                    (id, i),
+                    crate::components::RowState::default(),
+                    crate::components::TREE_ROW_H,
+                    &p,
+                )
+                .debug_selector(move || format!("{id}-row-{i}"))
+                .gap(px(7.))
+                .cursor_pointer()
+                .when_some(sev, |d, (g, c)| d.child(crate::components::icon(g, 14., c)))
+                .child(crate::components::file_label(name, &p).flex_none())
+                .child(div().flex_none().text_color(p.fg_dim).child(row.place.clone()))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .text_color(p.fg)
+                        .when(row.severity.is_none(), |d| d.font_family(look::MONO))
+                        .child(row.text.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .w(relative(0.3))
+                        .max_w(px(360.))
+                        .h_full()
+                        .flex()
+                        .child(crate::components::path_text(("problem-dir", i), dir, p.fg_dim)),
+                )
+                .on_click(move |_, _, cx| {
+                    let row = row.clone();
+                    hub.update(cx, |h, cx| {
+                        let root = h.root_of(&row.uri).or_else(|| h.servers.keys().next().cloned()).unwrap_or_default();
+                        cx.emit(HubEvent::Open { root, uri: row.uri, at: row.at });
+                    });
+                })
             })
             .collect()
     })
     .flex_1()
+    .px(px(4.))
 }
 
 /// Every problem the servers report.

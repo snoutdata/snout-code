@@ -176,6 +176,7 @@ impl Workspace {
                         let path = path.clone();
                         menu = menu.item(
                             PopupMenuItem::new(Model::dir_name(&path))
+                                .icon(crate::components::menu_icon(crate::components::IconName::Folder))
                                 .on_click(move |_, w, cx| w.dispatch_action(Box::new(OpenRecent(path.clone())), cx)),
                         );
                     }
@@ -305,6 +306,7 @@ impl Workspace {
                 }
                 menu.separator().item(
                     PopupMenuItem::new("Edit Configurations…")
+                        .icon(crate::components::menu_icon(crate::components::IconName::Settings))
                         .icon(crate::components::menu_icon(crate::components::IconName::Settings))
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::EditConfigurations), cx)),
                 )

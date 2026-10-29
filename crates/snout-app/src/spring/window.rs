@@ -17,6 +17,7 @@ use gpui_component::input::{InputEvent, InputState};
 use gpui_component::tooltip::Tooltip;
 
 use super::{Bean, Endpoint, Load, ModuleBeans, Spring, green, simple};
+use crate::components::RowState;
 use crate::glyphs::{Icon, icon};
 use crate::theme::{mix, palette};
 
@@ -499,26 +500,17 @@ impl SpringWindow {
         } else {
             let this = cx.entity();
             let count = rows.len();
-            let hover = p.button_hover;
             let leaf = green(&p);
             uniform_list("spring-beans", count, move |range, _, _| {
                 range
                     .map(|i| {
                         let row = rows[i].clone();
                         let this = this.clone();
-                        let base = div()
-                            .id(("spring-bean-row", i))
+                        let base = crate::components::tree_row(("spring-bean-row", i), RowState::default(), &p)
                             .debug_selector(move || format!("spring-bean-row-{i}"))
-                            .w_full()
                             .overflow_hidden()
-                            .h(px(24.))
-                            .pr(px(8.))
-                            .flex()
-                            .items_center()
                             .gap(px(5.))
-                            .cursor_pointer()
-                            .whitespace_nowrap()
-                            .hover(move |s| s.bg(hover));
+                            .cursor_pointer();
                         match row {
                             BeanRow::Module { key, name, count, library, open } => base
                                 .pl(px(8.))
@@ -580,6 +572,7 @@ impl SpringWindow {
             })
             .flex_1()
             .min_h_0()
+            .px(px(4.))
             .into_any_element()
         };
         div()
@@ -637,16 +630,14 @@ impl SpringWindow {
         }
         let sort = (self.endpoints.sort, self.endpoints.ascending);
         let header_cell = |id: &'static str, col: Column, label: &'static str, cx: &mut Context<Self>| {
-            let arrow = (sort.0 == col).then_some(if sort.1 { Icon::ChevronUp } else { Icon::ChevronDown });
+            let sorted = (sort.0 == col).then_some(sort.1);
             div()
                 .id(id)
                 .debug_selector(move || id.to_owned())
                 .flex()
                 .items_center()
-                .gap(px(2.))
                 .cursor_pointer()
-                .child(label)
-                .children(arrow.map(|a| icon(a, 11., p.fg_dim)))
+                .child(crate::components::head_title(label, sorted, &p))
                 .on_click(cx.listener(move |this, _, _, cx| this.sort_by(col, cx)))
         };
         // The module column only when the endpoints come from more than one.
@@ -655,17 +646,8 @@ impl SpringWindow {
             all.first().is_some_and(|f| all.iter().any(|e| e.module != f.module))
         };
         let method_w = px(58.);
-        let header = div()
-            .flex_none()
-            .h(px(24.))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .border_b_1()
-            .border_color(p.border)
-            .text_size(px(11.5))
-            .text_color(p.fg_dim)
+        let header = crate::components::header_bar(&p)
+            .mx(px(4.))
             .child(header_cell("spring-sort-method", Column::Method, "Method", cx).w(method_w).flex_none())
             .child(header_cell("spring-sort-path", Column::Path, "Path", cx).flex_1().min_w_0())
             .child(header_cell("spring-sort-handler", Column::Handler, "Handler", cx).w(relative(0.3)).flex_none())
@@ -694,19 +676,11 @@ impl SpringWindow {
                             Some("PUT" | "PATCH") => p.warn,
                             _ => p.fg_dim,
                         };
-                        div()
-                            .id(("spring-endpoint-row", i))
+                        crate::components::list_row(("spring-endpoint-row", i), RowState::default(), &p)
                             .debug_selector(move || format!("spring-endpoint-row-{i}"))
-                            .w_full()
                             .overflow_hidden()
-                            .h(px(24.))
-                            .px(px(10.))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
+                            .gap(px(crate::components::CELL_GAP))
                             .cursor_pointer()
-                            .whitespace_nowrap()
-                            .hover(move |s| s.bg(hover))
                             .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
                             .child(
                                 div()
@@ -779,6 +753,7 @@ impl SpringWindow {
             })
             .flex_1()
             .min_h_0()
+            .px(px(4.))
             .into_any_element()
         };
         div()

@@ -112,6 +112,34 @@ fn a_middle_click_closes_a_tab(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_right_click_in_the_editor_opens_the_apps_menu_and_its_items_reach_the_editor(cx: &mut TestAppContext) {
+    let (repo, _, _, editor, cx) = open_text("menu.txt", "alpha beta\n", (0, 0), cx);
+    cx.run_until_parked();
+    let body = cx.debug_bounds("editor-body").expect("the editor is drawn");
+    let at = body.origin + gpui::point(gpui::px(120.), gpui::px(10.));
+    cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(editor.read(cx).context.is_open(), "our menu opens, not the system's"));
+    // The keyboard is in it: Esc closes it.
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(!editor.read(cx).context.is_open(), "Esc closes it"));
+    // Select All, picked from it, selects the editor's text.
+    cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
+    cx.run_until_parked();
+    cx.simulate_keystrokes("up enter");
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(!editor.read(cx).context.is_open(), "picking an item closes it");
+        let state = editor.read(cx).state.read(cx);
+        assert_eq!(state.selected_range(), 0..state.text().len(), "Select All reached the editor");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
 fn the_status_bar_follows_the_editor_in_front(cx: &mut TestAppContext) {
     let repo = demo_repo("status-bar");
     std::fs::write(repo.join("App.java"), "class App {\r\n\tint x;\r\n}\r\n").unwrap();

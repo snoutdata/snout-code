@@ -117,7 +117,7 @@ impl ConnectDialog {
                     .gap(px(10.))
                     .rounded(px(5.))
                     .cursor_pointer()
-                    .when(on, |d| d.bg(p.selection()))
+                    .when(on, |d| d.bg(p.row_selected()))
                     .when(!on, |d| d.hover(move |s| s.bg(hover)))
                     .child(icon(Icon::Terminal, 15., p.fg_dim))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(h))

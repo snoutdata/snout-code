@@ -696,7 +696,7 @@ impl Render for NewProjectView {
                     .gap(px(10.))
                     .rounded(px(5.))
                     .cursor_pointer()
-                    .when(on, |d| d.bg(p.selection()))
+                    .when(on, |d| d.bg(p.row_selected()))
                     .when(!on, |d| d.hover(move |s| s.bg(hover)))
                     .child(icon(if k == Kind::Java { Icon::Module } else { Icon::Leaf }, 16., p.fg_dim))
                     .child(

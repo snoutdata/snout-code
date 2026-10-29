@@ -796,8 +796,8 @@ impl Render for DialogBody {
                             .h(px(30.))
                             .items_center()
                             .rounded(px(6.))
-                            .when(selected, |d| d.bg(p.selection()))
-                            .hover(|s| s.bg(p.button_hover))
+                            .when(selected, |d| d.bg(p.row_selected()))
+                            .hover(|s| s.bg(p.row_hover()))
                             .child(crate::components::icon(kind, 14., p.fg_dim))
                             .child(item.label.clone())
                             .child(

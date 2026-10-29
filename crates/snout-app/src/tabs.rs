@@ -21,6 +21,7 @@ use gpui_component::dock::{
     PanelId, PanelState, TabGroupContext, TabGroupRenderer,
 };
 
+use crate::components::{ContextMenuExt as _, PopupMenu};
 use crate::editor::EditorPanel;
 use crate::theme::palette;
 
@@ -180,6 +181,55 @@ fn close(group: &TabGroupContext, panel: &Arc<dyn BasePanelView>, window: &mut W
     }
     let group = group.clone();
     crate::editor::confirm_close(editor_of(panel), window, cx, move |window, cx| group.close(id, window, cx));
+}
+
+/// A tab's right-click menu: closing it, the others, those to its right or all of them;
+/// keeping a preview open; its file's path and place in the Finder.
+fn tab_menu(
+    menu: PopupMenu,
+    group: &TabGroupContext,
+    panel: &Arc<dyn BasePanelView>,
+    ix: usize,
+    path: Option<&std::path::Path>,
+    preview: bool,
+    cx: &App,
+) -> PopupMenu {
+    use crate::components::{IconName as I, menu_item};
+    let panels: Vec<Arc<dyn BasePanelView>> = group.panels().to_vec();
+    let id = panel.panel_id(cx);
+    let others: Vec<_> = panels.iter().filter(|q| q.panel_id(cx) != id).cloned().collect();
+    let right: Vec<_> = panels.iter().skip(ix + 1).cloned().collect();
+    let close_all = |which: Vec<Arc<dyn BasePanelView>>| {
+        let group = group.clone();
+        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+            for q in &which {
+                close(&group, q, window, cx);
+            }
+        }
+    };
+    let mut menu = crate::components::styled(menu)
+        .item(menu_item("Close", I::X, close_all(vec![panel.clone()])))
+        .item(menu_item("Close Others", I::ListX, close_all(others.clone())).disabled(others.is_empty()))
+        .item(
+            menu_item("Close Tabs to the Right", I::ArrowRightToLine, close_all(right.clone()))
+                .disabled(right.is_empty()),
+        )
+        .item(menu_item("Close All", I::CircleX, close_all(panels)));
+    if let Some(editor) = editor_of(panel).filter(|_| preview) {
+        menu = menu.separator().item(menu_item("Keep Open", I::Pin, move |_, _, cx| {
+            editor.update(cx, |e, cx| e.pin(cx));
+        }));
+    }
+    if let Some(path) = path {
+        let (copy, reveal) = (path.to_owned(), path.to_owned());
+        menu = menu
+            .separator()
+            .item(menu_item("Copy Path", I::Copy, move |_, _, cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.display().to_string()));
+            }))
+            .item(menu_item("Reveal in Finder", I::FolderOpen, move |_, _, cx| cx.reveal_path(&reveal)));
+    }
+    menu
 }
 
 /// Height of the editor tab bar.
@@ -414,6 +464,10 @@ fn tab(
             let group = group.clone();
             d.drag_over::<DragPanel>(move |s, _, _, _| s.border_l_2().border_color(accent))
                 .on_drop(move |drag: &DragPanel, window, cx| group.drop_panel(drag.clone(), Some(ix), true, window, cx))
+        })
+        .context_menu({
+            let (group, panel, path) = (group.clone(), panel.clone(), path.clone());
+            move |menu, _, cx| tab_menu(menu, &group, &panel, ix, path.as_deref(), preview, cx)
         })
         .into_any_element()
 }

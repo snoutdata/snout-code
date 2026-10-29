@@ -56,7 +56,7 @@ You can also drag a folder from Finder onto the window to open it.
 Below the Repositories list:
 
 - **Local Branches**, then one section per remote, then **Tags** (with their count). Click a section's title to fold it.
-- The current branch has a dot. Branches show how far ahead (↑) and behind (↓) of their upstream they are, and **(gone)** when the upstream was deleted. When HEAD is detached, a `HEAD (detached at …)` line says so.
+- The current branch is in bold with a **HEAD** badge. Branches show how far ahead (↑) and behind (↓) of their upstream they are, and a **gone** badge when the upstream was deleted. When HEAD is detached, a `HEAD (detached at …)` line says so.
 - Hover a branch or tag to see its upstream and its last commit.
 - **Double-click** a branch to check it out, or a tag to check it out detached. A remote branch checks out as a local branch of the same name.
 - **Right-click** a branch for **Check out**, **Create branch from here…**, **Delete…** (for a remote branch, **Delete from** the remote) and **Copy name**. A tag has **Check out (detached)**, **Create branch from tag…** and **Copy name**.
@@ -71,11 +71,12 @@ The buttons at the top of this pane check out (⇧⌘O), create a branch and fet
 
 ## Files
 
-Files lists the changed files of the working tree: name, state (staged, partly staged, untracked, conflicted and so on) and relative directory. The header says how many are changed and how many staged.
+Files lists the changed files of the working tree: name (with the file type's icon), state and relative directory. The state is a small pill in its own colour: **Modified**, **Added**, **Deleted**, **Renamed**, **Untracked** or **Conflicted**, with **Staged** or **Partly staged** beside it once you stage the file. A long directory is shortened in its middle; point at it to read it whole. The header says how many files are changed and how many staged.
 
-- **Sort** by a column: click its header; click again to reverse.
+- **Sort** by a column: click its header; click again to reverse. An arrow marks the column and the order.
+- **Resize** a column: point at the header and drag the handle that shows between two titles.
 - **Filter** by name with the field in the header.
-- **Select** a file to see its diff in Changes. ⌘-click adds or removes a file, ⇧-click selects a range, and ⌘A selects every file shown (when no text field has the keyboard).
+- **Select** a file to see its diff in Changes. The selection shows in the accent colour while the table has the keyboard, and in grey once you click elsewhere. ⌘-click adds or removes a file, ⇧-click selects a range, and ⌘A selects every file shown (when no text field has the keyboard).
 - **Right-click** for **Stage**, **Unstage**, **Discard…**, **Delete…**, **Reveal in Finder** and **Copy path**. A right-click on a file that is not selected selects it first.
 
 When nothing has changed, Files says the working tree is clean.
@@ -148,7 +149,7 @@ Enter the name. The dialog shows where the branch starts (HEAD, unless you start
 
 ## Journal
 
-The Journal, at the bottom, lists recent commits on a graph of their branches and merges, with the message, author, date and short SHA. Branch and tag badges sit beside the message, and commits not yet pushed are drawn solid.
+The Journal, at the bottom, lists recent commits on a graph of their branches and merges, with the message, author, date and short SHA. Branch and tag badges sit beside the message, and commits not yet pushed are drawn solid. Drag the handles between the column titles to resize the columns.
 
 - **Search** by message, author, SHA or ref in the field at the top right. While a search is on, the graph is hidden.
 - **Click** a commit to open it in the commit view.

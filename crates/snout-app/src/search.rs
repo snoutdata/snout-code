@@ -435,14 +435,23 @@ impl Render for SearchView {
                         .gap(px(8.))
                         .rounded(px(6.))
                         .cursor_pointer()
-                        .when(i == selected, |d| d.bg(p.selection()))
+                        .when(i == selected, |d| d.bg(p.row_selected()))
                         .when_some(item.symbol, |d, (kind, visibility)| {
                             d.pl(px(8. + 16. * item.depth as f32))
                                 .child(crate::lang::symbols::badge(kind, &p))
                                 .when_some(visibility, |d, v| d.child(crate::lang::symbols::visibility_mark(v, &p)))
                         })
+                        .when(item.symbol.is_none() && !commands, |d| {
+                            d.child(crate::icons::file_icon(std::path::Path::new(&name), 16., &p))
+                        })
                         .child(div().flex_none().whitespace_nowrap().child(name))
-                        .child(div().flex_none().whitespace_nowrap().text_color(p.weak()).child(dir))
+                        // The folder takes the rest of the row, shortened in its middle, unless
+                        // the row has more to say after it.
+                        .child(if item.detail.is_none() && !commands {
+                            crate::components::path_text(("search-dir", i), dir, p.fg_dim).into_any_element()
+                        } else {
+                            div().flex_none().whitespace_nowrap().text_color(p.fg_dim).child(dir).into_any_element()
+                        })
                         .when(commands, |d| d.child(div().flex_1()))
                         .when_some(item.keys.clone(), |d, keys| {
                             d.child(

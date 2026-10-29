@@ -271,6 +271,8 @@ pub struct EditorPanel {
     pub rename: Option<Entity<InputState>>,
     /// The ways a refactoring can go, while the menu at the caret asks which.
     pub choices: Option<refactor::Choices>,
+    /// The right click's menu, while it is open.
+    pub context: crate::components::MenuOverlay,
     /// A note at the caret: why a command did nothing.
     pub hint: Option<String>,
     _hint: Option<Task<()>>,
@@ -472,6 +474,7 @@ impl EditorPanel {
             signature_line: None,
             rename: None,
             choices: None,
+            context: Default::default(),
             hint: None,
             _hint: None,
             _refactor: None,
@@ -1375,6 +1378,7 @@ impl Render for EditorPanel {
             let line = self.state.read(cx).cursor_position().line;
             r.at_line(line).map(crate::run::Target::menu_label)
         });
+        let this = cx.weak_entity();
         div()
             .size_full()
             .flex()
@@ -1425,6 +1429,7 @@ impl Render for EditorPanel {
                     .relative()
                     .font_family(look::mono_font(cx))
                     .id("editor-body")
+                    .debug_selector(|| "editor-body".into())
                     .on_mouse_move(
                         cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.gutter_hover(e.position, cx)),
                     )
@@ -1450,7 +1455,15 @@ impl Render for EditorPanel {
                                 .pl(px(self.gutter_pad))
                                 .h_full()
                                 .text_size(px(font_size(cx)))
-                                .context_menu(move |menu, _, _| context_menu(menu, has_lang, run_label.as_deref())),
+                                // The engine's own menu is the system's, which takes no icons:
+                                // it is left empty, and the right click opens ours instead.
+                                .context_menu(move |menu, window, cx| {
+                                    if let Some(this) = this.upgrade() {
+                                        let run = run_label.clone();
+                                        this.update(cx, |e, cx| e.open_context_menu(has_lang, run, window, cx));
+                                    }
+                                    menu
+                                }),
                         )
                     })
                     .children(self.claude_overlay(cx))
@@ -1465,49 +1478,85 @@ impl Render for EditorPanel {
                     .children(self.inspections(cx))
                     .children(self.rename_box(cx))
                     .children(self.hint_popup(cx))
-                    .children(self.choices_popup(cx)),
+                    .children(self.choices_popup(cx))
+                    .children(self.context.render(cx)),
             )
+    }
+}
+
+impl EditorPanel {
+    /// Open the right click's menu where the pointer is: Run and Debug for what the caret is
+    /// in (`run`, its name), the code's own items, sending the selection to Claude Code, and
+    /// the clipboard. Its actions go to the editor.
+    pub fn open_context_menu(&mut self, lang: bool, run: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let at = window.mouse_position();
+        self.open_context_menu_at(at, lang, run, window, cx);
+    }
+
+    /// The right click's menu at `at` (window coordinates).
+    pub fn open_context_menu_at(
+        &mut self,
+        at: gpui::Point<gpui::Pixels>,
+        lang: bool,
+        run: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = gpui::Focusable::focus_handle(&self.state, cx);
+        self.context.open(
+            Some(target),
+            at,
+            window,
+            cx,
+            |e| &mut e.context,
+            move |menu, window, cx| context_menu(menu, lang, run.as_deref(), window, cx),
+        );
     }
 }
 
 /// The editor's right-click menu: Run and Debug for what the caret is in (`run`, its name),
 /// the code's own items, sending the selection to Claude Code, and the clipboard.
-fn context_menu(
-    menu: gpui_component::native_menu::NativeMenu,
+pub fn context_menu(
+    menu: crate::components::PopupMenu,
     lang: bool,
     run: Option<&str>,
-) -> gpui_component::native_menu::NativeMenu {
+    window: &mut Window,
+    cx: &mut Context<crate::components::PopupMenu>,
+) -> crate::components::PopupMenu {
+    use crate::components::{IconName as I, PopupMenu, action_item, submenu_item};
     use gpui_component::input as i;
     let menu = match run {
         Some(name) => menu
-            .menu(format!("Run '{name}'"), Box::new(crate::menus::RunContext))
-            .menu(format!("Debug '{name}'"), Box::new(crate::menus::DebugContext))
+            .item(action_item(format!("Run '{name}'"), I::Play, Box::new(crate::menus::RunContext)))
+            .item(action_item(format!("Debug '{name}'"), I::Bug, Box::new(crate::menus::DebugContext)))
             .separator(),
         None => menu,
     };
     let menu = if lang {
-        let refactor = gpui_component::native_menu::NativeMenu::new()
-            .menu("Rename Symbol…", Box::new(RenameSymbol))
-            .separator()
-            .menu("Extract Method", Box::new(ExtractMethod))
-            .menu("Extract Variable", Box::new(ExtractVariable))
-            .menu("Extract Constant", Box::new(ExtractConstant))
-            .menu("Extract Field", Box::new(ExtractField))
-            .menu("Inline", Box::new(Inline));
-        menu.menu("Go to Definition", Box::new(i::GoToDefinition))
-            .menu("Quick Fix…", Box::new(i::ToggleCodeActions))
-            .submenu("Refactor", refactor)
+        let refactor = PopupMenu::build(window, cx, |m, _, _| {
+            crate::components::styled(m)
+                .item(action_item("Rename Symbol…", I::TextCursorInput, Box::new(RenameSymbol)))
+                .separator()
+                .item(action_item("Extract Method", I::SquareFunction, Box::new(ExtractMethod)))
+                .item(action_item("Extract Variable", I::Variable, Box::new(ExtractVariable)))
+                .item(action_item("Extract Constant", I::Pi, Box::new(ExtractConstant)))
+                .item(action_item("Extract Field", I::Box, Box::new(ExtractField)))
+                .item(action_item("Inline", I::FoldVertical, Box::new(Inline)))
+        });
+        menu.item(action_item("Go to Definition", I::SquareArrowOutUpRight, Box::new(i::GoToDefinition)))
+            .item(action_item("Quick Fix…", I::Lightbulb, Box::new(i::ToggleCodeActions)))
+            .item(submenu_item("Refactor", I::Wrench, refactor))
             .separator()
     } else {
         menu
     };
-    menu.menu("Send Selection to Claude", Box::new(SendToClaude))
+    menu.item(action_item("Send Selection to Claude", I::Sparkles, Box::new(SendToClaude)))
         .separator()
-        .menu("Cut", Box::new(i::Cut))
-        .menu("Copy", Box::new(i::Copy))
-        .menu("Paste", Box::new(i::Paste))
+        .item(action_item("Cut", I::Scissors, Box::new(i::Cut)))
+        .item(action_item("Copy", I::Copy, Box::new(i::Copy)))
+        .item(action_item("Paste", I::ClipboardPaste, Box::new(i::Paste)))
         .separator()
-        .menu("Select All", Box::new(i::SelectAll))
+        .item(action_item("Select All", I::SquareDashedMousePointer, Box::new(i::SelectAll)))
 }
 
 /// Close an editor tab (`then` does the closing), asking first whether to save it when

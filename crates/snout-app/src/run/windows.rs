@@ -389,36 +389,34 @@ impl RunWindow {
         let tree = s.tests.clone().unwrap_or_default();
         let id = s.id;
         let rows = tree.rows(&s.collapsed);
-        let hover = p.button_hover;
         let selected = s.selected_test.clone();
         let mut list = Vec::new();
         // The run itself first: its counts.
         let (g, ink) = session_mark(s, &p);
         let runs = self.runs.clone();
         list.push(
-            div()
-                .id("test-root")
-                .debug_selector(|| "test-root".into())
-                .h(px(22.))
-                .px(px(8.))
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .cursor_pointer()
-                .when(selected.is_none(), |d| d.bg(p.selection()))
-                .hover(move |st| st.bg(hover))
-                .child(icon(g, 12., ink))
-                .child(div().font_weight(FontWeight::MEDIUM).child("Test Results"))
-                .child(div().text_color(p.fg_dim).child(millis_text(s.elapsed().as_millis() as u64)))
-                .on_click(move |_, _, cx| {
-                    runs.update(cx, |r, cx| {
-                        if let Some(s) = r.session_mut(id) {
-                            s.selected_test = None;
-                        }
-                        cx.notify();
-                    })
+            crate::components::list_row_h(
+                "test-root",
+                crate::components::RowState::current(selected.is_none()),
+                crate::components::TREE_ROW_H,
+                &p,
+            )
+            .debug_selector(|| "test-root".into())
+            .px(px(8.))
+            .gap(px(6.))
+            .cursor_pointer()
+            .child(icon(g, 12., ink))
+            .child(div().font_weight(FontWeight::MEDIUM).child("Test Results"))
+            .child(div().text_color(p.fg_dim).child(millis_text(s.elapsed().as_millis() as u64)))
+            .on_click(move |_, _, cx| {
+                runs.update(cx, |r, cx| {
+                    if let Some(s) = r.session_mut(id) {
+                        s.selected_test = None;
+                    }
+                    cx.notify();
                 })
-                .into_any_element(),
+            })
+            .into_any_element(),
         );
         for (i, (depth, tid)) in rows.iter().enumerate() {
             let Some(n) = tree.nodes.get(tid) else { continue };
@@ -430,52 +428,51 @@ impl RunWindow {
             let open = !s.collapsed.contains(tid);
             let suite = n.suite;
             list.push(
-                div()
-                    .id(("test-row", i))
-                    .debug_selector(move || format!("test-row-{i}"))
-                    .h(px(22.))
-                    .pl(px(8. + 16. * (*depth as f32 + 1.)))
-                    .pr(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .cursor_pointer()
-                    .when(on, |d| d.bg(p.selection()))
-                    .hover(move |st| st.bg(hover))
-                    .when(suite, |d| {
-                        d.child(
-                            div()
-                                .id(("test-fold", i))
-                                .child(icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, 11., p.fg_dim))
-                                .on_click(move |_, _, cx| {
-                                    cx.stop_propagation();
-                                    runs2.update(cx, |r, cx| {
-                                        if let Some(s) = r.session_mut(id)
-                                            && !s.collapsed.remove(&t2)
-                                        {
-                                            s.collapsed.insert(t2.clone());
-                                        }
-                                        cx.notify();
-                                    })
-                                }),
-                        )
-                    })
-                    .child(icon(g, 12., ink))
-                    .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(n.name.clone()))
-                    .children(
-                        n.millis
-                            .filter(|_| state != TestState::Skipped)
-                            .map(|ms| div().flex_none().text_color(p.fg_dim).child(millis_text(ms))),
+                crate::components::list_row_h(
+                    ("test-row", i),
+                    crate::components::RowState::current(on),
+                    crate::components::TREE_ROW_H,
+                    &p,
+                )
+                .debug_selector(move || format!("test-row-{i}"))
+                .pl(px(8. + 16. * (*depth as f32 + 1.)))
+                .pr(px(8.))
+                .gap(px(6.))
+                .cursor_pointer()
+                .when(suite, |d| {
+                    d.child(
+                        div()
+                            .id(("test-fold", i))
+                            .child(icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, 11., p.fg_dim))
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                runs2.update(cx, |r, cx| {
+                                    if let Some(s) = r.session_mut(id)
+                                        && !s.collapsed.remove(&t2)
+                                    {
+                                        s.collapsed.insert(t2.clone());
+                                    }
+                                    cx.notify();
+                                })
+                            }),
                     )
-                    .on_click(move |_, _, cx| {
-                        runs.update(cx, |r, cx| {
-                            if let Some(s) = r.session_mut(id) {
-                                s.selected_test = Some(t1.clone());
-                            }
-                            cx.notify();
-                        })
+                })
+                .child(icon(g, 12., ink))
+                .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(n.name.clone()))
+                .children(
+                    n.millis
+                        .filter(|_| state != TestState::Skipped)
+                        .map(|ms| div().flex_none().text_color(p.fg_dim).child(millis_text(ms))),
+                )
+                .on_click(move |_, _, cx| {
+                    runs.update(cx, |r, cx| {
+                        if let Some(s) = r.session_mut(id) {
+                            s.selected_test = Some(t1.clone());
+                        }
+                        cx.notify();
                     })
-                    .into_any_element(),
+                })
+                .into_any_element(),
             );
         }
         let detail = match selected.as_ref().and_then(|t| tree.nodes.get(t)) {
@@ -777,22 +774,21 @@ impl RunWindow {
                 };
                 let own = f.path.is_some();
                 frames.push(
-                    div()
-                        .id(("debug-frame", i))
-                        .debug_selector(move || format!("debug-frame-{i}"))
-                        .h(px(22.))
-                        .px(px(10.))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .cursor_pointer()
-                        .when(on, |d| d.bg(p.selection()))
-                        .hover(move |st| st.bg(hover))
-                        .text_color(if own { p.fg } else { p.fg_dim })
-                        .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(f.name.clone()))
-                        .child(div().flex_none().text_color(p.fg_dim).child(place))
-                        .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.select_frame(id, i, cx)))
-                        .into_any_element(),
+                    crate::components::list_row_h(
+                        ("debug-frame", i),
+                        crate::components::RowState::current(on),
+                        crate::components::TREE_ROW_H,
+                        &p,
+                    )
+                    .debug_selector(move || format!("debug-frame-{i}"))
+                    .px(px(10.))
+                    .gap(px(6.))
+                    .cursor_pointer()
+                    .text_color(if own { p.fg } else { p.fg_dim })
+                    .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(f.name.clone()))
+                    .child(div().flex_none().text_color(p.fg_dim).child(place))
+                    .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.select_frame(id, i, cx)))
+                    .into_any_element(),
                 );
             }
         }
@@ -871,49 +867,49 @@ impl RunWindow {
                     Icon::Variable
                 };
                 vars.push(
-                    div()
-                        .id(("debug-var", i))
-                        .debug_selector(move || format!("debug-var-{i}"))
-                        .h(px(22.))
-                        .pl(px(8. + 16. * row.depth as f32))
-                        .pr(px(8.))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .hover(move |st| st.bg(hover))
-                        .when(can_open, |d| d.cursor_pointer())
-                        .child(div().flex_none().w(px(11.)).when(can_open, |d| {
-                            d.child(icon(if row.open { Icon::ChevronDown } else { Icon::ChevronRight }, 11., p.fg_dim))
-                        }))
-                        .child(icon(g, 12., if row.watch.is_some() { p.accent } else { p.fg_dim }))
-                        .child(div().flex_none().whitespace_nowrap().child(row.var.name.clone()))
-                        .when(!row.scope, |d| {
-                            d.child(div().flex_none().text_color(p.fg_dim).child("="))
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .whitespace_nowrap()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .font_family(mono.clone())
-                                        .text_size(px(12.5))
-                                        .child(row.var.value.clone()),
-                                )
-                                .children(
-                                    row.var
-                                        .ty
-                                        .clone()
-                                        .map(|t| div().flex_none().text_color(p.fg_dim).text_size(px(11.5)).child(t)),
-                                )
-                        })
-                        .child(div().flex_1())
-                        .children(remove)
-                        .on_click(move |_, _, cx| {
-                            if can_open {
-                                runs.update(cx, |r, cx| r.toggle_var(id, &key, cx));
-                            }
-                        })
-                        .into_any_element(),
+                    crate::components::list_row_h(
+                        ("debug-var", i),
+                        crate::components::RowState::default(),
+                        crate::components::TREE_ROW_H,
+                        &p,
+                    )
+                    .debug_selector(move || format!("debug-var-{i}"))
+                    .pl(px(8. + 16. * row.depth as f32))
+                    .pr(px(8.))
+                    .gap(px(6.))
+                    .when(can_open, |d| d.cursor_pointer())
+                    .child(div().flex_none().w(px(11.)).when(can_open, |d| {
+                        d.child(icon(if row.open { Icon::ChevronDown } else { Icon::ChevronRight }, 11., p.fg_dim))
+                    }))
+                    .child(icon(g, 12., if row.watch.is_some() { p.accent } else { p.fg_dim }))
+                    .child(div().flex_none().whitespace_nowrap().child(row.var.name.clone()))
+                    .when(!row.scope, |d| {
+                        d.child(div().flex_none().text_color(p.fg_dim).child("="))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .font_family(mono.clone())
+                                    .text_size(px(12.5))
+                                    .child(row.var.value.clone()),
+                            )
+                            .children(
+                                row.var
+                                    .ty
+                                    .clone()
+                                    .map(|t| div().flex_none().text_color(p.fg_dim).text_size(px(11.5)).child(t)),
+                            )
+                    })
+                    .child(div().flex_1())
+                    .children(remove)
+                    .on_click(move |_, _, cx| {
+                        if can_open {
+                            runs.update(cx, |r, cx| r.toggle_var(id, &key, cx));
+                        }
+                    })
+                    .into_any_element(),
                 );
             }
         }

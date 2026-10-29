@@ -123,6 +123,7 @@ impl Render for WelcomePanel {
         let opened = self.model.read(cx).settings.opened.clone();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let hover = p.button_hover;
+        let row_hover = p.row_hover();
         let host = crate::host::host(cx);
 
         let action = |id: &'static str, g: Icon, title: &'static str, note: String, a: Option<Action>| {
@@ -242,7 +243,7 @@ impl Render for WelcomePanel {
                     .gap(px(12.))
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .hover(move |s| s.bg(hover))
+                    .hover(move |s| s.bg(row_hover))
                     .child(
                         div()
                             .flex_none()
@@ -264,15 +265,11 @@ impl Render for WelcomePanel {
                             .flex()
                             .flex_col()
                             .child(div().font_weight(FontWeight::MEDIUM).child(name))
-                            .child(
-                                div()
-                                    .text_size(px(12.))
-                                    .text_color(p.fg_dim)
-                                    .whitespace_nowrap()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .child(tilde(path, &host.info().home)),
-                            ),
+                            .child(div().h(px(16.)).flex().text_size(px(12.)).child(crate::components::path_text(
+                                ("welcome-recent-path", i),
+                                tilde(path, &host.info().home),
+                                p.fg_dim,
+                            ))),
                     )
                     .children(branch.map(|b| {
                         div()

@@ -146,7 +146,6 @@ impl FolderPicker {
 
     fn rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p = palette(cx);
-        let hover = p.button_hover;
         let Some(folders) = &self.folders else { return Vec::new() };
         folders
             .iter()
@@ -156,34 +155,28 @@ impl FolderPicker {
                 let on = self.selected.as_deref() == Some(name.as_str());
                 let id = format!("remote-folder-{i}");
                 let sel = id.clone();
-                div()
-                    .id(SharedString::from(id))
-                    .debug_selector(move || sel.clone())
-                    .h(px(26.))
-                    .px(px(10.))
-                    .mx(px(6.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .rounded(px(5.))
-                    .cursor_pointer()
-                    .when(on, |d| d.bg(p.selection()))
-                    .when(!on, |d| d.hover(move |s| s.bg(hover)))
-                    .child(icon(Icon::Folder, 15., p.fg_dim))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .child(name.clone()),
-                    )
-                    .on_click(cx.listener({
-                        let name = name.clone();
-                        move |this, e: &ClickEvent, window, cx| this.click(name.clone(), e, window, cx)
-                    }))
-                    .into_any_element()
+                crate::components::list_row_h(
+                    SharedString::from(id),
+                    crate::components::RowState::current(on),
+                    crate::components::TREE_ROW_H,
+                    &p,
+                )
+                .debug_selector(move || sel.clone())
+                .px(px(10.))
+                .mx(px(6.))
+                .w_auto()
+                .gap(px(8.))
+                .rounded(px(5.))
+                .cursor_pointer()
+                .child(icon(Icon::Folder, 15., p.fg_dim))
+                .child(
+                    div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name.clone()),
+                )
+                .on_click(cx.listener({
+                    let name = name.clone();
+                    move |this, e: &ClickEvent, window, cx| this.click(name.clone(), e, window, cx)
+                }))
+                .into_any_element()
             })
             .collect()
     }

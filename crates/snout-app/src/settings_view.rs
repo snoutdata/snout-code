@@ -19,7 +19,7 @@ use crate::lang::java::Jdk;
 use crate::look::{self, Trigger};
 use crate::model::Model;
 use crate::settings::{ColorTheme, Settings, ThemeChoice};
-use crate::theme::{Palette, mix, palette};
+use crate::theme::{Palette, palette};
 
 /// A page of the sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -725,7 +725,7 @@ impl SettingsView {
         let conflicts = crate::keymap::Conflicts::new(&self.draft.keymap, cx);
         let recording = self.recording.as_ref().map(|(a, _)| a.clone());
         let hover = p.button_hover;
-        let line = mix(p.border, 0.5, p.card);
+        let row_hover = p.row_hover();
         let mono = look::mono_font(cx);
         let chip = |text: String, warn: bool| {
             div()
@@ -817,12 +817,13 @@ impl SettingsView {
             let mut row = div()
                 .id(("keymap-row", ix))
                 .debug_selector(move || format!("keymap-row-{ix}"))
-                .py(px(4.))
+                .py(px(2.))
+                .px(px(crate::components::ROW_PAD))
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .border_b_1()
-                .border_color(line)
+                .rounded(px(6.))
+                .hover(move |s| s.bg(row_hover))
                 .child(
                     div()
                         .min_h(px(24.))
@@ -929,31 +930,29 @@ impl SettingsView {
                 }
             }
             let on = page == self.page;
-            let hover = p.button_hover;
             let id = format!("settings-page-{}", page.title().to_lowercase().replace(' ', "-"));
             let sel = id.clone();
             rows.push(
-                div()
-                    .id(SharedString::from(id))
-                    .debug_selector(move || sel.clone())
-                    .h(px(26.))
-                    .pl(px(if page.group().is_some() { 28. } else { 12. }))
-                    .pr(px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(4.))
-                    .cursor_pointer()
-                    .font_weight(if page.group().is_some() { FontWeight::NORMAL } else { FontWeight::MEDIUM })
-                    .gap(px(8.))
-                    .when(on, |d| d.bg(p.selection()))
-                    .when(!on, |d| d.hover(move |s| s.bg(hover)))
-                    .child(crate::components::icon(page.icon(), 14., if on { p.fg } else { p.fg_dim }))
-                    .child(page.title())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.page = page;
-                        cx.notify();
-                    }))
-                    .into_any_element(),
+                crate::components::list_row_h(
+                    SharedString::from(id),
+                    crate::components::RowState::current(on),
+                    crate::components::TREE_ROW_H,
+                    &p,
+                )
+                .debug_selector(move || sel.clone())
+                .pl(px(if page.group().is_some() { 28. } else { 12. }))
+                .pr(px(8.))
+                .rounded(px(4.))
+                .cursor_pointer()
+                .font_weight(if page.group().is_some() { FontWeight::NORMAL } else { FontWeight::MEDIUM })
+                .gap(px(8.))
+                .child(crate::components::icon(page.icon(), 14., if on { p.fg } else { p.fg_dim }))
+                .child(page.title())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.page = page;
+                    cx.notify();
+                }))
+                .into_any_element(),
             );
         }
         if rows.is_empty() {

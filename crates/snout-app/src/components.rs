@@ -19,6 +19,11 @@ use snout_core::art::Drawing;
 
 use crate::theme::{Palette, mix, palette};
 
+mod list;
+mod menu;
+pub use list::*;
+pub use menu::*;
+
 // ----- Icons ------------------------------------------------------------------------------
 
 /// An icon: one of Lucide's, or one of the window's own line icons.
@@ -1021,6 +1026,7 @@ impl gpui::Render for Gallery {
                         ),
                     ),
             )
+            .child(gallery_table(cx))
             .child(
                 row()
                     .child(div().w(px(380.)).child(callout(Tone::Danger, "This cannot be undone.", &p)))
@@ -1046,6 +1052,74 @@ impl gpui::Render for Gallery {
                     .child(div().text_size(px(11.)).text_color(p.fg_dim).child(name))
             })))
     }
+}
+
+/// A table of changed files for the gallery: the header, a selection with the keyboard on
+/// it, one without, the pointer's wash, every state's pill.
+fn gallery_table(cx: &mut gpui::Context<Gallery>) -> impl IntoElement {
+    let p = palette(cx);
+    let columns = TableColumns::new(
+        vec![
+            Column::new("Name", Some(220.)),
+            Column::new("State", Some(190.)),
+            Column::new("Relative Directory", None),
+        ],
+        cx,
+    );
+    let widths = columns.read(cx).widths();
+    let files: [(&str, &[StatePill], &str, RowState); 7] = [
+        (
+            "Application.java",
+            &[StatePill::Modified],
+            "scala/bamboo-web/src/main/java/com/solarpanda/bamboo",
+            RowState::new(true, true),
+        ),
+        ("pom.xml", &[StatePill::Added, StatePill::Staged], "scala/bamboo-web", RowState::default()),
+        (
+            "LegacyMapper.java",
+            &[StatePill::Deleted],
+            "scala/bamboo-core/src/main/java/com/solarpanda/legacy",
+            RowState::default(),
+        ),
+        ("Invoice.java", &[StatePill::Renamed, StatePill::PartlyStaged], "billing/src/main/java", RowState::default()),
+        ("NOTES.md", &[StatePill::Untracked], "", RowState::default()),
+        ("build.gradle.kts", &[StatePill::Conflicted], "", RowState::default()),
+        ("Gradle.java", &[StatePill::Modified], "src/main/java/demo", RowState::new(true, false)),
+    ];
+    let rows = files.iter().enumerate().map(|(i, (name, states, dir, state))| {
+        let name_cell = div()
+            .flex()
+            .items_center()
+            .gap(px(7.))
+            .child(crate::icons::file_icon(std::path::Path::new(name), 16., &p))
+            .child(div().text_color(p.fg).child(*name));
+        table_row(
+            ("g-row", i),
+            *state,
+            &widths,
+            vec![
+                name_cell.into_any_element(),
+                state_pills(states, &p).into_any_element(),
+                path_text(("g-dir", i), *dir, p.fg_dim).into_any_element(),
+            ],
+            &p,
+        )
+        .into_any_element()
+    });
+    div()
+        .w(px(700.))
+        .h(px(250.))
+        .flex()
+        .flex_col()
+        .p(px(8.))
+        .rounded(px(8.))
+        .bg(p.panel)
+        .border_1()
+        .border_color(p.border)
+        .child(table(
+            table_header("g-table", &columns, Some((0, true)), None, cx),
+            div().flex().flex_col().children(rows),
+        ))
 }
 
 #[cfg(test)]

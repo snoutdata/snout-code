@@ -17,6 +17,7 @@ SPEC = {
     "projects-new-dependencies": ("projects-new-deps-light", (580, 260, 2300, 1540)),
     "editor-search-everywhere": ("editor-search-everywhere-light", None),
     "editor-command-palette": ("editor-command-palette-light", None),
+    "editor-context-menu": ("editor-context-menu-light", None),
     "java-completion": ("java-completion-light", None),
     "java-hover": ("java-hover-light", None),
     "java-problems": ("java-problems-light", None),

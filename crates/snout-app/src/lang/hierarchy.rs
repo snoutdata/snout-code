@@ -336,54 +336,52 @@ impl Render for HierarchyWindow {
                         let leaf = n.children.as_ref().is_some_and(Vec::is_empty);
                         let (this, this2) = (this.clone(), this.clone());
                         let on = selected == Some(i);
-                        div()
-                            .id(("hierarchy-row", r))
-                            .debug_selector(move || format!("hierarchy-row-{r}"))
-                            .h(px(24.))
-                            .w_full()
-                            .pl(px(6. + 16. * n.depth as f32))
-                            .pr(px(8.))
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .cursor_pointer()
-                            .when(on, |d| d.bg(p.selection()))
-                            .when(!on, |d| d.hover(move |s| s.bg(hover)))
-                            .child(
-                                div()
-                                    .id(("hierarchy-fold", r))
-                                    .flex_none()
-                                    .w(px(12.))
-                                    .when(!leaf, |d| {
-                                        d.child(icon(
-                                            if n.open { Icon::ChevronDown } else { Icon::ChevronRight },
-                                            12.,
-                                            p.fg_dim,
-                                        ))
-                                    })
-                                    .on_click(move |_, _, cx| {
-                                        cx.stop_propagation();
-                                        this2.update(cx, |w, cx| w.toggle(i, cx));
-                                    }),
-                            )
-                            .child(symbols::badge(n.kind, &p))
-                            .child(div().flex_none().whitespace_nowrap().child(n.name.clone()))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_color(p.weak())
-                                    .child(n.detail.clone()),
-                            )
-                            .on_click(move |e, _, cx| {
-                                this.update(cx, |w, cx| {
-                                    w.open(i, cx);
-                                    if e.click_count() >= 2 {
-                                        w.toggle(i, cx);
-                                    }
+                        crate::components::list_row_h(
+                            ("hierarchy-row", r),
+                            crate::components::RowState::current(on),
+                            crate::components::TREE_ROW_H,
+                            &p,
+                        )
+                        .debug_selector(move || format!("hierarchy-row-{r}"))
+                        .pl(px(6. + 16. * n.depth as f32))
+                        .pr(px(8.))
+                        .gap(px(5.))
+                        .cursor_pointer()
+                        .child(
+                            div()
+                                .id(("hierarchy-fold", r))
+                                .flex_none()
+                                .w(px(12.))
+                                .when(!leaf, |d| {
+                                    d.child(icon(
+                                        if n.open { Icon::ChevronDown } else { Icon::ChevronRight },
+                                        12.,
+                                        p.fg_dim,
+                                    ))
                                 })
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    this2.update(cx, |w, cx| w.toggle(i, cx));
+                                }),
+                        )
+                        .child(symbols::badge(n.kind, &p))
+                        .child(div().flex_none().whitespace_nowrap().child(n.name.clone()))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_color(p.weak())
+                                .child(n.detail.clone()),
+                        )
+                        .on_click(move |e, _, cx| {
+                            this.update(cx, |w, cx| {
+                                w.open(i, cx);
+                                if e.click_count() >= 2 {
+                                    w.toggle(i, cx);
+                                }
                             })
+                        })
                     })
                     .collect()
             })

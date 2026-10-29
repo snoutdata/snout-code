@@ -417,97 +417,98 @@ impl Render for ChangesPanel {
             let editing = busy_path.as_ref() == Some(&f.path);
             let (p1, p2, p3, p4) = (f.path.clone(), f.path.clone(), f.path.clone(), f.path.clone());
             rows.push(
-                div()
-                    .id(("claude-file", ix))
-                    .debug_selector(move || format!("claude-file-{ix}"))
-                    .group(group.clone())
-                    .mx(px(4.))
-                    .pl(px(6.))
-                    .pr(px(4.))
-                    .h(px(26.))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .rounded(px(5.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(p.button_hover))
-                    .on_click(cx.listener(move |this, e: &gpui::ClickEvent, w, cx| {
-                        if e.click_count() >= 1 {
-                            let path = p1.clone();
-                            this.act(w, cx, move |ws, w, cx| bridge::open_change(ws, &path, None, w, cx));
-                        }
-                    }))
-                    .child(
+                crate::components::list_row_h(
+                    ("claude-file", ix),
+                    crate::components::RowState::default(),
+                    crate::components::TREE_ROW_H,
+                    &p,
+                )
+                .debug_selector(move || format!("claude-file-{ix}"))
+                .group(group.clone())
+                .mx(px(4.))
+                .w_auto()
+                .pl(px(6.))
+                .pr(px(4.))
+                .gap(px(6.))
+                .rounded(px(5.))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, e: &gpui::ClickEvent, w, cx| {
+                    if e.click_count() >= 1 {
+                        let path = p1.clone();
+                        this.act(w, cx, move |ws, w, cx| bridge::open_change(ws, &path, None, w, cx));
+                    }
+                }))
+                .child(
+                    div()
+                        .id(("claude-disclose", ix))
+                        .flex_none()
+                        .size(px(16.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.toggle(p2.clone(), cx)
+                        }))
+                        .child(look::chevron(open, p.fg_dim)),
+                )
+                .child(crate::icons::file_icon(&f.path, 13., &p))
+                .child(div().flex_none().when(editing, |d| d.text_color(c.mark)).child(name))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .text_color(p.fg_dim)
+                        .text_size(px(11.5))
+                        .child(dir),
+                )
+                .when(f.created(), |d| d.child(look::chip("new", p.ok, &p)))
+                .when(f.source == Source::Watcher, |d| {
+                    d.child(
                         div()
-                            .id(("claude-disclose", ix))
+                            .id(("claude-seen", ix))
                             .flex_none()
-                            .size(px(16.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.toggle(p2.clone(), cx)
-                            }))
-                            .child(look::chevron(open, p.fg_dim)),
-                    )
-                    .child(crate::icons::file_icon(&f.path, 13., &p))
-                    .child(div().flex_none().when(editing, |d| d.text_color(c.mark)).child(name))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
                             .text_color(p.fg_dim)
-                            .text_size(px(11.5))
-                            .child(dir),
+                            .text_size(px(11.))
+                            .tooltip(|w, cx| {
+                                Tooltip::new(
+                                    "Seen on disk while Claude Code was connected; its hooks did not report it",
+                                )
+                                .build(w, cx)
+                            })
+                            .child("seen"),
                     )
-                    .when(f.created(), |d| d.child(look::chip("new", p.ok, &p)))
-                    .when(f.source == Source::Watcher, |d| {
-                        d.child(
-                            div()
-                                .id(("claude-seen", ix))
-                                .flex_none()
-                                .text_color(p.fg_dim)
-                                .text_size(px(11.))
-                                .tooltip(|w, cx| {
-                                    Tooltip::new(
-                                        "Seen on disk while Claude Code was connected; its hooks did not report it",
-                                    )
-                                    .build(w, cx)
-                                })
-                                .child("seen"),
+                })
+                .child(counts(f.added, f.removed, &p, cx))
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .opacity(0.)
+                        .group_hover(group.clone(), |s| s.opacity(1.))
+                        .child(
+                            row_button(("claude-revert-file", ix), Glyph::Discard, "Revert the file", &p)
+                                .debug_selector(move || format!("claude-revert-file-{ix}"))
+                                .on_click(cx.listener(move |this, _, w, cx| {
+                                    cx.stop_propagation();
+                                    let path = p3.clone();
+                                    this.act(w, cx, move |ws, w, cx| bridge::revert_file(ws, &path, w, cx))
+                                })),
                         )
-                    })
-                    .child(counts(f.added, f.removed, &p, cx))
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .opacity(0.)
-                            .group_hover(group.clone(), |s| s.opacity(1.))
-                            .child(
-                                row_button(("claude-revert-file", ix), Glyph::Discard, "Revert the file", &p)
-                                    .debug_selector(move || format!("claude-revert-file-{ix}"))
-                                    .on_click(cx.listener(move |this, _, w, cx| {
-                                        cx.stop_propagation();
-                                        let path = p3.clone();
-                                        this.act(w, cx, move |ws, w, cx| bridge::revert_file(ws, &path, w, cx))
-                                    })),
-                            )
-                            .child(
-                                row_button(("claude-accept-file", ix), Glyph::Stage, "Accept the file", &p)
-                                    .debug_selector(move || format!("claude-accept-file-{ix}"))
-                                    .on_click(cx.listener(move |this, _, w, cx| {
-                                        cx.stop_propagation();
-                                        let path = p4.clone();
-                                        this.act(w, cx, move |ws, w, cx| bridge::accept_file(ws, &path, w, cx))
-                                    })),
-                            ),
-                    )
-                    .into_any_element(),
+                        .child(
+                            row_button(("claude-accept-file", ix), Glyph::Stage, "Accept the file", &p)
+                                .debug_selector(move || format!("claude-accept-file-{ix}"))
+                                .on_click(cx.listener(move |this, _, w, cx| {
+                                    cx.stop_propagation();
+                                    let path = p4.clone();
+                                    this.act(w, cx, move |ws, w, cx| bridge::accept_file(ws, &path, w, cx))
+                                })),
+                        ),
+                )
+                .into_any_element(),
             );
             if open {
                 let now = f.now.clone();
@@ -529,72 +530,62 @@ impl Render for ChangesPanel {
                     let (q1, q2, q3) = (f.path.clone(), f.path.clone(), f.path.clone());
                     let line = h.new_lines.start;
                     rows.push(
-                        div()
-                            .id(("claude-hunk", id))
-                            .debug_selector(move || format!("claude-hunk-{ix}-{hx}"))
-                            .group(hgroup.clone())
-                            .mx(px(4.))
-                            .pl(px(42.))
-                            .pr(px(4.))
-                            .h(px(24.))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            .rounded(px(5.))
-                            .cursor_pointer()
-                            .hover(|s| s.bg(p.button_hover))
-                            .on_click(cx.listener(move |this, _, w, cx| {
-                                let path = q1.clone();
-                                this.act(w, cx, move |ws, w, cx| bridge::open_change(ws, &path, Some(line), w, cx))
-                            }))
-                            .child(div().flex_none().text_color(p.fg_dim).text_size(px(11.5)).child(lines))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .font_family(look::mono_font(cx))
-                                    .text_size(px(11.5))
-                                    .child(preview),
-                            )
-                            .child(counts(h.new_lines.len(), h.old_lines.len(), &p, cx))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .flex()
-                                    .opacity(0.)
-                                    .group_hover(hgroup, |s| s.opacity(1.))
-                                    .child(
-                                        row_button(
-                                            ("claude-revert-hunk", id),
-                                            Glyph::Discard,
-                                            "Revert this change",
-                                            &p,
-                                        )
-                                        .on_click(cx.listener(
-                                            move |this, _, w, cx| {
-                                                cx.stop_propagation();
-                                                let path = q2.clone();
-                                                this.act(w, cx, move |ws, w, cx| {
-                                                    bridge::revert_hunk(ws, &path, hx, w, cx)
-                                                })
-                                            },
-                                        )),
-                                    )
-                                    .child(
-                                        row_button(("claude-accept-hunk", id), Glyph::Stage, "Accept this change", &p)
-                                            .on_click(cx.listener(move |this, _, w, cx| {
-                                                cx.stop_propagation();
-                                                let path = q3.clone();
-                                                this.act(w, cx, move |ws, w, cx| {
-                                                    bridge::accept_hunk(ws, &path, hx, w, cx)
-                                                })
-                                            })),
-                                    ),
-                            )
-                            .into_any_element(),
+                        crate::components::list_row_h(
+                            ("claude-hunk", id),
+                            crate::components::RowState::default(),
+                            crate::components::TREE_ROW_H,
+                            &p,
+                        )
+                        .debug_selector(move || format!("claude-hunk-{ix}-{hx}"))
+                        .group(hgroup.clone())
+                        .mx(px(4.))
+                        .w_auto()
+                        .pl(px(42.))
+                        .pr(px(4.))
+                        .gap(px(8.))
+                        .rounded(px(5.))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, w, cx| {
+                            let path = q1.clone();
+                            this.act(w, cx, move |ws, w, cx| bridge::open_change(ws, &path, Some(line), w, cx))
+                        }))
+                        .child(div().flex_none().text_color(p.fg_dim).text_size(px(11.5)).child(lines))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .font_family(look::mono_font(cx))
+                                .text_size(px(11.5))
+                                .child(preview),
+                        )
+                        .child(counts(h.new_lines.len(), h.old_lines.len(), &p, cx))
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .opacity(0.)
+                                .group_hover(hgroup, |s| s.opacity(1.))
+                                .child(
+                                    row_button(("claude-revert-hunk", id), Glyph::Discard, "Revert this change", &p)
+                                        .on_click(cx.listener(move |this, _, w, cx| {
+                                            cx.stop_propagation();
+                                            let path = q2.clone();
+                                            this.act(w, cx, move |ws, w, cx| bridge::revert_hunk(ws, &path, hx, w, cx))
+                                        })),
+                                )
+                                .child(
+                                    row_button(("claude-accept-hunk", id), Glyph::Stage, "Accept this change", &p)
+                                        .on_click(cx.listener(move |this, _, w, cx| {
+                                            cx.stop_propagation();
+                                            let path = q3.clone();
+                                            this.act(w, cx, move |ws, w, cx| bridge::accept_hunk(ws, &path, hx, w, cx))
+                                        })),
+                                ),
+                        )
+                        .into_any_element(),
                     );
                 }
             }

@@ -480,26 +480,36 @@ fn repo_menu(
     let (m2, path2, group2, names2) = (model.clone(), path.to_owned(), group.map(str::to_owned), names.to_vec());
     reveal_items(menu, model, path)
         .separator()
-        .submenu("Move to group", window, cx, move |mut menu, _, _| {
-            for name in names2.iter().filter(|n| Some(n.as_str()) != group2.as_deref()) {
-                menu = menu.item(
-                    PopupMenuItem::new(name.clone())
-                        .on_click(send(&m2, Action::MoveToGroup(path2.clone(), Some(name.clone())))),
-                );
-            }
-            if group2.is_some() {
-                menu = menu
-                    .item(PopupMenuItem::new("No group").on_click(send(&m2, Action::MoveToGroup(path2.clone(), None))));
-            }
-            if names2.iter().any(|n| Some(n.as_str()) != group2.as_deref()) || group2.is_some() {
-                menu = menu.separator();
-            }
-            menu.item(
-                PopupMenuItem::new("New group…")
-                    .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
-                    .on_click(send(&m2, Action::ShowNewGroup(Some(path2.clone())))),
-            )
-        })
+        .submenu_with_icon(
+            Some(crate::components::menu_icon(crate::components::IconName::FolderInput)),
+            "Move to group",
+            window,
+            cx,
+            move |mut menu, _, _| {
+                for name in names2.iter().filter(|n| Some(n.as_str()) != group2.as_deref()) {
+                    menu = menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .icon(crate::components::menu_icon(crate::components::IconName::Folder))
+                            .on_click(send(&m2, Action::MoveToGroup(path2.clone(), Some(name.clone())))),
+                    );
+                }
+                if group2.is_some() {
+                    menu = menu.item(
+                        PopupMenuItem::new("No group")
+                            .icon(crate::components::menu_icon(crate::components::IconName::FolderMinus))
+                            .on_click(send(&m2, Action::MoveToGroup(path2.clone(), None))),
+                    );
+                }
+                if names2.iter().any(|n| Some(n.as_str()) != group2.as_deref()) || group2.is_some() {
+                    menu = menu.separator();
+                }
+                menu.item(
+                    PopupMenuItem::new("New group…")
+                        .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
+                        .on_click(send(&m2, Action::ShowNewGroup(Some(path2.clone())))),
+                )
+            },
+        )
         .separator()
         .item(
             PopupMenuItem::new("Remove from list")
@@ -522,21 +532,11 @@ fn list_row(
     p: &Palette,
 ) -> gpui::Stateful<gpui::Div> {
     let ink = if dim { p.fg_dim } else { p.fg };
-    let hover = p.button_hover;
-    div()
-        .id(id)
-        .flex_none()
-        .h(px(ROW))
+    crate::components::tree_row(id, crate::components::RowState::current(selected), p)
+        .gap_0()
         .pl(px(2. + f32::from(depth) * INDENT))
         .pr(px(3.))
-        .flex()
-        .items_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(gpui::transparent_black())
         .text_color(ink)
-        .when(selected, |d| d.bg(p.selection()))
-        .when(!selected, |d| d.hover(move |s| s.bg(hover)))
         .child(div().w(px(14.)).h_full().flex_none().when_some(open, |d, open| d.child(look::chevron(open, p.fg_dim))))
         .child(div().w(px(1.)))
         .child(glyph(g, 16., ink))

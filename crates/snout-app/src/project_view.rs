@@ -731,7 +731,6 @@ impl ProjectView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selected = look.file.is_some() && look.file.as_ref() == active;
-        let hover_bg = p.button_hover;
         let depth = row.depth;
         let expandable = row.id.is_some();
         let selector = format!("project-row-{}", look.label);
@@ -739,21 +738,14 @@ impl ProjectView {
         let model = self.model.clone();
         let menu_path = look.path.clone();
         let menu_file = look.file.is_some();
-        div()
-            .id(("project-row", i))
+        crate::components::list_row_h(("project-row", i), crate::components::RowState::current(selected), ROW, p)
             .debug_selector(move || selector.clone())
             .relative()
-            .flex_none()
-            .h(px(ROW))
+            .gap_0()
             .pl(px(2. + depth as f32 * INDENT))
             .pr(px(4.))
-            .flex()
-            .items_center()
-            .rounded(px(5.))
             .cursor_pointer()
             .text_color(look.ink)
-            .when(selected, |d| d.bg(p.selection()))
-            .when(!selected, |d| d.hover(move |s| s.bg(hover_bg)))
             .children(
                 (0..depth).map(|d| {
                     div().absolute().top_0().bottom_0().left(px(2. + d as f32 * INDENT + 7.)).w(px(1.)).bg(guide)
@@ -792,6 +784,19 @@ impl ProjectView {
                 )
             })
             .when_some(look.note, |d, note| {
+                // A folder or a file's place: shortened in its middle, whole in the tooltip.
+                if note.starts_with('/') || note.starts_with('~') {
+                    return d.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .ml(px(8.))
+                            .h_full()
+                            .flex()
+                            .text_size(px(11.5))
+                            .child(crate::components::path_text(("project-row-note", i), note, p.fg_dim)),
+                    );
+                }
                 d.child(
                     div()
                         .flex_1()

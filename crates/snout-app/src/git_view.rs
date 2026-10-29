@@ -9,10 +9,10 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, BorderStyle, Bounds, ClickEvent, Context, Div, Entity, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, PathBuilder,
-    Pixels, Point, Render, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, canvas, div,
-    point, px, quad, uniform_list,
+    AnyElement, AnyView, App, AppContext as _, BorderStyle, Bounds, ClickEvent, Context, Div, Entity, FocusHandle,
+    Hsla, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _,
+    PathBuilder, Pixels, Point, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, canvas,
+    div, point, px, quad, uniform_list,
 };
 use gpui_component::input::{InputEvent, InputState, Textarea, TextareaState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
@@ -28,11 +28,14 @@ use snout_core::{
 };
 
 use crate::art::{drawing, glyph};
+use crate::components::{
+    Column, RowState, TableColumns, file_label, path_text, state_pill, state_pills, table, table_header, table_row,
+};
 use crate::look::{self, BODY, MONO, MONO_SIZE, Trigger, pane, separator, title, weak};
 use crate::model::{Action, Model, ModelEvent, SortColumn, StartPoint};
 use crate::settings::ThemeChoice;
 use crate::theme::{Palette, mix, palette};
-use crate::ui::{change_color, state_color};
+use crate::ui::{change_pill, state_pills as file_pills};
 
 /// A pane edge the pointer can drag.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -133,14 +136,26 @@ pub struct GitView {
     narrow_commit: bool,
     /// The width of the middle column, for what fits beside the Journal's tabs.
     middle_w: f32,
+    /// The tables' columns, as sized by hand.
+    file_columns: Entity<TableColumns>,
+    commit_columns: Entity<TableColumns>,
+    journal_columns: Entity<TableColumns>,
+    /// The tables' keyboard focus: a click on a row gives it to its table, whose selection
+    /// then shows in the accent.
+    files_focus: FocusHandle,
+    commit_focus: FocusHandle,
+    journal_focus: FocusHandle,
+    /// Which of them has it, as of this frame: files, commit files, Journal.
+    focused: (bool, bool, bool),
 }
 
-const FILE_COLUMNS: [Option<f32>; 3] = [Some(260.), Some(170.), None];
-const COMMIT_FILE_COLUMNS: [Option<f32>; 3] = [Some(260.), Some(110.), None];
-/// A file table's row, and the gap egui leaves between rows.
-const ROW: f32 = 21.;
-const ROW_GAP: f32 = 5.;
-const JOURNAL_ROW: f32 = 25.;
+fn file_columns(state_w: f32) -> Vec<Column> {
+    vec![
+        Column::new("Name", Some(260.)).min(120.),
+        Column::new("State", Some(state_w)).min(80.),
+        Column::new("Relative Directory", None),
+    ]
+}
 const DIFF_ROW: f32 = 17.;
 const LANE_W: f32 = 12.;
 /// Width of a Hack digit at the diff's size.
@@ -216,12 +231,33 @@ impl GitView {
             dragging: None,
             narrow_commit: false,
             middle_w: 1000.,
+            file_columns: TableColumns::new(file_columns(170.), cx),
+            commit_columns: TableColumns::new(file_columns(130.), cx),
+            journal_columns: TableColumns::new(
+                vec![
+                    Column::new("", Some(14.)),
+                    Column::new("Message", None),
+                    Column::new("Author", Some(160.)).min(60.),
+                    Column::new("Date", Some(130.)).min(60.),
+                    Column::new("SHA", Some(80.)).min(50.),
+                ],
+                cx,
+            ),
+            files_focus: cx.focus_handle(),
+            commit_focus: cx.focus_handle(),
+            journal_focus: cx.focus_handle(),
+            focused: (false, false, false),
         }
     }
 
     /// The commit box's width as dragged (before the 45 % cap).
     pub fn commit_width(&self) -> f32 {
         self.sizes.commit
+    }
+
+    /// The Files table's column widths, as sized by hand.
+    pub fn file_column_widths(&self, cx: &App) -> Vec<Option<f32>> {
+        self.file_columns.read(cx).widths()
     }
 
     /// Whether the bottom pane shows Output rather than the Journal.
@@ -404,12 +440,12 @@ impl GitView {
             .flex()
             .items_center()
             .gap(px(4.))
-            .h(px(22.))
-            .mb(px(5.))
+            .h(px(crate::components::TREE_ROW_H))
+            .mt(px(4.))
             .pl(px(2.))
             .cursor_pointer()
-            .child(look::disclosure(open, p.fg))
-            .child(div().whitespace_nowrap().child(text))
+            .child(look::chevron(open, p.fg_dim))
+            .child(crate::components::section_title(text, &p))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if !this.toggled.remove(&k) {
                     this.toggled.insert(k.clone());
@@ -433,13 +469,10 @@ impl GitView {
         }
         if let Some(label) = detached {
             rows.push(
-                div()
-                    .flex()
-                    .items_center()
-                    .h(px(22.))
-                    .mb(px(5.))
-                    .child(div().w(px(12.)).child("●"))
-                    .child(div().pl(px(16.)).child(format!("HEAD ({label})")))
+                crate::components::tree_row("detached-head", RowState::default(), &p)
+                    .pl(px(20.))
+                    .child(crate::components::icon(crate::components::IconName::GitCommitHorizontal, 14., p.branch()))
+                    .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(format!("HEAD ({label})")))
                     .into_any_element(),
             );
         }
@@ -497,19 +530,10 @@ impl GitView {
     }
 
     fn branch_row(&mut self, b: &Branch, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let mut label = match b.kind {
+        let label = match b.kind {
             BranchKind::Local => b.name.clone(),
             BranchKind::Remote => b.local_name().to_owned(),
         };
-        if b.ahead > 0 {
-            label += &format!("  ↑{}", b.ahead);
-        }
-        if b.behind > 0 {
-            label += &format!("  ↓{}", b.behind);
-        }
-        if b.upstream_gone {
-            label += "  (gone)";
-        }
         let tip: SharedString = format!(
             "{}{}\n{} {}\n\nDouble-click to check out",
             b.name,
@@ -531,34 +555,47 @@ impl GitView {
         let (b1, b2, b3) = (b.clone(), b.clone(), b.clone());
         let model = self.model.clone();
         let hover_key = key.clone();
-        let hover_bg = p.button_hover;
         let trash_tip = if b.kind == BranchKind::Local { "Delete branch…" } else { "Delete from the remote…" };
-        div()
-            .id(SharedString::from(format!("branch-{key}")))
-            .flex_none()
-            .flex()
-            .items_center()
-            .h(px(22.))
-            .mb(px(5.))
-            .pl(px(18.))
+        let head_ink = if b.is_head { p.fg } else { mix(p.fg, 0.8, p.fg_dim) };
+        let (ahead, behind, gone) = (b.ahead, b.behind, b.upstream_gone);
+        crate::components::tree_row(SharedString::from(format!("branch-{key}")), RowState::default(), p)
+            .pl(px(20.))
             .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                 this.hovered = on.then(|| hover_key.clone());
                 cx.notify();
             }))
-            .child(div().w(px(12.)).flex_none().flex().justify_center().child(if b.is_head { "●" } else { "" }))
+            .child(crate::components::icon(
+                if b.kind == BranchKind::Local {
+                    crate::components::IconName::GitBranch
+                } else {
+                    crate::components::IconName::Cloud
+                },
+                14.,
+                if b.is_head { p.branch() } else { p.fg_dim },
+            ))
             .child(
                 div()
                     .id("label")
-                    .ml(px(8.))
-                    .px(px(8.))
                     .h_full()
+                    .min_w_0()
                     .flex()
                     .items_center()
-                    .rounded(px(6.))
-                    .whitespace_nowrap()
-                    .hover(move |s| s.bg(hover_bg))
+                    .gap(px(6.))
+                    .cursor_pointer()
                     .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
-                    .child(label)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .text_color(head_ink)
+                            .when(b.is_head, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
+                            .child(label),
+                    )
+                    .when(ahead > 0, |d| d.child(crate::components::dim(format!("↑{ahead}"), p)))
+                    .when(behind > 0, |d| d.child(crate::components::dim(format!("↓{behind}"), p)))
+                    .when(gone, |d| d.child(crate::components::badge("gone", crate::components::Tone::Warning, p)))
+                    .when(b.is_head, |d| d.child(crate::components::badge("HEAD", crate::components::Tone::Git, p)))
                     .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
                         if e.click_count() == 2 && !b1.is_head {
                             this.send(Action::RequestCheckout((&b1).into()), cx);
@@ -618,24 +655,17 @@ impl GitView {
         let target = CheckoutTarget::Tag(t.name.clone());
         let (t1, name) = (target.clone(), t.name.clone());
         let model = self.model.clone();
-        let hover_bg = p.button_hover;
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .h(px(22.))
-            .mb(px(5.))
-            .pl(px(38.))
+        crate::components::tree_row(SharedString::from(format!("tag-row-{}", t.name)), RowState::default(), p)
+            .pl(px(20.))
+            .child(crate::components::icon(crate::components::IconName::Tag, 14., p.fg_dim))
             .child(
                 div()
                     .id(SharedString::from(format!("tag-{}", t.name)))
-                    .px(px(8.))
                     .h_full()
+                    .min_w_0()
                     .flex()
                     .items_center()
-                    .rounded(px(6.))
-                    .whitespace_nowrap()
-                    .hover(move |s| s.bg(hover_bg))
+                    .cursor_pointer()
                     .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
                     .child(t.name.clone())
                     .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
@@ -710,27 +740,21 @@ impl GitView {
         let body = if clean {
             look::art_note(snout_core::art::clean(), "The working tree is clean", clean_text, cx)
         } else {
-            let heads = ["Name", "State", "Relative Directory"].map(|t| t.to_owned());
             let sorts = [SortColumn::Name, SortColumn::State, SortColumn::Directory];
-            let head: Vec<AnyElement> = heads
-                .iter()
-                .zip(sorts)
-                .enumerate()
-                .map(|(i, (text, col))| {
-                    let on = by == col;
-                    div()
-                        .id(("sort", i))
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .cursor_pointer()
-                        .child(text.clone())
-                        .when(on, |d| d.child(sort_arrow(asc, p.fg)))
-                        .debug_selector(move || format!("sort-{i}"))
-                        .on_click(cx.listener(move |this, _, _, cx| this.model.update(cx, |m, cx| m.sort_by(col, cx))))
-                        .into_any_element()
-                })
-                .collect();
+            let sorted = sorts.iter().position(|c| *c == by).map(|i| (i, asc));
+            let header = table_header(
+                "files-head",
+                &self.file_columns,
+                sorted,
+                Some(Rc::new({
+                    let model = self.model.clone();
+                    move |i: usize, _: &mut Window, cx: &mut App| model.update(cx, |m, cx| m.sort_by(sorts[i], cx))
+                })),
+                cx,
+            );
+            let widths = self.file_columns.read(cx).widths();
+            let focused = self.focused.0;
+            let lead = m.anchor.clone();
             let list = uniform_list("files", rows.len(), move |range, _, cx| {
                 range
                     .map(|i| {
@@ -741,11 +765,12 @@ impl GitView {
                         let (model, root) = (model.clone(), root.clone());
                         let (path, f2) = (f.path.clone(), f.clone());
                         let cells = vec![
-                            div().child(f.file_name().to_owned()).into_any_element(),
-                            div().text_color(state_color(f, &p)).child(f.state_label()).into_any_element(),
-                            div().text_color(p.weak()).child(f.directory().to_owned()).into_any_element(),
+                            file_label(f.file_name().to_owned(), &p).into_any_element(),
+                            state_pills(&file_pills(f), &p).into_any_element(),
+                            path_text(("file-dir", i), f.directory().to_owned(), p.fg_dim).into_any_element(),
                         ];
-                        table_row(("file", i), i, is_selected, &FILE_COLUMNS, ROW + ROW_GAP, ROW_TEXT, cells, &p)
+                        let state = RowState::new(is_selected, focused).lead(lead.as_deref() == Some(f.path.as_str()));
+                        table_row(("file", i), state, &widths, cells, &p)
                             .on_click({
                                 let model = model.clone();
                                 move |e: &ClickEvent, _, cx| {
@@ -814,7 +839,15 @@ impl GitView {
                     .collect()
             })
             .flex_1();
-            table(&FILE_COLUMNS, head, ROW + ROW_GAP, ROW_TEXT, list.into_any_element(), &p)
+            let focus = self.files_focus.clone();
+            table(header, list)
+                .track_focus(&self.files_focus)
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| focus.focus(window, cx))
+                .on_mouse_down(MouseButton::Right, {
+                    let focus = self.files_focus.clone();
+                    move |_, window, cx| focus.focus(window, cx)
+                })
+                .into_any_element()
         };
         pane(&p).child(header).child(separator(&p)).child(body).into_any_element()
     }
@@ -1038,9 +1071,9 @@ impl GitView {
         let graph = Rc::new(m.graph.clone());
         let shown = m.commit_view.as_ref().and_then(|v| v.id()).map(str::to_owned);
         let model = self.model.clone();
-        let columns = [Some(graph_w), None, Some(160.), Some(130.), Some(80.)];
-        let head: Vec<AnyElement> =
-            ["", "Message", "Author", "Date", "SHA"].iter().map(|t| div().child(*t).into_any_element()).collect();
+        self.journal_columns.update(cx, |c, _| c.fit(0, graph_w));
+        let columns = self.journal_columns.read(cx).widths();
+        let focused = self.focused.2;
         let list = uniform_list("journal", rows.len(), move |range, _, _| {
             range
                 .map(|k| {
@@ -1054,6 +1087,11 @@ impl GitView {
                     let lanes = canvas(
                         |_, _, _| {},
                         move |bounds, _, window, _| {
+                            // Over the row's frame too, so the lanes run on from row to row.
+                            let bounds = Bounds::new(
+                                point(bounds.origin.x, bounds.origin.y - px(1.)),
+                                gpui::size(bounds.size.width, bounds.size.height + px(2.)),
+                            );
                             if show_graph {
                                 paint_graph(bounds, &row, unpushed, is_head, &p, window);
                             } else if unpushed {
@@ -1080,11 +1118,16 @@ impl GitView {
                             .children(c.refs.iter().map(|r| look::ref_badge(r, &p)))
                             .child(c.summary.clone())
                             .into_any_element(),
-                        div().child(c.author.clone()).into_any_element(),
-                        div().text_color(p.weak()).child(c.date.clone()).into_any_element(),
-                        div().font_family(MONO).text_size(px(MONO_SIZE)).child(c.short_id.clone()).into_any_element(),
+                        crate::components::dim(c.author.clone(), &p).into_any_element(),
+                        crate::components::dim(c.date.clone(), &p).into_any_element(),
+                        div()
+                            .font_family(MONO)
+                            .text_size(px(MONO_SIZE - 1.))
+                            .text_color(p.fg_dim)
+                            .child(c.short_id.clone())
+                            .into_any_element(),
                     ];
-                    table_row(("commit", k), k, selected, &columns, JOURNAL_ROW, JOURNAL_TEXT, cells, &p)
+                    table_row(("commit", k), RowState::new(selected, focused), &columns, cells, &p)
                         .on_click({
                             let (model, id) = (model.clone(), id.clone());
                             move |_, _, cx| {
@@ -1136,7 +1179,11 @@ impl GitView {
                 .collect()
         })
         .flex_1();
-        table(&columns, head, JOURNAL_ROW, JOURNAL_HEAD_TEXT, list.into_any_element(), &p)
+        let focus = self.journal_focus.clone();
+        table(table_header("journal-head", &self.journal_columns, None, None, cx), list)
+            .track_focus(&self.journal_focus)
+            .on_any_mouse_down(move |_, window, cx| focus.focus(window, cx))
+            .into_any_element()
     }
 
     // ----- Commit view -------------------------------------------------------------------
@@ -1164,6 +1211,8 @@ impl GitView {
         let root = m.repo.as_ref().map(|r| r.root().to_owned());
         let selected = view.selected.clone();
         let rows = d.files.clone();
+        let widths = self.commit_columns.read(cx).widths();
+        let focused = self.focused.1;
         let list = uniform_list("commit-files", rows.len(), {
             let model = model.clone();
             move |range, _, _| {
@@ -1178,11 +1227,11 @@ impl GitView {
                         let path = f.path.clone();
                         let (model, root) = (model.clone(), root.clone());
                         let cells = vec![
-                            div().child(f.file_name().to_owned()).into_any_element(),
-                            div().text_color(change_color(f.change, &p)).child(f.change.label()).into_any_element(),
-                            div().text_color(p.weak()).child(dir).into_any_element(),
+                            file_label(f.file_name().to_owned(), &p).into_any_element(),
+                            state_pill(change_pill(f.change), &p).into_any_element(),
+                            path_text(("cfile-dir", i), dir, p.fg_dim).into_any_element(),
                         ];
-                        table_row(("cfile", i), i, is_sel, &COMMIT_FILE_COLUMNS, ROW + ROW_GAP, ROW_TEXT, cells, &p)
+                        table_row(("cfile", i), RowState::new(is_sel, focused), &widths, cells, &p)
                             .on_click({
                                 let (model, path) = (model.clone(), path.clone());
                                 move |_, _, cx| model.update(cx, |m, cx| m.select_commit_file(path.clone(), cx))
@@ -1215,12 +1264,14 @@ impl GitView {
             }
         })
         .flex_1();
-        let head: Vec<AnyElement> =
-            ["Name", "State", "Relative Directory"].iter().map(|t| div().child(*t).into_any_element()).collect();
         let files_body = if d.files.is_empty() {
             look::art_note(snout_core::art::clean(), "", "This commit changes no files", cx)
         } else {
-            table(&COMMIT_FILE_COLUMNS, head, ROW + ROW_GAP, ROW_TEXT, list.into_any_element(), &p)
+            let focus = self.commit_focus.clone();
+            table(table_header("commit-files-head", &self.commit_columns, None, None, cx), list)
+                .track_focus(&self.commit_focus)
+                .on_any_mouse_down(move |_, window, cx| focus.focus(window, cx))
+                .into_any_element()
         };
         let files = pane(&p)
             .child(
@@ -1417,6 +1468,11 @@ impl GitView {
 
 impl Render for GitView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.focused = (
+            self.files_focus.contains_focused(window, cx),
+            self.commit_focus.contains_focused(window, cx),
+            self.journal_focus.contains_focused(window, cx),
+        );
         let p = palette(cx);
         let m = self.model.read(cx);
         let has_repo = m.repo.is_some();
@@ -1517,123 +1573,6 @@ impl Render for GitView {
 }
 
 // ----- Pieces ------------------------------------------------------------------------------
-
-/// The ▲ or ▼ beside the column a table sorts by.
-fn sort_arrow(up: bool, color: Hsla) -> impl IntoElement {
-    canvas(
-        |_, _, _| {},
-        move |b, _, window, _| {
-            let c = b.center();
-            let r = px(3.5);
-            let mut path = PathBuilder::fill();
-            if up {
-                path.move_to(point(c.x - r, c.y + r * 0.6));
-                path.line_to(point(c.x + r, c.y + r * 0.6));
-                path.line_to(point(c.x, c.y - r * 0.8));
-            } else {
-                path.move_to(point(c.x - r, c.y - r * 0.6));
-                path.line_to(point(c.x + r, c.y - r * 0.6));
-                path.line_to(point(c.x, c.y + r * 0.8));
-            }
-            path.close();
-            if let Ok(path) = path.build() {
-                window.paint_path(path, color);
-            }
-        },
-    )
-    .flex_none()
-    .size(px(10.))
-}
-
-/// A cell of a table column: fixed width, or the rest of the row when `None`.
-///
-/// egui lays a cell's text a little above the row's middle: its centre is `center` below the
-/// row's top.
-fn column(width: Option<f32>, center: f32, child: AnyElement) -> Div {
-    let d = div().h_full().flex().flex_col().overflow_hidden().whitespace_nowrap();
-    match width {
-        Some(w) => d.flex_none().w(px(w)),
-        // egui keeps the rest-of-the-row column at least 200 points wide; the table is cut
-        // off at the pane's edge instead.
-        None => d.flex_1().min_w(px(200.)),
-    }
-    .child(div().flex_none().h(px(2. * center)).flex().items_center().child(child))
-}
-
-/// Where egui centres the text of a file table's rows, and of the Journal's header and rows.
-const ROW_TEXT: f32 = 7.5;
-const JOURNAL_HEAD_TEXT: f32 = 8.;
-const JOURNAL_TEXT: f32 = 11.;
-
-/// One body row of an egui table: striped, filled when selected, lit under the pointer.
-#[allow(clippy::too_many_arguments)]
-fn table_row(
-    id: impl Into<gpui::ElementId>,
-    index: usize,
-    selected: bool,
-    columns: &[Option<f32>],
-    height: f32,
-    center: f32,
-    cells: Vec<AnyElement>,
-    p: &Palette,
-) -> Stateful<Div> {
-    let hover_bg = p.button_hover;
-    div()
-        .id(id)
-        .h(px(height))
-        .w_full()
-        .flex()
-        .gap(px(8.))
-        .when(index.is_multiple_of(2) && !selected, |d| d.bg(p.stripe))
-        .when(selected, |d| d.bg(p.selection()))
-        .when(!selected, |d| d.hover(move |s| s.bg(hover_bg)))
-        .children(columns.iter().zip(cells).enumerate().map(|(i, (w, c))| {
-            // The Journal's first column is its graph, which takes the whole row.
-            if i == 0 && height == JOURNAL_ROW {
-                div().flex_none().w(px(w.unwrap_or(0.))).h_full().child(c)
-            } else {
-                column(*w, center, c)
-            }
-        }))
-}
-
-/// An egui table: the header row, the rows, and the column lines over both.
-fn table(
-    columns: &[Option<f32>],
-    head: Vec<AnyElement>,
-    height: f32,
-    center: f32,
-    body: AnyElement,
-    p: &Palette,
-) -> AnyElement {
-    let mut lines = Vec::new();
-    let mut x = 0.;
-    for w in columns.iter().take(columns.len() - 1) {
-        let Some(w) = w else { break };
-        x += w + 4.;
-        lines.push(div().absolute().top_0().bottom_0().left(px(x)).w(px(1.)).bg(p.border));
-        x += 4.;
-    }
-    div()
-        .relative()
-        .flex_1()
-        .min_h_0()
-        .overflow_hidden()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .flex_none()
-                .h(px(height))
-                .w_full()
-                .flex()
-                .gap(px(8.))
-                .children(columns.iter().zip(head).map(|(w, c)| column(*w, center, c))),
-        )
-        .child(body)
-        .children(lines)
-        .into_any_element()
-}
 
 /// Path and +/− counts of the diff showing.
 fn diff_title(diff: Option<&Result<Rc<DiffLayout>, String>>, p: &Palette) -> AnyElement {
