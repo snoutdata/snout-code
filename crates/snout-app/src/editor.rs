@@ -281,6 +281,24 @@ pub struct EditorPanel {
     caret_seen: usize,
     /// How far down a restored tab's view was, until it has been laid out to scroll there.
     pending_scroll: Option<f32>,
+    /// The file is being read from the host; the tab shows it once it is.
+    pub loading: bool,
+    /// What was asked of the tab while its file was being read, done once it is: where
+    /// to put the caret (and whether to take the keyboard), and text to take from a split.
+    pending_caret: Option<(Position, bool)>,
+    pending_sync: Option<String>,
+    /// What waits for the file to be read.
+    #[allow(clippy::type_complexity)]
+    after_load: Vec<Box<dyn FnOnce(&mut Self, &mut Window, &mut Context<Self>)>>,
+    /// The Gradle build the file belongs to, as the host showed it when the file was read.
+    pub(crate) build_root: Option<PathBuf>,
+    /// The file was there when last read (a new file Claude proposes is not).
+    on_disk: bool,
+    /// A look at the file on the host is under way.
+    checking: bool,
+    /// A tab a saved session brought back: it closes when its file has gone.
+    pub close_if_gone: bool,
+    _load: Option<Task<()>>,
     focus: FocusHandle,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -408,6 +426,15 @@ impl EditorPanel {
             gutter_tip: None,
             caret_seen: 0,
             pending_scroll: None,
+            loading: false,
+            pending_caret: None,
+            pending_sync: None,
+            after_load: Vec::new(),
+            build_root: None,
+            on_disk: false,
+            checking: false,
+            close_if_gone: false,
+            _load: None,
             focus: cx.focus_handle(),
             _poll: poll,
             _subscriptions: subscriptions,
@@ -427,39 +454,114 @@ impl EditorPanel {
         }
     }
 
-    /// Show the file at `path` in this tab instead (a preview tab moving on).
+    /// Show the file at `path` in this tab instead (a preview tab moving on). The file is
+    /// read off the UI thread; the tab shows it when it comes.
     pub fn load(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.detach_lang(cx);
+        self.path = path.clone();
+        self.loading = true;
+        self.error = None;
+        self.conflict = false;
+        self.head = None;
+        self.changes = Arc::new(Vec::new());
+        self.runnables = None;
+        self.spring = None;
+        self.hints = Rc::new(Vec::new());
+        if path.as_os_str().is_empty() {
+            // A tab about to show something else (a class file).
+            self.loading = false;
+            self._load = None;
+            self.after_load.clear();
+            cx.notify();
+            return;
+        }
         let host = crate::host::host(cx);
-        let (text, error) = match host.read_to_string(&path) {
+        let project = crate::lang::hub(cx).and_then(|h| h.read(cx).model.read(cx).project_root());
+        let served = language_for(&path) == "java" || crate::spring::is_config_file(&path);
+        let read = cx.background_executor().spawn(async move { Loaded::read(&*host, &path, project, served) });
+        self._load = Some(cx.spawn_in(window, async move |this, cx| {
+            let loaded = read.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.path == loaded.path && this.loading {
+                    this.show_loaded(loaded, window, cx);
+                }
+            });
+        }));
+        cx.notify();
+    }
+
+    /// The file as [`Loaded::read`] found it, in the tab.
+    fn show_loaded(&mut self, loaded: Loaded, window: &mut Window, cx: &mut Context<Self>) {
+        let gone = loaded.text.as_ref().is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        if std::mem::take(&mut self.close_if_gone) && gone {
+            self.loading = false;
+            self._load = None;
+            cx.emit(EditorEvent::Discarded);
+            return;
+        }
+        let (text, error) = match loaded.text {
             Ok(text) => (text, None),
-            Err(e) => (String::new(), Some(format!("Could not read {}: {e}", path.display()))),
+            Err(e) => (String::new(), Some(format!("Could not read {}: {e}", loaded.path.display()))),
         };
+        self.on_disk = error.is_none();
         self.info = FileInfo::detect_or(&text, EditorDefaults::now(cx).tab_size);
         let info = self.info;
-        let language = language_for(&path);
-        self.gutter_pad = run_gutter::gutter_pad(&path);
+        let language = language_for(&loaded.path);
+        self.gutter_pad = run_gutter::gutter_pad(&loaded.path);
         self.state.update(cx, |s, cx| {
             s.set_highlighter(language, cx);
             s.set_tab_size(TabSize { tab_size: info.width, hard_tabs: info.tabs }, cx);
             s.set_value(text.clone(), window, cx);
         });
-        self.root = path.ancestors().skip(1).find(|d| host.exists(&d.join(".git"))).map(Path::to_owned);
-        self.disk = disk_stamp(&*host, &path);
-        self.path = path;
+        self.loading = false;
+        self._load = None;
+        self.root = loaded.root;
+        self.disk = loaded.disk;
+        self.build_root = loaded.build;
         self.saved = text;
         self.dirty = false;
         self.conflict = false;
         self.error = error;
-        self.head = None;
-        self.changes = Arc::new(Vec::new());
         self.refresh_head(cx);
         self.attach_lang(cx);
-        self.runnables = None;
         self.refresh_runnables(cx);
-        self.spring = None;
-        self.hints = Rc::new(Vec::new());
         self.refresh_spring(cx);
+        if let Some(text) = self.pending_sync.take() {
+            self.sync_from(&text, window, cx);
+        }
+        // The caret goes where it was asked (taking the keyboard, for a go to).
+        if let Some((at, focus)) = self.pending_caret.take() {
+            self.state.update(cx, |s, cx| {
+                if focus {
+                    s.set_cursor_position(at, window, cx);
+                } else {
+                    let offset = s.text().position_to_offset(&at);
+                    s.set_selected_range(offset..offset, cx);
+                }
+            });
+            self.caret_seen = self.state.read(cx).cursor();
+        }
+        if self.review.is_none() && !self.queue.is_empty() {
+            self.next_review(window, cx);
+        }
+        for f in std::mem::take(&mut self.after_load) {
+            f(self, window, cx);
+        }
         cx.notify();
+    }
+
+    /// Run `f` once the tab shows its file: now, or when it has been read.
+    pub fn after_load(
+        &mut self,
+        f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.loading {
+            self.after_load.push(Box::new(f));
+        } else {
+            f(self, window, cx);
+        }
     }
 
     /// Read the file as the last commit has it, then mark the gutter again.
@@ -520,40 +622,72 @@ impl EditorPanel {
         let preview = self.preview;
         self.load(self.path.clone(), window, cx);
         self.preview = preview;
-        self.state.update(cx, |s, cx| s.set_cursor_position(at, window, cx));
+        self.pending_caret = Some((at, false));
     }
 
     /// Keep this tab's text over what changed on disk; saving writes it.
     pub fn keep_mine(&mut self, cx: &mut Context<Self>) {
         self.conflict = false;
-        self.disk = disk_stamp(&*crate::host::host(cx), &self.path);
+        let (host, path) = (crate::host::host(cx), self.path.clone());
+        let stamp = cx.background_executor().spawn(async move { disk_stamp(&*host, &path) });
+        cx.spawn(async move |this, cx| {
+            let disk = stamp.await;
+            let _ = this.update(cx, |this, _| this.disk = disk);
+        })
+        .detach();
         cx.notify();
     }
 
     /// If the file changed on disk: take the new text when this tab has no changes, or
-    /// say so when it has.
+    /// say so when it has. The host is asked off the UI thread.
     pub fn check_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.class_file.is_some() {
+        if self.class_file.is_some() || self.loading || self.checking || self.conflict {
             return;
         }
-        let host = crate::host::host(cx);
-        let now = disk_stamp(&*host, &self.path);
-        if now.is_none() || now == self.disk || self.conflict {
+        if self.path.as_os_str().is_empty() {
             return;
         }
-        self.disk = now;
-        let Ok(text) = host.read_to_string(&self.path) else { return };
-        if text == self.saved {
-            return;
-        }
-        if self.dirty {
-            self.conflict = true;
-            cx.notify();
-            return;
-        }
-        let before = std::mem::take(&mut self.saved);
-        self.reload(window, cx);
-        cx.emit(EditorEvent::Reloaded(before));
+        self.checking = true;
+        let (host, path, known) = (crate::host::host(cx), self.path.clone(), self.disk);
+        let look = cx.background_executor().spawn(async move {
+            let now = disk_stamp(&*host, &path);
+            let text = (now.is_some() && now != known).then(|| host.read_to_string(&path).ok()).flatten();
+            (now, text)
+        });
+        let path = self.path.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let (now, text) = look.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.checking = false;
+                if this.path != path || this.loading || this.conflict || now.is_none() || now == this.disk {
+                    return;
+                }
+                this.disk = now;
+                let Some(text) = text else { return };
+                if text == this.saved {
+                    return;
+                }
+                if this.dirty {
+                    this.conflict = true;
+                    cx.notify();
+                    return;
+                }
+                let before = std::mem::take(&mut this.saved);
+                let at = this.state.read(cx).cursor_position();
+                let loaded = Loaded {
+                    path: this.path.clone(),
+                    text: Ok(text),
+                    root: this.root.clone(),
+                    disk: now,
+                    build: this.build_root.clone(),
+                };
+                this.loading = true;
+                this.pending_caret = Some((at, false));
+                this.show_loaded(loaded, window, cx);
+                cx.emit(EditorEvent::Reloaded(before));
+            });
+        })
+        .detach();
     }
 
     /// Frame the bracket at the caret and its match, once per caret move or edit.
@@ -647,16 +781,47 @@ impl EditorPanel {
         self.state.read(cx).text().lines_len()
     }
 
-    /// Write the text to the file.
-    pub fn save(&mut self, cx: &mut Context<Self>) {
-        if self.class_file.is_some() {
-            return;
+    /// Write the text to the file, off the UI thread. The task says whether it was written;
+    /// the tab stays dirty until it is.
+    pub fn save(&mut self, cx: &mut Context<Self>) -> Task<bool> {
+        self.save_making_folder(false, cx)
+    }
+
+    /// [`Self::save`], making the file's folder first when `make_folder` (a new file).
+    pub fn save_making_folder(&mut self, make_folder: bool, cx: &mut Context<Self>) -> Task<bool> {
+        if self.class_file.is_some() || self.loading {
+            return Task::ready(!self.dirty);
         }
         let text = self.state.read(cx).value().to_string();
-        let host = crate::host::host(cx);
-        match host.write(&self.path, text.as_bytes()) {
-            Ok(()) => {
-                self.disk = disk_stamp(&*host, &self.path);
+        let (host, path, data) = (crate::host::host(cx), self.path.clone(), text.clone());
+        let write = cx.background_executor().spawn(async move {
+            if make_folder && let Some(dir) = path.parent() {
+                host.create_dir_all(dir)?;
+            }
+            host.write(&path, data.as_bytes())?;
+            Ok::<_, std::io::Error>(disk_stamp(&*host, &path))
+        });
+        let path = self.path.clone();
+        cx.spawn(async move |this, cx| {
+            let written = write.await;
+            this.update(cx, |this, cx| {
+                if this.path != path {
+                    return false;
+                }
+                let ok = written.is_ok();
+                this.saved_as(text, written, cx);
+                ok
+            })
+            .unwrap_or(false)
+        })
+    }
+
+    /// A write of `text` ended as `written` says.
+    fn saved_as(&mut self, text: String, written: std::io::Result<Option<(SystemTime, u64)>>, cx: &mut Context<Self>) {
+        match written {
+            Ok(disk) => {
+                self.disk = disk;
+                self.on_disk = true;
                 self.conflict = false;
                 if let Some(link) = &self.lang
                     && let Some(hub) = link.hub.upgrade()
@@ -672,6 +837,9 @@ impl EditorPanel {
                     let path = self.path.clone();
                     runs.update(cx, |r, cx| r.scala_changed(&path, cx));
                 }
+                // Typed on while it was written: still dirty.
+                let now = self.state.read(cx).text();
+                self.dirty = now.len() != text.len() || *now != text.as_str();
                 self.saved = text;
                 self.refresh_runnables(cx);
                 self.refresh_spring(cx);
@@ -679,7 +847,6 @@ impl EditorPanel {
                     let path = self.path.clone();
                     spring.update(cx, |s, cx| s.file_saved(&path, cx));
                 }
-                self.dirty = false;
                 self.preview = false;
                 self.error = None;
             }
@@ -688,9 +855,23 @@ impl EditorPanel {
         cx.notify();
     }
 
+    /// When the file was last read or written (its modification time and length).
+    pub fn disk_stamp(&self) -> Option<(SystemTime, u64)> {
+        self.disk
+    }
+
+    /// Whether the file was there when last read or written.
+    pub fn on_disk(&self) -> bool {
+        self.on_disk
+    }
+
     /// Take `text` from the other view of this file (a split), changing only what
     /// differs, so this view's caret and scroll stay where they are.
     pub fn sync_from(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.loading {
+            self.pending_sync = Some(text.to_owned());
+            return;
+        }
         let (range, insert) = {
             let mine = self.state.read(cx).text();
             if mine.len() == text.len() && *mine == text {
@@ -719,10 +900,11 @@ impl EditorPanel {
         });
     }
 
-    /// The other view of this file saved it: this one is saved too.
-    pub fn mark_saved(&mut self, cx: &mut Context<Self>) {
+    /// The other view of this file saved it (the file then had `disk`): this one is saved too.
+    pub fn mark_saved(&mut self, disk: Option<(SystemTime, u64)>, cx: &mut Context<Self>) {
         self.saved = self.text(cx);
-        self.disk = disk_stamp(&*crate::host::host(cx), &self.path);
+        self.disk = disk;
+        self.on_disk = true;
         self.dirty = false;
         self.conflict = false;
         cx.notify();
@@ -746,6 +928,12 @@ impl EditorPanel {
     /// Put the caret on `line` and `column` (from 0) and the view's top `scroll` pixels down,
     /// as a saved session had them, without taking the keyboard.
     pub fn restore_view(&mut self, line: u32, column: u32, scroll: f32, cx: &mut Context<Self>) {
+        // The view scrolls once it has been laid out (see `render`).
+        self.pending_scroll = Some(scroll);
+        if self.loading {
+            self.pending_caret = Some((Position::new(line, column), false));
+            return;
+        }
         self.state.update(cx, |s, cx| {
             let offset = s.text().position_to_offset(&Position::new(line, column));
             s.set_selected_range(offset..offset, cx);
@@ -757,6 +945,10 @@ impl EditorPanel {
     }
 
     pub fn go_to(&mut self, line: u32, column: u32, window: &mut Window, cx: &mut Context<Self>) {
+        if self.loading {
+            self.pending_caret = Some((Position::new(line, column), true));
+            return;
+        }
         self.state.update(cx, |s, cx| {
             s.set_cursor_position(Position::new(line, column), window, cx);
             s.focus(window, cx);
@@ -909,6 +1101,27 @@ fn paint_mark(kind: LineChangeKind, b: Bounds<Pixels>, color: Hsla, window: &mut
 }
 
 /// A file's modification time and length, to notice changes made elsewhere.
+/// What a tab shows of a file, as read from the host off the UI thread.
+struct Loaded {
+    path: PathBuf,
+    text: std::io::Result<String>,
+    /// The repository the file is in.
+    root: Option<PathBuf>,
+    disk: Option<(SystemTime, u64)>,
+    /// The Gradle build it belongs to (within `project`), for a file a server may serve.
+    build: Option<PathBuf>,
+}
+
+impl Loaded {
+    fn read(host: &dyn snout_host::Host, path: &Path, project: Option<PathBuf>, served: bool) -> Self {
+        let text = host.read_to_string(path);
+        let root = path.ancestors().skip(1).find(|d| host.exists(&d.join(".git"))).map(Path::to_owned);
+        let disk = disk_stamp(host, path);
+        let build = served.then(|| crate::lang::java::gradle_root(host, path, project.as_deref())).flatten();
+        Loaded { path: path.to_owned(), text, root, disk, build }
+    }
+}
+
 fn disk_stamp(host: &dyn snout_host::Host, path: &Path) -> Option<(SystemTime, u64)> {
     let m = host.metadata(path).ok()?;
     Some((m.modified?, m.len))
@@ -996,6 +1209,7 @@ pub fn saved_class_file(state: &PanelState) -> Option<(lsp_types::Uri, PathBuf)>
 impl Render for EditorPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.state.read(cx).line_height().is_some()
+            && !self.loading
             && let Some(scroll) = self.pending_scroll.take()
         {
             self.state.update(cx, |s, cx| s.set_scroll_offset(gpui::point(px(0.), px(-scroll)), cx));
@@ -1019,7 +1233,7 @@ impl Render for EditorPanel {
                 d.on_action(cx.listener(|this, _: &AcceptChanges, w, cx| this.accept_review(w, cx)))
                     .on_action(cx.listener(|this, _: &RejectChanges, w, cx| this.reject_review(w, cx)))
             })
-            .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx)))
+            .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx).detach()))
             .on_action(cx.listener(|this, _: &ToggleComment, w, cx| this.toggle_comment(w, cx)))
             .on_action(cx.listener(|this, _: &DuplicateLine, w, cx| this.duplicate_line(w, cx)))
             .on_action(cx.listener(|this, _: &MoveLineUp, w, cx| this.move_lines(true, w, cx)))
@@ -1057,16 +1271,20 @@ impl Render for EditorPanel {
                             cx.stop_propagation();
                         }
                     }))
-                    .child(
-                        // The gutter's lanes (problems, run icons, Spring marks) take a
-                        // strip left of the line numbers.
-                        Editor::new(&self.state)
-                            .appearance(false)
-                            .pl(px(self.gutter_pad))
-                            .h_full()
-                            .text_size(px(font_size(cx)))
-                            .context_menu(move |menu, _, _| context_menu(menu, has_lang, run_label.as_deref())),
-                    )
+                    // Laid out once the file is read, so the first layout is of its text (the
+                    // caret asked for scrolls into view on it).
+                    .when(!self.loading, |d| {
+                        d.child(
+                            // The gutter's lanes (problems, run icons, Spring marks) take a
+                            // strip left of the line numbers.
+                            Editor::new(&self.state)
+                                .appearance(false)
+                                .pl(px(self.gutter_pad))
+                                .h_full()
+                                .text_size(px(font_size(cx)))
+                                .context_menu(move |menu, _, _| context_menu(menu, has_lang, run_label.as_deref())),
+                        )
+                    })
                     .children(self.claude_overlay(cx))
                     .child(self.gutter(cx))
                     .child(self.problem_marks(cx))
@@ -1134,10 +1352,14 @@ pub fn confirm_close(
             let Ok(answer) = answer.await else { return };
             let _ = cx.update(|window, cx| match answer {
                 0 => {
-                    editor.update(cx, |e, cx| e.save(cx));
-                    if !editor.read(cx).dirty {
-                        then(window, cx);
-                    }
+                    let saved = editor.update(cx, |e, cx| e.save(cx));
+                    window
+                        .spawn(cx, async move |cx| {
+                            if saved.await {
+                                let _ = cx.update(then);
+                            }
+                        })
+                        .detach();
                 }
                 1 => then(window, cx),
                 _ => {}

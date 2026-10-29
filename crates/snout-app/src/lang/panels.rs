@@ -174,31 +174,23 @@ impl ReferencesPanel {
         }
     }
 
-    /// Show `locations`, each with its line of code.
+    /// Show `locations`, each with its line of code (read off the UI thread; the rows show
+    /// at once, their lines as they come).
     pub fn show(&mut self, title: String, locations: Vec<Location>, cx: &mut Context<Self>) {
         let roots: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
-        let host = crate::host::host(cx);
-        let mut files: HashMap<PathBuf, Vec<String>> = HashMap::new();
         let mut locations = locations;
         locations.sort_by(|a, b| (a.uri.as_str(), a.range.start.line).cmp(&(b.uri.as_str(), b.range.start.line)));
+        let wanted: Vec<(Option<PathBuf>, u32)> =
+            locations.iter().map(|l| (snout_lang::uri::to_path(&l.uri), l.range.start.line)).collect();
         self.rows = locations
             .into_iter()
             .map(|l| {
                 let path = snout_lang::uri::to_path(&l.uri);
-                let line = path
-                    .as_ref()
-                    .and_then(|p| {
-                        let lines = files.entry(p.clone()).or_insert_with(|| {
-                            host.read_to_string(p).unwrap_or_default().lines().map(str::to_owned).collect()
-                        });
-                        lines.get(l.range.start.line as usize).cloned()
-                    })
-                    .unwrap_or_default();
                 let root = path.as_deref().and_then(|p| roots.iter().find(|r| p.starts_with(r))).or(roots.first());
                 Row {
                     file: short(&l.uri, root.map(PathBuf::as_path)).into(),
                     place: format!("{}:{}", l.range.start.line + 1, l.range.start.character + 1).into(),
-                    text: line.trim().to_owned().into(),
+                    text: SharedString::default(),
                     severity: None,
                     at: l.range.start,
                     uri: l.uri,
@@ -207,6 +199,34 @@ impl ReferencesPanel {
             .collect();
         let n = self.rows.len();
         self.title = format!("{title}: {n} {}", plural(n, "result")).into();
+        let host = crate::host::host(cx);
+        let lines = cx.background_executor().spawn(async move {
+            let mut files: HashMap<PathBuf, Vec<String>> = HashMap::new();
+            wanted
+                .into_iter()
+                .map(|(path, line)| {
+                    let Some(p) = path else { return String::new() };
+                    let lines = files.entry(p.clone()).or_insert_with(|| {
+                        host.read_to_string(&p).unwrap_or_default().lines().map(str::to_owned).collect()
+                    });
+                    lines.get(line as usize).map(|l| l.trim().to_owned()).unwrap_or_default()
+                })
+                .collect::<Vec<String>>()
+        });
+        let shown = self.title.clone();
+        cx.spawn(async move |this, cx| {
+            let lines = lines.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.title != shown || this.rows.len() != lines.len() {
+                    return;
+                }
+                for (row, line) in this.rows.iter_mut().zip(lines) {
+                    row.text = line.into();
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 

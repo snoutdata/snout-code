@@ -325,6 +325,8 @@ fn a_file_changed_on_disk_reloads_or_warns(cx: &mut TestAppContext) {
     cx.update(|_, cx| assert!(editor.read(cx).conflict, "a changed tab warns instead"));
     assert!(text_of(&editor, cx).starts_with('x'), "and keeps its text");
     cx.update(|w, cx| editor.update(cx, |e, cx| e.reload(w, cx)));
+    // Read off the UI thread.
+    cx.run_until_parked();
     assert_eq!(text_of(&editor, cx), "class D { int b; }\n");
     cx.update(|_, cx| assert!(!editor.read(cx).conflict && !editor.read(cx).dirty));
     let _ = std::fs::remove_dir_all(repo);

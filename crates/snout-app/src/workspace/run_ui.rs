@@ -76,44 +76,45 @@ impl Workspace {
     }
 
     /// Open the place a console line names: a path, or a stack frame's class found under the
-    /// project's source folders.
+    /// project's source folders. The host is asked off the UI thread.
     pub fn open_link(&mut self, link: Link, window: &mut Window, cx: &mut Context<Self>) {
         let line = link.line().saturating_sub(1);
-        let path = match &link {
-            Link::Path { path, column, .. } => {
-                if crate::host::host(cx).is_file(path) {
-                    return self.open_file(path.clone(), Some((line, column.saturating_sub(1))), false, window, cx);
-                }
-                None
+        let host = crate::host::host(cx);
+        // Where the file may be: the path itself, or the class's file under each source folder.
+        let (candidates, at) = match &link {
+            Link::Path { path, column, .. } => (vec![path.clone()], (line, column.saturating_sub(1))),
+            Link::Frame { .. } => {
+                (link.relative_file().map(|rel| self.source_candidates(&rel, cx)).unwrap_or_default(), (line, 0))
             }
-            Link::Frame { .. } => link.relative_file().and_then(|rel| self.find_source(&rel, cx)),
         };
-        match path {
-            Some(path) => self.open_file(path, Some((line, 0)), false, window, cx),
-            None => self.model.update(cx, |m, cx| {
-                m.message = match &link {
-                    Link::Frame { class, .. } => format!("{class} is not among the project's sources"),
-                    Link::Path { path, .. } => format!("{} does not exist", path.display()),
-                };
-                cx.notify();
-            }),
-        }
+        let found = cx.background_executor().spawn(async move { candidates.into_iter().find(|p| host.is_file(p)) });
+        cx.spawn_in(window, async move |this, cx| {
+            let found = found.await;
+            let _ = this.update_in(cx, |this, window, cx| match found {
+                Some(path) => {
+                    this.open_file(path, Some(at), false, window, cx);
+                }
+                None => this.model.update(cx, |m, cx| {
+                    m.message = match &link {
+                        Link::Frame { class, .. } => format!("{class} is not among the project's sources"),
+                        Link::Path { path, .. } => format!("{} does not exist", path.display()),
+                    };
+                    cx.notify();
+                }),
+            });
+        })
+        .detach();
     }
 
-    /// The file at `rel` (`demo/App.java`) under one of the project's source folders.
-    fn find_source(&self, rel: &std::path::Path, cx: &gpui::App) -> Option<PathBuf> {
-        let model = crate::project_model::store(cx)?.read(cx).current.clone()?;
+    /// Where the file at `rel` (`demo/App.java`) may be: under each of the project's source
+    /// folders.
+    fn source_candidates(&self, rel: &std::path::Path, cx: &gpui::App) -> Vec<PathBuf> {
+        let Some(model) = crate::project_model::store(cx).and_then(|s| s.read(cx).current.clone()) else {
+            return Vec::new();
+        };
         let roots =
             model.modules.iter().flat_map(|m| m.roots.iter()).chain(model.shared.iter().flat_map(|s| s.roots.iter()));
-        let host = crate::host::host(cx);
-        for root in roots {
-            let candidate = root.dir.join(rel);
-            if host.is_file(&candidate) {
-                return Some(candidate);
-            }
-        }
-        // Scala and Kotlin keep classes in files of other names: look for the file alone.
-        None
+        roots.map(|root| root.dir.join(rel)).collect()
     }
 
     /// The title bar's Run (or Debug): the selected configuration (run again when it runs),

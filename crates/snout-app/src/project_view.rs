@@ -295,7 +295,8 @@ pub struct ProjectView {
     files: Entity<FileTree>,
     pub store: Entity<ProjectModels>,
     pub expanded: HashSet<NodeId>,
-    jars: HashMap<PathBuf, Option<Rc<JarIndex>>>,
+    /// The jars' classes: `None` while being read.
+    jars: HashMap<PathBuf, Option<Option<Rc<JarIndex>>>>,
     root: Option<PathBuf>,
 }
 
@@ -303,7 +304,7 @@ impl EventEmitter<ProjectViewEvent> for ProjectView {}
 
 struct Lister<'a, 'b> {
     files: &'a Entity<FileTree>,
-    jars: &'a mut HashMap<PathBuf, Option<Rc<JarIndex>>>,
+    jars: &'a mut HashMap<PathBuf, Option<Option<Rc<JarIndex>>>>,
     cx: &'a mut Context<'b, ProjectView>,
 }
 
@@ -312,9 +313,27 @@ impl Source for Lister<'_, '_> {
         self.files.update(self.cx, |t, cx| t.children(dir, cx))
     }
 
+    /// The jar's classes, read off the UI thread: none until they are (the view redraws).
     fn jar(&mut self, file: &Path) -> Option<Rc<JarIndex>> {
-        let host = crate::host::host(self.cx);
-        self.jars.entry(file.to_owned()).or_insert_with(|| jar_index(&*host, file).map(Rc::new)).clone()
+        match self.jars.get(file) {
+            Some(Some(known)) => return known.clone(),
+            Some(None) => return None,
+            None => {}
+        }
+        self.jars.insert(file.to_owned(), None);
+        let (host, path) = (crate::host::host(self.cx), file.to_owned());
+        let read = self.cx.background_executor().spawn(async move { jar_index(&*host, &path) });
+        let path = file.to_owned();
+        self.cx
+            .spawn(async move |this, cx| {
+                let index = read.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.jars.insert(path, Some(index.map(Rc::new)));
+                    cx.notify();
+                });
+            })
+            .detach();
+        None
     }
 }
 

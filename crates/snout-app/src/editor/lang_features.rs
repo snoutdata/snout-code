@@ -36,8 +36,10 @@ impl EditorPanel {
         let Some(hub) = crate::lang::hub(cx) else { return };
         let weak = cx.weak_entity();
         let rope = self.state.read(cx).text().clone();
-        let path = self.path.clone();
-        let Some((uri, root, diags)) = hub.update(cx, |h, cx| h.open_doc(&weak, &path, rope, cx)) else { return };
+        let (path, build) = (self.path.clone(), self.build_root.clone());
+        let Some((uri, root, diags)) = hub.update(cx, |h, cx| h.open_doc(&weak, &path, build, rope, cx)) else {
+            return;
+        };
         let link = Rc::new(DocLink {
             hub: hub.downgrade(),
             uri,
@@ -161,6 +163,10 @@ impl EditorPanel {
 
     /// Put the caret on a protocol position (UTF-16 columns) and give the editor the keyboard.
     pub fn go_to_lsp(&mut self, at: lsp_types::Position, window: &mut Window, cx: &mut Context<Self>) {
+        if self.loading {
+            // The position counts in the file's text: once it is read.
+            return self.after_load(move |e, window, cx| e.go_to_lsp(at, window, cx), window, cx);
+        }
         let pos = text::to_kit(self.state.read(cx).text(), at);
         self.go_to(pos.line, pos.character, window, cx);
     }

@@ -183,44 +183,67 @@ fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Conte
         "getDiagnostics" => {
             let only =
                 a.get("uri").and_then(Value::as_str).map(|u| tools::path_of(u, &crate::host::host(cx).info().home));
-            reply.ok(tools::json_text(&diagnostics(ws, only.as_deref(), cx)));
+            // The file's name as the host resolves it, asked off the UI thread.
+            let host = crate::host::host(cx);
+            let canonical = cx.background_executor().spawn({
+                let only = only.clone();
+                async move { only.and_then(|p| host.canonicalize(&p).ok()) }
+            });
+            cx.spawn(async move |ws, cx| {
+                let canonical = canonical.await;
+                let v = ws.update(cx, |ws, cx| diagnostics(ws, only.as_deref(), canonical.as_deref(), cx));
+                reply.ok(tools::json_text(&v.unwrap_or_default()));
+            })
+            .detach();
         }
         "checkDocumentDirty" => {
             let Some(file) = a.get("filePath").and_then(Value::as_str) else {
                 return reply.error(INVALID_PARAMS, "Invalid params", Some("Missing filePath parameter".into()));
             };
-            let v = match editor_for(ws, &tools::path_of(file, &crate::host::host(cx).info().home), cx) {
-                Some(e) => {
-                    json!({ "success": true, "filePath": file, "isDirty": e.read(cx).dirty, "isUntitled": false })
-                }
-                None => json!({ "success": false, "message": format!("Document not open: {file}") }),
-            };
-            reply.ok(tools::json_text(&v));
+            let file = file.to_owned();
+            let found = editor_for(ws, &tools::path_of(&file, &crate::host::host(cx).info().home), cx);
+            cx.spawn(async move |_, cx| {
+                let found = found.await;
+                let v = cx.update(|cx| match found {
+                    Some(e) => {
+                        json!({ "success": true, "filePath": file, "isDirty": e.read(cx).dirty, "isUntitled": false })
+                    }
+                    None => json!({ "success": false, "message": format!("Document not open: {file}") }),
+                });
+                reply.ok(tools::json_text(&v));
+            })
+            .detach();
         }
         "saveDocument" => {
             let Some(file) = a.get("filePath").and_then(Value::as_str) else {
                 return reply.error(INVALID_PARAMS, "Invalid params", Some("Missing filePath parameter".into()));
             };
-            let v = match editor_for(ws, &tools::path_of(file, &crate::host::host(cx).info().home), cx) {
-                Some(e) => {
-                    e.update(cx, |e, cx| e.save(cx));
-                    match e.read(cx).dirty {
-                        false => json!({
-                            "success": true,
-                            "filePath": file,
-                            "saved": true,
-                            "message": "Document saved successfully",
-                        }),
-                        true => json!({
-                            "success": false,
-                            "message": format!("Failed to save file: {}", file),
-                            "filePath": file,
-                        }),
-                    }
-                }
-                None => json!({ "success": false, "message": format!("Document not open: {file}") }),
-            };
-            reply.ok(tools::json_text(&v));
+            let file = file.to_owned();
+            let found = editor_for(ws, &tools::path_of(&file, &crate::host::host(cx).info().home), cx);
+            // Found and written off the UI thread; the answer goes when it is.
+            cx.spawn(async move |_, cx| {
+                let Some(e) = found.await else {
+                    let v = json!({ "success": false, "message": format!("Document not open: {file}") });
+                    return reply.ok(tools::json_text(&v));
+                };
+                let saved = cx.update(|cx| e.update(cx, |e, cx| e.save(cx)));
+                let v = if saved.await {
+                    json!({
+                        "success": true,
+                        "filePath": file,
+                        "saved": true,
+                        "message": "Document saved successfully",
+                    })
+                } else {
+                    json!({
+                        "success": false,
+                        "message": format!("Failed to save file: {}", file),
+                        "filePath": file,
+                    })
+                };
+                reply.ok(tools::json_text(&v));
+            })
+            .detach();
         }
         "close_tab" => {
             let Some(tab) = a.get("tab_name").and_then(Value::as_str) else {
@@ -249,12 +272,17 @@ fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Conte
     }
 }
 
-/// The editor tab of `path`, if one is open.
-fn editor_for(ws: &Workspace, path: &Path, cx: &App) -> Option<Entity<EditorPanel>> {
-    let canonical = crate::host::host(cx).canonicalize(path).ok();
-    ws.editors(cx).into_iter().find(|e| {
-        let p = &e.read(cx).path;
-        p == path || canonical.as_deref().is_some_and(|c| c == p)
+/// The editor tab of `path`, if one is open: by its name, else by the name it resolves to
+/// on the host (asked off the UI thread).
+fn editor_for(ws: &Workspace, path: &Path, cx: &mut Context<Workspace>) -> Task<Option<Entity<EditorPanel>>> {
+    if let Some(e) = ws.editors(cx).into_iter().find(|e| e.read(cx).path == path) {
+        return Task::ready(Some(e));
+    }
+    let (host, path) = (crate::host::host(cx), path.to_owned());
+    let canonical = cx.background_executor().spawn(async move { host.canonicalize(&path).ok() });
+    cx.spawn(async move |ws, cx| {
+        let canonical = canonical.await?;
+        ws.update(cx, |ws, cx| ws.editors(cx).into_iter().find(|e| e.read(cx).path == canonical)).ok().flatten()
     })
 }
 
@@ -316,11 +344,9 @@ fn open_editors(ws: &Workspace, window: &Window, cx: &App) -> Value {
 }
 
 /// The language servers' diagnostics, per file; `only` narrows them to one file.
-fn diagnostics(ws: &Workspace, only: Option<&Path>, cx: &App) -> Value {
+fn diagnostics(ws: &Workspace, only: Option<&Path>, canonical: Option<&Path>, cx: &App) -> Value {
     use std::str::FromStr as _;
     let hub = ws.hub.read(cx);
-    let host = crate::host::host(cx);
-    let mut only_canonical: Option<Option<PathBuf>> = None;
     let mut files: Vec<Value> = Vec::new();
     for server in hub.servers.values() {
         for (uri, list) in &server.diagnostics {
@@ -329,10 +355,7 @@ fn diagnostics(ws: &Workspace, only: Option<&Path>, cx: &App) -> Value {
             }
             if let Some(only) = only {
                 let path = lsp_types::Uri::from_str(uri).ok().and_then(|u| snout_lang::uri::to_path(&u));
-                let same = path.as_deref().is_some_and(|p| {
-                    p == only
-                        || only_canonical.get_or_insert_with(|| host.canonicalize(only).ok()).as_deref() == Some(p)
-                });
+                let same = path.as_deref().is_some_and(|p| p == only || canonical == Some(p));
                 if !same {
                     continue;
                 }
@@ -361,20 +384,45 @@ fn close_tab(ws: &mut Workspace, tab: &str, window: &mut Window, cx: &mut Contex
     }
 }
 
-fn open_file(ws: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, cx: &mut Context<Workspace>) {
+fn open_file(_: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, cx: &mut Context<Workspace>) {
     let Some(file) = a.get("filePath").and_then(Value::as_str) else {
         return reply.error(INVALID_PARAMS, "Invalid params", Some("Missing filePath parameter".into()));
     };
     let path = tools::path_of(file, &crate::host::host(cx).info().home);
-    if !crate::host::host(cx).is_file(&path) {
-        return reply.error(TOOL_ERROR, "File operation error", Some(format!("File not found: {}", path.display())));
-    }
+    // Whether it is there is asked of the host off the UI thread; the tab answers once it
+    // shows the file.
+    let host = crate::host::host(cx);
+    let there = cx.background_executor().spawn({
+        let path = path.clone();
+        async move { host.is_file(&path) }
+    });
+    let a = a.clone();
+    cx.spawn_in(window, async move |ws, cx| {
+        if !there.await {
+            return reply.error(
+                TOOL_ERROR,
+                "File operation error",
+                Some(format!("File not found: {}", path.display())),
+            );
+        }
+        let _ = ws.update_in(cx, |ws, window, cx| {
+            let flag = |k: &str| a.get(k).and_then(Value::as_bool);
+            let preview = flag("preview").unwrap_or(false);
+            let front = flag("makeFrontmost").unwrap_or(true);
+            let editor = ws.reveal_file(path.clone(), preview, front, window, cx);
+            editor.update(cx, |e, cx| {
+                e.after_load(move |e, _, cx| select_and_answer(e, &path, &a, front, reply, cx), window, cx)
+            });
+        });
+    })
+    .detach();
+}
+
+/// openFile's selection, in the tab that shows the file, and its answer.
+fn select_and_answer(e: &mut EditorPanel, path: &Path, a: &Value, front: bool, reply: Reply, cx: &mut App) {
     let flag = |k: &str| a.get(k).and_then(Value::as_bool);
-    let preview = flag("preview").unwrap_or(false);
-    let front = flag("makeFrontmost").unwrap_or(true);
-    let editor = ws.reveal_file(path.clone(), preview, front, window, cx);
     let mut message = format!("Opened file: {}", path.display());
-    let text = editor.read(cx).text(cx);
+    let text = e.text(cx);
     let line_start = |line: usize| text.split_inclusive('\n').take(line).map(str::len).sum::<usize>();
     let line_end = |at: usize| text[at..].find('\n').map_or(text.len(), |i| at + i);
     let mut select: Option<Range<usize>> = None;
@@ -413,17 +461,16 @@ fn open_file(ws: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, c
         }
     }
     if let Some(range) = select {
-        let state = editor.read(cx).state.clone();
+        let state = e.state.clone();
         state.update(cx, |s, cx| s.set_selected_range(range, cx));
     }
     if front {
         reply.ok(tools::text(message));
     } else {
-        let e = editor.read(cx);
         reply.ok(tools::json_text(&json!({
             "success": true,
             "filePath": path.to_string_lossy(),
-            "languageId": tools::language_id(&path),
+            "languageId": tools::language_id(path),
             "lineCount": e.line_count(cx),
         })));
     }
@@ -730,6 +777,6 @@ fn follow_changed(
         }
         let lines = changed_lines(&before, &text);
         let editor = ws.reveal_file(path, true, true, window, cx);
-        editor.update(cx, |e, cx| e.flash(lines, window, cx));
+        editor.update(cx, |e, cx| e.after_load(move |e, window, cx| e.flash(lines, window, cx), window, cx));
     }
 }

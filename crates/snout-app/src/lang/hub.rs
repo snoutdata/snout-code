@@ -276,7 +276,7 @@ pub enum HubEvent {
 }
 
 pub struct LangHub {
-    model: Entity<Model>,
+    pub(crate) model: Entity<Model>,
     /// Servers start only when this is set (the app sets it; most tests do not).
     pub enabled: bool,
     pub servers: HashMap<PathBuf, Server>,
@@ -428,17 +428,18 @@ impl LangHub {
     /// `path` is in it or in a source folder its model lists (one engine syncs every build
     /// of the folder); else the Gradle build of `path` inside the project. A file of no
     /// build of the project gets none: engines run for the project shown, and no other.
-    pub fn root_for(&self, path: &Path, cx: &App) -> Option<PathBuf> {
+    /// `build` is the Gradle build of `path` within the project (`java::gradle_root`), as
+    /// the host showed it off the UI thread.
+    pub fn root_for(&self, path: &Path, build: Option<PathBuf>, cx: &App) -> Option<PathBuf> {
         let project = self.model.read(cx).project_root();
-        let host = &*self.host;
-        let Some(project) = &project else { return java::gradle_root(host, path, None) };
+        let Some(project) = &project else { return build };
         let listed =
             crate::project_model::store(cx).and_then(|s| s.read(cx).model_for(project)).is_some_and(|m| m.holds(path));
-        let inside = path.starts_with(project) && java::gradle_root(host, path, Some(project)).is_some();
+        let inside = path.starts_with(project) && build.is_some();
         if (inside || listed) && crate::project_model::project_has_gradle(project, cx) {
             return Some(project.clone());
         }
-        java::gradle_root(host, path, Some(project)).filter(|r| r.starts_with(project))
+        build.filter(|r| r.starts_with(project))
     }
 
     /// The engine that serves the folder `project`: its own, else one of a build inside it,
@@ -1041,10 +1042,11 @@ impl LangHub {
         &mut self,
         editor: &WeakEntity<EditorPanel>,
         path: &Path,
+        build: Option<PathBuf>,
         text: Rope,
         cx: &mut Context<Self>,
     ) -> Option<(Uri, PathBuf, Vec<Diagnostic>)> {
-        let root = self.root_for(path, cx)?;
+        let root = self.root_for(path, build, cx)?;
         let uri = snout_lang::uri::from_path(path);
         let key = uri_key(&uri);
         if let Some(doc) = self.docs.get_mut(&key) {
@@ -1190,9 +1192,16 @@ impl LangHub {
         let (major, root, resync) = (prompt.major, prompt.root.clone(), prompt.resync);
         let dir = java::downloads_dir(&self.home);
         let host = self.host.clone();
+        // The builds without a JDK: those the new one fits are found with it, off the UI thread.
+        let without: Vec<PathBuf> = self.servers.values().filter(|s| s.jdk.is_none()).map(|s| s.root.clone()).collect();
         let job = cx.background_executor().spawn({
             let progress = progress.clone();
-            async move { java::download_temurin(&*host, major, &dir, &progress) }
+            async move {
+                let jdk = java::download_temurin(&*host, major, &dir, &progress)?;
+                let fits: Vec<PathBuf> =
+                    without.into_iter().filter(|r| java::requirement(&*host, r).fits(jdk.major)).collect();
+                anyhow::Ok((jdk, fits))
+            }
         });
         cx.spawn(async move |this, cx| {
             // Repaint the bar as the bytes come in, until the download ends.
@@ -1211,17 +1220,11 @@ impl LangHub {
             drop(ticker);
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(jdk) => {
+                    Ok((jdk, fits)) => {
                         eprintln!("[java] downloaded JDK {} to {}", jdk.version, jdk.home.display());
                         this.jdk_prompt = None;
                         // Every build waiting for this version can use it.
-                        let waiting: Vec<PathBuf> = this
-                            .servers
-                            .values()
-                            .filter(|s| s.jdk.is_none() && java::requirement(&*this.host, &s.root).fits(jdk.major))
-                            .map(|s| s.root.clone())
-                            .chain(std::iter::once(root.clone()))
-                            .collect();
+                        let waiting: Vec<PathBuf> = fits.into_iter().chain(std::iter::once(root.clone())).collect();
                         for r in waiting {
                             if let Some(s) = this.servers.get_mut(&r).filter(|s| s.client.is_none()) {
                                 s.jdk = Some(jdk.clone());
@@ -1263,13 +1266,27 @@ impl LangHub {
         if self.jdk_prompt.is_some() || self.dismissed_jdks.contains(&major) {
             return;
         }
-        if java::downloaded_jdks(&*self.host).iter().any(|j| j.major == major) {
-            return;
-        }
-        eprintln!("[java] a build of {} needs JDK {major}: offering it", root.display());
-        self.jdk_prompt = Some(JdkPrompt { root: root.to_owned(), major, resync: true, progress: None, error: None });
-        cx.emit(HubEvent::Changed);
-        cx.notify();
+        // Whether it was downloaded already is asked of the host off the UI thread.
+        let host = self.host.clone();
+        let have = cx
+            .background_executor()
+            .spawn(async move { java::downloaded_jdks(&*host).iter().any(|j| j.major == major) });
+        let root = root.to_owned();
+        cx.spawn(async move |this, cx| {
+            if have.await {
+                return;
+            }
+            let _ = this.update(cx, |this, cx| {
+                if this.jdk_prompt.is_some() || this.dismissed_jdks.contains(&major) {
+                    return;
+                }
+                eprintln!("[java] a build of {} needs JDK {major}: offering it", root.display());
+                this.jdk_prompt = Some(JdkPrompt { root, major, resync: true, progress: None, error: None });
+                cx.emit(HubEvent::Changed);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     // ----- Requests the editors and the workspace make --------------------------------

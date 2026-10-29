@@ -119,7 +119,8 @@ impl EditorPanel {
     ) {
         let proposal = Proposal { tab_name, text, answer: Some(answer) };
         self.preview = false;
-        if self.review.is_some() {
+        // A tab still reading its file shows the change once it has the file to compare.
+        if self.review.is_some() || self.loading {
             self.queue.push_back(proposal);
             cx.notify();
             return;
@@ -129,7 +130,8 @@ impl EditorPanel {
 
     fn start_review(&mut self, mut p: Proposal, window: &mut Window, cx: &mut Context<Self>) {
         let original = self.text(cx);
-        let new_file = !crate::host::host(cx).exists(&self.path);
+        // As the host had it when the tab read the file (a proposal waits for that).
+        let new_file = !self.on_disk();
         if new_file {
             self.error = None;
         }
@@ -247,23 +249,25 @@ impl EditorPanel {
         }
         self.finish_stream(window, cx);
         let Some(mut r) = self.review.take() else { return };
-        if r.new_file
-            && let Some(dir) = self.path.parent()
-        {
-            let _ = crate::host::host(cx).create_dir_all(dir);
-        }
         let text = self.text(cx);
-        self.save(cx);
-        if self.dirty {
-            // Not written (the error shows); the review stays.
-            self.review = Some(r);
-            return;
-        }
-        if let Some(answer) = r.answer.take() {
-            answer(Outcome::Accepted(text));
-        }
-        drop(r);
-        self.next_review(window, cx);
+        let saved = self.save_making_folder(r.new_file, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let ok = saved.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if !ok {
+                    // Not written (the error shows); the review stays.
+                    this.review = Some(r);
+                    cx.notify();
+                    return;
+                }
+                if let Some(answer) = r.answer.take() {
+                    answer(Outcome::Accepted(text));
+                }
+                drop(r);
+                this.next_review(window, cx);
+            });
+        })
+        .detach();
     }
 
     /// Reject: put the text back as it was and say so.
@@ -283,7 +287,7 @@ impl EditorPanel {
         self.next_review(window, cx);
     }
 
-    fn next_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn next_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self._review_task = None;
         if let Some(next) = self.queue.pop_front() {
             self.start_review(next, window, cx);

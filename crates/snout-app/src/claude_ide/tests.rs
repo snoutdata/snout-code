@@ -317,7 +317,7 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     cx.update(|w, cx| {
         let state = editor.read(cx).state.clone();
         state.update(cx, |s, cx| s.set_value(HELLO, w, cx));
-        editor.update(cx, |e, cx| e.save(cx));
+        editor.update(cx, |e, cx| e.save(cx)).detach();
     });
 
     // Diagnostics from the language servers, Java's included.

@@ -55,8 +55,14 @@ sha2 = "0.10"
 gpui = { workspace = true, features = ["test-support"] }
 gpui-component = { workspace = true, features = ["test-support"] }
 gpui-platform = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
 
 [[test]]
 name = "screenshots"
 path = "tests/screenshots.rs"
+harness = false
+
+[[test]]
+name = "host_probe"
+path = "tests/host_probe.rs"
 harness = false

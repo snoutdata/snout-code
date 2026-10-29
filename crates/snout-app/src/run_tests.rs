@@ -404,7 +404,7 @@ fn a_fixture_app_runs_tests_and_debugs_in_the_app(cx: &mut TestAppContext) {
         main_editor.update(cx, |e, cx| {
             let text = e.text(cx).replace("return a + b;", "return a + b * 10;");
             e.state.update(cx, |s, cx| s.set_value(text, w, cx));
-            e.save(cx);
+            e.save(cx).detach();
         })
     });
     let reloaded = pump_until(cx, 120, |cx| {

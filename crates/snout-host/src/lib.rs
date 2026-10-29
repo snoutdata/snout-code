@@ -35,12 +35,11 @@
 //!   file dialogs; a remote host needs a picker of its own.
 //! - Tests set up their fixtures with `std::fs` and `std::process`.
 //!
-//! Calls still made on the UI thread (found with [`LatencyHost`]; to move off it): the
-//! editor's load, disk check and save, which Gradle build an opened file belongs to
-//! (`LangHub::root_for`), language server edits applied to files no tab shows, restoring the
-//! session's editor tabs, the reference lines of Find References, console links, and the
-//! IDE tools' file checks. Opening a project, the Git Panel, the file tree, search, the
-//! Processes window, the terminals, starting the engine and its JDK lookup are off it.
+//! The UI thread makes no host call: opening a project, the editor's loads, disk checks
+//! and saves, Find References, language server edits, console links, the IDE tools, the
+//! Settings sheet's JDKs and the session's tabs all ask the host off it. The app's
+//! `host_probe` test drives the real app on a [`LatencyHost`] and fails on any call made
+//! there (`SNOUT_HOST_PROBE=1 cargo test -p snout-app --test host_probe`).
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};

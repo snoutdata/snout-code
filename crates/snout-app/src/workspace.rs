@@ -82,6 +82,8 @@ pub struct Workspace {
     branch_popup: Option<Entity<crate::branch_popup::BranchPopup>>,
     /// The Settings sheet, while it shows.
     pub settings_sheet: Option<Entity<crate::settings_view::SettingsView>>,
+    /// The Settings sheet is about to come up (the host's JDKs are being looked for).
+    settings_opening: bool,
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::run::gradle_window::GradleWindow>,
     pub spring_window: Entity<crate::spring::window::SpringWindow>,
@@ -179,8 +181,7 @@ fn restore_layout(
     let pool: HashMap<&'static str, Arc<dyn BasePanelView>> =
         panels.iter().map(|(view, _)| (view.panel_name(cx), view.clone())).collect();
     let names: std::collections::HashSet<String> = pool.keys().map(|n| n.to_string()).collect();
-    let host = crate::host::host(cx);
-    let keep = session::Keep { panels: &names, editor: crate::editor::PANEL_NAME, project, host: &*host };
+    let keep = session::Keep { panels: &names, editor: crate::editor::PANEL_NAME, project, host: None };
     let Ok(state) = serde_json::from_value::<DockAreaState>(session::sanitize(state, &keep)) else {
         return (false, Vec::new());
     };
@@ -195,6 +196,7 @@ fn restore_layout(
             crate::editor::saved_path(ctx.state()).unwrap_or_default()
         };
         let editor = cx.new(|cx| EditorPanel::open(path, window, cx));
+        editor.update(cx, |e, _| e.close_if_gone = true);
         if let Some((uri, root)) = class_file {
             let loading = "// Loading the class from the Java server…\n".to_owned();
             editor.update(cx, |e, cx| e.show_class_file(uri, root, loading, window, cx));
@@ -320,8 +322,8 @@ impl Workspace {
             default_layout(&dock, &panels, window, cx);
             if let (Some(saved), Some(root)) = (&saved, &root) {
                 reopen = session::editor_files(saved, crate::editor::PANEL_NAME);
-                let host = crate::host::host(cx);
-                reopen.retain(|p| p.starts_with(root) && host.is_file(p));
+                // A file gone since closes its tab once it is found so (off the UI thread).
+                reopen.retain(|p| p.starts_with(root));
             }
         }
         let open = model.read(cx).settings.console_open;
@@ -417,6 +419,7 @@ impl Workspace {
             references,
             branch_popup: None,
             settings_sheet: None,
+            settings_opening: false,
             gradle,
             spring_window,
             spring,
@@ -440,7 +443,8 @@ impl Workspace {
         this.model.update(cx, |m, _| m.confirm_switch = true);
         this.adopt_editors(restored.1, window, cx);
         for path in reopen {
-            this.reveal_file(path, false, true, window, cx);
+            let editor = this.reveal_file(path, false, true, window, cx);
+            editor.update(cx, |e, _| e.close_if_gone = true);
         }
         // What the user arranged is kept on the way out: the caret and the view of each
         // tab move without saying so.
@@ -531,23 +535,32 @@ impl Workspace {
         window
             .spawn(cx, async move |cx| {
                 let Ok(answer) = answer.await else { return };
-                let _ = cx.update(|window, cx| {
-                    match answer {
-                        0 => {
-                            for e in &dirty {
-                                e.update(cx, |e, cx| e.save(cx));
-                            }
-                            if dirty.iter().any(|e| e.read(cx).dirty) {
-                                return;
-                            }
+                match answer {
+                    0 => {
+                        // Written off the UI thread; a save that fails stops here.
+                        let Ok(saves) = cx
+                            .update(|_, cx| dirty.iter().map(|e| e.update(cx, |e, cx| e.save(cx))).collect::<Vec<_>>())
+                        else {
+                            return;
+                        };
+                        let mut all = true;
+                        for s in saves {
+                            all &= s.await;
                         }
-                        1 => {
+                        if !all {
+                            return;
+                        }
+                    }
+                    1 => {
+                        let _ = cx.update(|_, cx| {
                             for e in &dirty {
                                 e.update(cx, |e, cx| e.discard(cx));
                             }
-                        }
-                        _ => return,
+                        });
                     }
+                    _ => return,
+                }
+                let _ = cx.update(|window, cx| {
                     let _ = this.update(cx, |this, cx| then(this, window, cx));
                 });
             })
@@ -711,8 +724,9 @@ impl Workspace {
                     }
                 }
                 EditorEvent::Saved => {
+                    let disk = editor.read(cx).disk_stamp();
                     for twin in this.twins_of(editor, cx) {
-                        twin.update(cx, |t, cx| t.mark_saved(cx));
+                        twin.update(cx, |t, cx| t.mark_saved(disk, cx));
                     }
                 }
                 EditorEvent::Reloaded(before) => {
@@ -1064,7 +1078,6 @@ impl Workspace {
 
     /// Put up the Settings sheet.
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::settings_view::{SettingsEvent, SettingsView};
         if self.settings_sheet.is_some() {
             return;
         }
@@ -1077,7 +1090,34 @@ impl Workspace {
             builds.push(root);
         }
         builds.sort();
-        let jdks = crate::lang::java::discover(&*host, &self.hub.read(cx).home);
+        // The JDKs of the host are looked for off the UI thread; the sheet comes up then.
+        if self.settings_opening {
+            return;
+        }
+        self.settings_opening = true;
+        let home = self.hub.read(cx).home.clone();
+        let found = cx.background_executor().spawn(async move { crate::lang::java::discover(&*host, &home) });
+        cx.spawn_in(window, async move |this, cx| {
+            let jdks = found.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.settings_opening = false;
+                this.show_settings(builds, jdks, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn show_settings(
+        &mut self,
+        builds: Vec<PathBuf>,
+        jdks: Vec<crate::lang::java::Jdk>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::settings_view::{SettingsEvent, SettingsView};
+        if self.settings_sheet.is_some() {
+            return;
+        }
         let model = self.model.clone();
         let sheet = cx.new(|cx| SettingsView::new(model, builds, jdks, window, cx));
         cx.subscribe_in(&sheet, window, |this, _, e: &SettingsEvent, window, cx| {

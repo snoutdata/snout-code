@@ -35,9 +35,14 @@ impl Workspace {
             HubEvent::Open { root, uri, at } => self.open_location(root.clone(), uri.clone(), *at, window, cx),
             HubEvent::ApplyEdit { edit, reply } => {
                 let applied = self.apply_edit(edit.clone(), window, cx);
-                if let Some((root, id)) = reply {
-                    self.hub.read(cx).reply_apply(root, id.clone(), applied);
-                }
+                let reply = reply.clone();
+                cx.spawn(async move |this, cx| {
+                    let applied = applied.await;
+                    if let Some((root, id)) = reply {
+                        let _ = this.update(cx, |this, cx| this.hub.read(cx).reply_apply(&root, id, applied));
+                    }
+                })
+                .detach();
             }
             HubEvent::Engine { .. } => {}
             HubEvent::References { title, locations } => {
@@ -172,59 +177,98 @@ impl Workspace {
         .detach();
     }
 
-    /// Apply a server's edit; false when a part of it could not be applied.
-    pub fn apply_edit(&mut self, edit: WorkspaceEdit, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let mut ok = true;
-        let mut on_disk: Vec<PathBuf> = Vec::new();
-        let host = crate::host::host(cx);
+    /// Apply a server's edit: to the tabs that show its files at once, to the other files on
+    /// the host off the UI thread, in order. The task says false when a part of it could
+    /// not be applied.
+    pub fn apply_edit(&mut self, edit: WorkspaceEdit, window: &mut Window, cx: &mut Context<Self>) -> Task<bool> {
+        enum HostStep {
+            Edit(PathBuf, Vec<lsp_types::TextEdit>),
+            Create(PathBuf),
+            Rename(PathBuf, PathBuf),
+            Delete(PathBuf),
+        }
+        let mut host_steps = Vec::new();
+        // Tabs follow a rename at once; the rename on the host follows.
+        let mut moved: Vec<(Entity<EditorPanel>, PathBuf)> = Vec::new();
         for step in edits::steps(edit) {
             match step {
                 Step::Edit(path, list) => match self.editors(cx).into_iter().find(|e| e.read(cx).path == path) {
                     Some(editor) => editor.update(cx, |e, cx| e.apply_lsp_edits(&list, window, cx)),
-                    None => match edits::edit_file(&*host, &path, &list) {
+                    None => host_steps.push(HostStep::Edit(path, list)),
+                },
+                Step::Create(path) => host_steps.push(HostStep::Create(path)),
+                Step::Rename(from, to) => {
+                    let named: Vec<Entity<EditorPanel>> =
+                        self.editors(cx).into_iter().filter(|e| e.read(cx).path == from).collect();
+                    for editor in named {
+                        editor.update(cx, |e, cx| {
+                            // The text stays as it is (unsaved edits included); the tab
+                            // now saves to the new name.
+                            e.path = to.clone();
+                            cx.notify();
+                        });
+                        moved.push((editor, from.clone()));
+                    }
+                    host_steps.push(HostStep::Rename(from, to));
+                }
+                Step::Delete(path) => host_steps.push(HostStep::Delete(path)),
+            }
+        }
+        let host = crate::host::host(cx);
+        let work = cx.background_executor().spawn(async move {
+            let (mut ok, mut on_disk, mut failed_renames) = (true, Vec::new(), Vec::new());
+            for step in host_steps {
+                match step {
+                    HostStep::Edit(path, list) => match edits::edit_file(&*host, &path, &list) {
                         Ok(()) => on_disk.push(path),
                         Err(e) => {
                             ok = false;
                             eprintln!("[java] could not edit {}: {e}", path.display());
                         }
                     },
-                },
-                Step::Create(path) => {
-                    if !host.exists(&path) {
-                        if let Some(dir) = path.parent() {
-                            let _ = host.create_dir_all(dir);
+                    HostStep::Create(path) => {
+                        if !host.exists(&path) {
+                            if let Some(dir) = path.parent() {
+                                let _ = host.create_dir_all(dir);
+                            }
+                            ok &= host.write(&path, b"").is_ok();
+                            on_disk.push(path);
                         }
-                        ok &= host.write(&path, b"").is_ok();
+                    }
+                    HostStep::Rename(from, to) => {
+                        if host.rename(&from, &to).is_ok() {
+                            on_disk.extend([from, to]);
+                        } else {
+                            ok = false;
+                            failed_renames.push(to);
+                        }
+                    }
+                    HostStep::Delete(path) => {
+                        ok &= host.remove_file(&path).is_ok();
                         on_disk.push(path);
                     }
                 }
-                Step::Rename(from, to) => {
-                    if host.rename(&from, &to).is_ok() {
-                        let moved: Vec<Entity<EditorPanel>> =
-                            self.editors(cx).into_iter().filter(|e| e.read(cx).path == from).collect();
-                        for editor in moved {
-                            editor.update(cx, |e, cx| {
-                                // The text stays as it is (unsaved edits included); the tab
-                                // now saves to the new name.
-                                e.path = to.clone();
-                                cx.notify();
-                            });
-                        }
-                        on_disk.extend([from, to]);
-                    } else {
-                        ok = false;
-                    }
-                }
-                Step::Delete(path) => {
-                    ok &= host.remove_file(&path).is_ok();
-                    on_disk.push(path);
-                }
             }
-        }
-        if !on_disk.is_empty() {
-            self.hub.read(cx).files_changed(&on_disk);
-        }
-        ok
+            (ok, on_disk, failed_renames)
+        });
+        cx.spawn(async move |this, cx| {
+            let (ok, on_disk, failed) = work.await;
+            let _ = this.update(cx, |this, cx| {
+                // A rename the host refused: the tabs keep their old name.
+                for (editor, from) in moved {
+                    editor.update(cx, |e, cx| {
+                        if failed.contains(&e.path) {
+                            e.path = from;
+                            cx.notify();
+                        }
+                    });
+                }
+                if !on_disk.is_empty() {
+                    this.hub.read(cx).files_changed(&on_disk);
+                }
+            });
+            ok
+        })
     }
 
     /// ⌘T, or ⇧⌘O in an editor (`file`): the symbol box.

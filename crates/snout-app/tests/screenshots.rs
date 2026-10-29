@@ -235,6 +235,8 @@ mod shots {
                 open(&mut cx, Action::OpenFile(repo.join("src/main.rs"), None));
                 open(&mut cx, Action::PreviewFile(repo.join("README.md")));
                 open(&mut cx, Action::OpenFile(file, Some((14, 23))));
+                // The tabs read their files off the UI thread.
+                cx.run_until_parked();
                 // An unsaved change in another tab, for its dot.
                 cx.update_window(handle.into(), |_, window, cx| {
                     let ws = ws.read(cx);
@@ -272,6 +274,10 @@ mod shots {
                 if name.contains("palette") {
                     cx.update_window(handle.into(), |_, window, cx| {
                         ws.update(cx, |ws, cx| ws.split_right(window, cx));
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(handle.into(), |_, window, cx| {
                         // Drawn once, so the palette finds the editor's own shortcuts.
                         window.draw(cx).clear(cx);
                         ws.update(cx, |ws, cx| ws.open_palette(window, cx));
@@ -297,6 +303,11 @@ mod shots {
             Some(Select::Settings(page)) => {
                 cx.update_window(handle.into(), |_, window, cx| {
                     ws.update(cx, |ws, cx| ws.open_settings(window, cx));
+                })
+                .unwrap();
+                // It comes up once the host's JDKs are found.
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, _, cx| {
                     let sheet = ws.read(cx).settings_sheet.clone().unwrap();
                     sheet.update(cx, |s, cx| {
                         s.page = page;
@@ -308,6 +319,11 @@ mod shots {
             Some(Select::Keymap) => {
                 cx.update_window(handle.into(), |_, window, cx| {
                     ws.update(cx, |ws, cx| ws.open_settings(window, cx));
+                })
+                .unwrap();
+                // It comes up once the host's JDKs are found.
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
                     let sheet = ws.read(cx).settings_sheet.clone().unwrap();
                     sheet.update(cx, |s, cx| {
                         s.page = snout_app::settings_view::Page::Keymap;

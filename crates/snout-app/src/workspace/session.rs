@@ -19,8 +19,10 @@ pub struct Keep<'a> {
     pub editor: &'a str,
     /// The open project: editor tabs of files outside it go. None: no editor tab stays.
     pub project: Option<&'a Path>,
-    /// The host the project is on, where an editor tab's file must still be.
-    pub host: &'a dyn snout_host::Host,
+    /// The host the project is on, where an editor tab's file must still be. None keeps the
+    /// tabs of every file of the project (the app's UI thread does not ask the host: a tab
+    /// whose file has gone closes itself once it finds so).
+    pub host: Option<&'a dyn snout_host::Host>,
 }
 
 impl Keep<'_> {
@@ -34,7 +36,7 @@ impl Keep<'_> {
                 r.starts_with(project) || project.starts_with(r)
             });
         }
-        path.starts_with(project) && self.host.is_file(path)
+        path.starts_with(project) && self.host.is_none_or(|h| h.is_file(path))
     }
 }
 
@@ -179,7 +181,7 @@ mod tests {
             "panel": tabs(vec![leaf("Output", Value::Null), leaf("Output", Value::Null)], 1),
             "placement": "bottom", "size": 200.0, "open": true } });
         let panels: HashSet<String> = ["Welcome", "Output"].into_iter().map(String::from).collect();
-        let keep = Keep { panels: &panels, editor: "Editor", project: Some(&dir), host: &*snout_host::local() };
+        let keep = Keep { panels: &panels, editor: "Editor", project: Some(&dir), host: Some(&*snout_host::local()) };
         let out = sanitize(state.clone(), &keep);
         let group = &out["center"]["children"];
         assert_eq!(group.as_array().unwrap().len(), 1, "the emptied group goes");
@@ -191,7 +193,7 @@ mod tests {
         assert_eq!(out["bottom_dock"]["panel"]["children"].as_array().unwrap().len(), 1, "no panel twice");
 
         // Without a project no editor tab stays; the files can still be read out.
-        let keep = Keep { panels: &panels, editor: "Editor", project: None, host: &*snout_host::local() };
+        let keep = Keep { panels: &panels, editor: "Editor", project: None, host: Some(&*snout_host::local()) };
         let out = sanitize(state.clone(), &keep);
         assert!(!out.to_string().contains("A.java"));
         assert_eq!(editor_files(&state, "Editor").len(), 3);
