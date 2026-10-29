@@ -308,6 +308,28 @@ fn a_connection_that_cannot_come_back_is_lost_and_calls_fail_at_once() {
 }
 
 #[test]
+fn a_connection_dropped_by_hand_comes_back_and_calls_wait_for_it() {
+    let f = fixture();
+    let host = &f.host;
+    f.local.refuse.store(true, Ordering::SeqCst);
+    host.drop_connection();
+    wait_until("the reconnect to start", Duration::from_secs(10), || {
+        matches!(host.status(), Status::Reconnecting { .. })
+    });
+    // A call waits for the connection, and gets through once it is back.
+    let home = f.local.home.clone();
+    std::thread::scope(|s| {
+        let waiting = s.spawn(|| host.is_dir(&home));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!waiting.is_finished(), "the call waits");
+        f.local.refuse.store(false, Ordering::SeqCst);
+        assert!(waiting.join().unwrap());
+    });
+    assert_eq!(host.status(), Status::Connected);
+    assert_eq!(host.connections(), 2);
+}
+
+#[test]
 fn a_port_forwarded_back_to_the_app_stays_through_a_reconnect() {
     let f = fixture();
     let host = &f.host;

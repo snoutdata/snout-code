@@ -401,7 +401,8 @@ pub mod tests {
                 None => c.env_remove(PORT_ENV),
             };
             let mut child = c.spawn().unwrap();
-            child.stdin.take().unwrap().write_all(post_input.to_string().as_bytes()).unwrap();
+            // Without the app the command may end before it reads its input.
+            let _ = child.stdin.take().unwrap().write_all(post_input.to_string().as_bytes());
             child.wait_with_output().unwrap()
         };
         let out = run(Some(server.port()));

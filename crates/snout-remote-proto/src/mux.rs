@@ -3,7 +3,9 @@
 //! One thread reads frames and routes them; one thread writes. Requests and responses
 //! travel on a channel named by the request id; streams on channels the client opens
 //! (client ids are odd, server ids even, and neither is ever reused on a connection, so a
-//! late frame for a closed channel is simply dropped).
+//! late frame for a closed channel is simply dropped). So is a frame for a channel this
+//! side has not taken yet: a side sends on a channel the peer names in a request only once
+//! the peer answered it, having taken the channel first.
 //!
 //! Fairness: the writer keeps a queue per channel and takes one frame from each in turn,
 //! with flow control frames ahead of everything. A 50 MB file read is many frames, and a

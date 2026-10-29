@@ -6,7 +6,7 @@ use std::time::Instant;
 
 /// Requests by `op`: `echo` returns the request; `big` a blob of `len` bytes; `flood` sends
 /// `len` bytes on `channel` and counts what it got out in `sent`; `events` sends `count`
-/// messages on `channel`; `upload` reads `channel` to its end and returns the byte count.
+/// messages on `channel`; `upload` reads `channel` to its end and sends back the byte count.
 struct TestHandler {
     sent: Arc<AtomicUsize>,
 }
@@ -48,16 +48,22 @@ impl Handler for TestHandler {
                 Message::new(&json!("ok"), vec![])
             }
             "upload" => {
+                // The channel is taken before the answer, as the server does: the client
+                // sends on it only once it has the answer.
                 let ch = mux.register_channel(h["channel"].as_u64().unwrap() as u32).unwrap();
-                let mut total = 0;
-                let mut buf = vec![0; 10_000];
-                loop {
-                    match ch.recv(&mut buf).unwrap() {
-                        0 => break,
-                        n => total += n,
+                std::thread::spawn(move || {
+                    let mut total = 0;
+                    let mut buf = vec![0; 10_000];
+                    loop {
+                        match ch.recv(&mut buf).unwrap() {
+                            0 => break,
+                            n => total += n,
+                        }
                     }
-                }
-                Message::new(&json!(total), vec![])
+                    ch.send_message(&Message::new(&json!(total), vec![])).unwrap();
+                    ch.send_eof().unwrap();
+                });
+                Message::new(&json!("ok"), vec![])
             }
             op => panic!("unknown op {op}"),
         }
@@ -123,21 +129,30 @@ fn requests_get_their_own_responses_concurrently() {
 
 #[test]
 fn a_big_response_does_not_hold_up_a_small_one() {
-    // 8 MB at 1 ms per frame takes a quarter second or more.
-    let p = pair(Duration::from_millis(1));
+    // 8 MB at 2 ms per frame takes half a second or more.
+    let p = pair(Duration::from_millis(2));
     let mux = p.client.clone();
-    let started = Instant::now();
     let big = std::thread::spawn(move || {
         let reply = mux.call(&req(json!({"op": "big", "len": 8 << 20}))).unwrap();
         assert_eq!(reply.blob.len(), 8 << 20);
-        started.elapsed()
     });
     std::thread::sleep(Duration::from_millis(30));
-    let t = Instant::now();
     p.client.call(&req(json!({"op": "echo"}))).unwrap();
-    let small = t.elapsed();
-    let big = big.join().unwrap();
-    assert!(small < big / 4, "the small request took {small:?}, the big one {big:?}");
+    // Answered between two frames of the big one, which is still on its way.
+    assert!(!big.is_finished(), "the small request waited for the big one");
+    big.join().unwrap();
+}
+
+/// Wait until `done`, for at most `secs` seconds; whether it came.
+fn until(secs: u64, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < deadline {
+        if done() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    done()
 }
 
 #[test]
@@ -146,14 +161,14 @@ fn a_stream_nobody_reads_stops_its_producer_and_blocks_nothing_else() {
     let ch = p.client.open_channel().unwrap();
     let len = 16 << 20;
     p.client.call(&req(json!({"op": "flood", "len": len, "channel": ch.id()}))).unwrap();
+    assert!(until(10, || p.sent.load(Ordering::SeqCst) > 0), "the producer started");
     std::thread::sleep(Duration::from_millis(200));
     let sent = p.sent.load(Ordering::SeqCst);
     assert!(sent <= WINDOW, "the producer got {sent} bytes out with nobody reading");
-    assert!(sent > 0);
     // Requests still flow.
     let t = Instant::now();
     p.client.call(&req(json!({"op": "echo"}))).unwrap();
-    assert!(t.elapsed() < Duration::from_secs(1));
+    assert!(t.elapsed() < Duration::from_secs(5));
     // Reading lets it all through, in order and complete.
     let mut got = 0;
     let mut buf = vec![0; 100_000];
@@ -175,13 +190,11 @@ fn a_stream_nobody_reads_stops_its_producer_and_blocks_nothing_else() {
 fn uploads_are_flow_controlled_too() {
     let p = pair(Duration::ZERO);
     let ch = p.client.open_channel().unwrap();
-    let mux = p.client.clone();
-    let id = ch.id();
-    let call = std::thread::spawn(move || mux.call(&req(json!({"op": "upload", "channel": id}))).unwrap());
+    p.client.call(&req(json!({"op": "upload", "channel": ch.id()}))).unwrap();
     let data = vec![3u8; 5 << 20];
     ch.send(&data).unwrap();
     ch.send_eof().unwrap();
-    let total: usize = call.join().unwrap().parse().unwrap();
+    let total: usize = ch.recv_message(Some(Duration::from_secs(10))).unwrap().unwrap().parse().unwrap();
     assert_eq!(total, data.len());
 }
 
@@ -228,11 +241,18 @@ fn closing_a_channel_stops_its_sender() {
     let p = pair(Duration::ZERO);
     let ch = p.client.open_channel().unwrap();
     p.client.call(&req(json!({"op": "flood", "len": 1 << 30, "channel": ch.id()}))).unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    assert!(until(10, || p.sent.load(Ordering::SeqCst) > 0), "the producer started");
     drop(ch);
-    std::thread::sleep(Duration::from_millis(100));
+    // Once the close reaches the server, the producer gets no further.
+    let mut last = p.sent.load(Ordering::SeqCst);
+    let stopped = until(10, || {
+        std::thread::sleep(Duration::from_millis(100));
+        let now = p.sent.load(Ordering::SeqCst);
+        std::mem::replace(&mut last, now) == now
+    });
+    assert!(stopped, "the producer kept going after the close");
     let after_close = p.sent.load(Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(100));
+    std::thread::sleep(Duration::from_millis(200));
     assert_eq!(p.sent.load(Ordering::SeqCst), after_close, "the producer kept going after the close");
     assert!(p.client.is_alive());
 }

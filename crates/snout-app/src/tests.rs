@@ -376,8 +376,11 @@ fn claude_console_runs_in_the_repo_and_refreshes_git(cx: &mut TestAppContext) {
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).expect("the console is docked");
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     act(&model, cx, Action::ToggleConsole);
+    // Real time: the program starts in a pseudo terminal, which takes a while when the
+    // machine is busy (the engine tests run beside this one).
     let wait = |cx: &mut VisualTestContext, what: &str| {
-        for _ in 0..300 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
             cx.executor().advance_clock(std::time::Duration::from_millis(50));
             cx.run_until_parked();
@@ -388,13 +391,15 @@ fn claude_console_runs_in_the_repo_and_refreshes_git(cx: &mut TestAppContext) {
         }
         panic!("{what:?} never appeared");
     };
-    let text = wait(cx, "ready in");
+    // The line may wrap: the program can print before the terminal takes the panel's width.
+    let text = wait(cx, "ready in").replace('\n', "");
     assert!(text.contains(repo.file_name().unwrap().to_str().unwrap()), "{text}");
     cx.simulate_keystrokes("n o t e enter");
     wait(cx, "made note");
     assert!(repo.join("note.txt").exists());
     // Once the agent goes quiet, the Git views read the repository again.
-    for _ in 0..60 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(25));
         cx.executor().advance_clock(std::time::Duration::from_millis(100));
         cx.run_until_parked();
@@ -780,8 +785,11 @@ fn the_terminal_tab_runs_a_shell_in_the_repository(cx: &mut TestAppContext) {
             });
         })
     });
+    // Real time: the program starts in a pseudo terminal, which takes a while when the
+    // machine is busy (the engine tests run beside this one).
     let wait = |cx: &mut VisualTestContext, what: &str| {
-        for _ in 0..300 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
             cx.executor().advance_clock(std::time::Duration::from_millis(50));
             cx.run_until_parked();

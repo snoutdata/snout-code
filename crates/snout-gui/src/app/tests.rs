@@ -527,8 +527,10 @@ fn opening_a_plain_folder_offers_init_or_search() {
     let _ = std::fs::remove_dir_all(&fresh);
 }
 
+/// Real time: processes and Git run beside the harness, slowly when the machine is busy.
 fn wait_until(h: &mut Harness<'_, SnoutApp>, what: &str, done: impl Fn(&SnoutApp) -> bool) {
-    for _ in 0..200 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if done(h.state()) {
             return;

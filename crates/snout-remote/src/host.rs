@@ -314,8 +314,9 @@ impl RemoteHost {
     /// waits for the server: call it off the UI thread.
     pub fn close(&self) {
         let ports = std::mem::take(&mut *lock(&self.forwards));
+        let client = lock(&self.link.st).client.clone().filter(Client::is_alive);
         if !ports.is_empty()
-            && let Some(c) = lock(&self.link.st).client.clone().filter(Client::is_alive)
+            && let Some(c) = client
         {
             for port in ports {
                 let _ = c.unlisten(port);
@@ -331,7 +332,9 @@ impl RemoteHost {
 
     /// Drop the connection now, as a broken network would (for tests).
     pub fn drop_connection(&self) {
-        if let Some(c) = lock(&self.link.st).client.clone() {
+        // Not under the lock: the close runs the connection's end, which takes it.
+        let client = lock(&self.link.st).client.clone();
+        if let Some(c) = client {
             c.close();
         }
     }
