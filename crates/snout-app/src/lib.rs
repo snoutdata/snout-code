@@ -76,7 +76,7 @@ pub fn init(settings: &Settings, cx: &mut App) {
         eprintln!("Could not load the fonts: {e}");
     }
     theme::set_fonts(settings, cx);
-    theme::apply(settings.theme, None, cx);
+    theme::apply(settings.colors, settings.theme, None, cx);
     keymap::init(&settings.keymap, cx);
     editor::register_languages();
     workspace::app_actions(cx);

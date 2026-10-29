@@ -68,6 +68,24 @@ impl Tool {
         }
     }
 
+    /// The hue its icon takes when icons are in colour.
+    fn hue(self) -> usize {
+        match self {
+            Tool::Run => 1,
+            Tool::Debug => 3,
+            Tool::Build => 2,
+            Tool::Output => 0,
+            Tool::Terminal => 5,
+            Tool::Problems => 6,
+            Tool::Claude => 7,
+            Tool::Gradle => 5,
+            Tool::Spring => 1,
+            Tool::Notifications => 6,
+            Tool::Processes => 0,
+            Tool::ClaudeChanges => 2,
+        }
+    }
+
     fn tip(self) -> &'static str {
         match self {
             Tool::Run => "Run",
@@ -125,9 +143,11 @@ fn item(
     tip: &'static str,
     on: bool,
     badge: Option<(usize, gpui::Hsla)>,
+    hue: usize,
     p: &Palette,
 ) -> gpui::Stateful<gpui::Div> {
-    let ink = if on { gpui::white() } else { p.fg_dim };
+    let ink = if on { p.on_accent } else { p.hue(hue) };
+    let glow = p.glow_of(p.accent);
     let hover = p.button_hover;
     let ground = p.ground;
     div()
@@ -141,7 +161,7 @@ fn item(
         .justify_center()
         .rounded(px(6.))
         .cursor_pointer()
-        .when(on, |d| d.bg(p.accent))
+        .when(on, |d| d.bg(p.accent).shadow(glow))
         .when(!on, |d| d.hover(move |s| s.bg(hover)))
         .tooltip(move |w, cx| Tooltip::new(tip).build(w, cx))
         .child(icon(g, 18., ink))
@@ -160,8 +180,8 @@ fn item(
                     .rounded(px(7.))
                     .border_1()
                     .border_color(ground)
-                    .bg(color)
-                    .text_color(gpui::white())
+                    .bg(p.tile(color).0)
+                    .text_color(p.tile(color).1)
                     .text_size(px(9.))
                     .child(if n > 99 { "99+".to_owned() } else { n.to_string() }),
             )
@@ -246,7 +266,7 @@ impl Workspace {
 
     fn tool_item(&self, tool: Tool, badge: Option<(usize, gpui::Hsla)>, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        item(tool.id(), tool.icon(), tool.tip(), self.tool_open(tool, cx), badge, &p)
+        item(tool.id(), tool.icon(), tool.tip(), self.tool_open(tool, cx), badge, tool.hue(), &p)
             .on_click(cx.listener(move |this, _, w, cx| this.toggle_tool(tool, w, cx)))
             .into_any_element()
     }
@@ -272,7 +292,7 @@ impl Workspace {
             .border_r_1()
             .border_color(p.border)
             .child(
-                item("act-project", Icon::Folder, "Project (⌘1)", open && current == Activity::Project, None, &p)
+                item("act-project", Icon::Folder, "Project (⌘1)", open && current == Activity::Project, None, 0, &p)
                     .on_click(pick(Activity::Project)),
             )
             .child(
@@ -282,6 +302,7 @@ impl Workspace {
                     "Git (⌘2)",
                     open && current == Activity::Git,
                     Some((changed, p.accent)),
+                    2,
                     &p,
                 )
                 .on_click(pick(Activity::Git)),

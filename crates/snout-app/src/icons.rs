@@ -84,6 +84,20 @@ impl FileKind {
     }
 
     fn color(self, p: &Palette) -> Hsla {
+        if p.tinted {
+            let i = match self {
+                Self::Java => 2,
+                Self::Kotlin => 4,
+                Self::Groovy => 5,
+                Self::Shell => 1,
+                Self::Yaml | Self::Json | Self::Sql => 6,
+                Self::Xml => 7,
+                Self::Markdown => 0,
+                Self::Rust => 3,
+                Self::Properties | Self::Other => return p.fg_dim,
+            };
+            return p.hues[i];
+        }
         let [green, warm, blue, clay, violet, dim] = p.lanes();
         match self {
             Self::Java | Self::Rust => clay,
@@ -101,6 +115,25 @@ pub fn file_icon(path: &Path, size: f32, p: &Palette) -> AnyElement {
     let kind = FileKind::of(path);
     let Some(text) = kind.monogram() else { return page(size, mix(p.fg, 0.55, p.panel)).into_any_element() };
     let color = kind.color(p);
+    if p.tinted {
+        // A solid tile of the type's colour, the letter cut out of it.
+        let (tile, ink) = p.tile(color);
+        return div()
+            .flex_none()
+            .size(px(size))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(3.5))
+            .bg(tile)
+            .text_color(ink)
+            .font_family(look::MONO)
+            .font_weight(FontWeight::BOLD)
+            .text_size(px(if text.len() > 1 { size * 0.5 } else { size * 0.66 }))
+            .line_height(px(size))
+            .child(text)
+            .into_any_element();
+    }
     div()
         .flex_none()
         .size(px(size))

@@ -128,6 +128,13 @@ impl Render for WelcomePanel {
         let action = |id: &'static str, g: Icon, title: &'static str, note: String, a: Option<Action>| {
             let model = model.clone();
             let enabled = a.is_some();
+            // Each action in its own colour when the palette is in colour.
+            let fill = match (p.tinted, id) {
+                (true, "welcome-clone") => p.tile(p.hues[1]),
+                (true, "welcome-new") => p.tile(p.hues[0]),
+                _ => (p.accent, p.on_accent),
+            };
+            let (fill, ink) = fill;
             div()
                 .id(id)
                 .debug_selector(move || id.to_owned())
@@ -152,8 +159,9 @@ impl Render for WelcomePanel {
                         .items_center()
                         .justify_center()
                         .rounded(px(8.))
-                        .bg(if enabled { p.accent } else { p.button })
-                        .child(icon(g, 17., if enabled { p.on_accent } else { p.fg_dim })),
+                        .bg(if enabled { fill } else { p.button })
+                        .when(enabled, |d| d.shadow(p.glow_of(fill)))
+                        .child(icon(g, 17., if enabled { ink } else { p.fg_dim })),
                 )
                 .child(
                     div()
@@ -244,7 +252,7 @@ impl Render for WelcomePanel {
                             .items_center()
                             .justify_center()
                             .bg(crate::workspace::badge_color(&name, &p))
-                            .text_color(gpui::white())
+                            .text_color(p.on_badge)
                             .text_size(px(11.5))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(crate::workspace::initials(&name)),

@@ -20,13 +20,40 @@ pub enum ThemeChoice {
 }
 
 impl ThemeChoice {
-    pub const ALL: [Self; 3] = [Self::System, Self::Dark, Self::Light];
+    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::System => "Match the system",
+            Self::System => "System",
             Self::Dark => "Dark",
             Self::Light => "Light",
+        }
+    }
+}
+
+/// The colour theme, each in light and dark (see `theme`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ColorTheme {
+    /// Warm, after Snout Studio: cream and walnut grounds, a terracotta or amber accent.
+    #[default]
+    Studio,
+    /// Neutral greys, a violet accent, colour wherever it carries meaning.
+    Vivid,
+    /// Midnight indigo, an aqua accent that glows.
+    Deep,
+    /// The earlier neutral greys and blue accent.
+    Classic,
+}
+
+impl ColorTheme {
+    pub const ALL: [Self; 4] = [Self::Studio, Self::Vivid, Self::Deep, Self::Classic];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Studio => "Studio",
+            Self::Vivid => "Vivid",
+            Self::Deep => "Deep",
+            Self::Classic => "Classic",
         }
     }
 }
@@ -42,7 +69,10 @@ pub struct Settings {
     pub compact: bool,
     /// The bottom dock (the Claude Code console) is showing.
     pub console_open: bool,
+    /// Light, dark, or as the system is.
     pub theme: ThemeChoice,
+    /// The colour theme.
+    pub colors: ColorTheme,
     /// The dock layout as GPUI Kit's dock writes it: panels, sizes, open docks.
     pub dock: Option<serde_json::Value>,
     /// The editors' font size (⌘+ and ⌘-).
@@ -99,6 +129,7 @@ impl Default for Settings {
             compact: true,
             console_open: false,
             theme: ThemeChoice::default(),
+            colors: ColorTheme::default(),
             dock: None,
             editor_font_size: crate::look::MONO_SIZE,
             activity: None,

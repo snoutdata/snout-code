@@ -254,7 +254,7 @@ impl StatusBar {
                         .items_center()
                         .gap(px(4.))
                         .when(i == last, |d| d.text_color(p.fg).child(crate::icons::file_icon(&path, 12., &p)))
-                        .when(i == 0, |d| d.child(icon(Icon::Folder, 12., p.fg_dim)))
+                        .when(i == 0, |d| d.child(icon(Icon::Folder, 12., p.hue(0))))
                         .child(name)
                         .when(i < last, |d| d.child(icon(Icon::ChevronRight, 10., p.fg_dim)))
                 }))
@@ -533,9 +533,21 @@ impl Render for StatusBar {
                 .when(busy, |d| d.child(Spinner::new().xsmall()))
                 .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(m.message.clone()))
                 .when_some(m.branch_summary().filter(|_| self.git), |d, s| {
-                    d.child(div().w(px(10.)))
-                        .child(icon(Icon::Branch, 13., p.fg_dim))
-                        .child(div().whitespace_nowrap().child(s))
+                    d.child(div().w(px(10.))).child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.))
+                            .when(p.tinted, |d| {
+                                d.h(px(18.)).px(px(7.)).rounded(px(9.)).bg(p.wash(p.branch())).text_color(if p.dark {
+                                    p.branch()
+                                } else {
+                                    p.fg
+                                })
+                            })
+                            .child(icon(Icon::Branch, 13., if p.tinted { p.branch() } else { p.fg_dim }))
+                            .child(div().whitespace_nowrap().child(s)),
+                    )
                 })
                 .into_any_element()
         } else {
@@ -550,18 +562,24 @@ impl Render for StatusBar {
             .pl(px(10.))
             .pr(px(8.))
             .h(px(26.))
-            .bg(p.ground)
+            .bg(p.status_bg)
             .border_t_1()
             .border_color(p.border)
             .text_size(px(12.))
             .text_color(p.fg_dim)
             .child(div().flex_1().min_w_0().child(left))
             .when_some(status, |d, s| {
-                d.child(item("status-position", s.position.into()))
-                    .when_some(s.selection, |d, sel| d.child(item("status-selection", sel.into())))
-                    .child(item("status-endings", s.endings.into()))
-                    .child(item("status-encoding", s.encoding.into()))
-                    .child(item("status-indent", s.indent.into()))
+                d.child(item("status-position", s.position.into()).when(p.tinted, |d| {
+                    d.h(px(18.))
+                        .bg(p.wash(p.accent))
+                        .text_color(if p.dark { p.accent } else { p.fg })
+                        .rounded(px(9.))
+                        .px(px(8.))
+                }))
+                .when_some(s.selection, |d, sel| d.child(item("status-selection", sel.into())))
+                .child(item("status-endings", s.endings.into()))
+                .child(item("status-encoding", s.encoding.into()))
+                .child(item("status-indent", s.indent.into()))
             })
             .children(java_item)
             .children(self.tasks_item(cx))

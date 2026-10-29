@@ -348,6 +348,8 @@ impl Workspace {
         });
 
         let subscriptions = vec![
+            // With the theme on System, the window turns light or dark when the Mac does.
+            theme::follow_system(window),
             cx.observe_in(&model, window, |this, model, window, cx| {
                 // A project opened with none open before: its tabs come back.
                 let root = model.read(cx).project_root();
@@ -861,8 +863,9 @@ impl Workspace {
         match e {
             ModelEvent::Dialog => crate::dialogs::open(model, window, cx),
             ModelEvent::Theme => {
-                let choice = model.read(cx).settings.theme;
-                theme::apply(choice, Some(window), cx);
+                let s = &model.read(cx).settings;
+                let (colors, choice) = (s.colors, s.theme);
+                theme::apply(colors, choice, Some(window), cx);
             }
             ModelEvent::ToggleConsole => {
                 let open = model.read(cx).settings.console_open;
@@ -1200,7 +1203,7 @@ impl Workspace {
             cx.notify();
         });
         theme::set_fonts(&next, cx);
-        theme::apply(next.theme, Some(window), cx);
+        theme::apply(next.colors, next.theme, Some(window), cx);
         cx.set_global(crate::editor::EditorFont(
             next.editor_font_size.clamp(crate::editor::FONT_MIN, crate::editor::FONT_MAX),
         ));
@@ -1518,6 +1521,7 @@ impl Render for Workspace {
                 this.send(Action::OpenPath(path.clone()), cx);
             }
         }));
+        let (veil, on_veil) = (p.panel.opacity(0.9), p.fg);
         let drop_hint = div()
             .id("drop-hint")
             .absolute()
@@ -1527,7 +1531,7 @@ impl Render for Workspace {
             .justify_center()
             .text_size(px(24.))
             .text_color(gpui::transparent_black())
-            .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(gpui::black().opacity(0.6)).text_color(gpui::white()))
+            .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(veil).text_color(on_veil))
             .child("Drop a folder to open it");
 
         let git = self.side.read(cx).activity == Activity::Git;
@@ -1571,7 +1575,7 @@ impl Render for Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(gpui::black().opacity(0.4))
+                    .bg(p.scrim)
                     .occlude()
                     .child(sheet)
             }))
@@ -1583,7 +1587,7 @@ impl Render for Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(gpui::black().opacity(0.4))
+                    .bg(p.scrim)
                     .occlude()
                     .child(dialog)
             }))
@@ -1595,7 +1599,7 @@ impl Render for Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(gpui::black().opacity(0.4))
+                    .bg(p.scrim)
                     .occlude()
                     .child(picker)
             }))
@@ -1607,7 +1611,7 @@ impl Render for Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(gpui::black().opacity(0.4))
+                    .bg(p.scrim)
                     .occlude()
                     .child(dialog)
             }))
@@ -1619,7 +1623,7 @@ impl Render for Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(gpui::black().opacity(0.4))
+                    .bg(p.scrim)
                     .occlude()
                     .child(dialog)
             }))

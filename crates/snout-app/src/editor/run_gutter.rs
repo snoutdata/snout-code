@@ -181,7 +181,8 @@ impl EditorPanel {
                         point(l.breakpoints().1, top),
                         size(bounds.right() - l.breakpoints().1, line_height),
                     );
-                    window.paint_quad(gpui::fill(band, p.accent.opacity(0.22)));
+                    window
+                        .paint_quad(gpui::fill(band, p.accent.opacity(if p.tinted && !p.dark { 0.14 } else { 0.22 })));
                 }
                 for (at, label) in labels {
                     let run = gpui::TextRun {
@@ -207,7 +208,7 @@ impl EditorPanel {
                     if condition.is_some() {
                         let q = px(2.5);
                         let inner = Bounds::new(point(c.x - q, c.y - q), size(q * 2., q * 2.));
-                        window.paint_quad(gpui::fill(inner, gpui::white()).corner_radii(q));
+                        window.paint_quad(gpui::fill(inner, p.on_badge).corner_radii(q));
                     }
                 }
                 // Run icons, and over them the arrow where the debugger stopped.

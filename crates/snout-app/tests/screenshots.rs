@@ -23,7 +23,7 @@ mod shots {
     use gpui::{AppContext as _, HeadlessAppContext, px, size};
     use snout_app::model::Action;
     use snout_app::panels::Activity;
-    use snout_app::settings::{Settings, ThemeChoice};
+    use snout_app::settings::{ColorTheme, Settings, ThemeChoice};
     use snout_app::workspace::Workspace;
 
     fn git(dir: &Path, args: &[&str]) {
@@ -164,6 +164,18 @@ mod shots {
 
     include!("fixtures/project_fixture.rs");
 
+    thread_local! {
+        /// The colour theme the next shots take (Studio, the default, unless a shot says).
+        static COLORS: std::cell::Cell<ColorTheme> = const { std::cell::Cell::new(ColorTheme::Studio) };
+    }
+
+    /// `shot` in another colour theme.
+    fn themed_shot(colors: ColorTheme, name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
+        COLORS.set(colors);
+        shot(name, theme, activity, select);
+        COLORS.set(ColorTheme::default());
+    }
+
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
         // `SNOUT_SHOT_ONLY=<part of a name>` takes only the shots it names.
         if std::env::var("SNOUT_SHOT_ONLY").is_ok_and(|only| !name.contains(&only)) {
@@ -179,7 +191,8 @@ mod shots {
             gpui_platform::current_headless_renderer,
         );
         let current = (!matches!(select, Some(Select::Nothing))).then(|| repo.clone());
-        let mut settings = Settings { theme, repos: vec![repo.clone()], current, ..Settings::default() };
+        let mut settings =
+            Settings { theme, colors: COLORS.get(), repos: vec![repo.clone()], current, ..Settings::default() };
         if matches!(select, Some(Select::Nothing)) {
             // The Welcome page's recent projects, opened a while ago.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -2031,5 +2044,20 @@ mod shots {
             Activity::Project,
             Some(Select::Spring(SpringShot::Properties)),
         );
+        // The other colour themes, on the editor and the Git view.
+        for (colors, name) in
+            [(ColorTheme::Vivid, "vivid"), (ColorTheme::Deep, "deep"), (ColorTheme::Classic, "classic")]
+        {
+            for (theme, mode) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
+                themed_shot(colors, &format!("{name}-editor-{mode}"), theme, Activity::Project, Some(Select::Editor));
+                themed_shot(
+                    colors,
+                    &format!("{name}-git-{mode}"),
+                    theme,
+                    Activity::Git,
+                    Some(Select::File("status.rs")),
+                );
+            }
+        }
     }
 }

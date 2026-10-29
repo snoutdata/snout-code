@@ -37,7 +37,11 @@ pub fn badge_color(name: &str, p: &Palette) -> gpui::Hsla {
     let hues = [0.58, 0.08, 0.36, 0.75, 0.95, 0.15, 0.5];
     let hash = name.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
     let hue = hues[hash as usize % hues.len()];
-    gpui::hsla(hue, 0.45, if p.dark { 0.42 } else { 0.5 }, 1.)
+    if p.tinted {
+        // One of the palette's hues, deepened until its letters read (WCAG AA).
+        return p.badge(p.hues[[0usize, 2, 1, 4, 3, 5, 7][hash as usize % 7]]);
+    }
+    p.badge(gpui::hsla(hue, 0.45, if p.dark { 0.42 } else { 0.5 }, 1.))
 }
 
 /// A quiet button of the title bar: filled only under the pointer.
@@ -143,7 +147,7 @@ impl Workspace {
                 .items_center()
                 .justify_center()
                 .bg(badge_color(&label, &p))
-                .text_color(gpui::white())
+                .text_color(p.on_badge)
                 .text_size(px(10.5))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .child(initials(&label));
@@ -215,9 +219,17 @@ impl Workspace {
                 .flex_none()
                 .child(
                     bar_button("title-branch", &p)
-                        .child(icon(Icon::Branch, 15., p.fg_dim))
+                        .when(p.tinted, |d| {
+                            d.h(px(24.))
+                                .bg(p.wash(p.branch()))
+                                .border_1()
+                                .border_color(mix(p.branch(), 0.35, p.ground))
+                                .rounded(px(12.))
+                                .text_color(if p.dark { p.branch() } else { p.fg })
+                        })
+                        .child(icon(Icon::Branch, 15., if p.tinted { p.branch() } else { p.fg_dim }))
                         .child(div().max_w(px(240.)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(b))
-                        .child(icon(Icon::ChevronDown, 12., p.fg_dim))
+                        .child(icon(Icon::ChevronDown, 12., if p.tinted { p.branch() } else { p.fg_dim }))
                         .on_click(cx.listener(|this, _, window, cx| this.toggle_branches(window, cx))),
                 )
                 .children(self.branch_popup.clone().map(|popup| {
@@ -295,8 +307,9 @@ impl Workspace {
         let run_icon = if rerun { Icon::Rerun } else { Icon::Play };
         let run_button = tip_button("title-run", run_icon, run_tip, ready, p.ok, &p)
             .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::RunSelected), cx)));
-        let debug_button = tip_button("title-debug", Icon::Bug, debug_tip, ready, p.ok, &p)
-            .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::DebugSelected), cx)));
+        let debug_button =
+            tip_button("title-debug", Icon::Bug, debug_tip, ready, if p.tinted { p.hues[3] } else { p.ok }, &p)
+                .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::DebugSelected), cx)));
         let stop_button = running.then(|| {
             tip_button("title-stop", Icon::Stop, "Stop (⌘F2)".into(), true, p.error, &p)
                 .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::StopRuns), cx))
@@ -323,7 +336,15 @@ impl Workspace {
 
         gpui_component::TitleBar::new()
             .h(px(TITLE_H))
-            .bg(p.ground)
+            .bg(p.title_bg)
+            .when_some(p.title_wash(), |d, tint| {
+                // The accent washes in from the left, fading into the bar.
+                d.bg(gpui::linear_gradient(
+                    90.,
+                    gpui::linear_color_stop(tint, 0.),
+                    gpui::linear_color_stop(p.title_bg, 0.35),
+                ))
+            })
             .border_b_1()
             .border_color(mix(p.border, 0.6, p.ground))
             .text_size(px(crate::look::BODY))

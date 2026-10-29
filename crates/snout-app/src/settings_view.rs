@@ -18,7 +18,7 @@ use crate::glyphs::{Icon, icon};
 use crate::lang::java::Jdk;
 use crate::look::{self, Trigger};
 use crate::model::Model;
-use crate::settings::{Settings, ThemeChoice};
+use crate::settings::{ColorTheme, Settings, ThemeChoice};
 use crate::theme::{Palette, mix, palette};
 
 /// A page of the sheet.
@@ -59,7 +59,7 @@ impl Page {
     /// Words the search finds the page by, besides its title.
     fn keywords(self) -> &'static str {
         match self {
-            Page::Appearance => "theme dark light system font size interface",
+            Page::Appearance => "theme colors studio vivid deep classic dark light system font size interface",
             Page::Keymap => "shortcuts keys bindings",
             Page::Editor => "tab size indent soft wrap whitespace font",
             Page::VersionControl => "git fetch interval background",
@@ -183,6 +183,7 @@ impl SettingsView {
         let mut next = self.model.read(cx).settings.clone();
         let d = &self.draft;
         next.theme = d.theme;
+        next.colors = d.colors;
         next.ui_font = d.ui_font.clone();
         next.ui_font_size = d.ui_font_size;
         next.editor_font = d.editor_font.clone();
@@ -311,6 +312,66 @@ pub(crate) fn choice(
     .into_any_element()
 }
 
+/// A colour theme to pick: a small window drawn in its colours (in the light or dark showing
+/// now), its name beneath, outlined in the accent when it is the one chosen.
+fn swatch(t: ColorTheme, dark: bool, on: bool, p: &Palette) -> gpui::Stateful<gpui::Div> {
+    let id = format!("settings-colors-{}", t.label().to_lowercase());
+    let s = Palette::new(t, dark);
+    let line = |w: f32, c: gpui::Hsla| div().h(px(3.)).w(px(w)).rounded(px(2.)).bg(c);
+    let hover = p.button_hover;
+    div()
+        .id(SharedString::from(id.clone()))
+        .debug_selector(move || id.clone())
+        .flex()
+        .flex_col()
+        .gap(px(5.))
+        .p(px(4.))
+        .rounded(px(8.))
+        .cursor_pointer()
+        .when(on, |d| d.bg(p.selection()))
+        .when(!on, |d| d.hover(move |st| st.bg(hover)))
+        .child(
+            div()
+                .w(px(84.))
+                .h(px(52.))
+                .flex()
+                .rounded(px(5.))
+                .overflow_hidden()
+                .border_1()
+                .border_color(if on { p.accent } else { p.border })
+                .bg(s.panel)
+                .child(
+                    div()
+                        .w(px(14.))
+                        .h_full()
+                        .bg(s.ground)
+                        .border_r_1()
+                        .border_color(s.border)
+                        .p(px(3.))
+                        .child(div().size(px(8.)).rounded(px(2.)).bg(s.accent)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(5.))
+                        .p(px(7.))
+                        .child(line(30., crate::theme::syntax_colors(&s).keyword))
+                        .child(line(44., s.fg_dim))
+                        .child(div().flex().gap(px(3.)).child(line(18., s.added)).child(line(22., s.removed)))
+                        .child(line(34., s.fg_dim)),
+                ),
+        )
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(if on { p.fg } else { p.fg_dim })
+                .when(on, |d| d.font_weight(FontWeight::SEMIBOLD))
+                .child(t.label()),
+        )
+}
+
 impl SettingsView {
     fn page_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
@@ -334,15 +395,21 @@ impl SettingsView {
                 let pick_editor = set.clone();
                 let view = cx.entity();
                 let view2 = cx.entity();
+                let dark = p.dark;
+                let swatches = div().flex().flex_wrap().gap(px(6.)).children(ColorTheme::ALL.map(|t| {
+                    swatch(t, dark, d.colors == t, &p)
+                        .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.colors = t)))
+                }));
                 body.child(section("Theme", &p))
+                    .child(row("Colors", swatches, &p))
                     .child(row(
-                        "Theme",
+                        "Light or dark",
                         div()
                             .flex()
                             .gap(px(4.))
+                            .child(theme(ThemeChoice::System, "System", "settings-theme-system", cx))
                             .child(theme(ThemeChoice::Light, "Light", "settings-theme-light", cx))
-                            .child(theme(ThemeChoice::Dark, "Dark", "settings-theme-dark", cx))
-                            .child(theme(ThemeChoice::System, "Match the system", "settings-theme-system", cx)),
+                            .child(theme(ThemeChoice::Dark, "Dark", "settings-theme-dark", cx)),
                         &p,
                     ))
                     .child(section("Interface", &p))

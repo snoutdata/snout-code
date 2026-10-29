@@ -859,6 +859,13 @@ fn the_settings_sheet_edits_a_copy_until_apply_or_ok(cx: &mut TestAppContext) {
         assert_eq!(model.read(cx).settings.theme, ThemeChoice::Light, "Apply puts it in place");
         assert!(!crate::theme::palette(cx).dark, "and the window follows");
         assert!(ws.read(cx).settings_sheet.is_some(), "Apply leaves the sheet open");
+        assert_eq!(crate::theme::palette(cx).theme, crate::settings::ColorTheme::Studio, "Studio by default");
+    });
+    click(cx, "settings-colors-classic");
+    click(cx, "settings-apply");
+    cx.update(|_, cx| {
+        assert_eq!(model.read(cx).settings.colors, crate::settings::ColorTheme::Classic);
+        assert_eq!(crate::theme::palette(cx), crate::theme::Palette::new(crate::settings::ColorTheme::Classic, false));
     });
     click(cx, "settings-page-editor");
     click(cx, "settings-tab-size-up");

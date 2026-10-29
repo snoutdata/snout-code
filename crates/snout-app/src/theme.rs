@@ -1,16 +1,21 @@
-//! The look, in one place: a neutral dark palette (near black greys, one blue accent,
-//! hairline separators) and its light twin, the type, and the editor's syntax colours, laid
-//! onto GPUI Kit's theme. Every view takes its colours from [`palette`].
+//! The look, in one place: the colour themes (Studio, the default, warm and modelled on
+//! Snout Studio; Vivid; Deep; and Classic, the earlier neutral greys), each in dark and light,
+//! the type, and the editor's syntax colours, laid onto GPUI Kit's theme. Every view takes
+//! its colours from [`palette`]; nothing else names a colour.
 
-use gpui::{App, Global, Hsla, Rgba, Window, WindowAppearance};
+mod palettes;
+
+use gpui::{App, Global, Hsla, Rgba, Subscription, Window, WindowAppearance};
 use gpui_component::{Theme, ThemeMode};
 
-use crate::settings::ThemeChoice;
+use crate::settings::{ColorTheme, ThemeChoice};
 
 /// Every colour the app uses. Pick one with [`palette`]; nothing else names a colour.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
     pub dark: bool,
+    /// The colour theme this palette belongs to.
+    pub theme: ColorTheme,
     /// The ground between the panes.
     pub ground: Hsla,
     /// The panes.
@@ -31,6 +36,28 @@ pub struct Palette {
     pub ok: Hsla,
     pub warn: Hsla,
     pub error: Hsla,
+    /// Lines a diff added and removed (gutter, counts, row washes): a colour-blind-safe pair.
+    pub added: Hsla,
+    pub removed: Hsla,
+    /// A line the working tree changed, in the gutter.
+    pub modified: Hsla,
+    /// The title bar's and the status bar's grounds.
+    pub title_bg: Hsla,
+    pub status_bg: Hsla,
+    /// Icon hues: blue, green, orange, red, purple, teal, yellow, pink. Grey when untinted.
+    pub hues: [Hsla; 8],
+    /// Tool window, activity bar and file icons in colour.
+    pub tinted: bool,
+    /// Accents give off a soft glow.
+    pub glow: bool,
+    /// How strongly the accent fills a selection.
+    pub sel_mix: f32,
+    /// Letters on a coloured tile or badge (a project's badge, a file type's tile).
+    pub on_badge: Hsla,
+    /// The dimming laid over the window behind a sheet or a drop.
+    pub scrim: Hsla,
+    /// The Spring accent: a soft leaf green.
+    pub spring: Hsla,
     /// Ink line of the drawings.
     pub ill_ink: Hsla,
     pub ill_blob: Hsla,
@@ -40,6 +67,7 @@ pub struct Palette {
     pub ill_accent: Hsla,
     pub ill_warm: Hsla,
     pub ill_clay: Hsla,
+    syntax: [u32; 8],
 }
 
 fn hex(rgb: u32) -> Hsla {
@@ -53,73 +81,32 @@ pub fn mix(a: Hsla, t: f32, b: Hsla) -> Hsla {
     Rgba { r: l(a.r, b.r), g: l(a.g, b.g), b: l(a.b, b.b), a: 1.0 }.into()
 }
 
-struct Base {
-    ground: u32,
-    panel: u32,
-    card: u32,
-    input: u32,
-    stripe: u32,
-    button: u32,
-    button_hover: u32,
-    active: u32,
-    border: u32,
-    fg: u32,
-    fg_dim: u32,
-    accent: u32,
-    on_accent: u32,
-    ok: u32,
-    warn: u32,
-    error: u32,
+/// WCAG relative luminance.
+pub fn luminance(c: Hsla) -> f32 {
+    let c: Rgba = c.into();
+    let f = |x: f32| if x <= 0.03928 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
+    0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
 }
 
-/// Dark: the chrome (title bar, stripes, tool windows) a step lighter than the editor.
-const DARK: Base = Base {
-    ground: 0x2a2c30,
-    panel: 0x1f2023,
-    card: 0x2d2f34,
-    input: 0x1f2023,
-    stripe: 0x25272b,
-    button: 0x35373c,
-    button_hover: 0x3a3d43,
-    active: 0x2b3f63,
-    border: 0x393b41,
-    fg: 0xdcdfe4,
-    fg_dim: 0x8b8f97,
-    accent: 0x3b78e7,
-    on_accent: 0xffffff,
-    ok: 0x5cb46a,
-    warn: 0xdba43f,
-    error: 0xe0605a,
-};
-
-/// Light: white editor, a pale grey chrome.
-const LIGHT: Base = Base {
-    ground: 0xf3f4f6,
-    panel: 0xffffff,
-    card: 0xffffff,
-    input: 0xffffff,
-    stripe: 0xf6f7f9,
-    button: 0xeceef1,
-    button_hover: 0xe3e5e9,
-    active: 0xd6e2fa,
-    border: 0xdcdee3,
-    fg: 0x1e1f23,
-    fg_dim: 0x676b74,
-    accent: 0x3266d4,
-    on_accent: 0xffffff,
-    ok: 0x2d8a42,
-    warn: 0xa66b00,
-    error: 0xcc3a32,
-};
+/// WCAG contrast ratio of two opaque colours.
+pub fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
 
 impl Palette {
-    fn derive(b: &Base, dark: bool) -> Self {
+    /// `theme` in dark or light.
+    pub fn new(theme: ColorTheme, dark: bool) -> Self {
+        let b = palettes::base(theme, dark);
         let (fg, card, ok, warn, error) = (hex(b.fg), hex(b.card), hex(b.ok), hex(b.warn), hex(b.error));
         let panel = hex(b.panel);
+        let hues = b.hues.map_or([hex(b.fg_dim); 8], |h| h.map(hex));
+        let classic = theme == ColorTheme::Classic;
         Self {
             dark,
+            theme,
             ground: hex(b.ground),
-            panel: hex(b.panel),
+            panel,
             card,
             input: hex(b.input),
             stripe: hex(b.stripe),
@@ -134,31 +121,113 @@ impl Palette {
             ok,
             warn,
             error,
+            added: hex(b.added),
+            removed: hex(b.removed),
+            modified: hex(b.modified),
+            title_bg: hex(b.title),
+            status_bg: hex(b.status),
+            hues,
+            tinted: b.hues.is_some(),
+            glow: theme == ColorTheme::Deep,
+            sel_mix: b.sel_mix,
+            on_badge: hex(0xffffff),
+            scrim: if dark { hex(0x000000).opacity(0.5) } else { fg.opacity(0.26) },
+            spring: if !classic {
+                ok
+            } else if dark {
+                gpui::hsla(95. / 360., 0.38, 0.56, 1.)
+            } else {
+                gpui::hsla(95. / 360., 0.5, 0.36, 1.)
+            },
             ill_ink: mix(fg, 0.88, panel),
             ill_blob: mix(fg, 0.05, panel),
             ill_paper: mix(fg, 0.06, card),
             ill_tint: mix(fg, 0.20, card),
-            ill_accent: mix(ok, 0.70, card),
+            // The drawings' one hue: sage, as in Snout Studio's; the accent in Vivid and Deep.
+            ill_accent: mix(
+                if matches!(theme, ColorTheme::Vivid | ColorTheme::Deep) { hex(b.accent) } else { ok },
+                0.70,
+                card,
+            ),
             ill_warm: mix(warn, 0.65, card),
             ill_clay: mix(mix(error, 0.5, warn), 0.55, card),
+            syntax: b.syntax,
         }
     }
 
+    /// The default theme, dark.
     pub fn dark() -> Self {
-        Self::derive(&DARK, true)
+        Self::new(ColorTheme::default(), true)
     }
 
+    /// The default theme, light.
     pub fn light() -> Self {
-        Self::derive(&LIGHT, false)
+        Self::new(ColorTheme::default(), false)
     }
 
     /// Background of a line a diff added or removed.
     pub fn diff_add(&self) -> Hsla {
-        mix(self.ok, 0.16, self.panel)
+        mix(self.added, if self.dark { 0.15 } else { 0.14 }, self.panel)
     }
 
     pub fn diff_del(&self) -> Hsla {
-        mix(self.error, 0.16, self.panel)
+        mix(self.removed, if self.dark { 0.15 } else { 0.14 }, self.panel)
+    }
+
+    /// An icon in hue `i` of [`Palette::hues`], or the dim grey when icons are untinted.
+    pub fn hue(&self, i: usize) -> Hsla {
+        if self.tinted { self.hues[i] } else { self.fg_dim }
+    }
+
+    /// The colour a branch takes: a chip, the current branch in the title bar.
+    pub fn branch(&self) -> Hsla {
+        if self.tinted { self.accent } else { self.ok }
+    }
+
+    /// The tab in front: a whisper of the accent in the coloured themes.
+    pub fn tab_selected(&self) -> Hsla {
+        if self.tinted { mix(self.accent, 0.07, self.panel) } else { self.ground }
+    }
+
+    /// Where the title bar's wash starts, on its left: the accent, faintly. `None` in Classic.
+    pub fn title_wash(&self) -> Option<Hsla> {
+        self.tinted.then(|| mix(self.accent, if self.dark { 0.20 } else { 0.16 }, self.title_bg))
+    }
+
+    /// A tile or badge of `color` that [`Palette::on_badge`] letters read on (WCAG AA).
+    pub fn badge(&self, color: Hsla) -> Hsla {
+        let mut c = color;
+        while contrast(self.on_badge, c) < 4.6 {
+            c = mix(c, 0.92, hex(0x000000));
+        }
+        c
+    }
+
+    /// A solid tile of `color` with letters on it that read (WCAG AA): `(ground, ink)`. Light
+    /// letters on a deepened colour in light, dark letters on a lightened one in dark.
+    pub fn tile(&self, color: Hsla) -> (Hsla, Hsla) {
+        if !self.dark {
+            return (self.badge(color), self.on_badge);
+        }
+        let mut c = color;
+        while contrast(self.panel, c) < 4.6 {
+            c = mix(c, 0.92, hex(0xffffff));
+        }
+        (c, self.panel)
+    }
+
+    /// A soft glow of `color` around an element, when the palette glows.
+    pub fn glow_of(&self, color: Hsla) -> Vec<gpui::BoxShadow> {
+        if !self.glow {
+            return vec![];
+        }
+        vec![gpui::BoxShadow {
+            color: color.opacity(if self.dark { 0.55 } else { 0.35 }),
+            offset: gpui::point(gpui::px(0.), gpui::px(0.)),
+            blur_radius: gpui::px(10.),
+            spread_radius: gpui::px(0.),
+            inset: false,
+        }]
     }
 
     /// A soft wash of `color` for chips and badges.
@@ -166,13 +235,13 @@ impl Palette {
         mix(color, 0.14, self.panel)
     }
 
-    /// Text of lesser weight: the text colour at 60 %, as egui draws weak text.
+    /// Text of lesser weight, between the text and the dim text, readable on every surface.
     pub fn weak(&self) -> Hsla {
-        self.fg.opacity(0.6)
+        mix(self.fg, 0.35, self.fg_dim)
     }
 
     pub fn selection(&self) -> Hsla {
-        mix(self.accent, if self.dark { 0.22 } else { 0.12 }, self.panel)
+        mix(self.accent, self.sel_mix, self.panel)
     }
 
     /// The colours of Claude Code's edits, by what they mark.
@@ -181,11 +250,11 @@ impl Palette {
         ClaudeColors {
             mark,
             mark_wash: self.wash(mark),
-            added: self.ok,
-            added_band: self.ok.opacity(if self.dark { 0.22 } else { 0.18 }),
-            removed: self.error,
-            removed_band: self.error.opacity(if self.dark { 0.20 } else { 0.14 }),
-            removed_text: mix(self.error, 0.85, self.fg),
+            added: self.added,
+            added_band: self.added.opacity(if self.dark { 0.22 } else { 0.2 }),
+            removed: self.removed,
+            removed_band: self.removed.opacity(if self.dark { 0.20 } else { 0.14 }),
+            removed_text: mix(self.removed, 0.85, self.fg),
             caret: mark,
             indicator: self.card,
         }
@@ -193,6 +262,10 @@ impl Palette {
 
     /// Lane colours of the commit graph: the drawings' tones, then two quiet extras.
     pub fn lanes(&self) -> [Hsla; 6] {
+        if self.tinted {
+            let h = self.hues;
+            return [h[1], h[2], h[0], h[3], h[4], self.fg_dim];
+        }
         let (blue, violet) = if self.dark { (hex(0x7fa6d8), hex(0xb79ad6)) } else { (hex(0x3f6fa8), hex(0x7a55a8)) };
         let strong = |c: Hsla| if self.dark { c } else { mix(c, 0.7, self.fg) };
         [strong(self.ill_accent), strong(self.ill_warm), blue, strong(self.ill_clay), violet, self.fg_dim]
@@ -224,21 +297,30 @@ pub struct ClaudeColors {
     pub indicator: Hsla,
 }
 
-/// The palette in use.
-pub struct Current(pub Palette);
+/// The palette in use, and what chose it.
+pub struct Current {
+    pub palette: Palette,
+    pub theme: ColorTheme,
+    pub choice: ThemeChoice,
+}
 
 impl Global for Current {}
 
 pub fn palette(cx: &App) -> Palette {
-    cx.try_global::<Current>().map_or_else(Palette::dark, |c| c.0)
+    cx.try_global::<Current>().map_or_else(Palette::dark, |c| c.palette)
 }
 
-/// Whether `choice` means dark right now.
-pub fn is_dark(choice: ThemeChoice, cx: &App) -> bool {
+fn is_dark_appearance(a: WindowAppearance) -> bool {
+    matches!(a, WindowAppearance::Dark | WindowAppearance::VibrantDark)
+}
+
+/// Whether `choice` means dark right now: the system's appearance, as `window` shows it
+/// when there is one, for [`ThemeChoice::System`].
+pub fn is_dark(choice: ThemeChoice, window: Option<&Window>, cx: &App) -> bool {
     match choice {
         ThemeChoice::Dark => true,
         ThemeChoice::Light => false,
-        ThemeChoice::System => matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark),
+        ThemeChoice::System => is_dark_appearance(window.map_or_else(|| cx.window_appearance(), Window::appearance)),
     }
 }
 
@@ -252,11 +334,41 @@ pub fn set_fonts(settings: &crate::settings::Settings, cx: &mut App) {
     });
 }
 
-/// Follow `choice`: pick the palette and lay it onto GPUI Kit's theme.
-pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
-    let dark = is_dark(choice, cx);
-    let p = if dark { Palette::dark() } else { Palette::light() };
-    cx.set_global(Current(p));
+/// Keep `window`'s app on the system's light or dark while the settings say System: when
+/// the Mac switches, the palette switches with it, live.
+pub fn follow_system(window: &Window) -> Subscription {
+    window.observe_window_appearance(|window, cx| system_changed(window.appearance(), Some(window), cx))
+}
+
+/// The Mac turned to `appearance`: with the theme on System, the palette follows.
+pub fn system_changed(appearance: WindowAppearance, window: Option<&mut Window>, cx: &mut App) {
+    if let Some(c) = cx.try_global::<Current>()
+        && c.choice == ThemeChoice::System
+    {
+        let theme = c.theme;
+        lay(theme, ThemeChoice::System, is_dark_appearance(appearance), window, cx);
+    }
+}
+
+/// Follow `theme` in the light or dark `choice` says: pick the palette and lay it onto GPUI
+/// Kit's theme. A forced Light or Dark also sets the windows' own frames to match; System
+/// lets them follow the Mac again.
+pub fn apply(theme: ColorTheme, choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
+    let forced = match choice {
+        ThemeChoice::System => None,
+        ThemeChoice::Dark => Some(WindowAppearance::Dark),
+        ThemeChoice::Light => Some(WindowAppearance::Light),
+    };
+    if cx.try_global::<Current>().map(|c| c.choice) != Some(choice) {
+        cx.set_window_appearance(forced);
+    }
+    let dark = is_dark(choice, window.as_deref(), cx);
+    lay(theme, choice, dark, window, cx);
+}
+
+fn lay(theme: ColorTheme, choice: ThemeChoice, dark: bool, window: Option<&mut Window>, cx: &mut App) {
+    let p = Palette::new(theme, dark);
+    cx.set_global(Current { palette: p, theme, choice });
     Theme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, window, cx);
     let (ui, mono, size) = (crate::look::ui_font(cx), crate::look::mono_font(cx), crate::look::ui_size(cx));
     Theme::update(cx, |t| {
@@ -303,9 +415,9 @@ pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
         t.sidebar = p.ground;
         t.sidebar_foreground = p.fg;
         t.sidebar_border = p.border;
-        t.title_bar = p.ground;
+        t.title_bar = p.title_bg;
         t.title_bar_border = p.border;
-        t.status_bar = p.ground;
+        t.status_bar = p.status_bg;
         t.status_bar_border = p.border;
         t.link = p.accent;
         t.window_border = p.border;
@@ -316,10 +428,10 @@ pub fn apply(choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
         t.radius_lg = gpui::px(8.);
         t.highlight_theme = std::sync::Arc::new(syntax(&p));
     });
+    cx.refresh_windows();
 }
 
-/// The editor's colours: the syntax in muted tones that sit on the neutral greys, and its
-/// gutter and current line.
+/// The editor's colours: the theme's tones for the code, and its gutter and current line.
 pub fn syntax(p: &Palette) -> gpui_component::highlighter::HighlightTheme {
     let hex = |c: Hsla| {
         let c: Rgba = c.into();
@@ -375,7 +487,7 @@ pub fn syntax(p: &Palette) -> gpui_component::highlighter::HighlightTheme {
     });
     style_json["syntax"] = syntax;
     let json = serde_json::json!({
-        "name": if p.dark { "SnoutCode Dark" } else { "SnoutCode Light" },
+        "name": format!("SnoutCode {} {}", p.theme.label(), if p.dark { "Dark" } else { "Light" }),
         "appearance": if p.dark { "dark" } else { "light" },
         "style": style_json,
     });
@@ -397,36 +509,174 @@ pub struct SyntaxColors {
 }
 
 pub fn syntax_colors(p: &Palette) -> SyntaxColors {
-    if p.dark {
-        SyntaxColors {
-            keyword: hex(0xd29b74),
-            ty: hex(0xc9cdd4),
-            function: hex(0x62aaee),
-            string: hex(0x78b383),
-            number: hex(0x44b0bd),
-            comment: hex(0x7c8089),
-            attribute: hex(0xbcb46e),
-            property: hex(0xc58bc0),
-            punctuation: mix(p.fg, 0.75, p.panel),
-            gutter: mix(p.fg, 0.32, p.panel),
-        }
-    } else {
-        SyntaxColors {
-            keyword: hex(0x1d3fa6),
-            ty: hex(0x23252b),
-            function: hex(0x0d6680),
-            string: hex(0x247a35),
-            number: hex(0x2556d8),
-            comment: hex(0x8a8d93),
-            attribute: hex(0x8f7d12),
-            property: hex(0x7d2391),
-            punctuation: mix(p.fg, 0.75, p.panel),
-            gutter: mix(p.fg, 0.38, p.panel),
-        }
+    let c = p.syntax.map(hex);
+    SyntaxColors {
+        keyword: c[0],
+        ty: c[1],
+        function: c[2],
+        string: c[3],
+        number: c[4],
+        comment: c[5],
+        attribute: c[6],
+        property: c[7],
+        punctuation: mix(p.fg, 0.78, p.panel),
+        gutter: readable(p.fg_dim, p.panel),
     }
+}
+
+/// `color` moved toward the text colour of `bg` until it reads on it (WCAG AA): the line
+/// numbers, as quiet as they may be.
+fn readable(color: Hsla, bg: Hsla) -> Hsla {
+    let toward = if luminance(bg) < 0.2 { hex(0xffffff) } else { hex(0x000000) };
+    let mut c = mix(color, 0.8, bg);
+    while contrast(c, bg) < 4.6 {
+        c = mix(c, 0.94, toward);
+    }
+    c
 }
 
 /// The band behind the caret's line in the editor.
 pub fn active_line(p: &Palette) -> Hsla {
     mix(p.fg, if p.dark { 0.05 } else { 0.045 }, p.panel)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every theme in light and dark.
+    fn all() -> impl Iterator<Item = Palette> {
+        ColorTheme::ALL.into_iter().flat_map(|t| [Palette::new(t, true), Palette::new(t, false)])
+    }
+
+    fn name(p: &Palette) -> String {
+        format!("{} {}", p.theme.label(), if p.dark { "dark" } else { "light" })
+    }
+
+    #[test]
+    fn text_meets_wcag_aa_on_every_surface_it_is_drawn_on() {
+        const AA: f32 = 4.5;
+        let mut bad = Vec::new();
+        let mut need = |what: &str, fg: Hsla, bg: Hsla, min: f32, p: &Palette| {
+            let c = contrast(fg, bg);
+            if c < min {
+                bad.push(format!("{}: {what} {c:.2} < {min}", name(p)));
+            }
+        };
+        for p in all() {
+            let surfaces = [
+                ("panel", p.panel),
+                ("ground", p.ground),
+                ("card", p.card),
+                ("input", p.input),
+                ("stripe", p.stripe),
+                ("title bar", p.title_bg),
+                ("status bar", p.status_bg),
+            ];
+            for (s, bg) in surfaces {
+                for (t, fg) in [("fg", p.fg), ("fg_dim", p.fg_dim), ("weak", p.weak())] {
+                    need(&format!("{t} on {s}"), fg, bg, AA, &p);
+                }
+                for (t, fg) in [
+                    ("accent", p.accent),
+                    ("ok", p.ok),
+                    ("warn", p.warn),
+                    ("error", p.error),
+                    ("added", p.added),
+                    ("removed", p.removed),
+                ] {
+                    need(&format!("{t} on {s}"), fg, bg, AA, &p);
+                }
+            }
+            for (s, bg) in [
+                ("button", p.button),
+                ("button hover", p.button_hover),
+                ("selection", p.selection()),
+                ("active", p.active),
+                ("added line", p.diff_add()),
+                ("removed line", p.diff_del()),
+                ("current line", active_line(&p)),
+                ("tab in front", p.tab_selected()),
+            ] {
+                need(&format!("fg on {s}"), p.fg, bg, AA, &p);
+                need(&format!("fg_dim on {s}"), p.fg_dim, bg, AA, &p);
+            }
+            for (t, c) in
+                [("accent", p.accent), ("ok", p.ok), ("warn", p.warn), ("error", p.error), ("branch", p.branch())]
+            {
+                need(&format!("{t} chip"), c, p.wash(c), AA, &p);
+            }
+            need("on_accent on accent", p.on_accent, p.accent, AA, &p);
+            need("Spring's hints", p.spring, p.panel, if p.theme == ColorTheme::Classic { 3.0 } else { AA }, &p);
+            let s = syntax_colors(&p);
+            for (t, c) in [
+                ("keyword", s.keyword),
+                ("type", s.ty),
+                ("function", s.function),
+                ("string", s.string),
+                ("number", s.number),
+                ("comment", s.comment),
+                ("attribute", s.attribute),
+                ("property", s.property),
+                ("punctuation", s.punctuation),
+            ] {
+                need(&format!("{t} on the editor"), c, p.panel, AA, &p);
+                need(&format!("{t} on the current line"), c, active_line(&p), AA, &p);
+            }
+            need("a line number", s.gutter, p.panel, AA, &p);
+            for c in p.hues {
+                let (tile, ink) = p.tile(c);
+                need("a tile's letter", ink, tile, AA, &p);
+                need("a badge's letter", p.on_badge, p.badge(c), AA, &p);
+                // Icons: 3:1, as WCAG asks of graphics.
+                need("an icon on the ground", c, p.ground, 3.0, &p);
+                need("an icon on the panel", c, p.panel, 3.0, &p);
+            }
+            let claude = p.claude();
+            need("Claude's mark", claude.mark, p.panel, 3.0, &p);
+            need("removed text while it goes", claude.removed_text, p.panel, AA, &p);
+        }
+        assert!(bad.is_empty(), "below WCAG AA:\n{}", bad.join("\n"));
+    }
+
+    /// Added and removed are a blue and an orange: they stay apart along the blue/yellow axis
+    /// that protanopia and deuteranopia keep. Errors and warnings differ in lightness too.
+    #[test]
+    fn diff_and_problem_colours_are_colour_blind_safe() {
+        for p in all() {
+            let hue = |c: Hsla| c.h * 360.;
+            assert!((180. ..=230.).contains(&hue(p.added)), "{}: added is not blue: {}", name(&p), hue(p.added));
+            assert!(
+                hue(p.removed) <= 40. || hue(p.removed) >= 350.,
+                "{}: removed is not orange: {}",
+                name(&p),
+                hue(p.removed)
+            );
+            assert!(contrast(p.error, p.warn) >= 1.25, "{}: error and warning too alike in lightness", name(&p));
+        }
+    }
+
+    #[gpui::test]
+    fn on_system_the_palette_follows_the_mac_live(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            apply(ColorTheme::Studio, ThemeChoice::System, None, cx);
+            system_changed(WindowAppearance::Dark, None, cx);
+            assert!(palette(cx).dark, "the Mac turned dark");
+            assert_eq!(palette(cx), Palette::new(ColorTheme::Studio, true));
+            system_changed(WindowAppearance::Light, None, cx);
+            assert!(!palette(cx).dark, "and light again");
+            apply(ColorTheme::Deep, ThemeChoice::Dark, None, cx);
+            system_changed(WindowAppearance::Light, None, cx);
+            assert_eq!(palette(cx), Palette::new(ColorTheme::Deep, true), "Dark in the settings stays dark");
+        });
+    }
+
+    #[test]
+    fn studio_is_the_default_and_is_warm() {
+        let p = Palette::new(ColorTheme::default(), false);
+        assert_eq!(p.theme, ColorTheme::Studio);
+        let ground: Rgba = p.panel.into();
+        assert!(ground.r > ground.b, "warm paper, not a cool grey");
+    }
 }

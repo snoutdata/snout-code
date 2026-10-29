@@ -371,7 +371,17 @@ impl Render for FileTree {
                     .child(div().w(px(2.)))
                     .map(|d| {
                         if e.dir {
-                            d.child(glyph(Glyph::Folder, 15., if e.ignored { ink } else { p.ill_ink }))
+                            d.child(glyph(
+                                Glyph::Folder,
+                                15.,
+                                if e.ignored {
+                                    ink
+                                } else if p.tinted {
+                                    p.hues[0]
+                                } else {
+                                    p.ill_ink
+                                },
+                            ))
                         } else {
                             d.child(
                                 div()

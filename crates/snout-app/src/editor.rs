@@ -1102,7 +1102,7 @@ impl EditorPanel {
     /// wrapping.
     fn gutter(&self, cx: &App) -> impl IntoElement {
         let p = palette(cx);
-        let colors = [p.ok, if p.dark { p.accent } else { p.warn }, p.error];
+        let colors = [p.added, p.modified, p.removed];
         // Under review, the gutter shows the proposed change instead of Git's.
         let changes = self.review_gutter().map_or_else(|| self.changes.clone(), Arc::new);
         let (state, painted) = (self.state.clone(), self.painted.clone());

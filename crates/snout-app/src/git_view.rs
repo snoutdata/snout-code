@@ -1594,8 +1594,8 @@ fn diff_title(diff: Option<&Result<Rc<DiffLayout>, String>>, p: &Palette) -> Any
         .whitespace_nowrap()
         .child(div().font_family(MONO).text_size(px(MONO_SIZE)).child(d.path.clone()))
         .when(!d.binary && !d.too_large, |e| {
-            e.child(div().text_color(p.ok).child(format!("+{}", d.additions)))
-                .child(div().text_color(p.error).child(format!("−{}", d.deletions)))
+            e.child(div().text_color(p.added).child(format!("+{}", d.additions)))
+                .child(div().text_color(p.removed).child(format!("−{}", d.deletions)))
         })
         .into_any_element()
 }

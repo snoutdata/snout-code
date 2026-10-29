@@ -295,7 +295,7 @@ impl ProjectsView {
             if b.behind > 0 {
                 head += &format!(" ↓{}", b.behind);
             }
-            chips.push((head, if b.head.is_some() { p.ok } else { p.warn }));
+            chips.push((head, if b.head.is_some() { p.branch() } else { p.warn }));
             if !m.status.files.is_empty() {
                 chips.push((m.status.files.len().to_string(), p.accent));
             }

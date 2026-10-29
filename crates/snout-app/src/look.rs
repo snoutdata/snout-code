@@ -226,6 +226,7 @@ pub fn primary_button(id: impl Into<ElementId>, text: &'static str, enabled: boo
         .justify_center()
         .rounded_full()
         .bg(fill)
+        .when(enabled, |d| d.shadow(p.glow_of(p.accent)))
         .text_color(ink)
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
         .child(text)
@@ -277,11 +278,11 @@ pub fn chip(text: impl Into<SharedString>, color: Hsla, p: &Palette) -> Div {
 /// A ref beside a commit, as egui draws it: small text in a wash of its colour.
 pub fn ref_badge(r: &str, p: &Palette) -> Div {
     let (text, color) = if let Some(branch) = r.strip_prefix("HEAD -> ") {
-        (branch, p.ok)
+        (branch, p.branch())
     } else if let Some(tag) = r.strip_prefix("tag: ") {
         (tag, p.warn)
     } else if r == "HEAD" {
-        (r, p.ok)
+        (r, p.branch())
     } else {
         (r, p.fg_dim)
     };

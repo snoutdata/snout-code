@@ -24,7 +24,7 @@ use crate::theme::Palette;
 
 /// The Spring accent: a soft leaf green.
 pub fn green(p: &Palette) -> Hsla {
-    if p.dark { gpui::hsla(95. / 360., 0.38, 0.56, 1.) } else { gpui::hsla(95. / 360., 0.5, 0.36, 1.) }
+    p.spring
 }
 
 /// Where a bean, an injection site or an endpoint is.

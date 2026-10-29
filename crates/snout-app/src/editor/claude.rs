@@ -602,8 +602,8 @@ impl EditorPanel {
                         .gap(px(6.))
                         .font_family(look::mono_font(cx))
                         .text_size(px(12.))
-                        .child(div().text_color(p.ok).child(format!("+{plus}")))
-                        .child(div().text_color(p.error).child(format!("−{minus}"))),
+                        .child(div().text_color(p.added).child(format!("+{plus}")))
+                        .child(div().text_color(p.removed).child(format!("−{minus}"))),
                 )
                 .when(waiting > 0, |d| {
                     let text =

@@ -368,7 +368,11 @@ fn tab(
         })
         .child(trailing)
         // The tab in front is underlined in the accent colour.
-        .when(selected, |d| d.child(div().absolute().left_0().right_0().bottom_0().h(px(2.)).bg(p.accent)))
+        .when(selected, |d| {
+            d.when(p.tinted, |d| d.bg(p.tab_selected())).child(
+                div().absolute().left_0().right_0().bottom_0().h(px(2.)).bg(p.accent).shadow(p.glow_of(p.accent)),
+            )
+        })
         .on_click({
             let (group, editor) = (group.clone(), editor.clone());
             move |e: &ClickEvent, window, cx| {
