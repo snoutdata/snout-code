@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use snout_core::DiffBase;
 use snout_core::groups::RepoGroup;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ThemeChoice {
     #[default]
     System,
@@ -32,7 +32,7 @@ impl ThemeChoice {
 }
 
 /// The colour theme, each in light and dark (see `theme`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ColorTheme {
     /// Warm, after Snout Studio: cream and walnut grounds, a terracotta or amber accent.
     #[default]
@@ -58,14 +58,20 @@ impl ColorTheme {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct Settings {
+    /// The repositories in the list, in its order.
     pub repos: Vec<PathBuf>,
+    /// The named groups of repositories in the list.
     pub groups: Vec<RepoGroup>,
+    /// The repository open last.
     pub current: Option<PathBuf>,
+    /// Which two versions of a file the Git view's diff compares.
     pub diff_base: DiffBase,
+    /// The Git view's diff shows the two versions side by side.
     pub side_by_side: bool,
+    /// The Git view's diff hides the lines that did not change, but for a few around each change.
     pub compact: bool,
     /// The bottom dock (the Claude Code console) is showing.
     pub console_open: bool,
@@ -85,12 +91,15 @@ pub struct Settings {
     pub recent: Option<Vec<PathBuf>>,
     /// The JDK each Gradle build runs on (build root to JDK home), as chosen or downloaded.
     pub project_jdks: std::collections::BTreeMap<PathBuf, PathBuf>,
-    /// The interface's typeface and size.
+    /// The interface's typeface: "Inter" or ".SystemUIFont".
     pub ui_font: String,
+    /// The interface's text size, from 10 to 20.
+    #[schemars(range(min = 10, max = 20))]
     pub ui_font_size: f32,
     /// The editors' typeface (their size is `editor_font_size`).
     pub editor_font: String,
-    /// The indentation a file gets when its own text does not show one.
+    /// The indentation, in spaces, a file gets when its own text does not show one (1 to 8).
+    #[schemars(range(min = 1, max = 8))]
     pub tab_size: usize,
     /// New editor tabs wrap long lines.
     pub soft_wrap: bool,
@@ -98,7 +107,8 @@ pub struct Settings {
     pub show_whitespace: bool,
     /// Java editors show the names of the parameters literal arguments are passed to.
     pub param_hints: bool,
-    /// How often the projects are fetched in the background, in minutes.
+    /// How often the projects are fetched in the background, in minutes (5 to 120).
+    #[schemars(range(min = 5, max = 120))]
     pub fetch_minutes: u64,
     /// The `claude` program to run; looked up on the usual paths when unset.
     pub claude_path: Option<PathBuf>,
@@ -113,10 +123,12 @@ pub struct Settings {
     /// Each recent project's editor tabs as it left them (the center of the dock layout),
     /// to open them again with the project.
     pub sessions: std::collections::BTreeMap<PathBuf, serde_json::Value>,
-    /// The shortcuts changed from the defaults (see [`crate::keymap`]).
+    /// The shortcuts changed from the defaults: each command's keys, as `"cmd-shift-p"`; an
+    /// empty list takes every shortcut of the command away.
     pub keymap: crate::keymap::Overrides,
     /// How long the Java engine's own Gradle daemons stay without a build before they stop, in
     /// minutes.
+    #[schemars(range(min = 1, max = 1440))]
     pub daemon_idle_minutes: u64,
     /// Ask before quitting, even when nothing would be lost or stopped (when something
     /// would, SnoutCode always asks).
@@ -179,6 +191,18 @@ impl Store {
     /// A store of its own at `file`, with no earlier app's settings to start from.
     pub fn at(file: PathBuf) -> Self {
         Self { file, legacy: PathBuf::from("/nonexistent/snout/app.ron") }
+    }
+
+    /// The settings file's change stamp: when it was written and how long it is.
+    pub fn stamp(&self) -> Option<(Option<std::time::SystemTime>, u64)> {
+        std::fs::metadata(&self.file).ok().map(|m| (m.modified().ok(), m.len()))
+    }
+
+    /// The settings as the file now says, read strictly (a value of the wrong type is an
+    /// error, not a default), or why it cannot be read; `None` without a file.
+    pub fn read_strict(&self) -> Option<Result<Settings, String>> {
+        let text = std::fs::read_to_string(&self.file).ok()?;
+        Some(serde_json::from_str::<Settings>(&text).map(migrate).map_err(|e| e.to_string()))
     }
 
     /// The folder of the app's own files.
@@ -263,7 +287,7 @@ pub fn lenient<T: Serialize + serde::de::DeserializeOwned + Default>(value: serd
 }
 
 /// Settings written by an earlier build, brought up to this one's meaning of them.
-fn migrate(mut s: Settings) -> Settings {
+pub fn migrate(mut s: Settings) -> Settings {
     // Sizes out of range (a hand edit, or a build that allowed more) come back within it.
     let defaults = Settings::default();
     if !(crate::editor::FONT_MIN..=crate::editor::FONT_MAX).contains(&s.editor_font_size) {

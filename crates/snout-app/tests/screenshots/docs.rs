@@ -433,6 +433,35 @@ fn settings_pages(projects: &Path) {
         w.pump(2, &mut |_| false);
         w.snap(name);
     }
+    // The project's settings as JSON: its problems, then completion of a key.
+    let shop = copy(projects, "settings", "shop");
+    std::fs::create_dir_all(shop.join(".snout")).unwrap();
+    let file = shop.join(snout_app::project_settings::FILE);
+    std::fs::write(
+        &file,
+        "{\n  \"tab_size\": 2,\n  \"show_whitespace\": false,\n  \"param_hints\": true,\n  \"fetch_minutes\": 15,\n  \"daemon_idle_minutes\": 30,\n  \"jdk\": \"/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home\",\n  \"soft_wrap\": \"yes\",\n  \"spring_profile\": [\"dev\"]\n}\n",
+    )
+    .unwrap();
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);
+    let e = w.open(&file, Some((7, 16)));
+    w.pump(4, &mut |_| false);
+    w.hover(&e, "\"spring_profile\"", 4);
+    w.pump(6, &mut |_| false);
+    w.snap("settings-json-problems-light");
+    std::fs::write(&file, "{\n  \"tab_size\": 2,\n  \"soft_wrap\": true\n}\n").unwrap();
+    let e2 = e.clone();
+    w.with(|_, window, cx| e2.update(cx, |e, cx| e.reload(window, cx)));
+    w.pump(4, &mut |_| false);
+    w.caret(&e, "\"soft_wrap\": true", "\"soft_wrap\": true".len());
+    w.insert(&e, ",\n  \"");
+    let e3 = e.clone();
+    w.with(|_, window, cx| e3.update(cx, |e, cx| e.state.update(cx, |s, cx| s.show_completions(window, cx))));
+    let e4 = e.clone();
+    let ok = w.pump(60, &mut |cx| !e4.read(cx).state.read(cx).completion_menu_state().items.is_empty());
+    println!("docs: settings json completion {ok}");
+    w.pump(1, &mut |_| false);
+    w.snap("settings-json-completion-light");
+    drop(w);
     // Quit SnoutCode?, with a file unsaved and the application running.
     let shop = copy(projects, "settings", "shop");
     let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);

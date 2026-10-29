@@ -255,10 +255,49 @@ Keys are written as `cmd-shift-p`. Two key presses in a row are written with a s
 `cmd-k cmd-s`; such a shortcut can be set here, though the Keymap page records one key press.
 An empty list takes every shortcut of the command away.
 
-To edit the file by hand, quit SnoutCode first, since the app writes the file while it runs. A
-value SnoutCode cannot read takes its default, and the rest of the file is kept. A file that is
-not JSON at all is copied to `settings.json.unreadable` before SnoutCode starts from the
-defaults.
+You can edit the file while SnoutCode runs: see [Edit settings as JSON](#edit-settings-as-json).
+When SnoutCode starts, a value it cannot read takes its default, and the rest of the file is
+kept. A file that is not JSON at all is copied to `settings.json.unreadable` before SnoutCode
+starts from the defaults.
+
+## Edit settings as JSON
+
+Open the settings file in an editor tab:
+
+- **Open Settings (JSON)**: your `settings.json`. In the SnoutCode menu and the command palette
+  (⇧⌘P).
+- **Open Project Settings (JSON)**: the open project's `.snout/settings.json`, made with nothing
+  in it yet when the project has none. In the same places.
+- **Edit as JSON**, at the top of the Settings sheet: the file of the scope shown, User or
+  Project. Changes not applied yet are applied first.
+
+The tab knows the settings, from the same definitions SnoutCode reads them with, so what it
+offers is always what this version of SnoutCode understands:
+
+- **Completion** offers the keys the file does not have yet, each with what it takes and what it
+  does, and after a key, the values it takes (`true` and `false`, a theme's names). ⌃Space asks
+  for it.
+- **Hover** over a key or a value to read what the setting does, what it takes and its default.
+- **Problems** are marked as you type: a red squiggle for JSON that cannot be read, a value of
+  the wrong type or out of range; a yellow one for a key SnoutCode does not know (it is ignored).
+
+![Completion in a project's settings file](images/settings-and-keymap-json-completion.png)
+
+*Completion of the keys a project can set, with what each takes.*
+
+![Problems in a project's settings file](images/settings-and-keymap-json-problems.png)
+
+*A value of the wrong type, and a key SnoutCode does not know.*
+
+Save the tab (⌘S) and SnoutCode takes the file at once: the window follows, as it does after
+**OK** in the Settings sheet. A file that cannot be read never wipes your settings: SnoutCode
+keeps the ones in use, says what is wrong in the status bar and at the top of the Settings
+sheet, and takes the file again once you fix it and save. Meanwhile it does not write your
+`settings.json` over your edit; if you quit with it still broken, it is copied to
+`settings.json.unreadable` and the settings in use are written in its place.
+
+Your `settings.json` is on your Mac: in a [Remote SSH](remote-ssh.md) window, open it from a
+window on your Mac. A project's file is in the project, on the remote machine too.
 
 ## Session restore
 

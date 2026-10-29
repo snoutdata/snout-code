@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use similar::{Algorithm, DiffOp, capture_diff_slices_deadline};
 
 /// Which two versions of a file to compare.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffBase {
     /// Everything not yet committed.

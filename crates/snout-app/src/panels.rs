@@ -51,7 +51,7 @@ macro_rules! panel {
 #[allow(unused_imports)]
 pub(crate) use panel;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub enum Activity {
     /// The project: its file tree, the editor tabs and the bottom dock. Saved settings from
     /// before it was renamed call it Projects.

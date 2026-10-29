@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 snout-host.workspace = true
 serde.workspace = true
+schemars.workspace = true
 thiserror.workspace = true
 similar.workspace = true
 # The terminal under the Claude Code console (xterm parser; the host runs the pseudo-terminal).

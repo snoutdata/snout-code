@@ -7413,6 +7413,7 @@ dependencies = [
  "lsp-types",
  "regex",
  "ron",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7432,6 +7433,7 @@ name = "snout-core"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "schemars",
  "serde",
  "serde_json",
  "similar 3.2.0",

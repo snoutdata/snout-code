@@ -34,6 +34,7 @@ mod inlay;
 mod lang_features;
 mod refactor;
 mod run_gutter;
+pub mod settings_lang;
 mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
@@ -260,6 +261,8 @@ pub struct EditorPanel {
     pub painted: Rc<RefCell<Vec<GutterMark>>>,
     /// The document as its language server knows it (a Java file of a Gradle build).
     pub lang: Option<Rc<DocLink>>,
+    /// A settings file (the user's, or a project's): completed and checked from its schema.
+    pub settings_file: Option<crate::settings_json::Which>,
     /// What the server reports about the file, as it sent it.
     pub problems: Vec<lsp_types::Diagnostic>,
     /// The call whose arguments are being typed, and the task asking about it.
@@ -382,6 +385,7 @@ impl EditorPanel {
                     this.revision += 1;
                     this.param_hints_changed(cx);
                     this.lang_changed(cx);
+                    this.check_settings_text(cx);
                     this.spring_changed(cx);
                     if this.writing > 0 {
                         this.writing -= 1;
@@ -468,6 +472,7 @@ impl EditorPanel {
             changes: Arc::new(Vec::new()),
             painted: Rc::new(RefCell::new(Vec::new())),
             lang: None,
+            settings_file: None,
             problems: Vec::new(),
             signature: None,
             _signature: None,

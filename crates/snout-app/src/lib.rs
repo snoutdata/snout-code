@@ -31,6 +31,7 @@ pub mod remote;
 pub mod run;
 pub mod search;
 pub mod settings;
+pub mod settings_json;
 pub mod settings_view;
 pub mod splash;
 pub mod spring;
@@ -58,6 +59,8 @@ mod quit_tests;
 mod run_tests;
 #[cfg(test)]
 mod session_tests;
+#[cfg(test)]
+mod settings_json_tests;
 #[cfg(test)]
 mod spring_tests;
 #[cfg(test)]

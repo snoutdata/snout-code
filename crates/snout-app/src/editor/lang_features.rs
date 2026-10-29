@@ -29,6 +29,9 @@ impl EditorPanel {
         self.detach_lang(cx);
         self.problems.clear();
         self.signature = None;
+        if self.attach_settings_lang(cx) {
+            return;
+        }
         let served = language_for(&self.path) == "java" || crate::spring::is_config_file(&self.path);
         if self.class_file.is_some() || !served {
             return;
@@ -58,6 +61,9 @@ impl EditorPanel {
 
     /// The tab no longer shows the document: the server may forget it.
     pub(super) fn detach_lang(&mut self, cx: &mut App) {
+        if self.settings_file.take().is_some() {
+            providers::uninstall(&self.state, cx);
+        }
         let Some(link) = self.lang.take() else { return };
         if let Some(hub) = link.hub.upgrade() {
             hub.update(cx, |h, _| h.close_doc(&link.uri, link.editor));

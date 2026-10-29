@@ -37,7 +37,7 @@ fn yes() -> bool {
 }
 
 /// Which profiles the engine evaluates the beans under.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ProfileMode {
     /// None: a bean with a `@Profile` may be there or not.
     #[default]

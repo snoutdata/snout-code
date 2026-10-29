@@ -137,6 +137,8 @@ pub enum SettingsEvent {
         project: Option<ProjectSettings>,
         close: bool,
     },
+    /// Close, and open the settings of this scope as JSON in a tab.
+    OpenJson(crate::settings_json::Which),
     Cancel,
 }
 
@@ -265,6 +267,18 @@ impl SettingsView {
             ps::put_over(&self.project, &mut s);
         }
         s
+    }
+
+    /// Put the changes in place, then open the file of the scope shown in a tab.
+    pub fn edit_as_json(&mut self, cx: &mut Context<Self>) {
+        if self.changed(cx) {
+            self.apply(false, cx);
+        }
+        let which = match self.scope {
+            Scope::User => crate::settings_json::Which::User,
+            Scope::Project => crate::settings_json::Which::Project,
+        };
+        cx.emit(SettingsEvent::OpenJson(which));
     }
 
     /// Show the user's settings or the project's (there is none without a project).
@@ -453,7 +467,11 @@ impl SettingsView {
     /// project file's error if it has one.
     fn scope_line(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        let error = self.model.read(cx).project_settings_error.clone();
+        let m = self.model.read(cx);
+        let (error, file) = match self.scope {
+            Scope::Project => (m.project_settings_error.clone(), ps::FILE),
+            Scope::User => (m.user_settings_error.clone(), "Your settings.json"),
+        };
         let (ico, text) = match (self.scope, &self.root) {
             (Scope::Project, Some(root)) => (
                 IconName::FolderCog,
@@ -482,11 +500,11 @@ impl SettingsView {
                     .child(crate::components::icon(ico, 12., p.fg_dim))
                     .child(text),
             )
-            .when_some(error.filter(|_| self.scope == Scope::Project), |d, e| {
+            .when_some(error, |d, e| {
                 d.child(
                     crate::components::callout_with(
                         crate::components::Tone::Warning,
-                        Some(format!("{} cannot be read", ps::FILE).into()),
+                        Some(format!("{file} cannot be read").into()),
                         format!("The values it had before stay in use until it is fixed. {e}"),
                         &p,
                     )
@@ -1482,6 +1500,16 @@ impl Render for SettingsView {
                                     div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(self.page.title()),
                                 )
                                 .child(div().flex_1())
+                                .child(
+                                    crate::components::Button::new("settings-edit-json")
+                                        .debug_selector("settings-edit-json")
+                                        .compact()
+                                        .ghost()
+                                        .icon(IconName::Braces)
+                                        .label("Edit as JSON")
+                                        .tooltip("Open these settings' file in a tab, with completion and checks")
+                                        .on_click(cx.listener(|this, _, _, cx| this.edit_as_json(cx))),
+                                )
                                 .child(scope_switch),
                         )
                         .child(scope_line)

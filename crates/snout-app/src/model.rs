@@ -407,6 +407,12 @@ pub struct Model {
     pub project_settings_error: Option<String>,
     /// The user's own values under those the project sets, given back when saving.
     project_under: crate::project_settings::ProjectSettings,
+    /// The user's settings file's stamp when it was last read or written here, to tell an
+    /// edit made elsewhere (the editor, another program).
+    user_file_stamp: Option<(Option<std::time::SystemTime>, u64)>,
+    /// Why the user's settings file, edited by hand, cannot be read: the settings in use
+    /// stay, and the file is not written over until it is fixed (or the app quits).
+    pub user_settings_error: Option<String>,
     /// The `claude` to run; looked up when `None`.
     pub claude: Option<PathBuf>,
     /// A file given on the command line, to open once the window is there.
@@ -439,6 +445,8 @@ impl Model {
             project_settings_stamp: None,
             project_settings_error: None,
             project_under: Default::default(),
+            user_file_stamp: store.as_ref().and_then(Store::stamp),
+            user_settings_error: None,
             pending_file: None,
             confirm_switch: false,
             saved: settings.clone(),
@@ -1084,15 +1092,75 @@ impl Model {
     /// are not the user's: the user's own go to the file).
     pub fn persist(&mut self) {
         let user = self.user_settings();
-        if self.saved == user {
+        if self.saved == user || self.user_settings_error.is_some() {
             return;
         }
-        if let Some(store) = &self.store
-            && let Err(e) = store.save(&user)
-        {
-            self.log_output(format!("Could not save settings: {e}"), true);
+        if let Some(store) = &self.store {
+            match store.save(&user) {
+                Ok(()) => self.user_file_stamp = store.stamp(),
+                Err(e) => self.log_output(format!("Could not save settings: {e}"), true),
+            }
         }
         self.saved = user;
+    }
+
+    /// Save the user's settings on the way out: a settings file left broken by a hand edit
+    /// is copied aside (`settings.json.unreadable`) first, then written over.
+    pub fn persist_at_quit(&mut self) {
+        if self.user_settings_error.take().is_some()
+            && let Some(store) = &self.store
+        {
+            let _ = std::fs::copy(&store.file, store.file.with_extension("json.unreadable"));
+            let _ = store.save(&self.user_settings());
+            return;
+        }
+        self.persist();
+    }
+
+    /// The user's settings file, if the settings are kept in one.
+    pub fn store_file(&self) -> Option<PathBuf> {
+        self.store.as_ref().map(|s| s.file.clone())
+    }
+
+    /// Write the user's settings file now, if it is not there.
+    pub fn ensure_store_file(&mut self) {
+        if let Some(store) = &self.store
+            && !store.file.exists()
+            && store.save(&self.user_settings()).is_ok()
+        {
+            self.user_file_stamp = store.stamp();
+        }
+    }
+
+    /// Read the user's settings file again if it changed since it was last read or
+    /// written here: its settings go in place (true), or, when it cannot be read, the
+    /// settings in use stay and the error is shown.
+    pub fn check_user_file(&mut self) -> bool {
+        let Some(store) = &self.store else { return false };
+        let stamp = store.stamp();
+        if stamp == self.user_file_stamp {
+            return false;
+        }
+        self.user_file_stamp = stamp;
+        match store.read_strict() {
+            None => false,
+            Some(Err(e)) => {
+                self.message = format!("Your settings.json has an error, so the settings in use stay: {e}");
+                self.user_settings_error = Some(e);
+                false
+            }
+            Some(Ok(read)) => {
+                if self.user_settings_error.take().is_some() {
+                    self.message = "Your settings are read again".into();
+                }
+                self.saved = read.clone();
+                if read == self.user_settings() {
+                    return false;
+                }
+                self.set_user_settings(read);
+                true
+            }
+        }
     }
 
     /// The user's own values under those the project sets.

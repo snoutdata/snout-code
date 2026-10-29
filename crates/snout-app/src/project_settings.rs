@@ -27,11 +27,12 @@ pub fn file_of(root: &Path) -> PathBuf {
 }
 
 /// What a project sets for itself: each value left out (`None`) is the user's.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ProjectSettings {
     /// The indentation, in spaces, a file gets when its own text does not show one (1 to 8).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 8))]
     pub tab_size: Option<usize>,
     /// New editor tabs wrap long lines.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,10 +45,12 @@ pub struct ProjectSettings {
     pub param_hints: Option<bool>,
     /// How often the project is fetched in the background, in minutes (5 to 120).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 5, max = 120))]
     pub fetch_minutes: Option<u64>,
     /// How long the Java engine's own Gradle daemons stay without a build before they stop,
     /// in minutes (1 to 240).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 240))]
     pub daemon_idle_minutes: Option<u64>,
     /// The JDK home every Gradle build of the project runs on, instead of the one its Java
     /// level picks (or the one picked per build in the user's settings).
@@ -61,7 +64,7 @@ pub struct ProjectSettings {
 }
 
 /// The Spring profiles as the project file writes them: `"any"`, `"config"` or a list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum ActiveProfiles {
     Mode(ProfilesWord),
@@ -69,7 +72,7 @@ pub enum ActiveProfiles {
 }
 
 /// `"any"` or `"config"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ProfilesWord {
     Any,

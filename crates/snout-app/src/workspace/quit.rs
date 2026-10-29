@@ -174,7 +174,7 @@ impl Workspace {
         }
         // What the user arranged is kept.
         self.save_layout(cx);
-        self.model.update(cx, |m, _| m.persist());
+        self.model.update(cx, |m, _| m.persist_at_quit());
         // Claude Code's lock file goes (the server deletes it on its own thread).
         let lock_gone = self.claude.as_mut().map(|b| b.server.stop());
         // The processes the app runs, as the Processes window would list them.

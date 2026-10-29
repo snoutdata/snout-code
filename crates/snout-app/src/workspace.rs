@@ -498,11 +498,21 @@ impl Workspace {
         this.model.update(cx, |m, _| m.confirm_switch = true);
         // The project's own settings: read now, and again when the project or the file
         // changes (its stamp is looked at every second; a project change at once).
+        // The user's settings file, which an editor tab may change, likewise.
+        if let Some(file) = this.model.read(cx).store_file() {
+            cx.set_global(crate::editor::settings_lang::UserSettingsFile(file));
+        }
         this.check_project_settings(true, window, cx);
         this._project_settings_poll = cx.spawn_in(window, async move |this, cx| {
             for tick in 1u64.. {
                 cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
-                let ok = this.update_in(cx, |this, window, cx| this.check_project_settings(tick % 4 == 0, window, cx));
+                let ok = this.update_in(cx, |this, window, cx| {
+                    let stat = tick % 4 == 0;
+                    this.check_project_settings(stat, window, cx);
+                    if stat {
+                        this.check_user_settings(window, cx);
+                    }
+                });
                 if ok.is_err() {
                     break;
                 }
@@ -1287,6 +1297,10 @@ impl Workspace {
                     this.apply_layers((**user).clone(), project.clone(), window, cx);
                     *close
                 }
+                SettingsEvent::OpenJson(which) => {
+                    this.open_settings_json(*which, window, cx);
+                    true
+                }
                 SettingsEvent::Cancel => true,
             };
             if close {
@@ -1406,6 +1420,84 @@ impl Workspace {
             });
         }
         window.refresh();
+    }
+
+    /// Read the user's settings file again if it changed on disk (a tab saved it), and make
+    /// the window follow what it says.
+    pub fn check_user_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.model.read(cx).settings.clone();
+        let had_error = self.model.read(cx).user_settings_error.is_some();
+        let changed = self.model.update(cx, |m, _| m.check_user_file());
+        if changed {
+            self.follow_settings(before, window, cx);
+        }
+        if changed || had_error != self.model.read(cx).user_settings_error.is_some() {
+            self.model.update(cx, |_, cx| cx.notify());
+            if let Some(sheet) = &self.settings_sheet {
+                sheet.update(cx, |_, cx| cx.notify());
+            }
+        }
+    }
+
+    /// Open the settings of `which` as JSON in a tab: the user's `settings.json`, or the
+    /// project's `.snout/settings.json` (made, with nothing in it yet, if it is not there).
+    pub fn open_settings_json(
+        &mut self,
+        which: crate::settings_json::Which,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::settings_json::Which;
+        let say = |this: &mut Self, text: &str, cx: &mut Context<Self>| {
+            this.model.update(cx, |m, cx| {
+                m.message = text.to_owned();
+                cx.notify();
+            })
+        };
+        match which {
+            Which::User => {
+                if crate::remote::is_remote(cx) {
+                    say(self, "Your settings.json is on this Mac: open it from a window on this Mac", cx);
+                    return;
+                }
+                let Some(file) = self.model.update(cx, |m, _| {
+                    m.ensure_store_file();
+                    m.store_file()
+                }) else {
+                    say(self, "These settings are not kept in a file", cx);
+                    return;
+                };
+                self.open_file(file, None, false, window, cx);
+            }
+            Which::Project => {
+                let Some(root) = self.model.read(cx).project_root() else {
+                    say(self, "Open a project to edit its settings", cx);
+                    return;
+                };
+                let host = self.model.read(cx).host.clone();
+                let file = crate::project_settings::file_of(&root);
+                let make = cx.background_executor().spawn({
+                    let file = file.clone();
+                    async move {
+                        if host.is_file(&file) {
+                            return Ok(());
+                        }
+                        if let Some(dir) = file.parent() {
+                            host.create_dir_all(dir)?;
+                        }
+                        host.write(&file, b"{\n}\n")
+                    }
+                });
+                cx.spawn_in(window, async move |this, cx| {
+                    let made: std::io::Result<()> = make.await;
+                    let _ = this.update_in(cx, |this, window, cx| match made {
+                        Ok(()) => this.open_file(file, Some((1, 0)), false, window, cx),
+                        Err(e) => say(this, &format!("Could not make {}: {e}", crate::project_settings::FILE), cx),
+                    });
+                })
+                .detach();
+            }
+        }
     }
 
     /// Read the open project's settings file again when the project or the file changed
@@ -1667,6 +1759,12 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToClass, w, cx| this.open_classes(w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::OpenSettingsJson, w, cx| {
+                this.open_settings_json(crate::settings_json::Which::User, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::menus::OpenProjectSettingsJson, w, cx| {
+                this.open_settings_json(crate::settings_json::Which::Project, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &crate::claude_ide::AcceptAllClaude, w, cx| {
                 crate::claude_ide::bridge::accept_all(this, w, cx)
             }))
