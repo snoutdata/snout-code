@@ -708,15 +708,15 @@ fn claude(projects: &Path) {
         w.cx.update(|cx| {
             changes.update(cx, |c, cx| {
                 c.root = Some(s2.clone());
-                c.set.new_turn();
+                c.set.new_turn("claude", Some("Add bulk discounts".into()));
                 c.hooks_heard = true;
                 c.set.before_edit(&f2, Some(Arc::new(v1b.clone())));
-                c.record(f2.clone(), Some(Arc::new(v2b.clone())), None, "Edit".into(), Source::Hook, cx);
+                c.record(f2.clone(), Some(Arc::new(v2b.clone())), None, "Edit".into(), Source::Hook, "claude", cx);
                 c.set.before_edit(&t2, None);
                 let text = "package com.example.shop.service;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport java.math.BigDecimal;\nimport org.junit.jupiter.api.Test;\n\nclass BulkDiscountTest {\n\n    @Test\n    void usesTheConfiguredThreshold() {\n        PriceCalculator prices = new PriceCalculator(new BigDecimal(\"0.20\"), 5, new BigDecimal(\"0.15\"));\n        assertEquals(BigDecimal.ZERO, prices.discount(new BigDecimal(\"40.00\"), 4));\n        assertEquals(new BigDecimal(\"7.50\"), prices.discount(new BigDecimal(\"50.00\"), 5));\n    }\n}\n";
-                c.record(t2.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, cx);
+                c.record(t2.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, "claude", cx);
                 let old = Some(Some(Arc::new(yml_v1.clone())));
-                c.record(y2.clone(), Some(Arc::new(yml_v2.clone())), old, String::new(), Source::Watcher, cx);
+                c.record(y2.clone(), Some(Arc::new(yml_v2.clone())), old, String::new(), Source::Watcher, "claude", cx);
                 c.expanded.insert(f2.clone());
                 let tool = if matches!(step, Step::Strike | Step::Typing) { "Edit" } else { "Write" };
                 c.activity = Some(Doing { path: f2.clone(), tool: tool.into(), at: Instant::now(), done: false });

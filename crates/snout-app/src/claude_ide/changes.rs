@@ -40,6 +40,8 @@ pub struct FileChange {
     /// The turn of its first edit.
     pub turn: u32,
     pub source: Source,
+    /// The agent that changed it last ([`crate::agents::CLAUDE`] and the others).
+    pub agent: &'static str,
 }
 
 impl FileChange {
@@ -75,14 +77,28 @@ pub struct Restore {
     pub text: Option<String>,
 }
 
+/// A turn: one prompt to an agent and what it did about it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Turn {
+    pub id: u32,
+    pub agent: &'static str,
+    /// The first line of the prompt, once known (Claude's hooks say it as the turn starts,
+    /// Codex as it ends; an agent only watched never does).
+    pub prompt: Option<String>,
+    /// When it began.
+    pub at: std::time::SystemTime,
+}
+
 #[derive(Default, Debug)]
 pub struct ChangeSet {
-    /// In the order Claude first changed them.
+    /// In the order the agents first changed them.
     pub files: Vec<FileChange>,
     /// Snapshots of files a tool is about to change, until it has.
     before: HashMap<PathBuf, Option<Arc<String>>>,
     /// The turn: one per prompt.
     pub turn: u32,
+    /// Every turn of the session, in order.
+    pub turns: Vec<Turn>,
 }
 
 impl ChangeSet {
@@ -94,9 +110,34 @@ impl ChangeSet {
         self.files.iter_mut().find(|f| f.path == path)
     }
 
-    pub fn new_turn(&mut self) {
+    /// A new prompt to `agent` (its first line, if known).
+    pub fn new_turn(&mut self, agent: &'static str, prompt: Option<String>) {
         self.turn += 1;
         self.before.clear();
+        self.turns.push(Turn { id: self.turn, agent, prompt, at: std::time::SystemTime::now() });
+    }
+
+    /// The turn under way (the last one).
+    pub fn current(&self) -> Option<&Turn> {
+        self.turns.last()
+    }
+
+    pub fn turn_of(&self, id: u32) -> Option<&Turn> {
+        self.turns.iter().find(|t| t.id == id)
+    }
+
+    /// `agent`'s last turn ended, and this was its prompt: kept unless one is known.
+    pub fn turn_ended(&mut self, agent: &'static str, prompt: Option<String>) {
+        if let Some(t) = self.turns.iter_mut().rev().find(|t| t.agent == agent)
+            && t.prompt.is_none()
+        {
+            t.prompt = prompt;
+        }
+    }
+
+    /// The files whose first unreviewed edit came in turn `id`.
+    pub fn files_of_turn(&self, id: u32) -> Vec<PathBuf> {
+        self.files.iter().filter(|f| f.turn == id).map(|f| f.path.clone()).collect()
     }
 
     /// A tool is about to change `path`, which holds `text` (none: missing). Kept as the
@@ -128,6 +169,7 @@ impl ChangeSet {
         diff: Diffed,
         tool: &str,
         source: Source,
+        agent: &'static str,
     ) -> bool {
         let unchanged = diff.hunks.is_empty();
         if let Some(f) = self.file_mut(path) {
@@ -136,6 +178,7 @@ impl ChangeSet {
             (f.added, f.removed) = (diff.added, diff.removed);
             f.tool = tool.to_owned();
             f.edits += 1;
+            f.agent = agent;
             if source == Source::Hook {
                 f.source = Source::Hook;
             }
@@ -161,6 +204,7 @@ impl ChangeSet {
             edits: 1,
             turn: self.turn,
             source,
+            agent,
         });
         true
     }
@@ -252,7 +296,7 @@ mod tests {
         set.before_edit(p, before.and_then(arc));
         let base = set.base_of(p).unwrap();
         let diff = Diffed::of(base.as_deref().map(String::as_str), after);
-        set.after_edit(p, None, after.and_then(arc), diff, "Edit", Source::Hook)
+        set.after_edit(p, None, after.and_then(arc), diff, "Edit", Source::Hook, crate::agents::CLAUDE)
     }
 
     const A0: &str = "one\ntwo\nthree\nfour\nfive\n";
@@ -328,9 +372,10 @@ mod tests {
         let mut set = ChangeSet::default();
         let p = Path::new("/w");
         let diff = Diffed::of(Some("a\n"), Some("b\n"));
-        assert!(set.after_edit(p, Some(arc("a\n")), arc("b\n"), diff, "", Source::Watcher));
+        assert!(set.after_edit(p, Some(arc("a\n")), arc("b\n"), diff, "", Source::Watcher, crate::agents::CODEX));
+        assert_eq!(set.file(p).unwrap().agent, crate::agents::CODEX);
         assert_eq!(set.file(p).unwrap().source, Source::Watcher);
         // Without any snapshot there is nothing to compare: not listed.
-        assert!(!set.after_edit(Path::new("/x"), None, arc("b\n"), Diffed::default(), "", Source::Watcher));
+        assert!(!set.after_edit(Path::new("/x"), None, arc("b\n"), Diffed::default(), "", Source::Watcher, "codex"));
     }
 }

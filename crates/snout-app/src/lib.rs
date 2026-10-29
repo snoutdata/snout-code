@@ -1,5 +1,6 @@
 //! SnoutCode on GPUI and GPUI Kit: an activity bar, docks, and the Git Panel.
 
+pub mod agents;
 pub mod art;
 pub mod background;
 pub mod branch_popup;

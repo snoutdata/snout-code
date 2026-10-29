@@ -46,6 +46,8 @@ pub enum HookKind {
     Prompt,
     /// Claude Code finished its answer.
     Stop,
+    /// Codex finished a turn (its `notify`), with the prompt that started it.
+    TurnComplete,
 }
 
 /// The file a tool works on, as it was when the hook ran.
@@ -71,7 +73,11 @@ impl Snapshot {
 #[derive(Clone, Debug)]
 pub struct HookEvent {
     pub kind: HookKind,
+    /// The agent that reported it ([`crate::agents::CLAUDE`], [`crate::agents::CODEX`]).
+    pub agent: &'static str,
     pub session: String,
+    /// The prompt the user sent (`UserPromptSubmit`, Codex's turn), its first line kept.
+    pub prompt: Option<String>,
     /// The tool, for the tool hooks.
     pub tool: String,
     /// The file the tool works on.
@@ -113,7 +119,65 @@ pub fn parse(body: &Value) -> Option<HookEvent> {
         HookKind::PreTool | HookKind::PostTool => Some(tool_path(&tool, &input, cwd.as_deref())?),
         _ => None,
     };
-    Some(HookEvent { kind, session: s("session_id"), tool, path, input, file: None })
+    let prompt = body.get("prompt").and_then(Value::as_str).and_then(first_line);
+    Some(HookEvent {
+        kind,
+        agent: crate::agents::CLAUDE,
+        session: s("session_id"),
+        prompt,
+        tool,
+        path,
+        input,
+        file: None,
+    })
+}
+
+/// The first line of a prompt that says something, trimmed and cut to a tooltip's length.
+pub fn first_line(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let mut out: String = line.chars().take(160).collect();
+    if line.chars().count() > 160 {
+        out.push('\u{2026}');
+    }
+    Some(out)
+}
+
+/// Read Codex's `notify` payload (the JSON it passes its notify program) into an event:
+/// only `agent-turn-complete`, with the turn's prompt (the last of its input messages).
+pub fn parse_codex(body: &Value) -> Option<HookEvent> {
+    if body.get("type").and_then(Value::as_str)? != "agent-turn-complete" {
+        return None;
+    }
+    let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let prompt = body
+        .get("input-messages")
+        .and_then(Value::as_array)
+        .and_then(|m| m.iter().rev().find_map(Value::as_str))
+        .and_then(first_line);
+    let session = Some(s("thread-id")).filter(|t| !t.is_empty()).unwrap_or_else(|| s("turn-id"));
+    Some(HookEvent {
+        kind: HookKind::TurnComplete,
+        agent: crate::agents::CODEX,
+        session,
+        prompt,
+        tool: String::new(),
+        path: None,
+        input: body.clone(),
+        file: None,
+    })
+}
+
+/// The arguments that make a `codex` started in the console tell the endpoint when a turn
+/// ends: its `notify` program set for this session only (`-c`), posting Codex's JSON (its
+/// last argument) with the token from `header`. The user's own config is never touched.
+pub fn codex_args(header: &Path) -> Vec<String> {
+    let header = header.to_string_lossy().replace('\'', "'\\''");
+    let script = format!(
+        "[ -n \"${PORT_ENV}\" ] && curl -s -m 5 -o /dev/null -X POST -H @'{header}' \
+         -H 'content-type: application/json' --data-binary \"$1\" \"http://127.0.0.1:${PORT_ENV}/codex\"; exit 0"
+    );
+    let notify = serde_json::to_string(&["/bin/sh", "-c", script.as_str(), "snout-notify"]).unwrap_or_default();
+    vec!["-c".into(), format!("notify={notify}")]
 }
 
 /// Take `path` as it is now on `host`.
@@ -293,10 +357,14 @@ fn serve(mut stream: TcpStream, host: &dyn snout_host::Host, token: &str, emit: 
     if !req.header(TOKEN_HEADER).is_some_and(|t| same(t, token)) {
         return respond(&mut stream, "401 Unauthorized");
     }
-    if req.method != "POST" || req.path != "/hook" {
+    if req.method != "POST" || (req.path != "/hook" && req.path != "/codex") {
         return respond(&mut stream, "404 Not Found");
     }
-    let event = serde_json::from_slice::<Value>(&req.body).ok().as_ref().and_then(parse);
+    let body = serde_json::from_slice::<Value>(&req.body).ok();
+    let event = match req.path.as_str() {
+        "/codex" => body.as_ref().and_then(parse_codex),
+        _ => body.as_ref().and_then(parse),
+    };
     if let Some(mut event) = event {
         if let Some(path) = event.path.take() {
             let path = resolved(host, &path);
@@ -411,6 +479,50 @@ pub mod tests {
         assert_eq!((e.kind, e.path), (HookKind::PostTool, Some(file.clone())));
         // Without the app (no port, or nobody listening) the hook still succeeds.
         assert!(run(None).status.success());
+        drop(server);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Codex's `notify` payload, as recorded from Codex 0.5x (`agent-turn-complete`).
+    const CODEX_NOTIFY: &str = include_str!("../../tests/fixtures/agents/codex-notify.json");
+
+    #[test]
+    fn codex_tells_the_end_of_its_turn_and_its_prompt() {
+        let v: Value = serde_json::from_str(CODEX_NOTIFY).unwrap();
+        let e = parse_codex(&v).unwrap();
+        assert_eq!((e.kind, e.agent), (HookKind::TurnComplete, crate::agents::CODEX));
+        assert_eq!(
+            e.prompt.as_deref(),
+            Some("Add input validation to OrderService.place: reject a null order and an empty list of items.")
+        );
+        assert!(parse_codex(&json!({ "type": "approval-requested" })).is_none());
+        // The prompt of a Claude turn too, from UserPromptSubmit.
+        let p = parse(&json!({ "hook_event_name": "UserPromptSubmit", "prompt": "\n  Rename greet\nplease" })).unwrap();
+        assert_eq!(p.prompt.as_deref(), Some("Rename greet"));
+    }
+
+    #[test]
+    fn codex_notify_reaches_the_endpoint_as_codex_runs_it() {
+        let dir = scratch("codex");
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let server = HookServer::start(snout_host::local(), move |e| tx.lock().unwrap().send(e).unwrap()).unwrap();
+        write_settings(&*snout_host::local(), &dir, server.token()).unwrap();
+        let args = codex_args(&dir.join("hook-header"));
+        assert_eq!(args[0], "-c");
+        // Codex reads `-c notify=<TOML array>`; a JSON array of strings is one.
+        let notify: Vec<String> = serde_json::from_str(args[1].strip_prefix("notify=").unwrap()).unwrap();
+        // Codex runs the program with its JSON as the last argument.
+        let out = std::process::Command::new(&notify[0])
+            .args(&notify[1..])
+            .arg(CODEX_NOTIFY)
+            .env(PORT_ENV, server.port().to_string())
+            .output()
+            .unwrap();
+        assert!(out.status.success() && out.stdout.is_empty(), "silent and successful");
+        let e = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(e.kind, HookKind::TurnComplete);
+        assert!(e.prompt.unwrap().starts_with("Add input validation"));
         drop(server);
         let _ = std::fs::remove_dir_all(dir);
     }

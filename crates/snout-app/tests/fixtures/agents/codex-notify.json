@@ -1,0 +1,10 @@
+{
+  "type": "agent-turn-complete",
+  "thread-id": "0199a1b2-7c3d-7e10-9f2a-5b6c7d8e9f01",
+  "turn-id": "12",
+  "cwd": "/home/alex/projects/shop",
+  "input-messages": [
+    "Add input validation to OrderService.place: reject a null order and an empty list of items.\nKeep the public API as it is."
+  ],
+  "last-assistant-message": "I added the two checks to OrderService.place and a test for each."
+}

@@ -1076,16 +1076,16 @@ sleep 30
                 cx.update(|cx| {
                     changes.update(cx, |c, cx| {
                         c.root = Some(repo.clone());
-                        c.set.new_turn();
+                        c.set.new_turn("claude", Some("Add bulk discounts".into()));
                         c.hooks_heard = true;
                         c.set.before_edit(&file, Some(Arc::new(GREETER_V1.into())));
-                        c.record(file.clone(), Some(Arc::new(GREETER_V2.into())), None, "Edit".into(), Source::Hook, cx);
+                        c.record(file.clone(), Some(Arc::new(GREETER_V2.into())), None, "Edit".into(), Source::Hook, "claude", cx);
                         c.set.before_edit(&farewell, None);
                         let text = "package demo;\n\n/** Says goodbye. */\npublic class Farewell {\n    public String bye(String name) {\n        return \"Goodbye, \" + name;\n    }\n}\n";
-                        c.record(farewell.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, cx);
+                        c.record(farewell.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, "claude", cx);
                         let old = Some(Some(Arc::new("plugins {\n    java\n}\n".to_owned())));
                         let new = "plugins {\n    java\n    application\n}\n\napplication {\n    mainClass = \"demo.Main\"\n}\n";
-                        c.record(gradle.clone(), Some(Arc::new(new.into())), old, String::new(), Source::Watcher, cx);
+                        c.record(gradle.clone(), Some(Arc::new(new.into())), old, String::new(), Source::Watcher, "claude", cx);
                         c.expanded.insert(file.clone());
                         let tool = if which == ClaudeShot::Strike || which == ClaudeShot::Typing { "Edit" } else { "Write" };
                         c.activity =

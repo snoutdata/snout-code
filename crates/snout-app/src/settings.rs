@@ -112,6 +112,13 @@ pub struct Settings {
     pub fetch_minutes: u64,
     /// The `claude` program to run; looked up on the usual paths when unset.
     pub claude_path: Option<PathBuf>,
+    /// The agent the console runs: Claude Code, Codex, or a command of your own.
+    pub console_agent: crate::agents::ConsoleAgent,
+    /// The `codex` program to run; looked up on the usual paths when unset.
+    pub codex_path: Option<PathBuf>,
+    /// The command line of your own agent (run by `/bin/sh -c` in the project), and its name.
+    pub custom_agent_command: String,
+    pub custom_agent_name: String,
     /// The editor follows the files Claude Code changes: opens them, scrolls to the
     /// change and lights it briefly. Off, a dot on the tab says so.
     pub follow_claude: bool,
@@ -235,6 +242,10 @@ impl Default for Settings {
             param_hints: true,
             fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,
             claude_path: None,
+            console_agent: Default::default(),
+            codex_path: None,
+            custom_agent_command: String::new(),
+            custom_agent_name: String::new(),
             follow_claude: true,
             plain_files: false,
             opened: Default::default(),

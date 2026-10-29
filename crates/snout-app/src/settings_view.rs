@@ -113,7 +113,7 @@ impl Page {
             Page::Gradle => "The JDK each build runs on, and how long SnoutCode's Gradle daemons stay.",
             Page::Spring => "The profiles the Spring window evaluates the beans under.",
             Page::Terminal => "How the terminals look and what they run, and the terminal app to open folders in.",
-            Page::ClaudeCode => "The claude program SnoutCode starts in its console.",
+            Page::ClaudeCode => "The coding agents SnoutCode follows, and the one its console runs.",
         }
     }
 
@@ -126,7 +126,7 @@ impl Page {
             Page::Gradle => "Gradle",
             Page::Spring => "Spring",
             Page::Terminal => "Terminal",
-            Page::ClaudeCode => "Claude Code",
+            Page::ClaudeCode => "Agents",
         }
     }
 
@@ -155,7 +155,7 @@ impl Page {
                 "tools engine ghostty built-in builtin shell console emulator vt font cursor blink scrollback \
                  environment variables copy select option meta external iterm wezterm alacritty kitty warp"
             }
-            Page::ClaudeCode => "tools agent console program path",
+            Page::ClaudeCode => "tools agents ai claude code codex openai console program path command colour color",
         }
     }
 
@@ -199,6 +199,9 @@ pub struct SettingsView {
     profiles: Entity<InputState>,
     pub search: Entity<InputState>,
     claude: Entity<InputState>,
+    codex: Entity<InputState>,
+    agent_command: Entity<InputState>,
+    agent_name: Entity<InputState>,
     /// The Terminal page's shell, its arguments, and a variable to add (`NAME=value`).
     shell: Entity<InputState>,
     shell_args: Entity<InputState>,
@@ -269,6 +272,36 @@ impl SettingsView {
             }
         })
         .detach();
+        let text_field = |placeholder: &'static str,
+                          value: String,
+                          window: &mut Window,
+                          cx: &mut Context<Self>,
+                          apply: fn(&mut Settings, String)| {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(value));
+            cx.subscribe(&input, move |this, input, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    let text = input.read(cx).value().trim().to_owned();
+                    apply(&mut this.draft, text);
+                    cx.notify();
+                }
+            })
+            .detach();
+            input
+        };
+        let codex = text_field(
+            "Found on PATH and the usual places",
+            draft.codex_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+            window,
+            cx,
+            |s, t| s.codex_path = (!t.is_empty()).then(|| PathBuf::from(t)),
+        );
+        let agent_command =
+            text_field("aider --model sonnet", draft.custom_agent_command.clone(), window, cx, |s, t| {
+                s.custom_agent_command = t
+            });
+        let agent_name = text_field("Its program's name", draft.custom_agent_name.clone(), window, cx, |s, t| {
+            s.custom_agent_name = t
+        });
         let profiles = cx.new(|cx| InputState::new(window, cx).placeholder("dev, local").default_value(chosen));
         cx.subscribe(&profiles, |this, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -338,6 +371,9 @@ impl SettingsView {
             page: Page::Appearance,
             search,
             claude,
+            codex,
+            agent_command,
+            agent_name,
             shell,
             shell_args,
             new_var,
@@ -414,6 +450,10 @@ impl SettingsView {
         next.fetch_minutes = d.fetch_minutes;
         next.daemon_idle_minutes = d.daemon_idle_minutes;
         next.claude_path = d.claude_path.clone();
+        next.codex_path = d.codex_path.clone();
+        next.console_agent = d.console_agent;
+        next.custom_agent_command = d.custom_agent_command.clone();
+        next.custom_agent_name = d.custom_agent_name.clone();
         next.project_jdks = d.project_jdks.clone();
         next.spring_profiles = d.spring_profiles.clone();
         next.keymap = d.keymap.clone();
@@ -1528,34 +1568,109 @@ impl SettingsView {
                     .into_any_element()
             }
             Page::Terminal => self.terminal_page(&d, cx),
-            Page::ClaudeCode => body
-                .child(section("Program", &p))
-                .child(row("Claude Code", div().w(px(360.)).child(look::field(&self.claude, false, None, &p)), &p))
+            Page::ClaudeCode => body.child(self.agents_page(&d, cx)).into_any_element(),
+        }
+    }
+
+    /// Settings ▸ Tools ▸ Agents: the agents SnoutCode knows (each one's colour, icon and how
+    /// SnoutCode follows it), the one the console runs, and the programs.
+    fn agents_page(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        use crate::agents::{Channel, ConsoleAgent};
+        let p = palette(cx);
+        let chosen = d.console_agent;
+        let cards = crate::agents::known(d).into_iter().zip(ConsoleAgent::ALL).map(|(agent, which)| {
+            let on = chosen == which;
+            let color = agent.color(&p);
+            let how = match agent.channel {
+                Channel::ClaudeIde => "Sees the editor; its hooks report each edit and prompt",
+                Channel::CodexNotify => "Its turns and prompts reported; files seen as it works",
+                Channel::Watcher => "Files seen on disk while it works in the console",
+            };
+            let hover = p.button_hover;
+            let id = format!("settings-agent-{}", agent.id);
+            div()
+                .id(gpui::SharedString::from(id.clone()))
+                .debug_selector(move || id.clone())
+                .w(px(196.))
+                .p(px(10.))
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .rounded(px(8.))
+                .border_1()
+                .border_color(if on { p.accent } else { p.border })
+                .when(on, |d| d.bg(p.wash(p.accent)))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.console_agent = which)))
                 .child(
                     div()
-                        .pl(px(162.))
-                        .text_size(px(12.))
-                        .text_color(p.fg_dim)
-                        .child("Leave empty to find claude on PATH, in ~/.local/bin and the usual places."),
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .flex_none()
+                                .size(px(26.))
+                                .rounded(px(7.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(crate::theme::mix(color, 0.18, p.card))
+                                .child(crate::components::icon(agent.icon, 15., color)),
+                        )
+                        .child(div().flex_1().min_w_0().font_weight(FontWeight::MEDIUM).child(agent.name.clone()))
+                        .when(on, |d| d.child(crate::components::icon(IconName::CircleCheck, 14., p.accent))),
                 )
-                .child(crate::components::tips(
-                    "Good to know",
-                    &[
-                        (
-                            IconName::SquareTerminal,
-                            "\u{2318}J shows or hides the Claude Code console. The session keeps running while it is hidden.",
-                        ),
-                        (IconName::TextCursorInput, "\u{2325}\u{2318}K sends the selection, or the whole file, to Claude."),
-                        (IconName::Check, "In a proposed change's tab, \u{2318}\u{21a9} accepts it and Esc rejects it."),
-                        (
-                            IconName::ListChecks,
-                            "The Claude Changes window keeps every edit Claude made, to accept or revert.",
-                        ),
-                    ],
-                    &p,
-                ))
-                .into_any_element(),
-        }
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .text_size(px(11.5))
+                        .text_color(p.fg_dim)
+                        .child(div().flex_none().size(px(9.)).rounded_full().bg(color))
+                        .child("Its colour, caret and marks"),
+                )
+                .child(div().text_size(px(11.5)).line_height(px(15.)).text_color(p.fg_dim).child(how))
+        });
+        let note = |text: &'static str| div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(text);
+        div()
+            .flex()
+            .flex_col()
+            .child(section("The console runs", &p))
+            .child(div().flex().gap(px(8.)).children(cards))
+            .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                "Each agent writes in its own colour: a caret with its name while it types, a mark in the gutter \
+                 beside the lines it changed, and a dot on the tabs and files it changed until you review them.",
+            ))
+            .child(section("Programs", &p))
+            .child(row("Claude Code", div().w(px(360.)).child(look::field(&self.claude, false, None, &p)), &p))
+            .child(row("Codex", div().w(px(360.)).child(look::field(&self.codex, false, None, &p)), &p))
+            .child(note("Leave them empty to find claude and codex on PATH, in ~/.local/bin and the usual places."))
+            .child(row("Your agent", div().w(px(360.)).child(look::field(&self.agent_command, false, None, &p)), &p))
+            .child(row("Its name", div().w(px(200.)).child(look::field(&self.agent_name, false, None, &p)), &p))
+            .child(note("Any command line agent: the console runs it in the project with /bin/sh -c."))
+            .child(crate::components::tips(
+                "Good to know",
+                &[
+                    (
+                        IconName::SquareTerminal,
+                        "\u{2318}J shows or hides the console. The session keeps running while it is hidden.",
+                    ),
+                    (
+                        IconName::TextCursorInput,
+                        "\u{2325}\u{2318}K sends the selection, or the whole file, to the agent.",
+                    ),
+                    (IconName::Check, "In a proposed change's tab, \u{2318}\u{21a9} accepts it and Esc rejects it."),
+                    (
+                        IconName::ListChecks,
+                        "The Agent Changes window keeps every edit an agent made, by prompt, to accept or revert.",
+                    ),
+                ],
+                &p,
+            ))
+            .into_any_element()
     }
 
     /// Settings ▸ Tools ▸ Terminal: the engine, the look (with a preview), what the Terminal

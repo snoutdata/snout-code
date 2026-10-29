@@ -888,3 +888,75 @@ fn real_claude_edits_live_and_reverts(cx: &mut TestAppContext) {
     std::thread::sleep(Duration::from_millis(500));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// Codex in the console (a stand-in that echoes, in place of `codex`): the console starts
+/// it with its `notify` set for the session, a Return begins its turn, the files that
+/// change while it works are put down to it, and its notify names the turn's prompt.
+#[gpui::test]
+fn codex_in_the_console_gets_its_turns_and_its_edits(cx: &mut TestAppContext) {
+    let repo = demo_repo("codex-console");
+    std::fs::create_dir_all(repo.join("src/demo")).unwrap();
+    let other = repo.join("src/demo/Other.java");
+    std::fs::write(&other, "class Other {}\n").unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "Other"]);
+    let lock_dir = scratch_dir("codex-console-ide");
+    let mut settings = with_repo(&repo);
+    settings.console_agent = crate::agents::ConsoleAgent::Codex;
+    let (model, ws, cx) = open_with_ide(cx, settings, &lock_dir);
+    pump_until(cx, "Codex's notify", |cx| {
+        cx.update(|_, cx| cx.try_global::<super::CodexArgs>().is_some_and(|a| a.0.len() == 2))
+    });
+    let notify = cx.update(|_, cx| cx.global::<super::CodexArgs>().0.clone());
+    assert_eq!(notify[0], "-c");
+    assert!(notify[1].starts_with("notify=[\"/bin/sh\",\"-c\","), "{}", notify[1]);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some("/bin/cat".into())));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
+    pump_until(cx, "the session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
+    cx.update(|_, cx| {
+        let agent = console.read(cx).session_agent(&repo, cx);
+        assert_eq!((agent.id, agent.name.as_ref()), (crate::agents::CODEX, "Codex"));
+    });
+    pump_until(cx, "the console's agent", |cx| {
+        cx.update(|_, cx| crate::agents::console_agent(cx).id == crate::agents::CODEX)
+    });
+    // The watcher starts with the first look at the project.
+    pump(cx, 300);
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Return: Codex's turn begins.
+    cx.update(|w, cx| {
+        let focus = gpui::Focusable::focus_handle(console.read(cx), cx);
+        w.focus(&focus, cx);
+    });
+    cx.simulate_keystrokes("x enter");
+    pump_until(cx, "the turn", |cx| {
+        cx.update(|_, cx| cx.try_global::<crate::agents::ConsoleTurn>().is_some_and(|t| t.active))
+    });
+    let c = changes(&ws, cx);
+    pump_until(cx, "a turn of Codex's", |cx| {
+        cx.update(|_, cx| c.read(cx).set.current().is_some_and(|t| t.agent == crate::agents::CODEX))
+    });
+    std::fs::write(&other, "class Other {\n    int count;\n}\n").unwrap();
+    pump_until(cx, "the change put down to Codex", |cx| {
+        settled(&ws, cx) && cx.update(|_, cx| c.read(cx).set.file(&other).is_some_and(|f| f.agent == "codex"))
+    });
+    // Codex's notify at the end of the turn: the prompt.
+    let port = cx.update(|_, cx| ws.read(cx).claude.as_ref().unwrap().hooks.as_ref().unwrap().port());
+    let notify: Vec<String> = serde_json::from_str(notify[1].strip_prefix("notify=").unwrap()).unwrap();
+    let payload = json!({ "type": "agent-turn-complete", "turn-id": "1", "input-messages": ["Count the others"] });
+    let out = std::process::Command::new(&notify[0])
+        .args(&notify[1..])
+        .arg(payload.to_string())
+        .env(super::hooks::PORT_ENV, port.to_string())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    pump_until(cx, "the prompt", |cx| {
+        cx.update(|_, cx| c.read(cx).set.current().is_some_and(|t| t.prompt.as_deref() == Some("Count the others")))
+    });
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = None));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}

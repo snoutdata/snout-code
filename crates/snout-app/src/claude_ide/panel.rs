@@ -78,6 +78,7 @@ impl ClaudeChanges {
 
     /// `path` now holds `now`: work out its diff off the UI thread, then list it.
     /// `base` is its snapshot if it has none yet.
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &mut self,
         path: PathBuf,
@@ -85,6 +86,7 @@ impl ClaudeChanges {
         base: Option<Option<Arc<String>>>,
         tool: String,
         source: Source,
+        agent: &'static str,
         cx: &mut Context<Self>,
     ) {
         let Some(from) = self.set.base_of(&path).or_else(|| base.clone()) else { return };
@@ -97,7 +99,7 @@ impl ClaudeChanges {
             let diff = diff.await;
             let _ = this.update(cx, |c, cx| {
                 c.diffs.remove(&p);
-                c.set.after_edit(&p, base, now, diff, &tool, source);
+                c.set.after_edit(&p, base, now, diff, &tool, source, agent);
                 cx.emit(Updated);
                 cx.notify();
             });

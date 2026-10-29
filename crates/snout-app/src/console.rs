@@ -1,4 +1,5 @@
-//! The Claude Code console in the bottom dock: `claude` running in the open repository on
+//! The agent console in the bottom dock: the coding agent of the settings (Claude Code,
+//! Codex or a command of the user's) running in the open repository on
 //! the pseudo-terminal of `snout_core::pty`, painted cell by cell from the frame its
 //! terminal engine publishes (the built-in one or Ghostty's, as Settings ▸ Terminal says
 //! when the session starts). One session per repository, kept alive while switching between
@@ -123,7 +124,16 @@ struct Session {
     pty: Pty,
     seen_gen: u64,
     refreshed: Instant,
+    /// The agent it runs (the agent console's sessions).
+    agent: Option<crate::agents::Agent>,
+    /// The agent's turn: since the Return that began it, while it works.
+    turn: Option<Instant>,
 }
+
+/// After Return, the agent counts as at work this long before it prints anything...
+const TURN_START: Duration = Duration::from_millis(1_500);
+/// ...and as done once it has been quiet this long.
+const TURN_QUIET: Duration = Duration::from_millis(2_500);
 
 /// The terminals running, and the engine each runs: Settings ▸ Terminal lists them, since
 /// a new choice of engine holds only for the terminals started after it.
@@ -192,8 +202,11 @@ impl gpui_component::dock::BasePanel for ConsolePanel {
 }
 
 impl gpui_component::dock::Panel for ConsolePanel {
-    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        self.kind.title()
+    fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        match self.kind {
+            Kind::Claude => self.agent(cx).name.to_string(),
+            Kind::Shell => self.kind.title().to_owned(),
+        }
     }
 
     fn inner_padding(&self, _: &App) -> bool {
@@ -335,6 +348,9 @@ impl ConsolePanel {
                 cx.notify();
             }
         }
+        if self.kind == Kind::Claude {
+            self.track_turn(cx);
+        }
         let Some(root) = self.root(cx) else { return };
         let Some(s) = self.sessions.get_mut(&root) else { return };
         if s.pty.frame_gen() != self.shown_gen {
@@ -355,6 +371,57 @@ impl ConsolePanel {
         }
     }
 
+    /// The agent the settings name for the console.
+    pub fn agent(&self, cx: &App) -> crate::agents::Agent {
+        crate::agents::of_settings(&self.model.read(cx).settings)
+    }
+
+    /// The agent the session of `root` runs, else the one the settings name.
+    pub fn session_agent(&self, root: &Path, cx: &App) -> crate::agents::Agent {
+        self.sessions.get(root).and_then(|s| s.agent.clone()).unwrap_or_else(|| self.agent(cx))
+    }
+
+    /// Keep the window's notes of the console up to date: the agent the settings name, and
+    /// whether the agent of the session in front is at work on a turn.
+    fn track_turn(&mut self, cx: &mut Context<Self>) {
+        use crate::agents::{ConsoleAgentNow, ConsoleTurn};
+        let agent = self.agent(cx);
+        if cx.try_global::<ConsoleAgentNow>().is_none_or(|a| a.0 != agent) {
+            cx.set_global(ConsoleAgentNow(agent));
+        }
+        let root = self.root(cx);
+        let mut ended = None;
+        let now = match root.as_ref().and_then(|r| self.sessions.get_mut(r)) {
+            Some(s) => {
+                let last = s.pty.last_output();
+                let active = s.turn.is_some_and(|t| {
+                    t.elapsed() < TURN_START || last.is_some_and(|o| o > t && o.elapsed() < TURN_QUIET)
+                });
+                if !active && s.turn.take().is_some() {
+                    ended = Some(Instant::now());
+                }
+                ConsoleTurn {
+                    agent: s.agent.as_ref().map(|a| a.id),
+                    active,
+                    root: root.clone(),
+                    since: s.turn,
+                    last_output: last,
+                    ended: None,
+                }
+            }
+            None => ConsoleTurn::default(),
+        };
+        let before = cx.try_global::<ConsoleTurn>().cloned().unwrap_or_default();
+        let ended = ended.or(before.ended);
+        if before.agent != now.agent
+            || before.active != now.active
+            || before.since != now.since
+            || before.ended != ended
+        {
+            cx.set_global(ConsoleTurn { ended, ..now });
+        }
+    }
+
     /// Start the console's program in `root`, on the workspace's host: found and started off
     /// the UI thread, the session shows once it runs.
     pub fn start(&mut self, root: &Path, args: &[String], window: &mut Window, cx: &mut Context<Self>) {
@@ -363,8 +430,13 @@ impl ConsolePanel {
         self.error = None;
         let host = crate::host::host(cx);
         let kind = self.kind;
+        let agent = (kind == Kind::Claude).then(|| self.agent(cx));
         let settings = &self.model.read(cx).settings;
-        let configured = settings.claude_path.clone();
+        let configured = match agent.as_ref().map(|a| a.id) {
+            Some(crate::agents::CODEX) => settings.codex_path.clone(),
+            Some(crate::agents::CUSTOM) => Some(PathBuf::from("/bin/sh")),
+            _ => settings.claude_path.clone(),
+        };
         let engine = settings.terminal_engine;
         let scrollback = settings.terminal_scrollback;
         let shell = Some(settings.terminal_shell.trim()).filter(|s| !s.is_empty()).map(PathBuf::from);
@@ -376,24 +448,43 @@ impl ConsolePanel {
         let (fg, bg) = (rgb(p.fg), rgb(p.panel));
         // The settings' variables, then for Claude Code those that connect it to this
         // window's IDE server, and its hooks report its edits.
+        // Codex gets the hooks' port, to tell the end of each turn; a command of the
+        // user's runs through the shell.
         let mut env = added;
-        if kind == Kind::Claude
-            && let Some(ide) = cx.try_global::<crate::claude_ide::IdeEnv>()
-        {
-            env.extend(ide.0.iter().map(|(k, v)| ((*k).to_owned(), v.clone())));
+        let agent_id = agent.as_ref().map(|a| a.id);
+        if let Some(ide) = cx.try_global::<crate::claude_ide::IdeEnv>() {
+            let take = |k: &str| match agent_id {
+                Some(crate::agents::CLAUDE) => true,
+                Some(crate::agents::CODEX) => k == crate::claude_ide::hooks::PORT_ENV,
+                _ => false,
+            };
+            env.extend(ide.0.iter().filter(|(k, _)| take(k)).map(|(k, v)| ((*k).to_owned(), v.clone())));
         }
         let mut args = args;
-        if kind == Kind::Claude
-            && let Some(extra) = cx.try_global::<crate::claude_ide::IdeArgs>()
-        {
-            args.splice(0..0, extra.0.iter().cloned());
+        match agent.as_ref() {
+            Some(a) if a.id == crate::agents::CLAUDE => {
+                if let Some(extra) = cx.try_global::<crate::claude_ide::IdeArgs>() {
+                    args.splice(0..0, extra.0.iter().cloned());
+                }
+            }
+            Some(a) if a.id == crate::agents::CODEX => {
+                if let Some(extra) = cx.try_global::<crate::claude_ide::CodexArgs>() {
+                    args.splice(0..0, extra.0.iter().cloned());
+                }
+            }
+            Some(a) => args = vec!["-c".into(), a.command.clone().unwrap_or_default()],
+            None => {}
         }
+        let session_agent = agent.clone();
         let root = root.to_owned();
         self.starting.insert(root.clone());
         let started = cx.background_executor().spawn({
             let root = root.clone();
             async move {
                 let found = match kind {
+                    Kind::Claude if agent_id == Some(crate::agents::CODEX) => {
+                        configured.or_else(|| crate::agents::find_codex(&*host))
+                    }
                     Kind::Claude => configured.or_else(|| find_claude(&*host)),
                     Kind::Shell => shell.or_else(|| {
                         Some(host.info().var("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from))
@@ -413,16 +504,23 @@ impl ConsolePanel {
                 this.starting.remove(&root);
                 match result {
                     Ok(pty) => {
-                        this.sessions.insert(root.clone(), Session { pty, seen_gen: 0, refreshed: Instant::now() });
+                        let session =
+                            Session { pty, seen_gen: 0, refreshed: Instant::now(), agent: session_agent, turn: None };
+                        this.sessions.insert(root.clone(), session);
                         this.note_engine(&root, cx);
                         window.focus(&this.focus, cx);
                     }
                     Err(None) => {
-                        this.error = Some(
-                            "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, /opt/homebrew/bin, \
-                             /usr/local/bin.\nInstall it from https://docs.claude.com/en/docs/claude-code and press Start."
+                        this.error = Some(match agent_id {
+                            Some(crate::agents::CODEX) => "Codex was not found on PATH or in ~/.local/bin, \
+                                ~/.npm-global/bin, /opt/homebrew/bin, /usr/local/bin. Install it with \
+                                npm install -g @openai/codex, or set its path in Settings, Agents."
                                 .into(),
-                        )
+                            _ => "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, \
+                                /opt/homebrew/bin, /usr/local/bin. Install it from \
+                                https://docs.claude.com/en/docs/claude-code, or set its path in Settings, Agents."
+                                .into(),
+                        })
                     }
                     Err(Some(e)) => this.error = Some(e),
                 }
@@ -515,7 +613,14 @@ impl ConsolePanel {
             k.key_char.as_deref()
         };
         let input = KeyInput { key, mods, text, base };
+        let enter = key == Some(pty::Key::Enter) && !m.shift && !m.alt && !m.control && !m.platform;
         if s.pty.key(&input) {
+            if enter
+                && self.kind == Kind::Claude
+                && let Some(s) = self.sessions.get_mut(root)
+            {
+                s.turn = Some(Instant::now());
+            }
             self.wake_cursor();
             self.selection = None;
             cx.stop_propagation();
@@ -778,7 +883,7 @@ impl Render for ConsolePanel {
                     Glyph::Refresh,
                     "Continue",
                     "Restart with the most recent conversation in this folder (claude --continue)",
-                    vec!["--continue".into()],
+                    continue_args(&self.session_agent(&root, cx)),
                     root.clone(),
                 ),
             ],
@@ -1248,4 +1353,13 @@ pub fn console_of(ws: &crate::workspace::Workspace, cx: &App) -> Option<Entity<C
     let id = ws.tabs.console?;
     let view = ws.dock.read(cx).panel(id)?.clone();
     view.view().downcast::<ConsolePanel>().ok()
+}
+
+/// The arguments that start `agent` on its most recent conversation in the folder.
+pub fn continue_args(agent: &crate::agents::Agent) -> Vec<String> {
+    match agent.id {
+        crate::agents::CLAUDE => vec!["--continue".into()],
+        crate::agents::CODEX => vec!["resume".into(), "--last".into()],
+        _ => Vec::new(),
+    }
 }

@@ -54,6 +54,13 @@ pub struct IdeArgs(pub Vec<String>);
 
 impl Global for IdeArgs {}
 
+/// The arguments a `codex` started in the console gets: its `notify` program, which tells
+/// the hooks' endpoint when a turn ends.
+#[derive(Clone, Debug, Default)]
+pub struct CodexArgs(pub Vec<String>);
+
+impl Global for CodexArgs {}
+
 /// How many Claude Code sessions are connected, for the console's header.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IdeStatus {

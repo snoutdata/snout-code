@@ -70,7 +70,7 @@ pub struct Palette {
     syntax: [u32; 8],
 }
 
-fn hex(rgb: u32) -> Hsla {
+pub fn hex(rgb: u32) -> Hsla {
     gpui::rgb(rgb).into()
 }
 
@@ -421,8 +421,8 @@ pub fn readable_on(ink: Hsla, ground: Hsla) -> Hsla {
 }
 
 /// Claude Code's own hue, for what it changed: a warm clay that no Git state uses.
-const CLAUDE_DARK: u32 = 0xd97757;
-const CLAUDE_LIGHT: u32 = 0xc15f3c;
+pub const CLAUDE_DARK: u32 = 0xd97757;
+pub const CLAUDE_LIGHT: u32 = 0xc15f3c;
 
 /// The tokens of Claude Code's edits, as [`Palette::claude`] gives them.
 #[derive(Debug, Clone, Copy, PartialEq)]

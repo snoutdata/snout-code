@@ -24,7 +24,8 @@ use super::hooks::{self, HookEvent, HookKind, HookServer, Snapshot};
 use super::panel::{Activity, ClaudeChanges, PendingDiff, Updated};
 use super::server::{Call, Event, Reply, Server};
 use super::tools::{self, INVALID_PARAMS, TOOL_ERROR};
-use super::{IdeArgs, IdeConfig, IdeEnv, IdeStatus, review};
+use super::{CodexArgs, IdeArgs, IdeConfig, IdeEnv, IdeStatus, review};
+use crate::agents::{self, ConsoleTurn};
 use crate::editor::{Answer, ClaudeRequest, EditorPanel, Outcome};
 use crate::lang::text::to_lsp;
 use crate::theme::palette;
@@ -81,6 +82,8 @@ pub struct Bridge {
     /// The file last brought forward to follow Claude, and when; the one waiting its turn.
     last_reveal: Option<Instant>,
     queued: Option<PathBuf>,
+    /// The console's turn last seen begin.
+    turn_seen: Option<Instant>,
     _tasks: Vec<Task<()>>,
     _quit: gpui::Subscription,
     _changes: gpui::Subscription,
@@ -177,11 +180,15 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         let Ok(ide_port) = ready_rx.await else { return };
         let mut env = Server::env(ide_port);
         let mut args = Vec::new();
+        let mut codex = Vec::new();
         if let Some(task) = hooks_ready {
             match task.await {
                 Ok((forward, file)) => {
                     env.push((hooks::PORT_ENV, forward.port.to_string()));
                     args = vec!["--settings".into(), file.to_string_lossy().into_owned()];
+                    if let Some(dir) = file.parent() {
+                        codex = hooks::codex_args(&dir.join("hook-header"));
+                    }
                     let _ = ws.update(cx, |ws, _| {
                         if let Some(b) = ws.claude.as_mut() {
                             b.hooks_forward = Some(forward);
@@ -194,6 +201,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         cx.update(|cx| {
             cx.set_global(IdeEnv(env));
             cx.set_global(IdeArgs(args));
+            cx.set_global(CodexArgs(codex));
         });
     })
     .detach();
@@ -201,6 +209,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
     // the window before, on another host).
     cx.set_global(IdeEnv::default());
     cx.set_global(IdeArgs::default());
+    cx.set_global(CodexArgs::default());
     cx.set_global(IdeStatus::default());
     let hook_events = cx.spawn_in(window, async move |this, cx| {
         while let Some(event) = hrx.next().await {
@@ -254,6 +263,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         pre: HashMap::new(),
         last_reveal: None,
         queued: None,
+        turn_seen: None,
         _tasks: vec![events, ticks, hook_events],
         _quit: quit,
         _changes: changes_sub,
@@ -659,6 +669,7 @@ fn open_diff(ws: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, c
 // ----- The selection and @-mentions -------------------------------------------------
 
 fn tick(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    track_console_turn(ws, cx);
     track_selection(ws, window, cx);
     follow_watched(ws, window, cx);
     // The lock file names the project open now.
@@ -686,6 +697,26 @@ fn tick(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     if let Some(b) = ws.claude.as_mut() {
         b.hooked.retain(|_, t| t.elapsed() < HOOKED);
         b.own_writes.retain(|_, t| t.elapsed() < HOOKED);
+    }
+}
+
+/// A turn of an agent the console runs begins (Return, and it went to work): a new turn in
+/// the change set, unless the agent's own hooks start turns themselves (Claude Code's).
+fn track_console_turn(ws: &mut Workspace, cx: &mut Context<Workspace>) {
+    let Some(turn) = cx.try_global::<ConsoleTurn>().cloned() else { return };
+    let Some(b) = ws.claude.as_mut() else { return };
+    let started = turn.since.filter(|_| turn.active);
+    if started == b.turn_seen {
+        return;
+    }
+    b.turn_seen = started;
+    let (Some(_), Some(agent)) = (started, turn.agent) else { return };
+    let hooked = agent == agents::CLAUDE && changes_of(ws, cx).read(cx).hooks_heard;
+    if !hooked {
+        changes_of(ws, cx).update(cx, |c, cx| {
+            c.set.new_turn(agent, None);
+            cx.notify();
+        });
     }
 }
 
@@ -821,10 +852,17 @@ fn changed_lines(before: &str, after: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
-/// Whether to follow a change on disk now: Claude is connected, and no Git job of the
-/// app's own is changing files.
-fn following(ws: &Workspace, cx: &App) -> bool {
-    ws.claude.as_ref().is_some_and(|b| b.clients() > 0) && ws.model.read(cx).job.is_none()
+/// The agent a change on disk is put down to now, if any: the agent whose turn runs in the
+/// console (or ended a moment ago), else Claude Code while it is connected; never while a
+/// Git job of the app's own is changing files.
+pub fn watched_agent(ws: &Workspace, cx: &App) -> Option<&'static str> {
+    if ws.model.read(cx).job.is_some() {
+        return None;
+    }
+    let turn = cx.try_global::<ConsoleTurn>();
+    let console = turn.filter(|t| t.at_work()).and_then(|t| t.agent);
+    let claude = ws.claude.as_ref().is_some_and(|b| b.clients() > 0).then_some(agents::CLAUDE);
+    console.or(claude)
 }
 
 /// An open tab took its file's new text from disk: follow it there, or mark the tab.
@@ -835,9 +873,7 @@ pub fn followed_reload(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    if !following(ws, cx) {
-        return;
-    }
+    let Some(agent) = watched_agent(ws, cx) else { return };
     let path = editor.read(cx).path.clone();
     if left_to_hooks(ws, &path) {
         return;
@@ -849,8 +885,9 @@ pub fn followed_reload(
     }
     // Claude Code without the hooks (started elsewhere): the change waits for review too.
     let base = Some(Some(Arc::new(before.to_owned())));
-    changes_of(ws, cx)
-        .update(cx, |c, cx| c.record(path, Some(Arc::new(after.clone())), base, String::new(), Source::Watcher, cx));
+    changes_of(ws, cx).update(cx, |c, cx| {
+        c.record(path, Some(Arc::new(after.clone())), base, String::new(), Source::Watcher, agent, cx)
+    });
     if ws.model.read(cx).settings.follow_claude {
         let (path, preview) = (editor.read(cx).path.clone(), editor.read(cx).preview);
         ws.reveal_file(path, preview, true, window, cx);
@@ -968,7 +1005,8 @@ fn follow_changed(
     if ws.model.read(cx).project_root().as_deref() != Some(root) {
         return;
     }
-    let connected = following(ws, cx);
+    let agent = watched_agent(ws, cx);
+    let connected = agent.is_some();
     let follow = connected && ws.model.read(cx).settings.follow_claude && files.len() <= FOLLOW_MAX;
     let open: Vec<PathBuf> = ws.editors(cx).into_iter().map(|e| e.read(cx).path.clone()).collect();
     for (path, text, head) in files {
@@ -989,8 +1027,9 @@ fn follow_changed(
         if connected {
             let base = Some(Some(Arc::new(before.clone())));
             let now = Some(Arc::new(text.clone()));
-            changes_of(ws, cx)
-                .update(cx, |c, cx| c.record(path.clone(), now, base, String::new(), Source::Watcher, cx));
+            changes_of(ws, cx).update(cx, |c, cx| {
+                c.record(path.clone(), now, base, String::new(), Source::Watcher, agent.unwrap_or(agents::CLAUDE), cx)
+            });
         }
         if !follow {
             continue;
@@ -1030,8 +1069,13 @@ fn user_typing(ws: &Workspace, window: &Window, cx: &App) -> bool {
 pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut Context<Workspace>) {
     let changes = changes_of(ws, cx);
     match e.kind {
+        HookKind::TurnComplete => changes.update(cx, |c, cx| {
+            c.set.turn_ended(e.agent, e.prompt.clone());
+            cx.emit(Updated);
+            cx.notify();
+        }),
         HookKind::Prompt => changes.update(cx, |c, cx| {
-            c.set.new_turn();
+            c.set.new_turn(e.agent, e.prompt.clone());
             c.activity = None;
             cx.notify();
         }),
@@ -1081,7 +1125,7 @@ pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut C
                     Snapshot::Unread => None,
                 };
                 if let Some(now) = now {
-                    c.record(path.clone(), now, None, e.tool.clone(), Source::Hook, cx);
+                    c.record(path.clone(), now, None, e.tool.clone(), Source::Hook, e.agent, cx);
                 }
                 cx.notify();
             });
