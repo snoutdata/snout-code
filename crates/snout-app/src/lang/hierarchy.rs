@@ -123,6 +123,9 @@ pub struct HierarchyWindow {
     focus: FocusHandle,
 }
 
+/// The note while the engine answers.
+const ASKING: &str = "Asking the Java engine";
+
 impl HierarchyWindow {
     pub fn new(hub: Entity<LangHub>, cx: &mut Context<Self>) -> Self {
         Self {
@@ -131,7 +134,7 @@ impl HierarchyWindow {
             mode: Mode::Subtypes,
             nodes: Vec::new(),
             selected: None,
-            note: Some("Type Hierarchy (⌃H) and Call Hierarchy (⌃⌥H) show here".into()),
+            note: Some("Type Hierarchy (⌃H) and Call Hierarchy (⌃⌥H) show here.".into()),
             _tasks: Vec::new(),
             focus: cx.focus_handle(),
         }
@@ -155,7 +158,7 @@ impl HierarchyWindow {
         self.mode = mode;
         self.nodes.clear();
         self.selected = None;
-        self.note = Some("Asking the Java engine".into());
+        self.note = Some(ASKING.into());
         self._tasks = vec![cx.spawn(async move |this, cx| {
             let answer = call.await;
             let _ = this.update(cx, |this, cx| {
@@ -169,9 +172,9 @@ impl HierarchyWindow {
                     }
                     None => {
                         this.note = Some(if mode.is_type() {
-                            "Put the caret on a class or an interface for its hierarchy".into()
+                            "Put the caret on a class or an interface for its hierarchy.".into()
                         } else {
-                            "Put the caret on a method for its calls".into()
+                            "Put the caret on a method for its calls.".into()
                         })
                     }
                 }
@@ -319,7 +322,12 @@ impl Render for HierarchyWindow {
         let selected = self.selected;
         let this = cx.entity();
         let body = match &self.note {
-            Some(note) => look::centered_note(note.clone(), &p).into_any_element(),
+            Some(note) if note == ASKING => look::centered_note(note.clone(), &p).into_any_element(),
+            Some(note) => crate::components::EmptyState::new(snout_core::art::spots::no_results(), "No hierarchy")
+                .hint(note.clone())
+                .on(p.panel)
+                .compact()
+                .into_any_element(),
             None => uniform_list("hierarchy-rows", rows.len(), move |range, _, _| {
                 range
                     .map(|r| {

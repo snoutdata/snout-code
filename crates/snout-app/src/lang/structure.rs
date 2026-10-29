@@ -14,7 +14,6 @@ use gpui::{
     WeakEntity, Window, div, px, uniform_list,
 };
 use gpui_component::input::{InputEvent, InputState};
-use gpui_component::tooltip::Tooltip;
 use serde_json::json;
 
 use super::symbols::{self, Row, Sort, Symbol};
@@ -204,7 +203,7 @@ impl StructureWindow {
     }
 }
 
-const NO_FILE: &str = "Open a Java file to see its structure";
+const NO_FILE: &str = "Open a Java file to see its structure.";
 const LOADING: &str = "Reading the file's structure";
 
 crate::panels::panel!(StructureWindow, "Structure", |_, _| "Structure".into(), true);
@@ -243,27 +242,16 @@ impl Render for StructureWindow {
         let current = self.current.clone();
         let this = cx.entity();
         let alphabetical = self.sort == Sort::Name;
-        let accent = p.accent;
-        let sort = div()
-            .id("structure-sort")
-            .debug_selector(|| "structure-sort".into())
-            .flex_none()
-            .size(px(24.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(4.))
-            .cursor_pointer()
-            .when(alphabetical, |d| d.bg(p.button))
-            .hover(|s| s.bg(p.button_hover))
-            .tooltip(move |w, cx| {
-                Tooltip::new(if alphabetical { "Sorted by Name (click for File Order)" } else { "Sort by Name" })
-                    .build(w, cx)
-            })
-            .child(icon(Icon::Sort, 14., if alphabetical { accent } else { p.fg_dim }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.set_sort(if alphabetical { Sort::Position } else { Sort::Name }, cx)
-            }));
+        let this2 = this.clone();
+        let sort = crate::components::IconButton::new(
+            "structure-sort",
+            Icon::Sort,
+            if alphabetical { "Sorted by Name (click for File Order)" } else { "Sort by Name" },
+        )
+        .selected(alphabetical)
+        .on_click(move |_, _, cx| {
+            this2.update(cx, |this, cx| this.set_sort(if alphabetical { Sort::Position } else { Sort::Name }, cx))
+        });
         let toolbar = div()
             .flex_none()
             .px(px(8.))
@@ -273,12 +261,20 @@ impl Render for StructureWindow {
             .gap(px(6.))
             .child(div().flex_1().child(look::field(&self.filter, true, None, &p)))
             .child(sort);
+        let empty = |title: &'static str, hint: &'static str| {
+            crate::components::EmptyState::new(snout_core::art::spots::no_results(), title)
+                .hint(hint)
+                .on(p.panel)
+                .compact()
+                .into_any_element()
+        };
         let body = match (self.note, count) {
+            (Some(NO_FILE), _) => empty("No structure", NO_FILE),
             (Some(note), _) => look::centered_note(note, &p).into_any_element(),
             (None, 0) if !self.filter.read(cx).value().is_empty() => {
-                look::centered_note("No symbol matches", &p).into_any_element()
+                empty("No symbol matches", "Try fewer letters of the name.")
             }
-            (None, 0) => look::centered_note("The file declares nothing", &p).into_any_element(),
+            (None, 0) => empty("Nothing declared", "The file declares no class, field or method."),
             (None, _) => uniform_list("structure-rows", count, move |range, _, _| {
                 range
                     .map(|i| {

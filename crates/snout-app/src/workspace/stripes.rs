@@ -73,6 +73,8 @@ impl Tool {
             "Notifications" => Tool::Notifications,
             "Claude Changes" => Tool::ClaudeChanges,
             "Processes" => Tool::Processes,
+            "Structure" => Tool::Structure,
+            "Hierarchy" => Tool::Hierarchy,
             _ => return None,
         })
     }

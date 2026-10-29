@@ -17,7 +17,6 @@ use lsp_types::{CodeAction, CodeActionOrCommand, WorkspaceEdit};
 use serde_json::json;
 
 use super::EditorPanel;
-use crate::glyphs::{Icon, icon};
 use crate::lang::edits::{self, Step};
 use crate::lang::{HubEvent, text};
 use crate::look;
@@ -255,26 +254,15 @@ impl EditorPanel {
         let text = self.hint.clone()?;
         let b = self.caret_bounds(cx)?;
         let p = palette(cx);
-        let note = div()
+        let note = crate::components::callout(crate::components::Tone::Warning, text, &p)
             .id("editor-hint")
             .debug_selector(|| "editor-hint".into())
             .mt(px(4.))
             .max_w(px(460.))
-            .px(px(8.))
-            .py(px(5.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .rounded(px(6.))
-            .bg(p.card)
-            .border_1()
-            .border_color(p.border)
+            .px(px(10.))
+            .py(px(6.))
             .shadow_md()
-            .font_family(look::ui_font(cx))
-            .text_size(px(12.5))
-            .text_color(p.fg)
-            .child(icon(Icon::Warning, 13., p.warn))
-            .child(text);
+            .font_family(look::ui_font(cx));
         Some(gpui::deferred(gpui::anchored().position(b.bottom_left()).child(note)).with_priority(1).into_any_element())
     }
 
@@ -318,7 +306,17 @@ impl EditorPanel {
             .font_family(look::ui_font(cx))
             .text_size(px(12.5))
             .text_color(p.fg)
-            .child(div().px(px(8.)).pb(px(4.)).text_color(p.weak()).child(c.refactoring.name()))
+            .child(
+                div()
+                    .px(px(8.))
+                    .pb(px(4.))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_color(p.weak())
+                    .child(crate::components::icon(crate::components::IconName::WandSparkles, 13., p.fg_dim))
+                    .child(c.refactoring.name()),
+            )
             .children(rows);
         Some(
             gpui::deferred(gpui::anchored().position(b.bottom_left()).snap_to_window_with_margin(px(8.)).child(menu))
