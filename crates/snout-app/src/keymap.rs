@@ -21,6 +21,7 @@ impl Global for KitBindings {}
 
 /// The app's own bindings: keys, action, and the context they apply in.
 fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
+    use crate::claude_ide as c;
     use crate::editor as e;
     use crate::search as s;
     use gpui_component::input as i;
@@ -99,6 +100,11 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-enter", Box::new(e::AcceptChanges), Some("ClaudeReview > Input")),
         ("escape", Box::new(e::RejectChanges), Some("ClaudeReview")),
         ("cmd-alt-k", Box::new(e::SendToClaude), Some("EditorPanel")),
+        // Claude's changes waiting for review: step through them, keep or revert one.
+        ("ctrl-alt-shift-down", Box::new(c::NextClaudeChange), Some("EditorPanel")),
+        ("ctrl-alt-shift-up", Box::new(c::PrevClaudeChange), Some("EditorPanel")),
+        ("cmd-alt-y", Box::new(c::AcceptClaudeHunk), Some("EditorPanel")),
+        ("cmd-alt-z", Box::new(c::RevertClaudeHunk), Some("EditorPanel")),
     ]
 }
 

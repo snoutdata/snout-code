@@ -1,9 +1,11 @@
 //! Claude Code in an editor tab. A change it proposes types itself into the tab, hunk by
 //! hunk, and waits there for Accept (⌘↩) or Reject (Esc): new lines lit green, removed
-//! ones marked red where they were. Changes it makes on its own flash briefly when the
-//! editor follows them.
+//! ones marked red where they were. A change it makes on its own plays out live: the
+//! lines it removes show struck through in red, the new text types itself in, then its
+//! green band fades; the gutter marks the lines until the change is reviewed.
 
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
@@ -15,15 +17,63 @@ use gpui_component::input::RopeExt as _;
 use snout_core::gutter::{LineChange, LineChangeKind};
 
 use super::{EditorEvent, EditorPanel};
-use crate::claude_ide::review::{self, Frame, Mark, Stream};
+use crate::claude_ide::review::{self, Frame, Hunk, Mark, Stream};
 use crate::look;
 use crate::theme::{mix, palette};
 
 /// One step of the change typing itself in.
 pub const STREAM_TICK: Duration = Duration::from_millis(16);
-/// One step of a follow highlight fading, and how many steps it lasts (about 2 s).
+/// One step of a follow highlight fading, and how many steps it lasts (about 3 s).
 pub const FLASH_TICK: Duration = Duration::from_millis(50);
-const FLASH_STEPS: u32 = 40;
+const FLASH_STEPS: u32 = 60;
+/// One step of a live edit.
+pub const LIVE_TICK: Duration = Duration::from_millis(16);
+/// How long the text an edit removes shows struck through before the new text comes.
+const STRIKE_TIME: Duration = Duration::from_millis(420);
+/// How long the disk check waits for Claude's report of an edit it announced.
+pub const HOLD: Duration = Duration::from_secs(10);
+/// Past these, an edit is not typed in: it shows at once and lights up.
+const LIVE_MAX_TEXT: usize = 512 * 1024;
+const LIVE_MAX_CHARS: usize = 20_000;
+
+/// How long an edit takes to type itself in: quick, a little longer for more, capped.
+pub fn live_time(hunks: usize, chars: usize) -> Duration {
+    Duration::from_millis((160 + 60 * hunks as u64 + chars as u64 / 2).clamp(220, 1_400))
+}
+
+/// What an editor asks of Claude Code's changes (the workspace answers).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClaudeRequest {
+    /// Keep, or put back, the hunk whose new lines are these (in the tab's text).
+    AcceptHunk(Range<usize>),
+    RevertHunk(Range<usize>),
+    AcceptFile,
+    RevertFile,
+    /// No more changes this way in this file: go to the next (or previous) file's.
+    NextFile,
+    PrevFile,
+}
+
+/// An edit Claude made on its own, playing out in the tab.
+pub struct Live {
+    plan: Stream,
+    pub original: String,
+    pub proposed: String,
+    pub frame: Frame,
+    tick: u32,
+    /// Steps of the struck text alone, then of the typing.
+    strike: u32,
+    ticks: u32,
+    /// Held where it is (a screenshot).
+    paused: bool,
+}
+
+impl Live {
+    /// Still showing the struck text, before the typing.
+    pub fn striking(&self) -> bool {
+        self.tick < self.strike
+    }
+}
 
 /// How a review ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,6 +142,22 @@ impl Drop for Review {
 pub struct Flash {
     pub lines: Vec<Range<usize>>,
     pub step: u32,
+}
+
+/// The gutter runs of `hunks` (Claude's unreviewed changes) and each one's first line.
+pub fn hunk_changes(hunks: &[Hunk]) -> (Vec<LineChange>, Vec<usize>) {
+    let mut runs = Vec::new();
+    let mut first = Vec::new();
+    for h in hunks {
+        let kind = match (h.old_lines.is_empty(), h.new_lines.is_empty()) {
+            (_, true) => LineChangeKind::Deleted,
+            (true, false) => LineChangeKind::Added,
+            (false, false) => LineChangeKind::Modified,
+        };
+        runs.push(LineChange { kind, lines: h.new_lines.clone() });
+        first.push(h.new_lines.start);
+    }
+    (runs, first)
 }
 
 impl Flash {
@@ -222,6 +288,7 @@ impl EditorPanel {
     fn write_text(&mut self, text: &str, follow: bool, window: &mut Window, cx: &mut Context<Self>) {
         let now = self.text(cx);
         let Some((range, insert)) = review::change(&now, text) else { return };
+        self.writing += 1;
         self.state.update(cx, |s, cx| {
             let sel = s.selected_range();
             let delta = insert.len() as isize - range.len() as isize;
@@ -362,16 +429,33 @@ impl EditorPanel {
     }
 
     /// The bands over the text: new lines green, a red rule where lines went (with how
-    /// many), and the fading light of a followed edit.
+    /// many), and the fading light of a followed edit. A live edit: its struck lines red,
+    /// the lines typed so far green, a caret where the typing is.
     pub(super) fn claude_overlay(&self, cx: &App) -> Option<impl IntoElement + use<>> {
-        if self.review.is_none() && self.flash.is_none() {
+        let inline = self.review.is_none() && self.claude_diff && self.claude_base.is_some();
+        if self.review.is_none() && self.flash.is_none() && self.live.is_none() && !inline {
             return None;
         }
         let p = palette(cx);
-        let marks = self.review.as_ref().map(|r| r.marks.clone()).unwrap_or_default();
+        let c = p.claude();
+        let marks = match &self.review {
+            Some(r) => r.marks.clone(),
+            None if inline && self.live.is_none() => self
+                .claude_hunks
+                .iter()
+                .map(|h| Mark { lines: h.new_lines.clone(), removed: h.old_lines.len() })
+                .collect(),
+            None => Vec::new(),
+        };
         let flash = self.flash.as_ref().map(|f| (f.lines.clone(), f.strength()));
+        // A live edit's parts, in its frame's bytes.
+        let live = self.live.as_ref().map(|l| {
+            let pulse = if l.striking() { 0.75 + 0.25 * ((l.tick as f32) * 0.35).sin().abs() } else { 1. };
+            (l.frame.waiting.clone(), l.frame.typed.clone(), l.frame.typing, pulse)
+        });
         let state = self.state.clone();
-        let (added, removed, lit, panel) = (p.ok.opacity(0.16), p.error, p.accent, p.panel);
+        let (added, removed, panel) = (c.added_band, c.removed, p.panel);
+        let (lit, struck, caret) = (c.added_band, c.removed_band, c.caret);
         let label_font = look::ui_font(cx);
         Some(
             canvas(
@@ -411,12 +495,28 @@ impl EditorPanel {
                                 quads.push((gpui::Bounds::new(point(x, y0), size(bounds.right() - x, y1 - y0)), color));
                             }
                         };
+                        // Bytes of the text to the lines they cover.
+                        let line_run = |r: &Range<usize>| {
+                            let a = text.offset_to_point(r.start.min(text.len())).row;
+                            let end = r.end.min(text.len()).max(r.start);
+                            let b = text.offset_to_point(end.saturating_sub(1).max(r.start)).row;
+                            a..b + 1
+                        };
                         for m in &marks {
                             band(&m.lines, added);
                         }
+                        if let Some((waiting, typed, _, pulse)) = &live {
+                            for r in waiting {
+                                band(&line_run(r), struck.opacity(struck.a * pulse));
+                            }
+                            for r in typed {
+                                band(&line_run(r), lit);
+                            }
+                        }
                         if let Some((runs, strength)) = &flash {
                             for run in runs {
-                                band(run, lit.opacity(0.28 * strength));
+                                // It starts brighter than the typed text's band, then fades.
+                                band(run, lit.opacity((lit.a * 1.8).min(0.45) * strength));
                             }
                         }
                         for m in marks.iter().filter(|m| m.removed > 0) {
@@ -428,6 +528,13 @@ impl EditorPanel {
                             let rule = gpui::Bounds::new(point(x, y - px(1.)), size(bounds.right() - x, px(2.)));
                             quads.push((rule, removed.opacity(0.8)));
                             labels.push((y, m.removed));
+                        }
+                        // The typing point: a bar the height of a line.
+                        if let Some((_, _, Some(at), _)) = &live
+                            && let Some(b) = s.range_to_bounds(&(*at..*at))
+                        {
+                            let x = b.left() - scroll_x;
+                            quads.push((gpui::Bounds::new(point(x, b.top()), size(px(2.), line_height)), caret));
                         }
                     }
                     for (rect, color) in quads {
@@ -539,5 +646,426 @@ impl EditorPanel {
                         .on_click(cx.listener(|this, _, w, cx| this.accept_review(w, cx))),
                 ),
         )
+    }
+}
+
+// ----- Live edits: Claude's own changes, played out ---------------------------------
+
+impl EditorPanel {
+    /// Claude changed the file to `after`: play it out from the text shown. `visible`
+    /// says whether anyone sees the tab; a tab nobody sees takes the text at once.
+    /// Returns false when there was nothing to show (the tab already had the text).
+    pub fn animate_edit(&mut self, after: &str, visible: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.claude_hold = None;
+        // The tab is still reading its file: the edit plays once it has it.
+        if self.loading {
+            let after = after.to_owned();
+            self.after_load.push(Box::new(move |e, window, cx| {
+                e.animate_edit(&after, visible, window, cx);
+            }));
+            return true;
+        }
+        if self.review.is_some() || self.dirty {
+            return false;
+        }
+        self.end_live(window, cx);
+        let original = self.text(cx);
+        if original == after {
+            self.take_disk(after, cx);
+            return false;
+        }
+        self.preview_edit(&original, after, visible, window, cx);
+        true
+    }
+
+    /// Show `before` in the tab first, then play the edit to `after` (a file just opened to
+    /// follow Claude, which already holds `after`).
+    pub fn animate_from(&mut self, before: &str, after: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.claude_hold = None;
+        if self.loading {
+            let (before, after) = (before.to_owned(), after.to_owned());
+            self.after_load.push(Box::new(move |e, window, cx| e.animate_from(&before, &after, window, cx)));
+            return;
+        }
+        if self.review.is_some() || self.dirty {
+            return;
+        }
+        self.end_live(window, cx);
+        let at = self.state.read(cx).selected_range();
+        self.state.update(cx, |s, cx| s.set_value(before.to_owned(), window, cx));
+        let at = at.start.min(before.len());
+        self.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
+        self.preview_edit(before, after, true, window, cx);
+    }
+
+    fn preview_edit(
+        &mut self,
+        original: &str,
+        after: &str,
+        visible: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let plan = Stream::new(original, after);
+        let lines: Vec<Range<usize>> = plan.hunks.iter().map(|h| lit_lines(h, after)).collect();
+        let big = original.len().max(after.len()) > LIVE_MAX_TEXT || plan.chars > LIVE_MAX_CHARS;
+        self.saved = after.to_owned();
+        if !visible || big || plan.hunks.is_empty() {
+            self.write_text(after, false, window, cx);
+            self.settle(cx, window);
+            if visible {
+                self.flash(lines, window, cx);
+            }
+            return;
+        }
+        let strike = if plan.hunks.iter().any(|h| !h.old.is_empty()) {
+            (STRIKE_TIME.as_millis() / LIVE_TICK.as_millis()) as u32
+        } else {
+            0
+        };
+        let ticks = (live_time(plan.hunks.len(), plan.chars).as_millis() / LIVE_TICK.as_millis()).max(1) as u32;
+        let frame = plan.frame(original, after, 0);
+        // The view goes to the first change; the caret too, when nobody is typing here.
+        if let Some(h) = plan.hunks.first() {
+            let at = h.old.start;
+            self.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
+        }
+        self.live = Some(Live {
+            plan,
+            original: original.to_owned(),
+            proposed: after.to_owned(),
+            frame,
+            tick: 0,
+            strike,
+            ticks,
+            paused: false,
+        });
+        self.strike_marks(cx);
+        self._live_task = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(LIVE_TICK).await;
+                match this.update_in(cx, |this, window, cx| this.live_step(window, cx)) {
+                    Ok(true) => {}
+                    _ => return,
+                }
+            }
+        }));
+        cx.notify();
+    }
+
+    /// The next step of a live edit. False once it is over.
+    fn live_step(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let now = self.text(cx);
+        let Some(live) = self.live.as_mut() else { return false };
+        if now != live.frame.text {
+            // The user typed meanwhile: the rest goes in at once, with their edit.
+            self.end_live(window, cx);
+            return false;
+        }
+        if live.paused {
+            return true;
+        }
+        live.tick += 1;
+        if live.tick <= live.strike {
+            cx.notify();
+            return true;
+        }
+        let step = live.tick - live.strike;
+        let total = live.plan.total;
+        let typed = if step >= live.ticks { total } else { total * step as usize / live.ticks as usize };
+        let frame = live.plan.frame(&live.original, &live.proposed, typed);
+        let text = frame.text.clone();
+        live.frame = frame;
+        let done = typed >= total;
+        let focused = gpui::Focusable::focus_handle(self.state.read(cx), cx).is_focused(window);
+        self.write_text(&text, !focused, window, cx);
+        self.strike_marks(cx);
+        if done {
+            self.end_live(window, cx);
+            return false;
+        }
+        cx.notify();
+        true
+    }
+
+    /// End a live edit now: the rest of it in (with what the user typed meanwhile), the
+    /// new lines lit and fading.
+    pub fn end_live(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(live) = self.live.take() else { return };
+        self._live_task = None;
+        let now = self.text(cx);
+        let text = review::carry(&live.frame, &live.proposed, &now);
+        self.write_text(&text, false, window, cx);
+        self.strike_marks(cx);
+        let lines: Vec<Range<usize>> = live.plan.hunks.iter().map(|h| lit_lines(h, &live.proposed)).collect();
+        self.settle(cx, window);
+        self.light(lines, window, cx);
+    }
+
+    /// Hold a live edit `fraction` of the way through (0 the struck text alone, 1 all
+    /// typed), for a look at it part way.
+    pub fn hold_live_at(&mut self, fraction: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else { return };
+        live.paused = true;
+        let typed = ((live.plan.total as f32) * fraction.clamp(0., 1.)) as usize;
+        live.tick = if fraction <= 0. { 0 } else { live.strike + 1 };
+        live.frame = live.plan.frame(&live.original, &live.proposed, typed);
+        let text = live.frame.text.clone();
+        self.write_text(&text, false, window, cx);
+        self.strike_marks(cx);
+        cx.notify();
+    }
+
+    /// The text is the file's again: one undo step no more (the edit came from outside),
+    /// the caret and the view where they were.
+    fn settle(&mut self, cx: &mut Context<Self>, window: &mut Window) {
+        let text = self.text(cx);
+        self.state.update(cx, |s, cx| {
+            let (sel, scroll) = (s.selected_range(), s.scroll_offset());
+            s.set_value(text.clone(), window, cx);
+            s.set_selected_range(sel, cx);
+            s.set_scroll_offset(scroll, cx);
+        });
+        let dirty = text != self.saved;
+        self.take_disk_stamp(cx);
+        self.dirty = dirty;
+        self.revision += 1;
+        self.diff_soon(cx);
+        cx.emit(EditorEvent::Changed);
+        cx.notify();
+    }
+
+    /// The file on disk holds `text`, which the tab shows.
+    fn take_disk(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.saved = text.to_owned();
+        self.dirty = false;
+        self.take_disk_stamp(cx);
+        cx.notify();
+    }
+
+    /// The struck text of the live edit, as the editor draws it.
+    fn strike_marks(&mut self, cx: &mut Context<Self>) {
+        let ranges = self.live.as_ref().map(|l| l.frame.waiting.clone()).unwrap_or_default();
+        if ranges.is_empty() && self.struck.is_none() {
+            return;
+        }
+        let c = palette(cx).claude();
+        let style = gpui::HighlightStyle {
+            color: Some(c.removed_text),
+            strikethrough: Some(gpui::StrikethroughStyle { thickness: px(1.5), color: Some(c.removed) }),
+            ..Default::default()
+        };
+        let decorations: Vec<gpui_component::input::TextDecoration> =
+            ranges.into_iter().map(|r| gpui_component::input::TextDecoration::new(r, style)).collect();
+        match &self.struck {
+            Some(struck) => struck.set(decorations, cx),
+            None => {
+                let struck = self.state.update(cx, |s, cx| s.create_decorations_collection(decorations, cx));
+                self.struck = Some(struck);
+            }
+        }
+    }
+
+    /// Light `lines` as a fading light is `step` steps in, and hold it there (for a look
+    /// at it part way).
+    pub fn hold_flash(&mut self, lines: Vec<Range<usize>>, step: u32, cx: &mut Context<Self>) {
+        self._flash_task = None;
+        self.flash = Some(Flash { lines, step });
+        cx.notify();
+    }
+
+    /// Light `lines` and let them fade, the caret staying where it is.
+    pub fn light(&mut self, lines: Vec<Range<usize>>, window: &mut Window, cx: &mut Context<Self>) {
+        let at = self.state.read(cx).selected_range();
+        self.flash(lines, window, cx);
+        self.state.update(cx, |s, cx| s.set_selected_range(at, cx));
+    }
+
+    // ----- Claude's unreviewed changes: the gutter's marks, the inline diff --------------
+
+    /// Mark the changes made since `base` (none: none to review).
+    pub fn set_claude_base(&mut self, base: Option<Arc<String>>, cx: &mut Context<Self>) {
+        let same = match (&self.claude_base, &base) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.claude_base = base;
+        if self.claude_base.is_none() {
+            self.claude_diff = false;
+        }
+        self.diff_now(cx);
+        cx.notify();
+    }
+
+    /// The hunk of Claude's changes at `line`, or the next one after it (`dir` > 0) or
+    /// before it (< 0).
+    pub fn claude_hunk_near(&self, line: usize, dir: i32) -> Option<&Hunk> {
+        let mut hunks = self.claude_hunks.iter();
+        match dir {
+            0 => hunks.find(|h| h.new_lines.contains(&line) || (h.new_lines.is_empty() && h.new_lines.start == line)),
+            d if d > 0 => hunks.find(|h| h.new_lines.start > line),
+            _ => hunks.rev().find(|h| h.new_lines.start < line),
+        }
+    }
+
+    fn caret_line(&self, cx: &App) -> usize {
+        self.state.read(cx).cursor_position().line as usize
+    }
+
+    /// Go to Claude's next (or previous) change in this file; at the end, ask for the next
+    /// file's.
+    pub fn step_claude_change(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let line = self.caret_line(cx);
+        let next = self.claude_hunk_near(line, if forward { 1 } else { -1 }).map(|h| h.new_lines.start);
+        match next {
+            Some(line) => self.go_to_claude_line(line, window, cx),
+            None => {
+                cx.emit(EditorEvent::Claude(if forward { ClaudeRequest::NextFile } else { ClaudeRequest::PrevFile }))
+            }
+        }
+    }
+
+    /// Put the caret on `line` (a hunk's first) and show the change inline.
+    pub fn go_to_claude_line(&mut self, line: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let at = self.state.read(cx).text().line_start_offset(line.min(self.line_count(cx).saturating_sub(1)));
+        self.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
+        let _ = window;
+        self.claude_diff = true;
+        cx.notify();
+    }
+
+    /// The hunk at the caret: keep it (`accept`) or put it back.
+    fn claude_hunk_request(&mut self, accept: bool, cx: &mut Context<Self>) {
+        let line = self.caret_line(cx);
+        let Some(h) = self.claude_hunk_near(line, 0) else { return };
+        let lines = h.new_lines.clone();
+        cx.emit(EditorEvent::Claude(if accept {
+            ClaudeRequest::AcceptHunk(lines)
+        } else {
+            ClaudeRequest::RevertHunk(lines)
+        }));
+    }
+
+    /// The Claude change keys, in this tab.
+    pub(super) fn claude_actions(&self, d: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
+        use crate::claude_ide::{AcceptClaudeHunk, NextClaudeChange, PrevClaudeChange, RevertClaudeHunk};
+        d.on_action(cx.listener(|this, _: &NextClaudeChange, w, cx| this.step_claude_change(true, w, cx)))
+            .on_action(cx.listener(|this, _: &PrevClaudeChange, w, cx| this.step_claude_change(false, w, cx)))
+            .on_action(cx.listener(|this, _: &AcceptClaudeHunk, _, cx| this.claude_hunk_request(true, cx)))
+            .on_action(cx.listener(|this, _: &RevertClaudeHunk, _, cx| this.claude_hunk_request(false, cx)))
+    }
+
+    /// The gutter's tooltip over a Claude mark.
+    pub(super) fn claude_tip_at(&self, at: gpui::Point<gpui::Pixels>) -> Option<(u32, String)> {
+        let painted = self.claude_painted.borrow();
+        let (line, _) = painted.iter().find(|(_, b)| {
+            let grown =
+                gpui::Bounds::new(point(b.left() - px(3.), b.top()), size(b.size.width + px(6.), b.size.height));
+            grown.contains(&at)
+        })?;
+        Some((*line as u32, "Changed by Claude, not reviewed yet\n⌥⌘Y keeps the change, ⌥⌘Z reverts it".to_owned()))
+    }
+
+    /// The bar over a tab showing Claude's changes inline: how much, keep or revert them.
+    pub(super) fn claude_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        if !self.claude_diff || self.review.is_some() || self.claude_base.is_none() {
+            return None;
+        }
+        let p = palette(cx);
+        let c = p.claude();
+        let (plus, minus) =
+            self.claude_hunks.iter().fold((0, 0), |(a, r), h| (a + h.new_lines.len(), r + h.old_lines.len()));
+        let n = self.claude_hunks.len();
+        let what = match n {
+            0 => "Claude's changes, all reviewed".to_owned(),
+            1 => "Claude changed this file: 1 change to review".to_owned(),
+            n => format!("Claude changed this file: {n} changes to review"),
+        };
+        let hint = |text: &'static str| div().text_color(p.fg_dim).text_size(px(11.)).child(text);
+        Some(
+            div()
+                .id("claude-bar")
+                .debug_selector(|| "claude-bar".into())
+                .flex_none()
+                .mx(px(8.))
+                .mt(px(4.))
+                .mb(px(4.))
+                .pl(px(10.))
+                .pr(px(6.))
+                .h(px(34.))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .rounded(px(6.))
+                .bg(c.mark_wash)
+                .border_1()
+                .border_color(mix(c.mark, 0.4, p.panel))
+                .font_family(look::ui_font(cx))
+                .text_size(px(look::BODY))
+                .child(crate::art::glyph(snout_core::art::Glyph::Spark, 16., c.mark))
+                .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().min_w_0().child(what))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(6.))
+                        .font_family(look::mono_font(cx))
+                        .text_size(px(12.))
+                        .child(div().text_color(c.added).child(format!("+{plus}")))
+                        .child(div().text_color(c.removed).child(format!("−{minus}"))),
+                )
+                .child(div().flex_1())
+                .child(hint("⌃⌥⇧↓ next"))
+                .child(
+                    look::small_button("claude-revert-file", "Revert File", &p)
+                        .debug_selector(|| "claude-revert-file".into())
+                        .h(px(24.))
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::RevertFile)))),
+                )
+                .child(
+                    div()
+                        .id("claude-accept-file")
+                        .debug_selector(|| "claude-accept-file".into())
+                        .flex_none()
+                        .h(px(24.))
+                        .px(px(10.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(6.))
+                        .bg(p.accent)
+                        .text_color(p.on_accent)
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
+                        .child("Accept File")
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::AcceptFile)))),
+                )
+                .child(
+                    look::icon_button(
+                        "claude-bar-close",
+                        snout_core::art::Glyph::Close,
+                        "Hide the inline changes",
+                        true,
+                        &p,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.claude_diff = false;
+                        cx.notify();
+                    })),
+                ),
+        )
+    }
+}
+
+/// The lines of `after` a hunk's new text takes, or the line where its old text went.
+fn lit_lines(h: &Hunk, after: &str) -> Range<usize> {
+    if h.new_lines.is_empty() {
+        let count = after.split_inclusive('\n').count().max(1);
+        let at = h.new_lines.start.min(count - 1);
+        at..at + 1
+    } else {
+        h.new_lines.clone()
     }
 }

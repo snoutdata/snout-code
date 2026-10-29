@@ -121,6 +121,20 @@ mod shots {
         /// picker of the remote machine, 2 a window on a remote machine whose connection is
         /// coming back (the title bar and the status bar say so).
         Remote(u8),
+        /// Claude Code editing on its own, live, with the Claude Changes window open.
+        Claude(ClaudeShot),
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    pub enum ClaudeShot {
+        /// The edit's removed line struck through, before the typing.
+        Strike,
+        /// Part way through typing the new text in.
+        Typing,
+        /// Done: the green band fading, the gutter's Claude marks, a change asking for review.
+        Fade,
+        /// The file's changes inline, from the window, with the bar to accept or revert them.
+        Inline,
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -900,6 +914,101 @@ mod shots {
                 cx.update(|cx| processes.update(cx, |p, cx| p.set_rows(rows, cx)));
                 cx.update_window(handle.into(), |_, window, cx| {
                     ws.update(cx, |ws, cx| ws.toggle_tool(snout_app::workspace::Tool::Processes, window, cx));
+                })
+                .unwrap();
+            }
+            Some(Select::Claude(which)) => {
+                use snout_app::claude_ide::changes::Source;
+                use snout_app::claude_ide::panel::{Activity, PendingDiff};
+                std::fs::create_dir_all(repo.join("src/main/java/demo")).unwrap();
+                let file = repo.join("src/main/java/demo/Greeter.java");
+                std::fs::write(&file, GREETER_V1).unwrap();
+                std::fs::write(repo.join("build.gradle.kts"), "plugins {\n    java\n}\n").unwrap();
+                git(&repo, &["add", "-A"]);
+                git(&repo, &["commit", "-qm", "Add the greeter"]);
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((0, 0))), cx)));
+                let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+                let fake = repo.join("fake-claude");
+                let script = "#!/bin/sh\nprintf '\\033]0;Making the greeter null safe\\007'\nprintf '\\033[1;32m●\\033[0m Update(\\033[36msrc/main/java/demo/Greeter.java\\033[0m)\\n'\nprintf '  Updated src/main/java/demo/Greeter.java with 6 additions and 4 removals\\n> '\nsleep 30\n";
+                std::fs::write(&fake, script).unwrap();
+                Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+                cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+                cx.update(|cx| cx.set_global(snout_app::claude_ide::IdeStatus { clients: 1 }));
+                cx.run_until_parked();
+                // The session so far: the greeter, a file Claude made, one the watcher saw.
+                let changes = cx.update(|cx| snout_app::claude_ide::bridge::changes_of(ws.read(cx), cx));
+                let farewell = repo.join("src/main/java/demo/Farewell.java");
+                let gradle = repo.join("build.gradle.kts");
+                cx.update(|cx| {
+                    changes.update(cx, |c, cx| {
+                        c.root = Some(repo.clone());
+                        c.set.new_turn();
+                        c.hooks_heard = true;
+                        c.set.before_edit(&file, Some(Arc::new(GREETER_V1.into())));
+                        c.record(file.clone(), Some(Arc::new(GREETER_V2.into())), None, "Edit".into(), Source::Hook, cx);
+                        c.set.before_edit(&farewell, None);
+                        let text = "package demo;\n\n/** Says goodbye. */\npublic class Farewell {\n    public String bye(String name) {\n        return \"Goodbye, \" + name;\n    }\n}\n";
+                        c.record(farewell.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, cx);
+                        let old = Some(Some(Arc::new("plugins {\n    java\n}\n".to_owned())));
+                        let new = "plugins {\n    java\n    application\n}\n\napplication {\n    mainClass = \"demo.Main\"\n}\n";
+                        c.record(gradle.clone(), Some(Arc::new(new.into())), old, String::new(), Source::Watcher, cx);
+                        c.expanded.insert(file.clone());
+                        let tool = if which == ClaudeShot::Strike || which == ClaudeShot::Typing { "Edit" } else { "Write" };
+                        c.activity =
+                            Some(Activity { path: file.clone(), tool: tool.into(), at: std::time::Instant::now(), done: false });
+                        if matches!(which, ClaudeShot::Fade | ClaudeShot::Inline) {
+                            c.activity = None;
+                            c.pending.push(PendingDiff {
+                                tab: "✻ [Claude Code] README.md ⧉".into(),
+                                path: repo.join("README.md"),
+                                added: 4,
+                                removed: 1,
+                                new_file: false,
+                                front: true,
+                            });
+                        }
+                    })
+                });
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    if which != ClaudeShot::Typing || ws.read(cx).model.read(cx).settings.theme == ThemeChoice::Light {
+                        ws.update(cx, |ws, cx| ws.toggle_tool(snout_app::workspace::Tool::ClaudeChanges, window, cx));
+                    }
+                    let greeter = ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == file).unwrap();
+                    match which {
+                        ClaudeShot::Strike | ClaudeShot::Typing => {
+                            greeter.update(cx, |e, cx| {
+                                e.animate_edit(GREETER_V2, true, window, cx);
+                                e.hold_live_at(if which == ClaudeShot::Strike { 0. } else { 0.55 }, window, cx);
+                            });
+                        }
+                        ClaudeShot::Fade | ClaudeShot::Inline => {
+                            greeter.update(cx, |e, cx| {
+                                e.animate_edit(GREETER_V2, false, window, cx);
+                            });
+                            ws.update(cx, snout_app::claude_ide::bridge::sync_bases);
+                        }
+                    }
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    let greeter = ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path == file).unwrap();
+                    greeter.update(cx, |e, cx| match which {
+                        ClaudeShot::Fade => {
+                            let hunks = snout_app::claude_ide::review::hunks(GREETER_V1, GREETER_V2);
+                            let lines: Vec<std::ops::Range<usize>> =
+                                hunks.iter().map(|h| h.new_lines.clone()).filter(|l| !l.is_empty()).collect();
+                            e.hold_flash(lines, 8, cx);
+                        }
+                        ClaudeShot::Inline => {
+                            let first = e.claude_hunks.first().map_or(0, |h| h.new_lines.start);
+                            e.go_to_claude_line(first, window, cx);
+                        }
+                        _ => {}
+                    });
                 })
                 .unwrap();
             }
@@ -1879,6 +1988,17 @@ mod shots {
         shot("review-streaming-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(Some(0.45))));
         shot("review-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(None)));
         shot("review-light", ThemeChoice::Light, Activity::Project, Some(Select::Review(None)));
+        shot("claude-live-strike-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Claude(ClaudeShot::Strike)));
+        shot("claude-live-typing-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Claude(ClaudeShot::Typing)));
+        shot(
+            "claude-live-typing-light",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::Claude(ClaudeShot::Typing)),
+        );
+        shot("claude-changes-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Claude(ClaudeShot::Fade)));
+        shot("claude-changes-light", ThemeChoice::Light, Activity::Project, Some(Select::Claude(ClaudeShot::Fade)));
+        shot("claude-inline-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Claude(ClaudeShot::Inline)));
         shot("welcome-light", ThemeChoice::Light, Activity::Project, Some(Select::Nothing));
         shot("run-tests-dark", ThemeChoice::Dark, Activity::Project, Some(Select::RunTests));
         shot("run-tests-light", ThemeChoice::Light, Activity::Project, Some(Select::RunTests));

@@ -1,21 +1,33 @@
 //! The workspace's side of the connection: the server runs while the window does, its
 //! tool calls act on the editor tabs, the selection goes to Claude as it changes, and
-//! the editor follows the files Claude changes on its own.
+//! the editor follows the files Claude changes on its own: its hooks say which, before
+//! and after each edit, and the file watcher stands in for a `claude` started elsewhere.
+//! What Claude changed waits in the Claude Changes window until it is accepted or
+//! reverted.
 
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use futures::StreamExt as _;
-use gpui::{App, Context, Entity, Task, WeakEntity, Window};
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
+    ParentElement as _, Styled as _, Task, WeakEntity, Window, div, px,
+};
 use serde_json::{Value, json};
 
+use super::changes::{Restore, Source};
+use super::hooks::{self, HookEvent, HookKind, HookServer, Snapshot};
+use super::panel::{Activity, ClaudeChanges, PendingDiff, Updated};
 use super::server::{Call, Event, Reply, Server};
 use super::tools::{self, INVALID_PARAMS, TOOL_ERROR};
-use super::{IdeConfig, IdeEnv, IdeStatus, review};
-use crate::editor::{Answer, EditorPanel, Outcome};
+use super::{IdeArgs, IdeConfig, IdeEnv, IdeStatus, review};
+use crate::editor::{Answer, ClaudeRequest, EditorPanel, Outcome};
 use crate::lang::text::to_lsp;
+use crate::theme::palette;
 use crate::workspace::Workspace;
 
 /// How often the selection and the watched files are looked at; the selection is sent
@@ -24,6 +36,13 @@ pub const TICK: Duration = Duration::from_millis(100);
 
 /// More files than this changing at once (a checkout) are not followed.
 const FOLLOW_MAX: usize = 8;
+
+/// The user typed in an editor this recently: the editor stays where it is.
+const TYPING: Duration = Duration::from_millis(1_500);
+/// A followed file stays in front at least this long before the next one takes its place.
+const DWELL: Duration = Duration::from_millis(700);
+/// The hooks reported a file this recently: the watcher leaves it to them.
+const HOOKED: Duration = Duration::from_secs(5);
 
 /// The watch on the project, set up off the UI thread.
 struct Watch {
@@ -49,8 +68,32 @@ pub struct Bridge {
     watch: Option<Watch>,
     /// What files the watcher reported held then, to see what changes next.
     known: HashMap<PathBuf, String>,
+    /// The hooks' endpoint, and the folder of the settings `claude` gets.
+    pub hooks: Option<HookServer>,
+    settings_dir: Option<PathBuf>,
+    /// The files the hooks reported, and when; the files the app wrote itself (a revert).
+    hooked: HashMap<PathBuf, Instant>,
+    own_writes: HashMap<PathBuf, Instant>,
+    /// Each file's text before the edit under way (the hooks' `PreToolUse`).
+    pre: HashMap<PathBuf, Snapshot>,
+    /// The file last brought forward to follow Claude, and when; the one waiting its turn.
+    last_reveal: Option<Instant>,
+    queued: Option<PathBuf>,
     _tasks: Vec<Task<()>>,
     _quit: gpui::Subscription,
+    _changes: gpui::Subscription,
+}
+
+impl Drop for Bridge {
+    fn drop(&mut self) {
+        // The settings `claude` was given go with the window.
+        if let Some(dir) = self.settings_dir.take() {
+            let host = self.server.host();
+            std::thread::spawn(move || {
+                let _ = host.remove_dir_all(&dir);
+            });
+        }
+    }
 }
 
 impl Bridge {
@@ -74,8 +117,47 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             return;
         }
     };
-    cx.set_global(IdeEnv(server.env()));
+    let mut env = server.env();
+    // Claude Code's hooks report every edit to the endpoint; `claude` gets their settings.
+    let (htx, mut hrx) = futures::channel::mpsc::unbounded::<HookEvent>();
+    let hooks = match HookServer::start(crate::host::host(cx), move |e| {
+        let _ = htx.unbounded_send(e);
+    }) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            eprintln!("Claude Code integration: could not start the hooks' endpoint: {e}");
+            None
+        }
+    };
+    let host = crate::host::host(cx);
+    let settings_dir = hooks
+        .as_ref()
+        .map(|h| host.info().temp_dir.join(format!("snout-code-claude-{}-{}", host.info().pid, h.port())));
+    if let (Some(h), Some(dir)) = (&hooks, &settings_dir) {
+        env.push((hooks::PORT_ENV, h.port().to_string()));
+        // Written off the UI thread; `claude` gets them once they are there.
+        let (host, dir, token) = (host.clone(), dir.clone(), h.token().to_owned());
+        let write = cx.background_spawn(async move { hooks::write_settings(&*host, &dir, &token) });
+        cx.spawn(async move |_, cx| match write.await {
+            Ok(file) => {
+                cx.update(|cx| cx.set_global(IdeArgs(vec!["--settings".into(), file.to_string_lossy().into_owned()])));
+            }
+            Err(e) => eprintln!("Claude Code integration: could not write the hooks' settings: {e}"),
+        })
+        .detach();
+    }
+    cx.set_global(IdeEnv(env));
     cx.set_global(IdeStatus::default());
+    let hook_events = cx.spawn_in(window, async move |this, cx| {
+        while let Some(event) = hrx.next().await {
+            if this.update_in(cx, |ws, window, cx| on_hook(ws, event, window, cx)).is_err() {
+                return;
+            }
+        }
+    });
+    let changes = changes_of(ws, cx);
+    changes.update(cx, |c, _| c.root = root.clone());
+    let changes_sub = cx.subscribe(&changes, |ws, _, _: &Updated, cx| sync_bases(ws, cx));
     let events = cx.spawn_in(window, async move |this, cx| {
         while let Some(event) = rx.next().await {
             if this.update_in(cx, |ws, window, cx| on_event(ws, event, window, cx)).is_err() {
@@ -110,8 +192,16 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         reviews: HashMap::new(),
         watch: None,
         known: HashMap::new(),
-        _tasks: vec![events, ticks],
+        hooks,
+        settings_dir,
+        hooked: HashMap::new(),
+        own_writes: HashMap::new(),
+        pre: HashMap::new(),
+        last_reveal: None,
+        queued: None,
+        _tasks: vec![events, ticks, hook_events],
         _quit: quit,
+        _changes: changes_sub,
     });
 }
 
@@ -284,6 +374,12 @@ fn editor_for(ws: &Workspace, path: &Path, cx: &mut Context<Workspace>) -> Task<
         let canonical = canonical.await?;
         ws.update(cx, |ws, cx| ws.editors(cx).into_iter().find(|e| e.read(cx).path == canonical)).ok().flatten()
     })
+}
+
+/// The editor tab open on `path`, by the name it goes by (the hooks report names as the
+/// host resolves them, as the tabs have them).
+fn open_editor(ws: &Workspace, path: &Path, cx: &App) -> Option<Entity<EditorPanel>> {
+    ws.editors(cx).into_iter().find(|e| e.read(cx).path == path)
 }
 
 /// The selection of `editor` as the protocol has it.
@@ -517,6 +613,24 @@ fn tick(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     {
         b.root = root.clone();
         b.server.set_folders(&root.iter().cloned().collect::<Vec<_>>());
+        changes_of(ws, cx).update(cx, |c, _| c.root = root.clone());
+    }
+    track_reviews(ws, cx);
+    sync_bases(ws, cx);
+    reveal_queued(ws, window, cx);
+    // Claude went quiet: the indicator goes.
+    changes_of(ws, cx).update(cx, |c, cx| {
+        if c.activity
+            .as_ref()
+            .is_some_and(|a| a.at.elapsed() >= super::panel::ACTIVE || (a.done && a.at.elapsed() >= LINGER))
+        {
+            c.activity = None;
+            cx.notify();
+        }
+    });
+    if let Some(b) = ws.claude.as_mut() {
+        b.hooked.retain(|_, t| t.elapsed() < HOOKED);
+        b.own_writes.retain(|_, t| t.elapsed() < HOOKED);
     }
 }
 
@@ -637,11 +751,19 @@ pub fn followed_reload(
     if !following(ws, cx) {
         return;
     }
+    let path = editor.read(cx).path.clone();
+    if left_to_hooks(ws, &path) {
+        return;
+    }
     let after = editor.read(cx).text(cx);
     let lines = changed_lines(before, &after);
     if lines.is_empty() {
         return;
     }
+    // Claude Code without the hooks (started elsewhere): the change waits for review too.
+    let base = Some(Some(Arc::new(before.to_owned())));
+    changes_of(ws, cx)
+        .update(cx, |c, cx| c.record(path, Some(Arc::new(after.clone())), base, String::new(), Source::Watcher, cx));
     if ws.model.read(cx).settings.follow_claude {
         let (path, preview) = (editor.read(cx).path.clone(), editor.read(cx).preview);
         ws.reveal_file(path, preview, true, window, cx);
@@ -759,24 +881,540 @@ fn follow_changed(
     if ws.model.read(cx).project_root().as_deref() != Some(root) {
         return;
     }
-    let follow = following(ws, cx) && ws.model.read(cx).settings.follow_claude && files.len() <= FOLLOW_MAX;
+    let connected = following(ws, cx);
+    let follow = connected && ws.model.read(cx).settings.follow_claude && files.len() <= FOLLOW_MAX;
     let open: Vec<PathBuf> = ws.editors(cx).into_iter().map(|e| e.read(cx).path.clone()).collect();
     for (path, text, head) in files {
+        let hooked = left_to_hooks(ws, &path);
         let Some(b) = ws.claude.as_mut() else { return };
         if b.known.len() > 512 {
             b.known.clear();
         }
         let before = b.known.insert(path.clone(), text.clone());
-        // Open tabs follow through their own reload.
-        if !follow || open.contains(&path) {
+        // Open tabs follow through their own reload; the hooks show their own files.
+        if hooked || open.contains(&path) {
             continue;
         }
         let before = before.or(head).unwrap_or_default();
         if before == text {
             continue;
         }
+        if connected {
+            let base = Some(Some(Arc::new(before.clone())));
+            let now = Some(Arc::new(text.clone()));
+            changes_of(ws, cx)
+                .update(cx, |c, cx| c.record(path.clone(), now, base, String::new(), Source::Watcher, cx));
+        }
+        if !follow {
+            continue;
+        }
         let lines = changed_lines(&before, &text);
         let editor = ws.reveal_file(path, true, true, window, cx);
         editor.update(cx, |e, cx| e.after_load(move |e, window, cx| e.flash(lines, window, cx), window, cx));
     }
+}
+
+// ----- Claude's edits, as its hooks report them -------------------------------------
+
+/// The indicator stays this long after the tool ran.
+const LINGER: Duration = Duration::from_millis(1_500);
+
+/// The window's change set.
+pub fn changes_of(ws: &Workspace, cx: &App) -> Entity<ClaudeChanges> {
+    ws.claude_changes.read(cx).changes.clone()
+}
+
+/// The hooks (or the app itself) have this file: the watcher stays out of it.
+fn left_to_hooks(ws: &Workspace, path: &Path) -> bool {
+    ws.claude.as_ref().is_some_and(|b| {
+        b.hooked.get(path).is_some_and(|t| t.elapsed() < HOOKED)
+            || b.own_writes.get(path).is_some_and(|t| t.elapsed() < HOOKED)
+    })
+}
+
+/// The user is typing in an editor that has the keyboard.
+fn user_typing(ws: &Workspace, window: &Window, cx: &App) -> bool {
+    ws.editors(cx).iter().any(|e| {
+        let e = e.read(cx);
+        e.edited_at.is_some_and(|t| t.elapsed() < TYPING) && e.state.read(cx).focus_handle(cx).is_focused(window)
+    })
+}
+
+pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut Context<Workspace>) {
+    let changes = changes_of(ws, cx);
+    match e.kind {
+        HookKind::Prompt => changes.update(cx, |c, cx| {
+            c.set.new_turn();
+            c.activity = None;
+            cx.notify();
+        }),
+        HookKind::Stop => changes.update(cx, |c, cx| {
+            if let Some(a) = c.activity.as_mut() {
+                a.done = true;
+            }
+            cx.notify();
+        }),
+        HookKind::PreTool => {
+            let Some(path) = e.path else { return };
+            let snap = e.file.clone().unwrap_or(Snapshot::Unread);
+            changes.update(cx, |c, cx| {
+                c.hooks_heard = true;
+                match &snap {
+                    Snapshot::Text(t) => c.set.before_edit(&path, Some(t.clone())),
+                    Snapshot::Missing => c.set.before_edit(&path, None),
+                    Snapshot::Unread => {}
+                }
+                c.activity =
+                    Some(Activity { path: path.clone(), tool: e.tool.clone(), at: Instant::now(), done: false });
+                cx.notify();
+            });
+            // An open tab waits for the report rather than reloading on its own.
+            if let Some(editor) = open_editor(ws, &path, cx) {
+                editor.update(cx, |e, _| e.claude_hold = Some(Instant::now()));
+            }
+            if let Some(b) = ws.claude.as_mut() {
+                b.hooked.insert(path.clone(), Instant::now());
+                b.pre.insert(path, snap);
+            }
+        }
+        HookKind::PostTool => {
+            let Some(path) = e.path else { return };
+            let after = e.file.clone().unwrap_or(Snapshot::Unread);
+            let before = ws.claude.as_mut().and_then(|b| {
+                b.hooked.insert(path.clone(), Instant::now());
+                b.pre.remove(&path)
+            });
+            changes.update(cx, |c, cx| {
+                c.hooks_heard = true;
+                c.activity =
+                    Some(Activity { path: path.clone(), tool: e.tool.clone(), at: Instant::now(), done: true });
+                let now = match &after {
+                    Snapshot::Text(t) => Some(Some(t.clone())),
+                    Snapshot::Missing => Some(None),
+                    Snapshot::Unread => None,
+                };
+                if let Some(now) = now {
+                    c.record(path.clone(), now, None, e.tool.clone(), Source::Hook, cx);
+                }
+                cx.notify();
+            });
+            show_edit(ws, &path, before.as_ref().and_then(Snapshot::text).cloned(), after.text().cloned(), window, cx);
+        }
+    }
+}
+
+/// Bring Claude's edit of `path` into view and play it out, or mark the tab when the
+/// editor should stay where it is.
+fn show_edit(
+    ws: &mut Workspace,
+    path: &Path,
+    before: Option<Arc<String>>,
+    after: Option<Arc<String>>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let open = open_editor(ws, path, cx);
+    let Some(after) = after else {
+        if let Some(editor) = open {
+            editor.update(cx, |e, _| e.claude_hold = None);
+        }
+        return;
+    };
+    let follow = ws.model.read(cx).settings.follow_claude;
+    let typing = user_typing(ws, window, cx);
+    let active = ws.active_editor(window, cx).is_some_and(|e| e.read(cx).path == path);
+    let recent = ws.claude.as_ref().and_then(|b| b.last_reveal).is_some_and(|t| t.elapsed() < DWELL);
+    // In front now (it is, or it may come forward), or later (another file just did).
+    let front = follow && !typing && (active || !recent);
+    if follow
+        && !typing
+        && !front
+        && let Some(b) = ws.claude.as_mut()
+    {
+        b.queued = Some(path.to_owned());
+    }
+    match open {
+        Some(editor) => {
+            if front && !active {
+                let preview = editor.read(cx).preview;
+                ws.reveal_file(path.to_owned(), preview, true, window, cx);
+                note_reveal(ws);
+            }
+            let visible = front || active;
+            let shown = editor.update(cx, |e, cx| e.animate_edit(&after, visible, window, cx));
+            if shown && !visible {
+                editor.update(cx, |e, cx| {
+                    e.touched = true;
+                    cx.notify();
+                });
+            }
+        }
+        None if front => {
+            let editor = ws.reveal_file(path.to_owned(), true, true, window, cx);
+            note_reveal(ws);
+            let before = before.map(|b| b.as_str().to_owned()).unwrap_or_default();
+            editor.update(cx, |e, cx| e.animate_from(&before, &after, window, cx));
+        }
+        None => {}
+    }
+}
+
+fn note_reveal(ws: &mut Workspace) {
+    if let Some(b) = ws.claude.as_mut() {
+        b.last_reveal = Some(Instant::now());
+    }
+}
+
+/// A file that changed while another was in front: its turn, once that one has been seen.
+fn reveal_queued(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    let Some(b) = ws.claude.as_ref() else { return };
+    if b.queued.is_none() || b.last_reveal.is_some_and(|t| t.elapsed() < DWELL) || user_typing(ws, window, cx) {
+        return;
+    }
+    let Some(path) = ws.claude.as_mut().and_then(|b| b.queued.take()) else { return };
+    let busy = changes_of(ws, cx).read(cx).busy().map(|a| a.path.clone());
+    // Claude moved on to another file meanwhile: that one shows itself.
+    if busy.as_ref().is_some_and(|p| *p != path) && open_editor(ws, busy.as_deref().unwrap_or(&path), cx).is_some() {
+        return;
+    }
+    let lines: Vec<Range<usize>> = open_editor(ws, &path, cx)
+        .map(|e| e.read(cx).claude_hunks.iter().map(|h| h.new_lines.clone()).filter(|l| !l.is_empty()).collect())
+        .unwrap_or_default();
+    let editor = ws.reveal_file(path, true, true, window, cx);
+    note_reveal(ws);
+    editor.update(cx, |e, cx| {
+        e.touched = false;
+        e.after_load(move |e, window, cx| e.flash(lines, window, cx), window, cx)
+    });
+}
+
+/// One shared empty text: the snapshot of every file Claude made.
+fn empty() -> Arc<String> {
+    static EMPTY: OnceLock<Arc<String>> = OnceLock::new();
+    EMPTY.get_or_init(|| Arc::new(String::new())).clone()
+}
+
+/// Every open tab marks the changes waiting for review in its file.
+pub fn sync_bases(ws: &mut Workspace, cx: &mut Context<Workspace>) {
+    let changes = changes_of(ws, cx);
+    for editor in ws.editors(cx) {
+        let base = changes.read(cx).set.file(&editor.read(cx).path).map(|f| f.base.clone().unwrap_or_else(empty));
+        editor.update(cx, |e, cx| e.set_claude_base(base, cx));
+    }
+}
+
+/// The changes Claude asks to make (`openDiff`), as the Claude Changes window lists them.
+fn track_reviews(ws: &mut Workspace, cx: &mut Context<Workspace>) {
+    let Some(b) = ws.claude.as_mut() else { return };
+    b.reviews.retain(|_, e| e.upgrade().is_some());
+    let mut pending: Vec<PendingDiff> = Vec::new();
+    for (tab, editor) in &b.reviews {
+        let Some(editor) = editor.upgrade() else { continue };
+        let e = editor.read(cx);
+        if let Some(r) = e.review.as_ref().filter(|r| r.tab_name == *tab) {
+            let (added, removed) = review::counts(&r.marks);
+            let path = e.path.clone();
+            pending.push(PendingDiff { tab: tab.clone(), path, added, removed, new_file: r.new_file, front: true });
+        } else if e.queue.iter().any(|p| p.tab_name == *tab) {
+            let path = e.path.clone();
+            pending.push(PendingDiff { tab: tab.clone(), path, added: 0, removed: 0, new_file: false, front: false });
+        }
+    }
+    pending.sort_by(|a, b| (!a.front, &a.path, &a.tab).cmp(&(!b.front, &b.path, &b.tab)));
+    let changes = changes_of(ws, cx);
+    if changes.read(cx).pending != pending {
+        changes.update(cx, |c, cx| {
+            c.pending = pending;
+            cx.notify();
+        });
+    }
+}
+
+// ----- Reviewing Claude's changes: from the window, the tab's bar and the keys ---------
+
+/// Write what a revert puts back (on the host, off the UI thread), and show it in the
+/// file's tab.
+fn restore(ws: &mut Workspace, r: Restore, window: &mut Window, cx: &mut Context<Workspace>) {
+    if let Some(b) = ws.claude.as_mut() {
+        b.own_writes.insert(r.path.clone(), Instant::now());
+        if let Some(text) = &r.text {
+            b.known.insert(r.path.clone(), text.clone());
+        } else {
+            b.known.remove(&r.path);
+        }
+    }
+    let host = crate::host::host(cx);
+    let write = cx.background_executor().spawn({
+        let (path, text) = (r.path.clone(), r.text.clone());
+        async move {
+            match &text {
+                Some(text) => {
+                    if let Some(dir) = path.parent() {
+                        let _ = host.create_dir_all(dir);
+                    }
+                    host.write(&path, text.as_bytes())
+                }
+                None => match host.remove_file(&path) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                    _ => Ok(()),
+                },
+            }
+        }
+    });
+    cx.spawn_in(window, async move |ws, cx| {
+        if let Err(e) = write.await {
+            eprintln!("Claude Code integration: could not revert {}: {e}", r.path.display());
+            return;
+        }
+        let _ = ws.update_in(cx, |ws, window, cx| {
+            if let Some(b) = ws.claude.as_mut() {
+                b.own_writes.insert(r.path.clone(), Instant::now());
+            }
+            let editor = open_editor(ws, &r.path, cx);
+            match (&r.text, editor) {
+                (Some(text), Some(editor)) => {
+                    editor.update(cx, |e, cx| {
+                        e.animate_edit(text, false, window, cx);
+                    });
+                }
+                (None, Some(editor)) => {
+                    editor.update(cx, |e, cx| e.discard(cx));
+                    ws.dock.update(cx, |d, cx| d.remove_panel(editor, window, cx));
+                }
+                (_, None) => {}
+            }
+            ws.model.update(cx, |m, cx| {
+                if m.job.is_none() {
+                    m.refresh(cx);
+                }
+            });
+        });
+    })
+    .detach();
+}
+
+pub fn accept_file(ws: &mut Workspace, path: &Path, _: &mut Window, cx: &mut Context<Workspace>) {
+    changes_of(ws, cx).update(cx, |c, cx| {
+        c.set.accept_file(path);
+        cx.emit(Updated);
+        cx.notify();
+    });
+}
+
+pub fn revert_file(ws: &mut Workspace, path: &Path, window: &mut Window, cx: &mut Context<Workspace>) {
+    let r = changes_of(ws, cx).update(cx, |c, cx| {
+        let r = c.set.revert_file(path);
+        cx.emit(Updated);
+        cx.notify();
+        r
+    });
+    if let Some(r) = r {
+        restore(ws, r, window, cx);
+    }
+}
+
+pub fn accept_all(ws: &mut Workspace, _: &mut Window, cx: &mut Context<Workspace>) {
+    changes_of(ws, cx).update(cx, |c, cx| {
+        c.set.accept_all();
+        cx.emit(Updated);
+        cx.notify();
+    });
+}
+
+pub fn revert_all(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    let all = changes_of(ws, cx).update(cx, |c, cx| {
+        let all = c.set.revert_all();
+        cx.emit(Updated);
+        cx.notify();
+        all
+    });
+    for r in all {
+        restore(ws, r, window, cx);
+    }
+}
+
+pub fn accept_hunk(ws: &mut Workspace, path: &Path, ix: usize, _: &mut Window, cx: &mut Context<Workspace>) {
+    changes_of(ws, cx).update(cx, |c, cx| {
+        if c.set.accept_hunk(path, ix).is_some() {
+            c.rediff(path, cx);
+        }
+    });
+}
+
+pub fn revert_hunk(ws: &mut Workspace, path: &Path, ix: usize, window: &mut Window, cx: &mut Context<Workspace>) {
+    let r = changes_of(ws, cx).update(cx, |c, cx| {
+        let r = c.set.revert_hunk(path, ix);
+        if r.is_some() {
+            c.rediff(path, cx);
+        }
+        r
+    });
+    if let Some(r) = r {
+        restore(ws, r, window, cx);
+    }
+}
+
+/// Open `path` on Claude's changes, shown inline: at `line`, or at the first.
+pub fn open_change(
+    ws: &mut Workspace,
+    path: &Path,
+    line: Option<usize>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    if open_editor(ws, path, cx).is_none() {
+        // Not open: whether it is still there is asked of the host off the UI thread.
+        let host = crate::host::host(cx);
+        let there = cx.background_executor().spawn({
+            let path = path.to_owned();
+            async move { host.is_file(&path) }
+        });
+        let path = path.to_owned();
+        cx.spawn_in(window, async move |ws, cx| {
+            if there.await {
+                let _ = ws.update_in(cx, |ws, window, cx| show_change(ws, &path, line, window, cx));
+            }
+        })
+        .detach();
+        return;
+    }
+    show_change(ws, path, line, window, cx);
+}
+
+fn show_change(ws: &mut Workspace, path: &Path, line: Option<usize>, window: &mut Window, cx: &mut Context<Workspace>) {
+    let first = changes_of(ws, cx).read(cx).set.file(path).and_then(|f| f.hunks.first().map(|h| h.new_lines.start));
+    let editor = ws.reveal_file(path.to_owned(), false, true, window, cx);
+    sync_bases(ws, cx);
+    if let Some(line) = line.or(first) {
+        editor.update(cx, |e, cx| e.after_load(move |e, window, cx| e.go_to_claude_line(line, window, cx), window, cx));
+    }
+    editor.update(cx, |e, cx| e.state.update(cx, |s, cx| s.focus(window, cx)));
+}
+
+/// Accept or reject the change Claude asks to make in the tab `tab`.
+pub fn answer_review(ws: &mut Workspace, tab: &str, accept: bool, window: &mut Window, cx: &mut Context<Workspace>) {
+    let editor = ws.claude.as_ref().and_then(|b| b.reviews.get(tab)).and_then(|e| e.upgrade());
+    let Some(editor) = editor else { return };
+    editor.update(cx, |e, cx| {
+        let front = e.review.as_ref().is_some_and(|r| r.tab_name == tab);
+        match (front, accept) {
+            (true, true) => e.accept_review(window, cx),
+            (true, false) => e.reject_review(window, cx),
+            (false, false) => {
+                e.close_review(tab, window, cx);
+            }
+            (false, true) => {}
+        }
+    });
+    track_reviews(ws, cx);
+}
+
+/// What an editor asks of Claude's changes.
+pub fn editor_request(
+    ws: &mut Workspace,
+    editor: &Entity<EditorPanel>,
+    request: &ClaudeRequest,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let path = editor.read(cx).path.clone();
+    let changes = changes_of(ws, cx);
+    let hunk = |lines: &Range<usize>, cx: &App| {
+        changes.read(cx).set.file(&path).and_then(|f| f.hunks.iter().position(|h| h.new_lines == *lines))
+    };
+    match request {
+        ClaudeRequest::AcceptHunk(lines) => {
+            if let Some(ix) = hunk(lines, cx) {
+                accept_hunk(ws, &path, ix, window, cx);
+            }
+        }
+        ClaudeRequest::RevertHunk(lines) => {
+            if let Some(ix) = hunk(lines, cx) {
+                revert_hunk(ws, &path, ix, window, cx);
+            }
+        }
+        ClaudeRequest::AcceptFile => accept_file(ws, &path, window, cx),
+        ClaudeRequest::RevertFile => revert_file(ws, &path, window, cx),
+        ClaudeRequest::NextFile | ClaudeRequest::PrevFile => {
+            let files: Vec<PathBuf> = changes.read(cx).set.files.iter().map(|f| f.path.clone()).collect();
+            if files.is_empty() {
+                return;
+            }
+            let at = files.iter().position(|p| *p == path);
+            let forward = *request == ClaudeRequest::NextFile;
+            let next = match (at, forward) {
+                (Some(i), true) => (i + 1) % files.len(),
+                (Some(i), false) => (i + files.len() - 1) % files.len(),
+                (None, true) => 0,
+                (None, false) => files.len() - 1,
+            };
+            let target = files[next].clone();
+            let line = changes.read(cx).set.file(&target).and_then(|f| {
+                let h = if forward { f.hunks.first() } else { f.hunks.last() };
+                h.map(|h| h.new_lines.start)
+            });
+            open_change(ws, &target, line, window, cx);
+        }
+    }
+}
+
+/// A dot that pulses while Claude works.
+pub fn pulse_dot(color: gpui::Hsla, id: &'static str) -> AnyElement {
+    use gpui::{Animation, AnimationExt as _, pulsating_between};
+    div()
+        .flex_none()
+        .size(px(8.))
+        .rounded_full()
+        .bg(color)
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(1_100))
+                .repeat()
+                .with_easing(pulsating_between(0.35, 1.))
+                .with_max_fps(24.),
+            |d, t| d.opacity(t),
+        )
+        .into_any_element()
+}
+
+/// The floating note of what Claude is doing: the file it edits and the tool, or the
+/// change waiting for review.
+pub fn indicator(changes: &ClaudeChanges, cx: &App) -> Option<(gpui::Stateful<gpui::Div>, PathBuf)> {
+    let p = palette(cx);
+    let c = p.claude();
+    let (what, path, tool) = if let Some(d) = changes.pending.iter().find(|d| d.front) {
+        ("Claude is waiting for your review", d.path.clone(), None)
+    } else {
+        let a = changes
+            .activity
+            .as_ref()
+            .filter(|a| (!a.done && a.at.elapsed() < super::panel::ACTIVE) || (a.done && a.at.elapsed() < LINGER))?;
+        ("Claude is editing", a.path.clone(), Some(a.tool.clone()))
+    };
+    let (name, _) = changes.display(&path);
+    let el = div()
+        .id("claude-indicator")
+        .debug_selector(|| "claude-indicator".into())
+        .flex_none()
+        .h(px(30.))
+        .pl(px(10.))
+        .pr(px(6.))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .rounded(px(8.))
+        .bg(c.indicator)
+        .border_1()
+        .border_color(crate::theme::mix(c.mark, 0.45, p.border))
+        .shadow_md()
+        .text_size(px(12.5))
+        .text_color(p.fg)
+        .font_family(crate::look::ui_font(cx))
+        .cursor_pointer()
+        .child(pulse_dot(c.mark, "claude-indicator-dot"))
+        .child(div().text_color(p.fg_dim).whitespace_nowrap().child(what))
+        .child(crate::icons::file_icon(&path, 13., &p))
+        .child(div().max_w(px(220.)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
+        .when_some(tool, |d, tool| d.child(crate::look::chip(tool, c.mark, &p)));
+    Some((el, path))
 }

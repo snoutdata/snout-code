@@ -203,11 +203,17 @@ impl ConsolePanel {
         let args = if kind == Kind::Shell && args.is_empty() { &shell_args[..] } else { args }.to_vec();
         let p = palette(cx);
         let (fg, bg) = (rgb(p.fg), rgb(p.panel));
-        // Claude Code connects to this window's IDE server.
+        // Claude Code connects to this window's IDE server, and its hooks report its edits.
         let env = match kind {
             Kind::Claude => cx.try_global::<crate::claude_ide::IdeEnv>().map(|e| e.0.clone()).unwrap_or_default(),
             Kind::Shell => Vec::new(),
         };
+        let mut args = args;
+        if kind == Kind::Claude
+            && let Some(extra) = cx.try_global::<crate::claude_ide::IdeArgs>()
+        {
+            args.splice(0..0, extra.0.iter().cloned());
+        }
         let root = root.to_owned();
         self.starting.insert(root.clone());
         let started = cx.background_executor().spawn({

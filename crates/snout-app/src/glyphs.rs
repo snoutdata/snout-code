@@ -89,6 +89,8 @@ pub enum Icon {
     Endpoint,
     /// Copy: two sheets, one over the other.
     Copy,
+    /// Claude's changes: a page with a plus and a minus on it.
+    ClaudeChanges,
 }
 
 /// One stroke of an icon, in grid units (16 across).
@@ -363,6 +365,12 @@ impl Icon {
                 Curve((8., 2.), (3.6, 8.), (8., 14.)),
                 Curve((8., 2.), (12.4, 8.), (8., 14.)),
                 Line(&[(2., 8.), (14., 8.)], false),
+            ],
+            Icon::ClaudeChanges => &[
+                Line(&[(3.5, 1.5), (9.5, 1.5), (12.5, 4.5), (12.5, 14.5), (3.5, 14.5)], true),
+                Line(&[(8., 4.5), (8., 9.5)], false),
+                Line(&[(5.5, 7.), (10.5, 7.)], false),
+                Line(&[(5.5, 12.), (10.5, 12.)], false),
             ],
             Icon::Copy => &[
                 Line(&[(5.5, 5.5), (13.5, 5.5), (13.5, 14.), (5.5, 14.)], true),

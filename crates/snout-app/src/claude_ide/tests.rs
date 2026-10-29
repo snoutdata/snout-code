@@ -474,7 +474,7 @@ fn the_editor_follows_the_files_claude_changes(cx: &mut TestAppContext) {
     assert_eq!(lit[1], 7..8);
     let caret = cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
     assert_eq!(caret as usize, lit[0].start, "the view goes to the change");
-    pump(cx, 2_500);
+    pump(cx, 3_500);
     cx.update(|_, cx| assert!(editor.read(cx).flash.is_none(), "and fades"));
 
     // A file no tab shows: it opens, as a preview, on the change.
@@ -494,6 +494,191 @@ fn the_editor_follows_the_files_claude_changes(cx: &mut TestAppContext) {
         assert!(editor.read(cx).touched, "a dot marks the tab");
         assert!(editor.read(cx).flash.is_none());
     });
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// The hooks' endpoint of the window and the command `claude`'s settings run for a hook.
+fn hook_command(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> (u16, String) {
+    pump_until(cx, "the hooks' settings", |cx| cx.update(|_, cx| cx.try_global::<super::IdeArgs>().is_some()));
+    let (port, args, env) = cx.update(|_, cx| {
+        let port = ws.read(cx).claude.as_ref().unwrap().hooks.as_ref().unwrap().port();
+        (port, cx.global::<super::IdeArgs>().0.clone(), cx.global::<IdeEnv>().0.clone())
+    });
+    assert_eq!(args[0], "--settings", "the console's `claude` gets the hooks as extra settings");
+    assert!(env.contains(&(super::hooks::PORT_ENV, port.to_string())));
+    let settings: Value = serde_json::from_str(&std::fs::read_to_string(&args[1]).unwrap()).unwrap();
+    let cmd = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap().to_owned();
+    (port, cmd)
+}
+
+/// Run a hook as Claude Code does: its command through the shell, its input on stdin.
+fn run_hook(port: u16, cmd: &str, input: Value) {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(cmd)
+        .env(super::hooks::PORT_ENV, port.to_string())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input.to_string().as_bytes()).unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+fn tool_hook(event: &str, tool: &str, file: &Path) -> Value {
+    json!({ "hook_event_name": event, "session_id": "fake-session", "cwd": file.parent().unwrap(), "tool_name": tool,
+        "tool_input": { "file_path": file } })
+}
+
+fn changes(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> Entity<super::panel::ClaudeChanges> {
+    cx.update(|_, cx| super::bridge::changes_of(ws.read(cx), cx))
+}
+
+fn listed(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> Vec<(PathBuf, usize, usize, bool)> {
+    let c = changes(ws, cx);
+    cx.update(|_, cx| c.read(cx).set.files.iter().map(|f| (f.path.clone(), f.added, f.removed, f.created())).collect())
+}
+
+fn settled(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> bool {
+    let c = changes(ws, cx);
+    cx.update(|_, cx| !c.read(cx).settling())
+}
+
+#[gpui::test]
+fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut TestAppContext) {
+    let (repo, lock_dir, _model, ws, mut client, cx) = connected("claude-hooks", cx);
+    let (port, cmd) = hook_command(&ws, cx);
+    let hello = repo.join("src/demo/Hello.java");
+    let fresh = repo.join("src/demo/Fresh.java");
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(hello.clone(), None, false, w, cx)));
+    let editor = editor_of(&ws, &hello, cx).unwrap();
+
+    // An edit Claude accepts on its own (no openDiff): the hook before it, then the write.
+    run_hook(port, &cmd, json!({ "hook_event_name": "UserPromptSubmit", "session_id": "fake-session", "prompt": "x" }));
+    run_hook(port, &cmd, tool_hook("PreToolUse", "Edit", &hello));
+    pump_until(cx, "the editing indicator", |cx| {
+        let c = changes(&ws, cx);
+        cx.update(|_, cx| c.read(cx).busy().is_some_and(|a| a.path == hello && a.tool == "Edit"))
+    });
+    cx.update(|_, cx| {
+        assert!(editor.read(cx).claude_hold.is_some(), "the tab waits for the report");
+        let c = super::bridge::changes_of(ws.read(cx), cx);
+        assert!(super::bridge::indicator(c.read(cx), cx).is_some(), "Claude is editing Hello.java");
+    });
+    std::fs::write(&hello, HELLO_V2).unwrap();
+    // The disk check does not take the file meanwhile: the report shows it.
+    pump(cx, 900);
+    assert_eq!(text_of(&editor, cx), HELLO);
+    run_hook(port, &cmd, tool_hook("PostToolUse", "Edit", &hello));
+    pump_until(cx, "the live edit", |cx| cx.update(|_, cx| editor.read(cx).live.is_some()));
+    cx.update(|_, cx| {
+        let live = editor.read(cx).live.as_ref().unwrap();
+        assert!(live.striking(), "the removed line shows struck through first");
+        let waiting: Vec<String> = live.frame.waiting.iter().map(|r| live.frame.text[r.clone()].to_owned()).collect();
+        assert_eq!(waiting, ["        return \"Hello, \" + name;\n"]);
+        assert!(!editor.read(cx).dirty, "a live edit is not an unsaved change");
+    });
+    pump_until(cx, "the typing", |cx| cx.update(|_, cx| editor.read(cx).live.as_ref().is_none_or(|l| !l.striking())));
+    pump_until(cx, "the end of the edit", |cx| cx.update(|_, cx| editor.read(cx).live.is_none()));
+    assert_eq!(text_of(&editor, cx), HELLO_V2);
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        assert!(!e.dirty && e.flash.is_some(), "the new lines lit, fading; the tab as the file");
+    });
+    pump_until(cx, "the change listed", |cx| settled(&ws, cx) && !listed(&ws, cx).is_empty());
+    assert_eq!(listed(&ws, cx), [(hello.clone(), 3, 1, false)]);
+    pump_until(cx, "the gutter's Claude marks", |cx| cx.update(|_, cx| editor.read(cx).claude_hunks.len() == 2));
+    cx.update(|_, cx| assert!(editor.read(cx).claude_base.as_deref().is_some_and(|b| b == HELLO)));
+
+    // A file Claude creates: it opens and types itself in.
+    run_hook(port, &cmd, tool_hook("PreToolUse", "Write", &fresh));
+    std::fs::write(&fresh, "class Fresh {\n    int n;\n}\n").unwrap();
+    run_hook(port, &cmd, tool_hook("PostToolUse", "Write", &fresh));
+    pump_until(cx, "the new file's tab", |cx| editor_of(&ws, &fresh, cx).is_some());
+    let fresh_editor = editor_of(&ws, &fresh, cx).unwrap();
+    pump_until(cx, "the new file typed in", |cx| cx.update(|_, cx| fresh_editor.read(cx).live.is_none()));
+    assert_eq!(text_of(&fresh_editor, cx), "class Fresh {\n    int n;\n}\n");
+    pump_until(cx, "two files listed", |cx| settled(&ws, cx) && listed(&ws, cx).len() == 2);
+    assert_eq!(listed(&ws, cx)[1], (fresh.clone(), 3, 0, true));
+
+    // Review: revert one hunk of Hello (the import), keep the other; the file leaves the list.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::revert_hunk(ws, &hello, 0, w, cx)));
+    let reverted = HELLO_V2.replace("import java.util.Objects;\n\n", "");
+    // Written on the host off the UI thread.
+    pump_until(cx, "the hunk put back on disk", |_| std::fs::read_to_string(&hello).unwrap() == reverted);
+    pump_until(cx, "the tab takes it", |cx| text_of(&editor, cx) == reverted);
+    pump_until(cx, "one hunk left", |cx| settled(&ws, cx) && listed(&ws, cx)[0].1 == 1);
+    cx.update(|_, cx| assert!(!editor.read(cx).dirty));
+    // The editor's own key: keep the change at the caret.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(hello.clone(), None, false, w, cx)));
+    cx.update(|w, cx| {
+        let line = reverted.lines().position(|l| l.contains("requireNonNull")).unwrap();
+        editor.update(cx, |e, cx| e.go_to_claude_line(line, w, cx));
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, cx| s.focus(w, cx));
+    });
+    pump(cx, 200);
+    cx.simulate_keystrokes("cmd-alt-y");
+    pump_until(cx, "Hello reviewed", |cx| settled(&ws, cx) && listed(&ws, cx).len() == 1);
+    pump(cx, 200);
+    cx.update(|_, cx| assert!(editor.read(cx).claude_base.is_none(), "no marks left in the gutter"));
+    assert_eq!(std::fs::read_to_string(&hello).unwrap(), reverted, "keeping writes nothing");
+
+    // Revert All: the file Claude made goes, its tab too.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::revert_all(ws, w, cx)));
+    pump(cx, 100);
+    assert!(!fresh.exists(), "a created file reverts to nothing");
+    assert!(editor_of(&ws, &fresh, cx).is_none());
+    assert!(listed(&ws, cx).is_empty());
+
+    // While the user types, the editor stays put: the change is listed, nothing moves.
+    let other = repo.join("src/demo/Other.java");
+    focus(&editor, cx);
+    cx.simulate_input("x");
+    run_hook(port, &cmd, tool_hook("PreToolUse", "Edit", &other));
+    std::fs::write(&other, "class Other {\n    int count;\n}\n").unwrap();
+    run_hook(port, &cmd, tool_hook("PostToolUse", "Edit", &other));
+    pump_until(cx, "Other listed", |cx| settled(&ws, cx) && listed(&ws, cx).len() == 1);
+    assert!(editor_of(&ws, &other, cx).is_none(), "no tab opened under the user's typing");
+    cx.update(|w, cx| {
+        let active = ws.read(cx).active_editor(w, cx).unwrap();
+        assert_eq!(active.read(cx).path, hello, "the tab in front stays");
+    });
+
+    // A change Claude asks to make (openDiff) waits in the window too, and is answered there.
+    cx.update(|w, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, cx| s.set_value(reverted.clone(), w, cx));
+        editor.update(cx, |e, cx| e.save(cx)).detach();
+    });
+    run_hook(port, &cmd, tool_hook("PreToolUse", "Edit", &hello));
+    let diff =
+        json!({ "old_file_path": hello, "new_file_path": hello, "new_file_contents": HELLO, "tab_name": "tab h" });
+    let id = client.start_tool("openDiff", diff);
+    pump_until(cx, "the request in the window", |cx| {
+        let c = changes(&ws, cx);
+        cx.update(|_, cx| c.read(cx).pending.first().is_some_and(|d| d.front && d.path == hello))
+    });
+    pump_until(cx, "the stream", |cx| !streaming(&editor, cx));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::answer_review(ws, "tab h", true, w, cx)));
+    assert_eq!(texts(&client.wait(cx, id))[0], "FILE_SAVED");
+    // Claude Code writes what was accepted; the hook after it lists the change, played out
+    // already (no second animation).
+    std::fs::write(&hello, HELLO).unwrap();
+    run_hook(port, &cmd, tool_hook("PostToolUse", "Edit", &hello));
+    pump_until(cx, "Hello listed again", |cx| settled(&ws, cx) && listed(&ws, cx).iter().any(|f| f.0 == hello));
+    cx.update(|_, cx| {
+        assert!(editor.read(cx).live.is_none(), "no replay of a change already reviewed in the tab");
+        let c = super::bridge::changes_of(ws.read(cx), cx);
+        assert!(c.read(cx).pending.is_empty());
+    });
+    run_hook(port, &cmd, json!({ "hook_event_name": "Stop", "session_id": "fake-session" }));
+    // The indicator lingers a moment (on the wall clock) after the last edit.
+    std::thread::sleep(Duration::from_millis(1_600));
+    pump(cx, 200);
+    let c = changes(&ws, cx);
+    cx.update(|_, cx| assert!(c.read(cx).activity.is_none(), "the indicator goes once Claude stops"));
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }

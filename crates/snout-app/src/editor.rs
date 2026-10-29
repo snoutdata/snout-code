@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -35,7 +35,7 @@ mod run_gutter;
 mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
-pub use claude::{Answer, Outcome, Proposal, Review, STREAM_TICK};
+pub use claude::{Answer, ClaudeRequest, LIVE_TICK, Outcome, Proposal, Review, STREAM_TICK};
 pub use lang_features::{class_file_name, is_class_file_path};
 pub use run_gutter::{CODE_PAD, GutterMenu, Lanes, PLAIN_PAD, runnables_of};
 pub use spring_gutter::{SpringItem, spring_items, spring_of};
@@ -202,6 +202,8 @@ pub enum EditorEvent {
     Discarded,
     /// The caret moved (the session remembers where it is).
     CaretMoved,
+    /// Something to do with Claude Code's changes (a key, a button of the tab's bar).
+    Claude(ClaudeRequest),
 }
 
 pub struct EditorPanel {
@@ -254,6 +256,25 @@ pub struct EditorPanel {
     pub touched: bool,
     /// Lines of a followed change, fading.
     pub flash: Option<claude::Flash>,
+    /// An edit Claude made on its own, playing out: struck, typed in, lit.
+    pub live: Option<claude::Live>,
+    _live_task: Option<Task<()>>,
+    /// The struck text of a live edit.
+    struck: Option<gpui_component::input::TextDecorationCollection>,
+    /// Claude is about to change the file: the disk check waits for its report.
+    pub claude_hold: Option<Instant>,
+    /// The file before Claude's unreviewed changes (empty for a file Claude made), and
+    /// the hunks from it to the text, for the gutter's Claude marks.
+    pub claude_base: Option<Arc<String>>,
+    pub claude_hunks: Arc<Vec<crate::claude_ide::review::Hunk>>,
+    /// Claude's changes shown inline, the bar above them.
+    pub claude_diff: bool,
+    /// The Claude marks drawn on the last frame: the hunk's first new line and where.
+    pub claude_painted: Rc<RefCell<Vec<ClaudeMark>>>,
+    /// When the user last typed here, and how many changes the app made that the editor
+    /// has yet to report (they are not the user's typing).
+    pub edited_at: Option<Instant>,
+    writing: u32,
     _review_task: Option<Task<()>>,
     _flash_task: Option<Task<()>>,
     _diff: Option<Task<()>>,
@@ -322,15 +343,23 @@ impl EditorPanel {
                     this.revision += 1;
                     this.lang_changed(cx);
                     this.spring_changed(cx);
-                    // Compared in place: no copy of a large file on every keystroke.
-                    let text = state.read(cx).text();
-                    let dirty = text.len() != this.saved.len() || *text != this.saved.as_str();
-                    if dirty {
-                        // Editing keeps a preview tab.
-                        this.preview = false;
+                    if this.writing > 0 {
+                        this.writing -= 1;
+                    } else {
+                        this.edited_at = Some(Instant::now());
                     }
-                    if dirty != this.dirty {
-                        this.dirty = dirty;
+                    // A live edit decides at its end whether the tab differs from the file.
+                    if this.live.is_none() {
+                        // Compared in place: no copy of a large file on every keystroke.
+                        let text = state.read(cx).text();
+                        let dirty = text.len() != this.saved.len() || *text != this.saved.as_str();
+                        if dirty {
+                            // Editing keeps a preview tab.
+                            this.preview = false;
+                        }
+                        if dirty != this.dirty {
+                            this.dirty = dirty;
+                        }
                     }
                     this.diff_soon(cx);
                     this.review_changed(cx);
@@ -409,6 +438,16 @@ impl EditorPanel {
             queue: VecDeque::new(),
             touched: false,
             flash: None,
+            live: None,
+            _live_task: None,
+            struck: None,
+            claude_hold: None,
+            claude_base: None,
+            claude_hunks: Arc::new(Vec::new()),
+            claude_diff: false,
+            claude_painted: Rc::new(RefCell::new(Vec::new())),
+            edited_at: None,
+            writing: 0,
             _review_task: None,
             _flash_task: None,
             _diff: None,
@@ -584,7 +623,8 @@ impl EditorPanel {
 
     /// Mark the gutter again once typing pauses.
     fn diff_soon(&mut self, cx: &mut Context<Self>) {
-        if self.head.is_none() && self.changes.is_empty() {
+        if self.head.is_none() && self.changes.is_empty() && self.claude_base.is_none() && self.claude_hunks.is_empty()
+        {
             return;
         }
         self._diff = Some(cx.spawn(async move |this, cx| {
@@ -595,21 +635,39 @@ impl EditorPanel {
 
     /// Diff the text against the commit (off the main thread) and mark the gutter.
     fn diff_now(&mut self, cx: &mut Context<Self>) {
-        let Some(head) = self.head.clone() else {
-            if !self.changes.is_empty() {
-                self.changes = Arc::new(Vec::new());
-                cx.notify();
-            }
+        let (head, base) = (self.head.clone(), self.claude_base.clone());
+        if head.is_none() && !self.changes.is_empty() {
+            self.changes = Arc::new(Vec::new());
+            cx.notify();
+        }
+        if base.is_none() && !self.claude_hunks.is_empty() {
+            self.claude_hunks = Arc::new(Vec::new());
+            cx.notify();
+        }
+        if head.is_none() && base.is_none() {
             return;
-        };
+        }
         let text = self.state.read(cx).text().to_string();
         let revision = self.revision;
         self._diff = Some(cx.spawn(async move |this, cx| {
-            let changes =
-                cx.background_executor().spawn(async move { snout_core::gutter::line_changes(&head, &text) }).await;
+            let (changes, claude) = cx
+                .background_executor()
+                .spawn(async move {
+                    let changes = head.map(|head| snout_core::gutter::line_changes(&head, &text));
+                    let claude = base.map(|base| crate::claude_ide::review::hunks(&base, &text));
+                    (changes, claude)
+                })
+                .await;
             let _ = this.update(cx, |this, cx| {
                 if this.revision == revision {
-                    this.changes = Arc::new(changes);
+                    if let Some(changes) = changes {
+                        this.changes = Arc::new(changes);
+                    }
+                    if let Some(claude) = claude
+                        && this.claude_base.is_some()
+                    {
+                        this.claude_hunks = Arc::new(claude);
+                    }
                     cx.notify();
                 }
             });
@@ -623,6 +681,29 @@ impl EditorPanel {
         self.load(self.path.clone(), window, cx);
         self.preview = preview;
         self.pending_caret = Some((at, false));
+    }
+
+    /// Note the file's modification time and length as they are now (asked of the host off
+    /// the UI thread; the disk check waits for it).
+    pub(crate) fn take_disk_stamp(&mut self, cx: &mut Context<Self>) {
+        self.conflict = false;
+        if self.path.as_os_str().is_empty() {
+            return;
+        }
+        let (host, path) = (crate::host::host(cx), self.path.clone());
+        let stamp = cx.background_executor().spawn(async move { disk_stamp(&*host, &path) });
+        self.checking = true;
+        let path = self.path.clone();
+        cx.spawn(async move |this, cx| {
+            let disk = stamp.await;
+            let _ = this.update(cx, |this, _| {
+                this.checking = false;
+                if this.path == path {
+                    this.disk = disk;
+                }
+            });
+        })
+        .detach();
     }
 
     /// Keep this tab's text over what changed on disk; saving writes it.
@@ -641,7 +722,11 @@ impl EditorPanel {
     /// If the file changed on disk: take the new text when this tab has no changes, or
     /// say so when it has. The host is asked off the UI thread.
     pub fn check_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.class_file.is_some() || self.loading || self.checking || self.conflict {
+        if self.class_file.is_some() || self.loading || self.checking || self.conflict || self.live.is_some() {
+            return;
+        }
+        // Claude is changing the file: its report shows the change (for a while at most).
+        if self.claude_hold.is_some_and(|t| t.elapsed() < claude::HOLD) {
             return;
         }
         if self.path.as_os_str().is_empty() {
@@ -1021,6 +1106,9 @@ impl EditorPanel {
         // Under review, the gutter shows the proposed change instead of Git's.
         let changes = self.review_gutter().map_or_else(|| self.changes.clone(), Arc::new);
         let (state, painted) = (self.state.clone(), self.painted.clone());
+        // Over Git's marks, the lines Claude changed and nobody has reviewed yet.
+        let claude = (self.review.is_none() && self.claude_base.is_some()).then(|| self.claude_hunks.clone());
+        let (claude_painted, claude_color) = (self.claude_painted.clone(), p.claude().mark);
         canvas(
             |_, _, _| {},
             move |_, _, window, cx| {
@@ -1034,12 +1122,26 @@ impl EditorPanel {
                     paint_mark(*kind, *b, color, window);
                 }
                 *painted.borrow_mut() = marks;
+                let mut drawn = Vec::new();
+                if let Some(hunks) = &claude {
+                    let runs = claude::hunk_changes(hunks);
+                    for ((kind, b), first) in gutter_marks(state.read(cx), &runs.0).into_iter().zip(runs.1) {
+                        let wide =
+                            Bounds::new(point(b.left() - px(0.5), b.top()), size(b.size.width + px(1.), b.size.height));
+                        paint_mark(kind, if kind == LineChangeKind::Deleted { b } else { wide }, claude_color, window);
+                        drawn.push((first, b));
+                    }
+                }
+                *claude_painted.borrow_mut() = drawn;
             },
         )
         .absolute()
         .inset_0()
     }
 }
+
+/// A Claude mark in the gutter: its change's first line, and where it is drawn.
+pub type ClaudeMark = (usize, Bounds<Pixels>);
 
 /// A mark in the gutter: what changed, and where it is drawn.
 pub type GutterMark = (LineChangeKind, Bounds<Pixels>);
@@ -1233,6 +1335,7 @@ impl Render for EditorPanel {
                 d.on_action(cx.listener(|this, _: &AcceptChanges, w, cx| this.accept_review(w, cx)))
                     .on_action(cx.listener(|this, _: &RejectChanges, w, cx| this.reject_review(w, cx)))
             })
+            .map(|d| self.claude_actions(d, cx))
             .on_action(cx.listener(|this, _: &Save, _, cx| this.save(cx).detach()))
             .on_action(cx.listener(|this, _: &ToggleComment, w, cx| this.toggle_comment(w, cx)))
             .on_action(cx.listener(|this, _: &DuplicateLine, w, cx| this.duplicate_line(w, cx)))
@@ -1250,6 +1353,7 @@ impl Render for EditorPanel {
             .when_some(self.error.clone(), |d, e| d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(e)))
             .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
             .children(self.review_bar(cx))
+            .children(self.claude_bar(cx))
             .child(
                 div()
                     .flex_1()

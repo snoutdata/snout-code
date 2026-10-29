@@ -344,7 +344,7 @@ fn tab(
                     .flex_none()
                     .size(px(5.))
                     .rounded_full()
-                    .bg(p.accent),
+                    .bg(p.claude().mark),
             )
         })
         .when(reviews > 0, |d| {
@@ -446,7 +446,7 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
     use crate::glyphs::Icon;
     let p = palette(cx);
     let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
-    let right = matches!(active, "Gradle" | "Spring" | "Notifications");
+    let right = matches!(active, "Gradle" | "Spring" | "Notifications" | "Claude Changes");
     let mut row = div()
         .id(("tool-header", group.node().as_u64()))
         .debug_selector(|| "tool-header".into())

@@ -49,6 +49,7 @@ pub struct Tabs {
     pub gradle: PanelId,
     pub spring: PanelId,
     pub notifications: PanelId,
+    pub claude_changes: PanelId,
     pub run: PanelId,
     pub debug: PanelId,
     pub build: PanelId,
@@ -111,6 +112,8 @@ pub struct Workspace {
     pub remote_picker: Option<Entity<crate::remote::picker::FolderPicker>>,
     /// Claude Code's connection to this window, when the app runs one.
     pub claude: Option<crate::claude_ide::bridge::Bridge>,
+    /// The Claude Changes tool window, and the session's changes it shows.
+    pub claude_changes: Entity<crate::claude_ide::panel::ChangesPanel>,
     /// Every panel the window made, and where it goes when a layout does not place it.
     panels: Vec<(Arc<dyn BasePanelView>, DockPlacement)>,
     /// The project whose tabs show.
@@ -237,6 +240,7 @@ fn restore_layout(
 
 impl Workspace {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let cx_ws = cx.weak_entity();
         // Restored editor tabs start with the settings' defaults.
         let defaults = crate::editor::EditorDefaults::of(&model.read(cx).settings);
         cx.set_global(defaults);
@@ -282,6 +286,7 @@ impl Workspace {
         let debug_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Debug, window, cx));
         let build_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Build, window, cx));
         let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
+        let claude_changes = cx.new(|cx| crate::claude_ide::panel::ChangesPanel::new(cx_ws.clone(), cx));
         let processes_window = cx.new(|cx| crate::processes::window::ProcessesWindow::new(processes.clone(), cx));
         let spring_window = cx.new(|cx| crate::spring::window::SpringWindow::new(spring.clone(), window, cx));
         let mut tabs = Tabs {
@@ -293,6 +298,7 @@ impl Workspace {
             gradle: PanelId::from(gradle.entity_id()),
             spring: PanelId::from(spring_window.entity_id()),
             notifications: PanelId::from(notifications.entity_id()),
+            claude_changes: PanelId::from(claude_changes.entity_id()),
             run: PanelId::from(run_window.entity_id()),
             debug: PanelId::from(debug_window.entity_id()),
             build: PanelId::from(build_window.entity_id()),
@@ -313,6 +319,7 @@ impl Workspace {
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
         panels.push((panel_handle(spring_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
+        panels.push((panel_handle(claude_changes.clone()), DockPlacement::Right));
 
         let saved = model.read(cx).settings.dock.clone();
         let root = model.read(cx).project_root();
@@ -441,6 +448,7 @@ impl Workspace {
             connect_dialog: None,
             remote_picker: None,
             claude: None,
+            claude_changes,
             panels,
             shown: root.clone(),
             _save_layout: None,
@@ -744,6 +752,7 @@ impl Workspace {
                     this.dock.update(cx, |d, cx| d.remove_panel(e, window, cx));
                 }
                 EditorEvent::CaretMoved => this.save_layout_soon(cx),
+                EditorEvent::Claude(r) => crate::claude_ide::bridge::editor_request(this, editor, r, window, cx),
             }
         }));
     }
@@ -1546,6 +1555,7 @@ impl Render for Workspace {
                     .child(self.right_stripe(cx)),
             )
             .child(self.status.clone())
+            .child(self.claude_changes.read(cx).indicator.clone())
             .child(drop_hint)
             .children(self.settings_sheet.clone().map(|sheet| {
                 div()

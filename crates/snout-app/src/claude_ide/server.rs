@@ -165,6 +165,11 @@ impl Server {
         self.port
     }
 
+    /// The host the lock file is on.
+    pub fn host(&self) -> HostRef {
+        self.host.clone()
+    }
+
     pub fn token(&self) -> &str {
         &self.shared.token
     }

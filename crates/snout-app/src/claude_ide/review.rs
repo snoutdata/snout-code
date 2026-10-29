@@ -105,6 +105,12 @@ struct Seg {
 pub struct Frame {
     pub text: String,
     segs: Vec<Seg>,
+    /// Old text still waiting for its hunk's turn, in this frame's text.
+    pub waiting: Vec<Range<usize>>,
+    /// New text typed in so far, in this frame's text.
+    pub typed: Vec<Range<usize>>,
+    /// Where the typing is now, while a hunk is part way in.
+    pub typing: Option<usize>,
 }
 
 impl Frame {
@@ -150,29 +156,41 @@ impl Stream {
     pub fn frame(&self, original: &str, proposed: &str, typed: usize) -> Frame {
         let mut text = String::with_capacity(original.len().max(proposed.len()));
         let mut segs = Vec::new();
+        let (mut waiting, mut done, mut typing) = (Vec::new(), Vec::new(), None);
         let mut push = |text: &mut String, piece: &str, to: Range<usize>, exact: bool| {
             let start = text.len();
             text.push_str(piece);
             segs.push(Seg { at: start..text.len(), to, exact });
+            start..text.len()
         };
         let (mut old_at, mut new_at, mut spent) = (0, 0, 0);
         for (h, &cost) in self.hunks.iter().zip(&self.costs) {
             push(&mut text, &original[old_at..h.old.start], new_at..h.new.start, true);
             if typed >= spent + cost {
-                push(&mut text, &proposed[h.new.clone()], h.new.clone(), true);
+                done.push(push(&mut text, &proposed[h.new.clone()], h.new.clone(), true));
             } else if typed > spent {
                 let piece = &proposed[h.new.clone()];
                 let cut = piece.char_indices().nth(typed - spent).map_or(piece.len(), |(i, _)| i);
-                push(&mut text, &piece[..cut], h.new.start..h.new.start + cut, true);
+                let at = push(&mut text, &piece[..cut], h.new.start..h.new.start + cut, true);
+                typing = Some(at.end);
+                done.push(at);
+                // A line part way typed ends there, not on the line after it.
+                if !piece[..cut].ends_with('\n') && piece.ends_with('\n') {
+                    push(&mut text, "\n", h.new.start + cut..h.new.end, false);
+                }
             } else {
-                push(&mut text, &original[h.old.clone()], h.new.clone(), false);
+                let at = push(&mut text, &original[h.old.clone()], h.new.clone(), false);
+                if !at.is_empty() {
+                    waiting.push(at);
+                }
             }
             spent += cost;
             old_at = h.old.end;
             new_at = h.new.end;
         }
         push(&mut text, &original[old_at..], new_at..proposed.len(), true);
-        Frame { text, segs }
+        done.retain(|r| !r.is_empty());
+        Frame { text, segs, waiting, typed: done, typing }
     }
 }
 
@@ -241,10 +259,12 @@ mod tests {
         // The first done, the removal next.
         let after_first = "B1\nB2\n".chars().count();
         assert_eq!(s.frame(OLD, NEW, after_first + 1).text, "a\nB1\nB2\nc\ne\n");
-        let mut last = String::new();
+        let (mut last, mut was_typing) = (String::new(), false);
         for typed in 0..=s.total {
             let f = s.frame(OLD, NEW, typed);
-            assert_ne!(f.text, last, "every step shows something new");
+            // A line's own newline shows with its first character, so typing it changes nothing.
+            assert!(f.text != last || was_typing, "every step shows something new");
+            was_typing = f.typing.is_some();
             last = f.text;
         }
     }
@@ -262,6 +282,22 @@ mod tests {
         let now = f.text.replacen("B1", "Bx1", 1);
         assert_eq!(carry(&f, NEW, &now), NEW.replacen("B1", "Bx1", 1));
         assert_eq!(carry(&f, NEW, &f.text), NEW);
+    }
+
+    #[test]
+    fn a_frame_knows_what_waits_and_what_is_typed() {
+        let s = Stream::new(OLD, NEW);
+        let f = s.frame(OLD, NEW, 0);
+        let waiting: Vec<&str> = f.waiting.iter().map(|r| &f.text[r.clone()]).collect();
+        assert_eq!(waiting, ["b\n", "d\n"], "the old lines of the hunks that replace or remove");
+        assert!(f.typed.is_empty() && f.typing.is_none());
+        let f = s.frame(OLD, NEW, 3);
+        assert_eq!(f.typed.iter().map(|r| &f.text[r.clone()]).collect::<Vec<_>>(), ["B1\n"]);
+        assert_eq!(f.typing, Some(5));
+        assert_eq!(f.waiting.iter().map(|r| &f.text[r.clone()]).collect::<Vec<_>>(), ["d\n"]);
+        let f = s.frame(OLD, NEW, s.total);
+        assert!(f.waiting.is_empty() && f.typing.is_none());
+        assert_eq!(f.typed.iter().map(|r| &f.text[r.clone()]).collect::<Vec<_>>(), ["B1\nB2\n", "f\n"]);
     }
 
     #[test]

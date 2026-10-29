@@ -175,12 +175,53 @@ impl Palette {
         mix(self.accent, if self.dark { 0.22 } else { 0.12 }, self.panel)
     }
 
+    /// The colours of Claude Code's edits, by what they mark.
+    pub fn claude(&self) -> ClaudeColors {
+        let mark = if self.dark { hex(CLAUDE_DARK) } else { hex(CLAUDE_LIGHT) };
+        ClaudeColors {
+            mark,
+            mark_wash: self.wash(mark),
+            added: self.ok,
+            added_band: self.ok.opacity(if self.dark { 0.22 } else { 0.18 }),
+            removed: self.error,
+            removed_band: self.error.opacity(if self.dark { 0.20 } else { 0.14 }),
+            removed_text: mix(self.error, 0.85, self.fg),
+            caret: mark,
+            indicator: self.card,
+        }
+    }
+
     /// Lane colours of the commit graph: the drawings' tones, then two quiet extras.
     pub fn lanes(&self) -> [Hsla; 6] {
         let (blue, violet) = if self.dark { (hex(0x7fa6d8), hex(0xb79ad6)) } else { (hex(0x3f6fa8), hex(0x7a55a8)) };
         let strong = |c: Hsla| if self.dark { c } else { mix(c, 0.7, self.fg) };
         [strong(self.ill_accent), strong(self.ill_warm), blue, strong(self.ill_clay), violet, self.fg_dim]
     }
+}
+
+/// Claude Code's own hue, for what it changed: a warm clay that no Git state uses.
+const CLAUDE_DARK: u32 = 0xd97757;
+const CLAUDE_LIGHT: u32 = 0xc15f3c;
+
+/// The tokens of Claude Code's edits, as [`Palette::claude`] gives them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClaudeColors {
+    /// The gutter mark of a line Claude changed (until reviewed), the tab's dot, the
+    /// Claude Changes window's accents.
+    pub mark: Hsla,
+    /// A soft wash of `mark` for chips and the floating indicator's badge.
+    pub mark_wash: Hsla,
+    /// Lines added (counts, the fading band behind new text).
+    pub added: Hsla,
+    pub added_band: Hsla,
+    /// Lines removed (counts, struck text while it goes).
+    pub removed: Hsla,
+    pub removed_band: Hsla,
+    pub removed_text: Hsla,
+    /// The point where text is typing itself in.
+    pub caret: Hsla,
+    /// The floating indicator's ground.
+    pub indicator: Hsla,
 }
 
 /// The palette in use.
