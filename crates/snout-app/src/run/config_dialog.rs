@@ -245,6 +245,7 @@ impl ConfigDialog {
                 Button::new("config-profiles")
                     .debug_selector(|| "config-profiles".into())
                     .outline()
+                    .icon(crate::components::menu_icon(crate::components::IconName::Leaf))
                     .label("Profiles")
                     .dropdown_menu(move |mut menu, _, _| {
                         for (name, from) in &known {
@@ -287,6 +288,7 @@ impl ConfigDialog {
             Button::new("config-kind")
                 .debug_selector(|| "config-kind".into())
                 .outline()
+                .icon(crate::components::menu_icon(crate::components::IconName::Shapes))
                 .label(current.label())
                 .dropdown_menu(move |mut menu, _, _| {
                     for k in Kind::ALL {
@@ -308,6 +310,7 @@ impl ConfigDialog {
             Button::new("config-module")
                 .debug_selector(|| "config-module".into())
                 .outline()
+                .icon(crate::components::menu_icon(crate::components::IconName::Package))
                 .label(if current.is_empty() { "Choose a module".to_owned() } else { current.clone() })
                 .dropdown_menu(move |mut menu, _, _| {
                     for m in &modules {
@@ -407,10 +410,8 @@ impl Render for ConfigDialog {
                 .into_any_element(),
             );
         }
-        let button = |id: &'static str, text: &'static str, primary: bool| {
-            use crate::components::{Variant, button_base};
-            let variant = if primary { Variant::Primary } else { Variant::Secondary };
-            button_base(id, variant, false, false, false, false, &p).child(text)
+        let button = |id: &'static str, ico: crate::components::IconName, text: &'static str, primary: bool| {
+            crate::components::footer_button(id, ico, text, primary, true, &p)
         };
         let small = |id: &'static str, g: Icon, tip: &'static str| crate::tabs::tool_button(id, g, tip, &p);
         div()
@@ -502,17 +503,21 @@ impl Render for ConfigDialog {
                     .border_color(p.border)
                     .bg(p.dialog_footer())
                     .child(
-                        button("config-cancel", "Cancel", false)
+                        button("config-cancel", crate::components::CANCEL_ICON, "Cancel", false)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ConfigEvent::Close))),
                     )
-                    .child(button("config-apply", "Apply", false).on_click(cx.listener(|this, _, _, cx| {
-                        this.apply(cx);
-                        cx.notify();
-                    })))
-                    .child(button("config-ok", "OK", true).on_click(cx.listener(|this, _, _, cx| {
-                        this.apply(cx);
-                        cx.emit(ConfigEvent::Close);
-                    }))),
+                    .child(button("config-apply", crate::components::APPLY_ICON, "Apply", false).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.apply(cx);
+                            cx.notify();
+                        },
+                    )))
+                    .child(button("config-ok", crate::components::OK_ICON, "OK", true).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.apply(cx);
+                            cx.emit(ConfigEvent::Close);
+                        },
+                    ))),
             )
     }
 }

@@ -419,10 +419,15 @@ impl NewProjectView {
                     .gap(px(6.))
                     .child(div().w(px(360.)).child(look::field(&self.location, false, None, &p)))
                     .child(
-                        look::small_button("new-project-browse", "Choose…", &p)
-                            .px(px(8.))
-                            .h(px(24.))
-                            .on_click(cx.listener(|this, _, w, cx| this.pick_location(w, cx))),
+                        look::small_button(
+                            "new-project-browse",
+                            crate::components::IconName::FolderOpen,
+                            "Choose…",
+                            &p,
+                        )
+                        .px(px(8.))
+                        .h(px(24.))
+                        .on_click(cx.listener(|this, _, w, cx| this.pick_location(w, cx))),
                     ),
                 &p,
             ))
@@ -440,12 +445,12 @@ impl NewProjectView {
         }
         // The build script's language.
         let dsl = |d: Dsl, label: &'static str, id: &'static str, cx: &mut Context<Self>| {
-            look::toggle(id, label, self.dsl == d, &p).debug_selector(move || id.to_owned()).on_click(cx.listener(
-                move |this, _, _, cx| {
+            look::toggle(id, crate::components::IconName::FileCode, label, self.dsl == d, &p)
+                .debug_selector(move || id.to_owned())
+                .on_click(cx.listener(move |this, _, _, cx| {
                     this.dsl = d;
                     cx.notify();
-                },
-            ))
+                }))
         };
         body = body.child(section("Build", &p)).child(row(
             "Build script",
@@ -649,8 +654,13 @@ impl NewProjectView {
                          downloads Spring Boot once there is a network."
                     ))
                     .child(
-                        look::small_button("new-project-retry", "Try Again", &p)
-                            .on_click(cx.listener(|this, _, _, cx| this.load_catalog(cx))),
+                        look::small_button(
+                            "new-project-retry",
+                            crate::components::IconName::RotateCcw,
+                            "Try Again",
+                            &p,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.load_catalog(cx))),
                     ),
             );
         }
@@ -711,19 +721,15 @@ impl Render for NewProjectView {
             })
             .collect();
         let button = |id: &'static str, text: &'static str, primary: bool, enabled: bool| {
-            use crate::components::{IconName, Variant, button_base, button_ink, icon as ico};
-            let variant = if primary { Variant::Primary } else { Variant::Secondary };
-            let ink = button_ink(variant, !enabled, &p);
-            let lead = match id {
-                "new-project-create" => Some(IconName::FolderPlus),
-                "new-project-next" => Some(IconName::ArrowRight),
-                "new-project-back" => Some(IconName::ArrowLeft),
-                "new-project-offline" => Some(IconName::WifiOff),
-                _ => None,
+            use crate::components::{CANCEL_ICON, IconName, footer_button};
+            let ico = match id {
+                "new-project-create" => IconName::FolderPlus,
+                "new-project-next" => IconName::ArrowRight,
+                "new-project-back" => IconName::ArrowLeft,
+                "new-project-offline" => IconName::WifiOff,
+                _ => CANCEL_ICON,
             };
-            button_base(id, variant, !enabled, false, false, false, &p)
-                .when_some(lead, |d, i| d.child(ico(i, 14., ink)))
-                .child(text)
+            footer_button(id, ico, text, primary, enabled, &p)
                 .when(id == "new-project-cancel", |d| d.child(crate::components::kbd("Esc", p.fg_dim)))
         };
         let status: Option<(String, gpui::Hsla)> = if self.creating {

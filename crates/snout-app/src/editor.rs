@@ -1144,11 +1144,11 @@ impl EditorPanel {
             .child(crate::art::glyph(snout_core::art::Glyph::Alert, 14., p.warn))
             .child(div().flex_1().child("This file changed on disk, and this tab has unsaved changes."))
             .child(
-                look::small_button("conflict-reload", "Reload from disk", &p)
+                look::small_button("conflict-reload", crate::components::IconName::RefreshCw, "Reload from disk", &p)
                     .on_click(cx.listener(|this, _, w, cx| this.reload(w, cx))),
             )
             .child(
-                look::small_button("conflict-keep", "Keep my changes", &p)
+                look::small_button("conflict-keep", crate::components::IconName::Save, "Keep my changes", &p)
                     .on_click(cx.listener(|this, _, _, cx| this.keep_mine(cx))),
             )
     }

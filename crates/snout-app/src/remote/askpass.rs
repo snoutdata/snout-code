@@ -101,21 +101,36 @@ impl Render for Askpass {
                     .flex()
                     .justify_end()
                     .gap(px(8.))
-                    .child(button("askpass-cancel", if confirm { "No" } else { "Cancel" }, false, true, cx).on_click(
-                        |_, _, _| {
+                    .child(
+                        button(
+                            "askpass-cancel",
+                            crate::components::CANCEL_ICON,
+                            if confirm { "No" } else { "Cancel" },
+                            false,
+                            true,
+                            cx,
+                        )
+                        .on_click(|_, _, _| {
                             if is_confirmation_reply() {
                                 answer("no")
                             }
                             cancel()
-                        },
-                    ))
+                        }),
+                    )
                     .child(
-                        button("askpass-ok", if confirm { "Yes" } else { "OK" }, true, true, cx)
-                            .when(!confirm, |d| d.child(kbd("⏎", p.primary().ink.opacity(0.85))))
-                            .on_click(move |_, _, cx| match &input {
-                                Some(i) => answer(&i.read(cx).value()),
-                                None => answer("yes"),
-                            }),
+                        button(
+                            "askpass-ok",
+                            if confirm { crate::components::APPLY_ICON } else { crate::components::OK_ICON },
+                            if confirm { "Yes" } else { "OK" },
+                            true,
+                            true,
+                            cx,
+                        )
+                        .when(!confirm, |d| d.child(kbd("⏎", p.primary().ink.opacity(0.85))))
+                        .on_click(move |_, _, cx| match &input {
+                            Some(i) => answer(&i.read(cx).value()),
+                            None => answer("yes"),
+                        }),
                     ),
             )
     }

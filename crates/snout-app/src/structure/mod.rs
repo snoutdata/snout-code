@@ -58,6 +58,18 @@ pub enum Page {
 impl Page {
     pub const ALL: [Page; 5] = [Page::Project, Page::Modules, Page::Dependencies, Page::Facets, Page::Sdks];
 
+    /// The page's spot drawing, at its head.
+    pub fn art(self) -> &'static snout_core::art::Drawing {
+        use snout_core::art::spots;
+        match self {
+            Page::Project => spots::no_project(),
+            Page::Modules => spots::modules(),
+            Page::Dependencies => spots::dependencies(),
+            Page::Facets => spots::facets(),
+            Page::Sdks => spots::jdk(),
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Page::Project => "Project",

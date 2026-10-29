@@ -416,22 +416,34 @@ impl EditorPanel {
                         div()
                             .flex()
                             .gap(px(4.))
-                            .child(crate::look::small_button("gutter-condition-done", "Done", &p).on_click(
-                                cx.listener(move |this, _, w, cx| {
+                            .child(
+                                crate::look::small_button(
+                                    "gutter-condition-done",
+                                    crate::components::APPLY_ICON,
+                                    "Done",
+                                    &p,
+                                )
+                                .on_click(cx.listener(move |this, _, w, cx| {
                                     let text = input2.read(cx).value().to_string();
                                     this.apply_condition(text, w, cx);
-                                }),
-                            ))
-                            .child(crate::look::small_button("gutter-condition-remove", "Remove", &p).on_click(
-                                cx.listener(move |this, _, _, cx| {
+                                })),
+                            )
+                            .child(
+                                crate::look::small_button(
+                                    "gutter-condition-remove",
+                                    crate::components::IconName::Trash,
+                                    "Remove",
+                                    &p,
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
                                     this.gutter_menu = None;
                                     if let Some(runs) = crate::run::runs(cx) {
                                         let path = this.path.clone();
                                         runs.update(cx, |r, cx| r.remove_breakpoint(&path, line, cx));
                                     }
                                     cx.notify();
-                                }),
-                            )),
+                                })),
+                            ),
                     )
                     .into_any_element();
                 (*at, body)

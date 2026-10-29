@@ -82,6 +82,35 @@ impl Page {
         }
     }
 
+    /// The page's spot drawing, at its head.
+    pub fn art(self) -> &'static snout_core::art::Drawing {
+        use snout_core::art::spots;
+        match self {
+            Page::Appearance => spots::appearance(),
+            Page::Keymap => spots::keymap(),
+            Page::Editor => spots::editor(),
+            Page::VersionControl => spots::version_control(),
+            Page::Gradle => spots::gradle(),
+            Page::Spring => spots::spring(),
+            Page::Terminal => spots::terminal(),
+            Page::ClaudeCode => spots::claude_review(),
+        }
+    }
+
+    /// What the page is for, under its title.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Page::Appearance => "Colours, light or dark, and the typefaces of the window and the editor.",
+            Page::Keymap => "The keys of every command. Add keys, take them away, or go back to the defaults.",
+            Page::Editor => "How files indent, wrap and show as you type.",
+            Page::VersionControl => "How SnoutCode keeps your projects' Git up to date.",
+            Page::Gradle => "The JDK each build runs on, and how long SnoutCode's Gradle daemons stay.",
+            Page::Spring => "The profiles the Spring window evaluates the beans under.",
+            Page::Terminal => "The engine behind the Terminal tab and the Claude Code console.",
+            Page::ClaudeCode => "The claude program SnoutCode starts in its console.",
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Page::Appearance => "Appearance",
@@ -572,7 +601,8 @@ fn stepper(
 ) -> AnyElement {
     let on_step = std::rc::Rc::new(on_step);
     let hover = p.button_hover;
-    let button = |suffix: &'static str, sign: i32, text: &'static str| {
+    let ink = p.fg;
+    let button = |suffix: &'static str, sign: i32, ico: IconName| {
         let on_step = on_step.clone();
         div()
             .id(SharedString::from(format!("{id}-{suffix}")))
@@ -584,7 +614,7 @@ fn stepper(
             .rounded(px(4.))
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
-            .child(text)
+            .child(crate::components::icon(ico, 13., ink))
             .on_click(move |_, w, cx| on_step(sign, w, cx))
     };
     div()
@@ -596,9 +626,9 @@ fn stepper(
         .border_1()
         .border_color(p.border)
         .bg(p.input)
-        .child(button("down", -1, "−"))
+        .child(button("down", -1, IconName::Minus))
         .child(div().min_w(px(44.)).text_center().child(value))
-        .child(button("up", 1, "+"))
+        .child(button("up", 1, IconName::Plus))
         .into_any_element()
 }
 
@@ -731,6 +761,114 @@ fn engine_card(engine: EngineKind, on: bool, p: &Palette) -> gpui::Stateful<gpui
         .child(div().text_size(px(11.)).text_color(p.fg_dim).child(if available { blurb } else { "Unavailable" }))
 }
 
+/// A terminal as the chosen engine draws it, in the theme's colours: its title bar with the
+/// engine's name, then a short session.
+fn terminal_preview(engine: EngineKind, p: &Palette) -> gpui::Div {
+    let shown = engine.or_available();
+    let ico = if shown == EngineKind::Ghostty { IconName::Ghost } else { IconName::SquareTerminal };
+    let hues = p.hues;
+    div()
+        .flex()
+        .flex_col()
+        .rounded(px(8.))
+        .overflow_hidden()
+        .border_1()
+        .border_color(p.border)
+        .bg(p.panel)
+        .child(
+            div()
+                .h(px(26.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .bg(p.ground)
+                .border_b_1()
+                .border_color(p.border)
+                .children([hues[3], hues[6], hues[1]].map(|c| div().size(px(8.)).rounded_full().bg(c)))
+                .child(div().ml(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child("zsh in shop"))
+                .child(div().flex_1())
+                .child(crate::components::badge_with_icon(
+                    format!("{} engine", shown.label()),
+                    ico,
+                    crate::components::Tone::Accent,
+                    p,
+                )),
+        )
+        .child(div().px(px(10.)).py(px(8.)).child(crate::console::preview(shown)))
+}
+
+/// Java code as the editor shows it with these settings: its indentation at the tab size,
+/// whitespace when shown, a parameter name hint, and a long line wrapped or cut.
+fn editor_preview(d: &Settings, p: &Palette) -> gpui::Div {
+    use crate::theme::syntax_colors;
+    let syn = syntax_colors(p);
+    let mono: SharedString = d.editor_font.clone().into();
+    let indent = |level: usize| -> AnyElement {
+        let n = level * d.tab_size;
+        let text = if d.show_whitespace { "\u{b7}".repeat(n) } else { " ".repeat(n) };
+        div().flex_none().text_color(p.fg_dim.opacity(0.6)).child(text).into_any_element()
+    };
+    let t = |text: &'static str, c: gpui::Hsla| div().flex_none().text_color(c).child(text).into_any_element();
+    let hint = |name: &'static str| {
+        div()
+            .flex_none()
+            .mx(px(2.))
+            .px(px(4.))
+            .rounded(px(3.))
+            .bg(p.wash(p.fg_dim))
+            .text_size(px(11.))
+            .text_color(p.fg_dim)
+            .child(name)
+            .into_any_element()
+    };
+    let line = |n: usize, parts: Vec<AnyElement>| {
+        div()
+            .flex()
+            .child(div().w(px(26.)).flex_none().text_color(syn.gutter).child(n.to_string()))
+            .child(div().flex_1().min_w_0().flex().when(d.soft_wrap, |d| d.flex_wrap()).children(parts))
+    };
+    let mut retry = vec![indent(2), t("return ", syn.keyword), t("retry", syn.function), t("(", syn.punctuation)];
+    if d.param_hints {
+        retry.push(hint("times:"));
+    }
+    retry.extend([t("3", syn.number), t(", ", syn.punctuation)]);
+    if d.param_hints {
+        retry.push(hint("reason:"));
+    }
+    retry.extend([t("\"the payment service did not answer in time\"", syn.string), t(");", syn.punctuation)]);
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(2.))
+        .p(px(10.))
+        .rounded(px(8.))
+        .overflow_hidden()
+        .border_1()
+        .border_color(p.border)
+        .bg(p.panel)
+        .font_family(mono)
+        .text_size(px(12.5))
+        .line_height(px(19.))
+        .whitespace_nowrap()
+        .child(line(1, vec![t("class ", syn.keyword), t("OrderService", syn.ty), t(" {", syn.punctuation)]))
+        .child(line(
+            2,
+            vec![
+                indent(1),
+                t("Result ", syn.ty),
+                t("place", syn.function),
+                t("(", syn.punctuation),
+                t("Order ", syn.ty),
+                t("order", p.fg),
+                t(") {", syn.punctuation),
+            ],
+        ))
+        .child(line(3, retry))
+        .child(line(4, vec![indent(1), t("}", syn.punctuation)]))
+        .child(line(5, vec![t("}", syn.punctuation)]))
+}
+
 /// A colour theme to pick: a small window drawn in its colours (in the light or dark showing
 /// now), its name beneath, outlined in the accent when it is the one chosen.
 fn swatch(t: ColorTheme, dark: bool, on: bool, p: &Palette) -> gpui::Stateful<gpui::Div> {
@@ -802,9 +940,8 @@ impl SettingsView {
             )
             .hint(format!("{title} settings are yours: a project cannot set them for itself."))
             .action(
-                crate::components::Button::new("settings-show-user")
+                crate::components::Button::new("settings-show-user", IconName::User)
                     .debug_selector("settings-show-user")
-                    .icon(IconName::User)
                     .label("Show Your Settings")
                     .on_click(cx.listener(|this, _, w, cx| this.set_scope(Scope::User, w, cx))),
             )
@@ -821,7 +958,12 @@ impl SettingsView {
         match self.page {
             Page::Appearance => {
                 let theme = |t: ThemeChoice, label: &'static str, id: &'static str, cx: &mut Context<Self>| {
-                    look::toggle(id, label, d.theme == t, &p)
+                    let ico = match t {
+                        ThemeChoice::System => IconName::SunMoon,
+                        ThemeChoice::Light => IconName::Sun,
+                        ThemeChoice::Dark => IconName::Moon,
+                    };
+                    look::toggle(id, ico, label, d.theme == t, &p)
                         .debug_selector(move || id.to_owned())
                         .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.theme = t)))
                 };
@@ -980,6 +1122,8 @@ impl SettingsView {
                         .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.param_hints = !s.param_hints))),
                         hints_mark,
                     ))
+                    .child(section("Preview", &p))
+                    .child(editor_preview(&d, &p))
                     .into_any_element()
             }
             Page::VersionControl => {
@@ -1018,6 +1162,21 @@ impl SettingsView {
                             .text_color(p.fg_dim)
                             .child("The projects are fetched in the background, to count what there is to pull."),
                     )
+                    .child(crate::components::tips(
+                        "Good to know",
+                        &[
+                            (
+                                IconName::CloudDownload,
+                                "A background fetch leaves your branches as they are: it only counts the commits there are to pull.",
+                            ),
+                            (
+                                IconName::GitBranch,
+                                "Click the branch in the title bar for New Branch, Fetch, Pull and Push, and every branch to check out.",
+                            ),
+                            (IconName::Keyboard, "\u{2318}2 shows the Git view. In the message field, \u{2318}\u{21a9} commits."),
+                        ],
+                        &p,
+                    ))
                     .into_any_element()
             }
             Page::Gradle => {
@@ -1142,13 +1301,41 @@ impl SettingsView {
                     "SnoutCode's own Gradle daemons stop after this long without a build. A new value \
                              holds for the daemons started after the Java engine starts again.",
                 ))
+                .child(crate::components::tips(
+                    "Good to know",
+                    &[
+                        (IconName::Hammer, "Double click a task in the Gradle tool window to run it. Its output shows in the Build window."),
+                        (IconName::Activity, "The Processes window lists the Gradle daemons running, and stops the idle ones on request."),
+                        (IconName::LayoutGrid, "Project Structure (\u{2318};) downloads JDKs and sets the project's own."),
+                    ],
+                    &p,
+                ))
                 .into_any_element()
             }
             Page::Spring => {
+                let tips = crate::components::tips(
+                    "Good to know",
+                    &[
+                        (
+                            IconName::Leaf,
+                            "The leaf on the right stripe opens the Spring window: the beans and the endpoints SnoutCode found.",
+                        ),
+                        (
+                            IconName::Keyboard,
+                            "Spring Active Profiles (\u{2303}\u{2325}P) changes the profiles from anywhere.",
+                        ),
+                        (
+                            IconName::EyeOff,
+                            "A bean the active profiles leave out is dimmed, and no injection takes it.",
+                        ),
+                    ],
+                    &p,
+                );
                 if self.root.is_none() {
                     return body
                         .child(section("Active profiles", &p))
                         .child(div().text_color(p.fg_dim).child("Open a project to choose its profiles."))
+                        .child(tips)
                         .into_any_element();
                 }
                 let mode = self.spring_mode();
@@ -1198,6 +1385,7 @@ impl SettingsView {
                         "The Spring window evaluates the beans under these profiles and dims those they leave out. \
                          Its profile menu changes the same setting.",
                     ))
+                    .child(tips)
                     .into_any_element()
             }
             Page::Terminal => self.terminal_page(&d, cx),
@@ -1211,6 +1399,22 @@ impl SettingsView {
                         .text_color(p.fg_dim)
                         .child("Leave empty to find claude on PATH, in ~/.local/bin and the usual places."),
                 )
+                .child(crate::components::tips(
+                    "Good to know",
+                    &[
+                        (
+                            IconName::SquareTerminal,
+                            "\u{2318}J shows or hides the Claude Code console. The session keeps running while it is hidden.",
+                        ),
+                        (IconName::TextCursorInput, "\u{2325}\u{2318}K sends the selection, or the whole file, to Claude."),
+                        (IconName::Check, "In a proposed change's tab, \u{2318}\u{21a9} accepts it and Esc rejects it."),
+                        (
+                            IconName::ListChecks,
+                            "The Claude Changes window keeps every edit Claude made, to accept or revert.",
+                        ),
+                    ],
+                    &p,
+                ))
                 .into_any_element(),
         }
     }
@@ -1233,20 +1437,33 @@ impl SettingsView {
             .map(|o| o.0.iter().map(|((kind, root), e)| (format!("{kind} in {}", Model::dir_name(root)), *e)).collect())
             .unwrap_or_default();
         let others = open.iter().filter(|(_, e)| *e != chosen).count();
-        let mut body =
-            div().flex().flex_col().child(section("Engine", &p)).child(row("Terminal engine", cards, &p)).child(
-                div().pl(px(162.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                    "The engine reads what runs in the terminals and the Claude Code console. A change applies \
-                 to the terminals you start after it; open terminals keep the engine they started with.",
-                ),
-            );
-        if let Some(why) = EngineKind::Ghostty.unavailable() {
-            body = body.child(
-                div().pl(px(162.)).pt(px(10.)).child(
+        // The cards, and beside them what the engine is and why Ghostty may be missing.
+        let about = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .child(div().text_size(px(12.)).line_height(px(17.)).text_color(p.fg_dim).child(
+                "The engine reads what runs in the terminals and the Claude Code console. A change applies to \
+                 the terminals you start after it; open terminals keep the engine they started with.",
+            ))
+            .when_some(EngineKind::Ghostty.unavailable(), |d, why| {
+                d.child(
                     callout_with(Tone::Info, Some("Ghostty is unavailable".into()), why, &p)
                         .debug_selector(|| "settings-ghostty-unavailable".into()),
-                ),
-            );
+                )
+            });
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .child(section("Terminal engine", &p))
+            .child(div().flex().items_start().gap(px(16.)).child(cards).child(about));
+        body = body.child(section("Preview", &p)).child(terminal_preview(chosen, &p));
+        if chosen.or_available() == EngineKind::Builtin {
+            body = body.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                "Ghostty also draws the strikethrough, the curly underline and the link of the last line but one.",
+            ));
         }
         if !open.is_empty() {
             body = body.child(section("Running now", &p)).children(open.into_iter().map(|(what, e)| {
@@ -1466,7 +1683,7 @@ impl SettingsView {
                             names.join(", ")
                         ))
                         .child(
-                            look::small_button("keymap-take", "Remove It There", &p)
+                            look::small_button("keymap-take", IconName::Unlink, "Remove It There", &p)
                                 .on_click(cx.listener(|this, _, _, cx| this.take_from_others(cx))),
                         ),
                 );
@@ -1489,13 +1706,13 @@ impl SettingsView {
                     .gap(px(8.))
                     .child(div().flex_1().child(look::field(&self.key_search, true, None, &p)))
                     .when(any_changed, |d| {
-                        d.child(look::small_button("keymap-reset-all", "Reset All", &p).on_click(cx.listener(
-                            |this, _, _, cx| {
+                        d.child(look::small_button("keymap-reset-all", IconName::RotateCcw, "Reset All", &p).on_click(
+                            cx.listener(|this, _, _, cx| {
                                 this.draft.keymap.clear();
                                 this.taken = None;
                                 cx.notify();
-                            },
-                        )))
+                            }),
+                        ))
                     }),
             )
             .child(
@@ -1586,10 +1803,8 @@ impl Render for SettingsView {
         let tree = self.tree(cx);
         let scope_switch = self.scope_switch(cx);
         let scope_line = self.scope_line(cx);
-        let button = |id: &'static str, text: &'static str, primary: bool, enabled: bool| {
-            use crate::components::{Variant, button_base};
-            let variant = if primary { Variant::Primary } else { Variant::Secondary };
-            button_base(id, variant, !enabled, false, false, false, &p).child(text)
+        let button = |id: &'static str, ico: IconName, text: &'static str, primary: bool, enabled: bool| {
+            crate::components::footer_button(id, ico, text, primary, enabled, &p)
         };
         div()
             .id("settings")
@@ -1599,7 +1814,7 @@ impl Render for SettingsView {
             .on_action(cx.listener(|_, _: &crate::search::SearchClose, _, cx| cx.emit(SettingsEvent::Cancel)))
             .occlude()
             .w(px(860.))
-            .h(px(580.))
+            .h(px(660.))
             .flex()
             .flex_col()
             .bg(p.card)
@@ -1630,40 +1845,21 @@ impl Render for SettingsView {
                         .min_w_0()
                         .flex()
                         .flex_col()
-                        .child(
-                            div()
-                                .px(px(20.))
-                                .pt(px(14.))
-                                .pb(px(4.))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.))
-                                .child(
-                                    div()
-                                        .size(px(28.))
-                                        .rounded(px(8.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .bg(p.wash(p.accent))
-                                        .child(crate::components::icon(self.page.icon(), 15., p.accent)),
-                                )
-                                .child(
-                                    div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(self.page.title()),
-                                )
-                                .child(div().flex_1())
-                                .child(
-                                    crate::components::Button::new("settings-edit-json")
-                                        .debug_selector("settings-edit-json")
-                                        .compact()
-                                        .ghost()
-                                        .icon(IconName::Braces)
-                                        .label("Edit as JSON")
-                                        .tooltip("Open these settings' file in a tab, with completion and checks")
-                                        .on_click(cx.listener(|this, _, _, cx| this.edit_as_json(cx))),
-                                )
-                                .child(scope_switch),
-                        )
+                        .child(crate::components::page_header(
+                            self.page.art(),
+                            self.page.title(),
+                            self.page.blurb(),
+                            div().flex().flex_col().items_end().gap(px(6.)).child(scope_switch).child(
+                                crate::components::Button::new("settings-edit-json", IconName::FileBraces)
+                                    .debug_selector("settings-edit-json")
+                                    .compact()
+                                    .ghost()
+                                    .label("Edit as JSON")
+                                    .tooltip("Open these settings' file in a tab, with completion and checks")
+                                    .on_click(cx.listener(|this, _, _, cx| this.edit_as_json(cx))),
+                            ),
+                            &p,
+                        ))
                         .child(scope_line)
                         .child(
                             div()
@@ -1691,15 +1887,15 @@ impl Render for SettingsView {
                     .border_color(p.border)
                     .bg(p.dialog_footer())
                     .child(
-                        button("settings-cancel", "Cancel", false, true)
+                        button("settings-cancel", crate::components::CANCEL_ICON, "Cancel", false, true)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Cancel))),
                     )
                     .child(
-                        button("settings-apply", "Apply", false, changed)
+                        button("settings-apply", crate::components::APPLY_ICON, "Apply", false, changed)
                             .when(changed, |d| d.on_click(cx.listener(|this, _, _, cx| this.apply(false, cx)))),
                     )
                     .child(
-                        button("settings-ok", "OK", true, true)
+                        button("settings-ok", crate::components::OK_ICON, "OK", true, true)
                             .on_click(cx.listener(|this, _, _, cx| this.apply(true, cx))),
                     ),
             )

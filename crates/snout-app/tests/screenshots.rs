@@ -2508,6 +2508,13 @@ sleep 30
         shot("processes-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Processes));
         shot("processes-light", ThemeChoice::Light, Activity::Project, Some(Select::Processes));
         shot("settings-gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Gradle)));
+        // Every Settings page, light and dark (`SNOUT_SHOT_ONLY=settings-page-` takes these alone).
+        for page in Page::ALL {
+            let slug = page.title().to_lowercase().replace(' ', "-");
+            for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
+                shot(&format!("settings-page-{slug}-{mode}"), theme, Activity::Project, Some(Select::Settings(page)));
+            }
+        }
         real_spring_shot(ThemeChoice::Dark);
         shot("spring-gutter-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));
         shot("spring-gutter-light", ThemeChoice::Light, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));

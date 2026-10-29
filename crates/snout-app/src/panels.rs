@@ -124,6 +124,7 @@ impl Render for SidePanel {
             .debug_selector(|| "side-view".into())
             .ghost()
             .small()
+            .icon(crate::components::menu_icon(crate::components::IconName::FolderTree))
             .label(view_name)
             .dropdown_menu(move |menu, _, _| {
                 let pick = |plain: bool| {

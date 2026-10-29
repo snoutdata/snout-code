@@ -498,12 +498,12 @@ impl Workspace {
                 .when(!busy, |d| {
                     let label = if prompt.error.is_some() { "Try again" } else { "Download" };
                     d.child(
-                        look::small_button("jdk-download", label, &p)
+                        look::small_button("jdk-download", crate::components::IconName::Download, label, &p)
                             .debug_selector(|| "jdk-download".into())
                             .on_click(move |_, _, cx| hub.update(cx, |h, cx| h.download_jdk(cx))),
                     )
                     .child(
-                        look::small_button("jdk-dismiss", "Not now", &p)
+                        look::small_button("jdk-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
                             .debug_selector(|| "jdk-dismiss".into())
                             .on_click(move |_, _, cx| hub2.update(cx, |h, cx| h.dismiss_jdk(cx))),
                     )
@@ -553,12 +553,17 @@ impl Workspace {
                 ))
                 .child(div().flex_1().min_w_0().child(text))
                 .child(
-                    look::small_button("gradle-sync", if changed { "Sync" } else { "Try again" }, &p)
-                        .debug_selector(|| "gradle-sync".into())
-                        .on_click(move |_, _, cx| sync.update(cx, |s, cx| s.sync(cx))),
+                    look::small_button(
+                        "gradle-sync",
+                        crate::components::IconName::RefreshCw,
+                        if changed { "Sync" } else { "Try again" },
+                        &p,
+                    )
+                    .debug_selector(|| "gradle-sync".into())
+                    .on_click(move |_, _, cx| sync.update(cx, |s, cx| s.sync(cx))),
                 )
                 .child(
-                    look::small_button("gradle-dismiss", "Not now", &p)
+                    look::small_button("gradle-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
                         .debug_selector(|| "gradle-dismiss".into())
                         .on_click(move |_, _, cx| {
                             dismiss.update(cx, |s, cx| {

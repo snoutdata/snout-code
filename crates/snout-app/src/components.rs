@@ -145,6 +145,13 @@ pub fn kbd(keys: impl Into<SharedString>, ink: Hsla) -> Div {
 
 // ----- Buttons ----------------------------------------------------------------------------
 
+/// The icons of the buttons every dialog and sheet has, the same everywhere: Cancel and
+/// Close dismiss, Apply keeps the sheet open, OK applies and closes.
+pub const CANCEL_ICON: IconName = IconName::X;
+pub const CLOSE_ICON: IconName = IconName::X;
+pub const APPLY_ICON: IconName = IconName::Check;
+pub const OK_ICON: IconName = IconName::CheckCheck;
+
 /// How a [`Button`] stands out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Variant {
@@ -161,14 +168,15 @@ pub enum Variant {
 
 type Handler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// A button: an optional leading icon, its label and a key hint, in one of four
-/// [`Variant`]s, with hover, pressed, keyboard focus (when [`Button::focusable`]) and
-/// disabled states. Its id is also its debug selector.
+/// A button: its leading icon, its label and a key hint, in one of four [`Variant`]s, with
+/// hover, pressed, keyboard focus (when [`Button::focusable`]) and disabled states. Its id
+/// is also its debug selector. Every button has an icon: [`Button::new`] takes it, so a
+/// button without one does not build.
 #[derive(IntoElement)]
 pub struct Button {
     id: SharedString,
     label: Option<SharedString>,
-    icon: Option<Ico>,
+    icon: Ico,
     kbd: Option<SharedString>,
     variant: Variant,
     disabled: bool,
@@ -181,11 +189,11 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn new(id: impl Into<SharedString>) -> Self {
+    pub fn new(id: impl Into<SharedString>, icon: impl Into<Ico>) -> Self {
         Self {
             id: id.into(),
             label: None,
-            icon: None,
+            icon: icon.into(),
             kbd: None,
             variant: Variant::Secondary,
             disabled: false,
@@ -209,8 +217,9 @@ impl Button {
         self
     }
 
+    /// Another icon than the one it was made with.
     pub fn icon(mut self, icon: impl Into<Ico>) -> Self {
-        self.icon = Some(icon.into());
+        self.icon = icon.into();
         self
     }
 
@@ -294,11 +303,14 @@ fn button_colors(variant: Variant, disabled: bool, p: &Palette) -> (Hsla, Hsla, 
     }
 }
 
-/// A button's frame in `variant`, as a `Div` to add children and handlers to: what
-/// [`Button`] draws, for code that wants the element itself. `icon_only` makes it square.
+/// A button in `variant` with its icon, as a `Div` to add the label, a key hint and
+/// handlers to: what [`Button`] draws, for code that wants the element itself. `icon_only`
+/// makes it square.
+#[allow(clippy::too_many_arguments)]
 pub fn button_base(
     id: impl Into<SharedString>,
     variant: Variant,
+    ico: impl Into<Ico>,
     disabled: bool,
     compact: bool,
     focusable: bool,
@@ -314,6 +326,7 @@ pub fn button_base(
     let (h, pad) = if compact { (24., 8.) } else { (30., 12.) };
     let dark = p.dark;
     let glow = p.glow_of(p.accent);
+    let ico = ico.into();
     div()
         .id(ElementId::Name(id))
         .debug_selector(move || selector.to_string())
@@ -355,6 +368,21 @@ pub fn button_base(
                 }])
             })
         })
+        .child(icon(ico, if compact { 13. } else { 14. }, ink))
+}
+
+/// A dialog's or a sheet's button with its icon and label, as an element to add a handler
+/// to: what [`Button`] draws.
+pub fn footer_button(
+    id: impl Into<SharedString>,
+    ico: impl Into<Ico>,
+    label: impl Into<SharedString>,
+    primary: bool,
+    enabled: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let variant = if primary { Variant::Primary } else { Variant::Secondary };
+    button_base(id, variant, ico, !enabled, false, false, false, p).child(label.into())
 }
 
 /// The label colour of a button in `variant`, for its icon.
@@ -367,12 +395,11 @@ impl RenderOnce for Button {
         let p = palette(cx);
         let ink = button_ink(self.variant, self.disabled, &p);
         let solid = matches!(self.variant, Variant::Primary | Variant::Danger) && !self.disabled;
-        let icon_size = if self.compact { 13. } else { 14. };
-        button_base(self.id, self.variant, self.disabled, self.compact, self.focusable, self.label.is_none(), &p)
+        let icon_only = self.label.is_none();
+        button_base(self.id, self.variant, self.icon, self.disabled, self.compact, self.focusable, icon_only, &p)
             .when(self.wide, |d| d.w_full())
             .when_some(self.selector, |d, s| d.debug_selector(move || s.to_owned()))
             .when_some(self.tooltip, |d, t| d.tooltip(tip(t)))
-            .when_some(self.icon, |d, i| d.child(icon(i, icon_size, ink)))
             .when_some(self.label, |d, l| d.child(l))
             .when_some(self.kbd, |d, k| {
                 let key_ink = if solid { ink.opacity(0.85) } else { p.fg_dim };
@@ -762,6 +789,88 @@ impl RenderOnce for EmptyState {
     }
 }
 
+// ----- Pages ------------------------------------------------------------------------------
+
+/// The head of a page of a sheet (Settings, Project Structure): its spot drawing, its title
+/// and what the page is for, and the page's own controls on the right.
+pub fn page_header(
+    art: &'static Drawing,
+    title: impl Into<SharedString>,
+    blurb: impl Into<SharedString>,
+    controls: impl IntoElement,
+    p: &Palette,
+) -> Div {
+    div()
+        .flex_none()
+        .px(px(20.))
+        .pt(px(12.))
+        .pb(px(6.))
+        .flex()
+        .items_center()
+        .gap(px(14.))
+        .child(crate::art::drawing_on(art, 114., 76., p.card))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(3.))
+                .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).text_color(p.fg).child(title.into()))
+                .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(blurb.into())),
+        )
+        .child(div().flex_none().flex().flex_col().items_end().gap(px(6.)).child(controls))
+}
+
+/// A card of tips about a page: a light bulb and its title, then each tip with its icon.
+pub fn tips(title: impl Into<SharedString>, items: &[(IconName, &'static str)], p: &Palette) -> Div {
+    let color = p.accent;
+    div()
+        .mt(px(16.))
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .px(px(14.))
+        .py(px(12.))
+        .rounded(px(10.))
+        .bg(mix(color, if p.dark { 0.08 } else { 0.06 }, p.card))
+        .border_1()
+        .border_color(mix(color, 0.22, p.card))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .text_size(px(12.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(p.fg)
+                .child(icon(IconName::Lightbulb, 15., color))
+                .child(title.into()),
+        )
+        .children(items.iter().map(|(ico, text)| {
+            div()
+                .flex()
+                .items_start()
+                .gap(px(9.))
+                .text_size(px(12.5))
+                .line_height(px(18.))
+                .text_color(p.fg)
+                .child(
+                    div()
+                        .flex_none()
+                        .mt(px(1.))
+                        .size(px(20.))
+                        .rounded(px(6.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(p.wash(color))
+                        .child(icon(*ico, 12., color)),
+                )
+                .child(div().flex_1().min_w_0().pt(px(1.)).child(*text))
+        }))
+}
+
 // ----- Dialogs ----------------------------------------------------------------------------
 
 /// A dialog's header: its spot drawing with the tone's badge on its corner, the title, and
@@ -1007,12 +1116,12 @@ impl gpui::Render for Gallery {
             .gap(px(14.))
             .child(
                 row()
-                    .child(Button::new("g-primary").primary().icon(IconName::Check).label("Commit").kbd("⏎"))
-                    .child(Button::new("g-secondary").label("Cancel").kbd("Esc"))
-                    .child(Button::new("g-danger").danger().icon(IconName::Trash).label("Discard").kbd("⌘⌫"))
-                    .child(Button::new("g-ghost").ghost().icon(IconName::RefreshCw).label("Refresh"))
-                    .child(Button::new("g-disabled").primary().label("Create").disabled(true))
-                    .child(Button::new("g-compact").compact().icon(IconName::Copy).label("Copy"))
+                    .child(Button::new("g-primary", IconName::Check).primary().label("Commit").kbd("⏎"))
+                    .child(Button::new("g-secondary", CANCEL_ICON).label("Cancel").kbd("Esc"))
+                    .child(Button::new("g-danger", IconName::Trash).danger().label("Discard").kbd("⌘⌫"))
+                    .child(Button::new("g-ghost", IconName::RefreshCw).ghost().label("Refresh"))
+                    .child(Button::new("g-disabled", IconName::Plus).primary().label("Create").disabled(true))
+                    .child(Button::new("g-compact", IconName::Copy).compact().label("Copy"))
                     .child(IconButton::new("g-icon", IconName::Settings, "Settings"))
                     .child(IconButton::new("g-icon-on", IconName::Search, "Search").selected(true))
                     .child(IconButton::new("g-icon-run", IconName::Play, "Run").tone(Tone::Success)),
@@ -1048,7 +1157,7 @@ impl gpui::Render for Gallery {
             )
             .child(div().flex().flex_wrap().gap(px(8.)).children(arts.into_iter().map(|(name, art)| {
                 div()
-                    .w(px(176.))
+                    .w(px(140.))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -1057,7 +1166,7 @@ impl gpui::Render for Gallery {
                     .border_1()
                     .border_color(p.border)
                     .p(px(4.))
-                    .child(crate::art::drawing(art, 168., 112., None))
+                    .child(crate::art::drawing(art, 132., 88., None))
                     .child(div().text_size(px(11.)).text_color(p.fg_dim).child(name))
             })))
     }
@@ -1134,6 +1243,73 @@ fn gallery_table(cx: &mut gpui::Context<Gallery>) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::middle_ellipsis;
+
+    /// Every `.rs` file under `dir`, with its text.
+    fn sources(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                sources(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push((path.clone(), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+
+    /// The app's own buttons ([`super::Button`], [`super::footer_button`], `look`'s) take
+    /// their icon to be built at all. GPUI Kit's buttons do not: each one the app makes must
+    /// set one before its menu or its handler. And no dialog or sheet spells its Cancel,
+    /// Apply or OK out as a bare label, outside a button.
+    #[test]
+    fn every_button_has_an_icon() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        sources(&src, &mut files);
+        let mut bare = Vec::new();
+        for (path, text) in &files {
+            let mut from = 0;
+            while let Some(at) = text[from..].find("Button::new(").map(|i| i + from) {
+                from = at + 1;
+                if text[..at].ends_with("Icon") || text[..at].ends_with('"') {
+                    continue;
+                }
+                // The app's Button::new takes the id and the icon; GPUI Kit's the id alone.
+                let rest = &text[at + "Button::new(".len()..];
+                let (mut depth, mut args, mut close) = (0, 1, rest.len());
+                for (i, c) in rest.char_indices() {
+                    match c {
+                        '(' | '[' | '{' => depth += 1,
+                        ')' | ']' | '}' if depth == 0 => {
+                            close = i;
+                            break;
+                        }
+                        ')' | ']' | '}' => depth -= 1,
+                        ',' if depth == 0 => args += 1,
+                        _ => {}
+                    }
+                }
+                if args > 1 {
+                    continue;
+                }
+                let chain = &rest[close..];
+                let end = ["dropdown_menu(", ".on_click(", ";"]
+                    .iter()
+                    .filter_map(|m| chain.find(m))
+                    .min()
+                    .unwrap_or(chain.len());
+                if !chain[..end].contains(".icon(") {
+                    let line = text[..at].lines().count();
+                    bare.push(format!("{}:{line}", path.display()));
+                }
+            }
+            for label in ["Cancel", "Apply", "OK"] {
+                if text.contains(&format!(".child(\"{label}\")")) {
+                    bare.push(format!("{}: a bare \"{label}\"", path.display()));
+                }
+            }
+        }
+        assert!(bare.is_empty(), "buttons without an icon: {bare:#?}");
+    }
 
     #[test]
     fn a_long_path_keeps_its_ends_and_its_name() {

@@ -173,9 +173,16 @@ pub fn icon_button(
         .child(outline_glyph(g, 16., ink))
 }
 
-/// egui's selectable label: filled with the selection colour when on.
-pub fn toggle(id: impl Into<ElementId>, text: impl Into<SharedString>, on: bool, p: &Palette) -> Stateful<Div> {
+/// egui's selectable label with its icon: filled with the selection colour when on.
+pub fn toggle(
+    id: impl Into<ElementId>,
+    ico: impl Into<crate::components::Ico>,
+    text: impl Into<SharedString>,
+    on: bool,
+    p: &Palette,
+) -> Stateful<Div> {
     let hover_bg = p.button_hover;
+    let ink = if on { p.fg } else { mix(p.fg, 0.7, p.fg_dim) };
     div()
         .id(id)
         .flex_none()
@@ -183,16 +190,24 @@ pub fn toggle(id: impl Into<ElementId>, text: impl Into<SharedString>, on: bool,
         .px(px(8.))
         .flex()
         .items_center()
+        .gap(px(5.))
         .rounded(px(6.))
         .whitespace_nowrap()
         .cursor_pointer()
         .when(on, |d| d.bg(p.selection()))
         .when(!on, |d| d.hover(move |s| s.bg(hover_bg)))
+        .child(crate::components::icon(ico, 13., ink))
         .child(text.into())
 }
 
-/// A small framed button, for bars and rows: the shared button's look, compact.
-pub fn small_button(id: impl Into<ElementId>, text: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
+/// A small framed button with its icon, for bars and rows: the shared button's look,
+/// compact.
+pub fn small_button(
+    id: impl Into<ElementId>,
+    ico: impl Into<crate::components::Ico>,
+    text: impl Into<SharedString>,
+    p: &Palette,
+) -> Stateful<Div> {
     let (hover_bg, pressed) = (p.button_hover, p.active);
     div()
         .id(id)
@@ -201,6 +216,7 @@ pub fn small_button(id: impl Into<ElementId>, text: impl Into<SharedString>, p: 
         .h(px(22.))
         .flex()
         .items_center()
+        .gap(px(5.))
         .rounded(px(6.))
         .border_1()
         .border_color(mix(p.fg, 0.14, p.button))
@@ -211,18 +227,15 @@ pub fn small_button(id: impl Into<ElementId>, text: impl Into<SharedString>, p: 
         .hover(move |s| s.bg(hover_bg))
         .active(move |s| s.bg(pressed))
         .whitespace_nowrap()
+        .child(crate::components::icon(ico, 12., p.fg))
         .child(text.into())
 }
 
-/// The primary action of a pane: the accent, solid, grey while it cannot be pressed.
-pub fn primary_button(id: impl Into<ElementId>, text: &'static str, enabled: bool, p: &Palette) -> Stateful<Div> {
-    primary_button_with(id, None, text, enabled, p)
-}
-
-/// [`primary_button`] with an icon before its label.
-pub fn primary_button_with(
+/// The primary action of a pane, with its icon: the accent, solid, grey while it cannot be
+/// pressed.
+pub fn primary_button(
     id: impl Into<ElementId>,
-    icon: Option<crate::components::IconName>,
+    icon: crate::components::IconName,
     text: &'static str,
     enabled: bool,
     p: &Palette,
@@ -246,7 +259,7 @@ pub fn primary_button_with(
         .when(enabled, |d| d.shadow(p.glow_of(p.accent)))
         .text_color(ink)
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed)))
-        .when_some(icon, |d, i| d.child(crate::components::icon(i, 14., ink)))
+        .child(crate::components::icon(icon, 14., ink))
         .child(text)
 }
 

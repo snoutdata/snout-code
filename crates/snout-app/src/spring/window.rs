@@ -370,11 +370,20 @@ impl SpringWindow {
             .px(px(8.))
             .flex()
             .items_center()
+            .gap(px(5.))
             .rounded(px(4.))
             .cursor_pointer()
             .whitespace_nowrap()
             .when(on, |d| d.bg(p.button).font_weight(FontWeight::MEDIUM))
             .when(!on, |d| d.text_color(p.fg_dim).hover(move |s| s.bg(hover)))
+            .child(crate::components::icon(
+                match tab {
+                    Tab::Beans => crate::components::IconName::Bean,
+                    Tab::Endpoints => crate::components::IconName::Route,
+                },
+                13.,
+                if on { p.accent } else { p.fg_dim },
+            ))
             .child(label)
             .on_click(cx.listener(move |this, _, _, cx| this.set_tab(tab, cx)))
     }

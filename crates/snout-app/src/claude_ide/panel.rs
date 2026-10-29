@@ -321,17 +321,24 @@ impl Render for ChangesPanel {
                                 .justify_end()
                                 .gap(px(6.))
                                 .child(
-                                    look::small_button(("claude-reject", ix), "Reject", &p)
-                                        .debug_selector(move || format!("claude-reject-{ix}"))
-                                        .h(px(22.))
-                                        .px(px(8.))
-                                        .on_click(cx.listener(move |this, _, w, cx| {
+                                    look::small_button(
+                                        ("claude-reject", ix),
+                                        crate::components::IconName::Ban,
+                                        "Reject",
+                                        &p,
+                                    )
+                                    .debug_selector(move || format!("claude-reject-{ix}"))
+                                    .h(px(22.))
+                                    .px(px(8.))
+                                    .on_click(cx.listener(
+                                        move |this, _, w, cx| {
                                             cx.stop_propagation();
                                             let tab = reject_tab.clone();
                                             this.act(w, cx, move |ws, w, cx| {
                                                 bridge::answer_review(ws, &tab, false, w, cx)
                                             })
-                                        })),
+                                        },
+                                    )),
                                 )
                                 .when(d.front, |r| {
                                     r.child(
@@ -343,11 +350,17 @@ impl Render for ChangesPanel {
                                             .px(px(10.))
                                             .flex()
                                             .items_center()
+                                            .gap(px(5.))
                                             .rounded(px(6.))
                                             .bg(p.accent)
                                             .text_color(p.on_accent)
                                             .cursor_pointer()
                                             .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
+                                            .child(crate::components::icon(
+                                                crate::components::IconName::Check,
+                                                12.,
+                                                p.on_accent,
+                                            ))
                                             .child("Accept")
                                             .on_click(cx.listener(move |this, _, w, cx| {
                                                 cx.stop_propagation();

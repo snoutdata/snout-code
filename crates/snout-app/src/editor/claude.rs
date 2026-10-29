@@ -612,7 +612,7 @@ impl EditorPanel {
                 })
                 .child(div().flex_1())
                 .child(
-                    look::small_button("review-reject", "Reject", &p)
+                    look::small_button("review-reject", crate::components::IconName::Ban, "Reject", &p)
                         .debug_selector(|| "review-reject".into())
                         .px(px(8.))
                         .h(px(24.))
@@ -635,6 +635,7 @@ impl EditorPanel {
                         .text_color(p.on_accent)
                         .cursor_pointer()
                         .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
+                        .child(crate::components::icon(crate::components::IconName::Check, 13., p.on_accent))
                         .child("Accept")
                         .child(div().text_size(px(11.)).opacity(0.8).child("⌘↩"))
                         .on_click(cx.listener(|this, _, w, cx| this.accept_review(w, cx))),
@@ -1014,7 +1015,7 @@ impl EditorPanel {
                 .child(div().flex_1())
                 .child(hint("⌃⌥⇧↓ next"))
                 .child(
-                    look::small_button("claude-revert-file", "Revert File", &p)
+                    look::small_button("claude-revert-file", crate::components::IconName::Undo2, "Revert File", &p)
                         .debug_selector(|| "claude-revert-file".into())
                         .h(px(24.))
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::RevertFile)))),
@@ -1028,11 +1029,13 @@ impl EditorPanel {
                         .px(px(10.))
                         .flex()
                         .items_center()
+                        .gap(px(6.))
                         .rounded(px(6.))
                         .bg(p.accent)
                         .text_color(p.on_accent)
                         .cursor_pointer()
                         .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
+                        .child(crate::components::icon(crate::components::IconName::Check, 13., p.on_accent))
                         .child("Accept File")
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::AcceptFile)))),
                 )

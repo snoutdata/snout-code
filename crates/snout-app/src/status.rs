@@ -615,11 +615,13 @@ impl Render for StatusBar {
                             .px(px(6.))
                             .flex()
                             .items_center()
+                            .gap(px(4.))
                             .rounded(px(4.))
                             .whitespace_nowrap()
                             .cursor_pointer()
                             .text_color(p.accent)
                             .hover(move |s| s.bg(hover_bg))
+                            .child(crate::components::icon(crate::components::IconName::RotateCw, 12., p.accent))
                             .child("Restart")
                             .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::RestartJava), cx)),
                     )

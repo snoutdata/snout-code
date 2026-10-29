@@ -219,7 +219,7 @@ impl Render for BreakpointsDialog {
                                     .gap(px(6.))
                                     .child(div().flex_1().child(look::field(&self.condition, false, None, &p)))
                                     .child(
-                                        Button::new("bp-apply")
+                                        Button::new("bp-apply", crate::components::APPLY_ICON)
                                             .label("Apply")
                                             .compact()
                                             .on_click(cx.listener(|this, _, _, cx| this.apply_condition(cx))),
@@ -267,17 +267,17 @@ impl Render for BreakpointsDialog {
             .child(components::dialog_footer(
                 Some((status, p.fg_dim)),
                 vec![
-                    Button::new("bp-remove-all")
+                    Button::new("bp-remove-all", IconName::Trash)
                         .label("Remove All")
                         .disabled(empty)
                         .on_click(cx.listener(|this, _, w, cx| this.remove_all(w, cx)))
                         .into_any_element(),
-                    Button::new("bp-close")
+                    Button::new("bp-close", crate::components::CLOSE_ICON)
                         .label("Close")
                         .kbd("Esc")
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(DebugDialogEvent::Close)))
                         .into_any_element(),
-                    Button::new("bp-go-to")
+                    Button::new("bp-go-to", IconName::CornerDownRight)
                         .label("Go to Line")
                         .primary()
                         .disabled(empty)
@@ -437,19 +437,18 @@ impl Render for EvaluateDialog {
             .child(components::dialog_footer(
                 None,
                 vec![
-                    Button::new("evaluate-watch")
+                    Button::new("evaluate-watch", IconName::Eye)
                         .label("Add to Watches")
-                        .icon(IconName::Eye)
                         .kbd("⌘⏎")
                         .disabled(!live)
                         .on_click(cx.listener(|this, _, _, cx| this.add_watch(cx)))
                         .into_any_element(),
-                    Button::new("evaluate-close")
+                    Button::new("evaluate-close", crate::components::CLOSE_ICON)
                         .label("Close")
                         .kbd("Esc")
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(DebugDialogEvent::Close)))
                         .into_any_element(),
-                    Button::new("evaluate-run")
+                    Button::new("evaluate-run", IconName::Play)
                         .label("Evaluate")
                         .kbd("⏎")
                         .primary()

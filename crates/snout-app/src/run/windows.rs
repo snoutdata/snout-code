@@ -745,6 +745,7 @@ impl RunWindow {
                 gpui_component::button::Button::new("debug-thread")
                     .debug_selector(|| "debug-thread".into())
                     .ghost()
+                    .icon(crate::components::menu_icon(crate::components::IconName::ListTree))
                     .label(format!("{name}  ({reason})"))
                     .dropdown_menu(move |mut menu, _, _| {
                         for (tid, tname) in &threads {
@@ -950,18 +951,16 @@ impl RunWindow {
             Place::Run => EmptyState::new(spots::no_tests(), "Nothing running")
                 .hint("Run a configuration from the title bar, or a test from the gutter.")
                 .action(
-                    Button::new("run-empty-run")
+                    Button::new("run-empty-run", IconName::Play)
                         .compact()
-                        .icon(IconName::Play)
                         .label("Run")
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RunSelected), cx)),
                 ),
             Place::Debug => EmptyState::new(spots::debugger_idle(), "No debug session")
                 .hint("Debug a configuration from the title bar, or a test from the gutter.")
                 .action(
-                    Button::new("debug-empty-debug")
+                    Button::new("debug-empty-debug", IconName::Bug)
                         .compact()
-                        .icon(IconName::Bug)
                         .label("Debug")
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::DebugSelected), cx)),
                 ),

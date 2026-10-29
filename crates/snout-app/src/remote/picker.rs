@@ -261,16 +261,23 @@ impl Render for FolderPicker {
         .child(footer(
             status,
             vec![
-                button("remote-picker-cancel", "Cancel", false, true, cx)
+                button("remote-picker-cancel", crate::components::CANCEL_ICON, "Cancel", false, true, cx)
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(PickerEvent::Cancel)))
                     .into_any_element(),
-                button("remote-picker-open", "Open", true, self.error.is_none(), cx)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if this.error.is_none() {
-                            cx.emit(PickerEvent::Open(this.chosen()))
-                        }
-                    }))
-                    .into_any_element(),
+                button(
+                    "remote-picker-open",
+                    crate::components::IconName::FolderOpen,
+                    "Open",
+                    true,
+                    self.error.is_none(),
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if this.error.is_none() {
+                        cx.emit(PickerEvent::Open(this.chosen()))
+                    }
+                }))
+                .into_any_element(),
             ],
             cx,
         ))

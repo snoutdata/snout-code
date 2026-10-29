@@ -123,9 +123,8 @@ impl Render for GradleWindow {
         let note = |art: &'static snout_core::art::Drawing, title: &'static str, text: String, sync: bool| {
             EmptyState::new(art, title).hint(text).compact().when(sync, |e| {
                 e.action(
-                    Button::new("gradle-empty-sync")
+                    Button::new("gradle-empty-sync", IconName::RefreshCw)
                         .compact()
-                        .icon(IconName::RefreshCw)
                         .label("Sync the Gradle Project")
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
                 )

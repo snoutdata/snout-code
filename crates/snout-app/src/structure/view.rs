@@ -50,7 +50,7 @@ fn gradle_value(text: impl Into<SharedString>, p: &Palette) -> AnyElement {
 
 /// "Edit in build file": a small ghost button.
 fn edit_button(id: impl Into<SharedString>) -> Button {
-    Button::new(id).compact().ghost().icon(IconName::SquarePen).label("Edit in build file")
+    Button::new(id, IconName::SquarePen).compact().ghost().label("Edit in build file")
 }
 
 /// A tile with `ico` in a wash of `color`, as the pages' headers and cards draw them.
@@ -175,7 +175,7 @@ impl ProjectStructureView {
     /// The empty state of a page that needs the model, when there is none to show.
     fn without_model(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = palette(cx);
-        let sync = || Button::new("structure-sync-empty").icon(IconName::RefreshCw).label("Sync Gradle").primary();
+        let sync = || Button::new("structure-sync-empty", IconName::RefreshCw).label("Sync Gradle").primary();
         let state = match &self.load {
             Load::Ready(_) => return None,
             Load::Loading => EmptyState::new(snout_core::art::building(), "Reading the Gradle model")
@@ -1005,9 +1005,8 @@ impl ProjectStructureView {
         let view = cx.entity();
         let download = crate::look::Trigger(
             div().id("structure-sdk-download").debug_selector(|| "structure-sdk-download".into()).child(
-                Button::new("structure-sdk-download-button")
+                Button::new("structure-sdk-download-button", IconName::Download)
                     .compact()
-                    .icon(IconName::Download)
                     .label("Download JDK")
                     .disabled(downloading.is_some()),
             ),
@@ -1038,9 +1037,8 @@ impl ProjectStructureView {
                         .child(format!("Found where JDKs are installed {machine}, and added by you.")),
                 )
                 .child(
-                    Button::new("structure-sdk-add")
+                    Button::new("structure-sdk-add", IconName::FolderPlus)
                         .compact()
-                        .icon(IconName::FolderPlus)
                         .label("Add from Folder…")
                         .on_click(cx.listener(|this, _, _, cx| this.pick_jdk_folder(cx))),
                 )
@@ -1240,9 +1238,8 @@ impl ProjectStructureView {
                     div().child(badge_with_icon("Runs on it", IconName::CircleCheck, Tone::Success, &p))
                 } else {
                     div().child(
-                        Button::new("structure-sdk-use")
+                        Button::new("structure-sdk-use", IconName::FolderCog)
                             .compact()
-                            .icon(IconName::FolderCog)
                             .label("Use for This Project")
                             .on_click(cx.listener(move |this, _, _, cx| this.set_jdk(Some(home_path.clone()), cx))),
                     )
@@ -1286,10 +1283,9 @@ impl ProjectStructureView {
                 })
                 .child(div().flex_1())
                 .child(
-                    Button::new("structure-facet-spring-settings")
+                    Button::new("structure-facet-spring-settings", IconName::Settings)
                         .compact()
                         .ghost()
-                        .icon(IconName::Settings)
                         .label("Spring Settings")
                         .on_click(
                             cx.listener(|this, _, _, cx| this.open_settings(crate::settings_view::Page::Spring, cx)),
@@ -1393,10 +1389,9 @@ impl ProjectStructureView {
                     })
                     .child(div().flex_1())
                     .child(
-                        Button::new("structure-facet-claude-settings")
+                        Button::new("structure-facet-claude-settings", IconName::Settings)
                             .compact()
                             .ghost()
-                            .icon(IconName::Settings)
                             .label("Claude Code Settings")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_settings(crate::settings_view::Page::ClaudeCode, cx)
@@ -1680,10 +1675,8 @@ impl Render for ProjectStructureView {
         let changed = self.changed(cx);
         let page = self.page_body(cx);
         let tree = self.tree(cx);
-        let button = |id: &'static str, text: &'static str, primary: bool, enabled: bool| {
-            use crate::components::{Variant, button_base};
-            let variant = if primary { Variant::Primary } else { Variant::Secondary };
-            button_base(id, variant, !enabled, false, false, false, &p).child(text)
+        let button = |id: &'static str, ico: IconName, text: &'static str, primary: bool, enabled: bool| {
+            crate::components::footer_button(id, ico, text, primary, enabled, &p)
         };
         let syncing = crate::project_model::store(cx).is_some_and(|s| s.read(cx).syncing.is_some());
         let gradle_page = matches!(self.page, Page::Project | Page::Modules | Page::Dependencies);
@@ -1739,36 +1732,24 @@ impl Render for ProjectStructureView {
                         .min_w_0()
                         .flex()
                         .flex_col()
-                        .child(
-                            div()
-                                .px(px(20.))
-                                .pt(px(14.))
-                                .pb(px(2.))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.))
-                                .child(tile(self.page.icon(), p.accent, 28., &p))
-                                .child(
-                                    div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(self.page.title()),
+                        .child(crate::components::page_header(
+                            self.page.art(),
+                            self.page.title(),
+                            self.subtitle(),
+                            div().when(gradle_page, |d| {
+                                d.child(
+                                    Button::new("structure-sync", IconName::RefreshCw)
+                                        .debug_selector("structure-sync")
+                                        .compact()
+                                        .ghost()
+                                        .label(if syncing { "Syncing…" } else { "Sync Gradle" })
+                                        .disabled(syncing)
+                                        .tooltip("Read the Gradle builds again")
+                                        .on_click(cx.listener(|this, _, _, cx| this.sync(cx))),
                                 )
-                                .child(div().flex_1())
-                                .when(gradle_page, |d| {
-                                    d.child(
-                                        Button::new("structure-sync")
-                                            .debug_selector("structure-sync")
-                                            .compact()
-                                            .ghost()
-                                            .icon(IconName::RefreshCw)
-                                            .label(if syncing { "Syncing…" } else { "Sync Gradle" })
-                                            .disabled(syncing)
-                                            .tooltip("Read the Gradle builds again")
-                                            .on_click(cx.listener(|this, _, _, cx| this.sync(cx))),
-                                    )
-                                }),
-                        )
-                        .child(
-                            div().px(px(20.)).pb(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(self.subtitle()),
-                        )
+                            }),
+                            &p,
+                        ))
                         .child(
                             div()
                                 .id("structure-page")
@@ -1784,13 +1765,13 @@ impl Render for ProjectStructureView {
             .child(crate::components::dialog_footer(
                 status,
                 vec![
-                    button("structure-cancel", "Cancel", false, true)
+                    button("structure-cancel", crate::components::CANCEL_ICON, "Cancel", false, true)
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(StructureEvent::Cancel)))
                         .into_any_element(),
-                    button("structure-apply", "Apply", false, changed)
+                    button("structure-apply", crate::components::APPLY_ICON, "Apply", false, changed)
                         .when(changed, |d| d.on_click(cx.listener(|this, _, _, cx| this.apply(false, cx))))
                         .into_any_element(),
-                    button("structure-ok", "OK", true, true)
+                    button("structure-ok", crate::components::OK_ICON, "OK", true, true)
                         .on_click(cx.listener(|this, _, _, cx| this.apply(true, cx)))
                         .into_any_element(),
                 ],

@@ -476,9 +476,8 @@ impl Render for FileTree {
                     EmptyState::new(snout_core::art::spots::no_project(), "No project open")
                         .hint("Open a project to see its files.")
                         .action(
-                            Button::new("files-open")
+                            Button::new("files-open", IconName::FolderOpen)
                                 .compact()
-                                .icon(IconName::FolderOpen)
                                 .label("Open Project…")
                                 .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::Open), cx)),
                         )
@@ -492,9 +491,8 @@ impl Render for FileTree {
                         EmptyState::new(snout_core::art::spots::remote_lost(), "The connection is lost")
                             .hint(format!("The files on {host} come back when it reconnects."))
                             .action(
-                                Button::new("files-reconnect")
+                                Button::new("files-reconnect", IconName::RefreshCw)
                                     .compact()
-                                    .icon(IconName::RefreshCw)
                                     .label("Reconnect")
                                     .on_click(|_, _, cx| crate::remote::reconnect(cx)),
                             )

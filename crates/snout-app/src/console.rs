@@ -605,7 +605,7 @@ impl Render for ConsolePanel {
                     .on_click(cx.listener(move |this, _, window, cx| this.start(&root, &args, window, cx)))
                     .into_any_element()
             };
-        let follow_button = look::toggle("follow", "Follow", follow, &p)
+        let follow_button = look::toggle("follow", crate::components::IconName::ArrowDownToLine, "Follow", follow, &p)
             .h(px(22.))
             .tooltip(move |w, cx| {
                 let tip = if follow {
@@ -668,10 +668,12 @@ impl Render for ConsolePanel {
                 .flex_col()
                 .gap(px(8.))
                 .child(self.error.clone().unwrap_or_else(|| "Not running".into()))
-                .child(look::small_button("start", "Start", &p).on_click(cx.listener(move |this, _, window, cx| {
-                    this.error = None;
-                    this.start(&r, &[], window, cx)
-                })))
+                .child(look::small_button("start", crate::components::IconName::Play, "Start", &p).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.error = None;
+                        this.start(&r, &[], window, cx)
+                    }),
+                ))
                 .into_any_element()
         };
         div().size_full().bg(p.panel).flex().flex_col().child(header(title, Some(running), buttons)).child(body)
@@ -717,6 +719,7 @@ impl ConsolePanel {
                         .child(
                             Button::new("again")
                                 .link()
+                                .icon(crate::components::menu_icon(crate::components::IconName::Play))
                                 .label("Start a new session")
                                 .on_click(cx.listener(move |this, _, window, cx| this.start(&start, &[], window, cx))),
                         ),
@@ -871,6 +874,89 @@ impl ConsolePanel {
             }
         }
     }
+}
+
+/// What the Terminal settings page's preview shows: a short session in the shop, in colour,
+/// with the text styles only some engines draw.
+const PREVIEW: &str = concat!(
+    "\x1b[35mshop\x1b[0m \x1b[1;32m$\x1b[0m ./gradlew test\r\n",
+    "\x1b[32m\u{2713}\x1b[0m OrderServiceTest \x1b[2m(12 tests)\x1b[0m\r\n",
+    "\x1b[1;32mBUILD SUCCESSFUL\x1b[0m in 4s\r\n",
+    "\x1b[35mshop\x1b[0m \x1b[1;32m$\x1b[0m git status --short\r\n",
+    "\x1b[33m M\x1b[0m src/main/java/shop/OrderService.java\r\n",
+    "\x1b[31m??\x1b[0m NOTES.md   \x1b[9mstrike\x1b[0m \x1b[4:3mcurly\x1b[0m ",
+    "\x1b]8;;https://example.com/docs\x1b\\a link\x1b]8;;\x1b\\\r\n",
+    "\x1b[35mshop\x1b[0m \x1b[1;32m$\x1b[0m ",
+);
+
+/// The preview's rows.
+pub const PREVIEW_ROWS: u16 = 7;
+
+thread_local! {
+    /// The previews made: by engine, colours and width. Engines stay on the thread that
+    /// made them, as their frames do here.
+    static PREVIEWS: std::cell::RefCell<HashMap<(EngineKind, Rgb, Rgb, u16), Frame>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// [`PREVIEW`] as `engine` (or the built-in one, when this build lacks it) reads it, `cols`
+/// wide, in the colours `fg` on `bg`.
+fn preview_frame(engine: EngineKind, cols: u16, fg: Rgb, bg: Rgb) -> Option<Frame> {
+    let engine = engine.or_available();
+    let key = (engine, fg, bg, cols);
+    if let Some(f) = PREVIEWS.with(|m| m.borrow().get(&key).cloned()) {
+        return Some(f);
+    }
+    let mut e = engine.create(PREVIEW_ROWS, cols, fg, bg).ok()?;
+    e.write(PREVIEW.as_bytes());
+    let mut frame = Frame::default();
+    e.frame(&mut frame);
+    PREVIEWS.with(|m| m.borrow_mut().insert(key, frame.clone()));
+    Some(frame)
+}
+
+/// A terminal's screen as `engine` draws a short session, in the theme's colours: for the
+/// Terminal settings page. As tall as [`PREVIEW_ROWS`], as wide as its container.
+pub fn preview(engine: EngineKind) -> impl IntoElement {
+    let cell_h = (px(FONT_SIZE) * 1.3).round();
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, cx| {
+            let p = palette(cx);
+            let font: Font = font(SharedString::from(look::MONO));
+            let font_size = px(FONT_SIZE);
+            let ts = window.text_system().clone();
+            let id = ts.resolve_font(&font);
+            let cell_w = ts.advance(id, font_size, 'M').map(|s| s.width).unwrap_or(px(8.));
+            let cols = ((bounds.size.width / cell_w).floor() as u16).clamp(20, 200);
+            let (fg0, bg0) = (rgb(p.fg), rgb(p.panel));
+            let Some(frame) = preview_frame(engine, cols, fg0, bg0) else { return };
+            let (rows, cols) = frame.size();
+            for row in 0..rows {
+                let mut text = String::new();
+                let mut runs: Vec<TextRun> = Vec::new();
+                for col in 0..cols {
+                    let Some(c) = frame.cell(row, col) else { continue };
+                    if c.width == Width::Continuation {
+                        continue;
+                    }
+                    let (glyph, bg, run) = cell_run(&frame, c, &font, (fg0, bg0), &p);
+                    runs.push(TextRun { len: glyph.len(), background_color: bg, ..run });
+                    text.push_str(&glyph);
+                }
+                let line = ts.shape_line(text.into(), font_size, &runs, Some(cell_w));
+                let origin = point(bounds.left(), bounds.top() + cell_h * f32::from(row));
+                let _ = line.paint_background(origin, cell_h, TextAlign::Left, None, window, cx);
+                let _ = line.paint(origin, cell_h, TextAlign::Left, None, window, cx);
+            }
+            if let Some(cur) = frame.cursor {
+                let at = point(bounds.left() + cell_w * f32::from(cur.col), bounds.top() + cell_h * f32::from(cur.row));
+                window.paint_quad(gpui::fill(Bounds::new(at, size(cell_w, cell_h)), p.fg.opacity(0.7)));
+            }
+        },
+    )
+    .w_full()
+    .h(cell_h * f32::from(PREVIEW_ROWS))
 }
 
 /// A cell as text to shape: its glyph (a wide one kept to one cell so the grid stays

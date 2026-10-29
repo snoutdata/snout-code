@@ -985,10 +985,21 @@ impl Render for FindInFiles {
                 _ => s.label().into(),
             };
             scope_row = scope_row.child(
-                look::toggle(SharedString::from(format!("fif-scope-{}", s.label())), label, self.scope == s, &p)
-                    .debug_selector(move || format!("fif-scope-{}", s.label()))
-                    .text_size(px(12.))
-                    .on_click(move |_, _, cx| view.update(cx, |v, cx| v.set_scope(s, cx))),
+                look::toggle(
+                    SharedString::from(format!("fif-scope-{}", s.label())),
+                    match s {
+                        Scope::Project => IconName::FolderTree,
+                        Scope::Module => IconName::Package,
+                        Scope::Directory => IconName::Folder,
+                        Scope::OpenFiles => IconName::Files,
+                    },
+                    label,
+                    self.scope == s,
+                    &p,
+                )
+                .debug_selector(move || format!("fif-scope-{}", s.label()))
+                .text_size(px(12.))
+                .on_click(move |_, _, cx| view.update(cx, |v, cx| v.set_scope(s, cx))),
             );
         }
         if self.scope == Scope::Module && self.modules.len() > 1 {
@@ -996,8 +1007,11 @@ impl Render for FindInFiles {
             let current = self.module;
             let view = view.clone();
             scope_row = scope_row.child(
-                gpui_component::button::Button::new("fif-module").outline().label("Choose…").dropdown_menu(
-                    move |mut menu, _, _| {
+                gpui_component::button::Button::new("fif-module")
+                    .outline()
+                    .icon(crate::components::menu_icon(crate::components::IconName::Package))
+                    .label("Choose…")
+                    .dropdown_menu(move |mut menu, _, _| {
                         for (i, (name, _)) in modules.iter().enumerate() {
                             let view = view.clone();
                             menu = menu.item(
@@ -1007,8 +1021,7 @@ impl Render for FindInFiles {
                             );
                         }
                         menu
-                    },
-                ),
+                    }),
             );
         }
         let where_row = div()
@@ -1218,19 +1231,18 @@ impl Render for FindInFiles {
         };
         let buttons: Vec<AnyElement> = if replacing {
             vec![
-                Button::new("fif-cancel")
+                Button::new("fif-cancel", crate::components::CANCEL_ICON)
                     .label("Cancel")
                     .kbd("Esc")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(FindEvent::Close)))
                     .into_any_element(),
-                Button::new("fif-replace-selected")
+                Button::new("fif-replace-selected", IconName::Replace)
                     .label("Replace Selected")
                     .disabled(self.selected_changes().is_empty())
                     .on_click(cx.listener(|this, _, _, cx| this.replace_selected(cx)))
                     .into_any_element(),
-                Button::new("fif-replace-all")
+                Button::new("fif-replace-all", IconName::ReplaceAll)
                     .label("Replace All")
-                    .icon(IconName::ReplaceAll)
                     .kbd("⌘⏎")
                     .primary()
                     .disabled(ticked == 0)
@@ -1239,12 +1251,12 @@ impl Render for FindInFiles {
             ]
         } else {
             vec![
-                Button::new("fif-close")
+                Button::new("fif-close", crate::components::CLOSE_ICON)
                     .label("Close")
                     .kbd("Esc")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(FindEvent::Close)))
                     .into_any_element(),
-                Button::new("fif-open")
+                Button::new("fif-open", IconName::FileInput)
                     .label("Open")
                     .kbd("⏎")
                     .primary()

@@ -233,24 +233,29 @@ impl Render for ProcessesWindow {
             })
             .child(div().flex_1())
             .child(
-                crate::look::small_button("processes-stop-idle", "Stop Idle Processes", &p)
-                    .debug_selector(|| "processes-stop-idle".into())
-                    .px(px(8.))
-                    .h(px(22.))
-                    .text_color(if idle > 0 { p.fg } else { p.fg_dim })
-                    .font_weight(FontWeight::MEDIUM)
-                    .tooltip(|w, cx| {
-                        Tooltip::new(
-                            "Stops the idle Gradle daemons, what an earlier session left running, and the engines of \
+                crate::look::small_button(
+                    "processes-stop-idle",
+                    crate::components::IconName::CircleStop,
+                    "Stop Idle Processes",
+                    &p,
+                )
+                .debug_selector(|| "processes-stop-idle".into())
+                .px(px(8.))
+                .h(px(22.))
+                .text_color(if idle > 0 { p.fg } else { p.fg_dim })
+                .font_weight(FontWeight::MEDIUM)
+                .tooltip(|w, cx| {
+                    Tooltip::new(
+                        "Stops the idle Gradle daemons, what an earlier session left running, and the engines of \
                              projects that are not open",
-                        )
-                        .build(w, cx)
-                    })
-                    .on_click(move |_, _, cx| {
-                        processes.update(cx, |p, cx| {
-                            p.stop_idle(cx);
-                        });
-                    }),
+                    )
+                    .build(w, cx)
+                })
+                .on_click(move |_, _, cx| {
+                    processes.update(cx, |p, cx| {
+                        p.stop_idle(cx);
+                    });
+                }),
             );
         base.child(header).child(list).child(foot)
     }

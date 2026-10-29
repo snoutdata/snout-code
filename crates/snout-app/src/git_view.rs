@@ -730,7 +730,7 @@ impl GitView {
             .child(weak(summary, &p))
             .when_some(dir, |d, dir| {
                 d.child(
-                    look::small_button("dir-chip", format!("in {dir}/  ✕"), &p)
+                    look::small_button("dir-chip", crate::components::IconName::FolderX, format!("in {dir}/"), &p)
                         .tooltip(|w, cx| Tooltip::new("Show all files").build(w, cx))
                         .on_click(self.on_click(Action::FilterDir(None))),
                 )
@@ -902,7 +902,7 @@ impl GitView {
         });
         let commit =
             div().flex_1().flex().items_center().justify_end().gap(px(8.)).child(weak(scope.label(), &p)).child(
-                look::primary_button_with("commit", Some(crate::components::IconName::Check), "Commit", can_commit, &p)
+                look::primary_button("commit", crate::components::IconName::Check, "Commit", can_commit, &p)
                     .tooltip(move |w, cx| Tooltip::new(commit_tip.clone()).build(w, cx))
                     .when(can_commit, |b| b.on_click(self.on_click(Action::Commit))),
             );
@@ -1007,19 +1007,32 @@ impl GitView {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(look::toggle("tab-journal", "Journal", tab == BottomTab::Journal, &p).on_click(cx.listener(
-                |this, _, _, cx| {
+            .child(
+                look::toggle(
+                    "tab-journal",
+                    crate::components::IconName::NotebookText,
+                    "Journal",
+                    tab == BottomTab::Journal,
+                    &p,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
                     this.bottom = BottomTab::Journal;
                     cx.notify();
-                },
-            )))
+                })),
+            )
             .child(
-                look::toggle("tab-output", "Output", tab == BottomTab::Output, &p)
-                    .debug_selector(|| "tab-output".into())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.bottom = BottomTab::Output;
-                        cx.notify();
-                    })),
+                look::toggle(
+                    "tab-output",
+                    crate::components::IconName::SquareTerminal,
+                    "Output",
+                    tab == BottomTab::Output,
+                    &p,
+                )
+                .debug_selector(|| "tab-output".into())
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.bottom = BottomTab::Output;
+                    cx.notify();
+                })),
             )
             .child(div().flex_1())
             .when(tab == BottomTab::Journal, |d| {
@@ -1031,12 +1044,14 @@ impl GitView {
                 ))
             })
             .when(tab == BottomTab::Output, |d| {
-                d.child(look::small_button("clear-output", "Clear", &p).on_click(cx.listener(|this, _, _, cx| {
-                    this.model.update(cx, |m, cx| {
-                        m.output.clear();
-                        cx.notify();
-                    })
-                })))
+                d.child(look::small_button("clear-output", crate::components::IconName::Eraser, "Clear", &p).on_click(
+                    cx.listener(|this, _, _, cx| {
+                        this.model.update(cx, |m, cx| {
+                            m.output.clear();
+                            cx.notify();
+                        })
+                    }),
+                ))
             });
         let body = match tab {
             BottomTab::Output => div()
@@ -1375,7 +1390,7 @@ impl GitView {
                                     .gap(px(8.))
                                     .child(div().font_family(MONO).text_size(px(look::SMALL)).child(d.id.clone()))
                                     .child(
-                                        look::small_button("copy-sha", "Copy", &p)
+                                        look::small_button("copy-sha", crate::components::IconName::Copy, "Copy", &p)
                                             .on_click(self.on_click(Action::Copy(d.id.clone()))),
                                     )
                                     .into_any_element(),
@@ -1608,11 +1623,17 @@ fn diff_controls(model: &Entity<Model>, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .gap(px(8.))
-        .child(look::toggle("uni", "Unified", !sbs, &p).on_click(set(Some(false), None)))
-        .child(look::toggle("sbs", "Side by Side", sbs, &p).on_click(set(Some(true), None)))
+        .child(
+            look::toggle("uni", crate::components::IconName::Rows2, "Unified", !sbs, &p)
+                .on_click(set(Some(false), None)),
+        )
+        .child(
+            look::toggle("sbs", crate::components::IconName::Columns2, "Side by Side", sbs, &p)
+                .on_click(set(Some(true), None)),
+        )
         .child(look::vseparator(&p))
         .child(
-            look::toggle("compact", "Compact", compact, &p)
+            look::toggle("compact", crate::components::IconName::FoldVertical, "Compact", compact, &p)
                 .tooltip(|w, cx| Tooltip::new("Hide unchanged lines away from changes").build(w, cx))
                 .on_click(set(None, Some(!compact))),
         )

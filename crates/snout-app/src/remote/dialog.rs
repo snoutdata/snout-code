@@ -149,15 +149,13 @@ fn heading(text: &'static str, cx: &App) -> AnyElement {
 /// look, as an element to add a handler to.
 pub fn button(
     id: &'static str,
+    ico: crate::components::IconName,
     text: &'static str,
     primary: bool,
     enabled: bool,
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
-    use crate::components::{Variant, button_base};
-    let p = palette(cx);
-    let variant = if primary { Variant::Primary } else { Variant::Secondary };
-    button_base(id, variant, !enabled, false, false, false, &p).child(text)
+    crate::components::footer_button(id, ico, text, primary, enabled, &palette(cx))
 }
 
 /// A dialog's frame: a header with its title and an icon, its body, and a footer.
@@ -248,31 +246,17 @@ impl Render for ConnectDialog {
         .child(footer(
             status,
             vec![
-                button("connect-ssh-cancel", "Cancel", false, true, cx)
+                button("connect-ssh-cancel", crate::components::CANCEL_ICON, "Cancel", false, true, cx)
                     .child(crate::components::kbd("Esc", p.fg_dim))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(ConnectEvent::Cancel)))
                     .into_any_element(),
-                crate::components::button_base(
-                    "connect-ssh-connect",
-                    crate::components::Variant::Primary,
-                    !can,
-                    false,
-                    false,
-                    false,
-                    &p,
-                )
-                .child(ico(
-                    IconName::Plug,
-                    14.,
-                    crate::components::button_ink(crate::components::Variant::Primary, !can, &p),
-                ))
-                .child("Connect")
-                .child(crate::components::kbd(
-                    "⏎",
-                    crate::components::button_ink(crate::components::Variant::Primary, !can, &p).opacity(0.85),
-                ))
-                .when(can, |d| d.on_click(cx.listener(|this, _, _, cx| this.connect(cx))))
-                .into_any_element(),
+                button("connect-ssh-connect", IconName::Plug, "Connect", true, can, cx)
+                    .child(crate::components::kbd(
+                        "⏎",
+                        crate::components::button_ink(crate::components::Variant::Primary, !can, &p).opacity(0.85),
+                    ))
+                    .when(can, |d| d.on_click(cx.listener(|this, _, _, cx| this.connect(cx))))
+                    .into_any_element(),
             ],
             cx,
         ))

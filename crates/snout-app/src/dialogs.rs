@@ -22,8 +22,8 @@ use snout_core::groups::{dir_name, group_name_problem};
 use snout_core::{BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, branch_name_problem, repo_dir_name};
 
 use crate::components::{
-    Button, FileChip, IconButton, IconName, Tone, badge, callout, choice_card, dialog_body, dialog_footer,
-    dialog_header, field_label,
+    Button, CANCEL_ICON, FileChip, IconButton, IconName, OK_ICON, Tone, badge, callout, choice_card, dialog_body,
+    dialog_footer, dialog_header, field_label,
 };
 use crate::menus::{SOURCE_URL, WEBSITE_URL};
 use crate::model::{Action, Dialog, Model, Mood};
@@ -401,7 +401,7 @@ fn pick_items(m: &Model, query: &str) -> Vec<PickItem> {
 
 /// The Cancel button of a dialog.
 fn cancel_button(cx: &mut Context<DialogBody>) -> AnyElement {
-    Button::new("cancel")
+    Button::new("cancel", CANCEL_ICON)
         .debug_selector("dialog-cancel")
         .focusable()
         .label("Cancel")
@@ -463,11 +463,10 @@ impl DialogBody {
         let quit = |save: Option<bool>, dont_ask: bool| Action::Quit(QuitChoice { save, dont_ask });
         if info.unsaved.is_empty() {
             buttons.push(
-                Button::new("ok")
+                Button::new("ok", IconName::Power)
                     .debug_selector("quit-ok")
                     .primary()
                     .focusable()
-                    .icon(IconName::Power)
                     .label("Quit")
                     .kbd("⏎")
                     .on_click(cx.listener(move |this, _, w, cx| {
@@ -478,22 +477,20 @@ impl DialogBody {
             );
         } else {
             buttons.push(
-                Button::new("danger")
+                Button::new("danger", IconName::Trash)
                     .debug_selector("quit-discard")
                     .danger()
                     .focusable()
-                    .icon(IconName::Trash)
                     .label("Discard and Quit")
                     .kbd("⌘⌫")
                     .on_click(cx.listener(move |this, _, w, cx| this.act(quit(Some(false), false), w, cx)))
                     .into_any_element(),
             );
             buttons.push(
-                Button::new("ok")
+                Button::new("ok", IconName::Save)
                     .debug_selector("quit-save-all")
                     .primary()
                     .focusable()
-                    .icon(IconName::Save)
                     .label("Save All and Quit")
                     .kbd("⏎")
                     .on_click(cx.listener(move |this, _, w, cx| this.act(quit(Some(true), false), w, cx)))
@@ -542,11 +539,10 @@ impl Render for DialogBody {
 
         let mut body: Vec<AnyElement> = Vec::new();
         let mut buttons: Vec<AnyElement> = Vec::new();
-        let ok = |label: &str| Button::new("ok").primary().focusable().label(label.to_owned()).kbd("⏎");
-        let danger = |label: &str| {
-            Button::new("danger").danger().focusable().icon(IconName::Trash).label(label.to_owned()).kbd("⌘⌫")
-        };
-        let cancel = Button::new("cancel")
+        let ok = |label: &str| Button::new("ok", OK_ICON).primary().focusable().label(label.to_owned()).kbd("⏎");
+        let danger =
+            |label: &str| Button::new("danger", IconName::Trash).danger().focusable().label(label.to_owned()).kbd("⌘⌫");
+        let cancel = Button::new("cancel", CANCEL_ICON)
             .focusable()
             .label("Cancel")
             .kbd("Esc")
@@ -573,16 +569,14 @@ impl Render for DialogBody {
                         .flex()
                         .gap(px(8.))
                         .child(
-                            Button::new("src")
+                            Button::new("src", IconName::Github)
                                 .compact()
-                                .icon(IconName::Github)
                                 .label("github.com/snoutdata/snout-code")
                                 .on_click(|_, _, cx| cx.open_url(SOURCE_URL)),
                         )
                         .child(
-                            Button::new("web")
+                            Button::new("web", IconName::Globe)
                                 .compact()
-                                .icon(IconName::Globe)
                                 .label("snoutdata.com")
                                 .on_click(|_, _, cx| cx.open_url(WEBSITE_URL)),
                         )
@@ -595,9 +589,8 @@ impl Render for DialogBody {
                 body.push(code(&msg).into_any_element());
                 let copy = msg.clone();
                 buttons.push(
-                    Button::new("copy")
+                    Button::new("copy", IconName::Copy)
                         .ghost()
-                        .icon(IconName::Copy)
                         .label("Copy")
                         .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone())))
                         .into_any_element(),
@@ -715,10 +708,9 @@ impl Render for DialogBody {
                 body.push(code(&details).into_any_element());
                 buttons.push(cancel);
                 buttons.push(on!(
-                    Button::new("ok")
+                    Button::new("ok", IconName::RotateCcw)
                         .primary()
                         .focusable()
-                        .icon(IconName::RotateCcw)
                         .label(format!("Reset to {upstream}"))
                         .disabled(has_tracked),
                     Action::ResetToUpstream
@@ -953,8 +945,12 @@ impl Render for DialogBody {
                 }
                 body.push(list.into_any_element());
                 if has_changes {
-                    let seg = |id: &'static str, label: &'static str, value: LocalChanges, current: LocalChanges| {
-                        Button::new(id).compact().label(label).when(value == current, |b| b.primary()).on_click(
+                    let seg = |id: &'static str,
+                               ico: IconName,
+                               label: &'static str,
+                               value: LocalChanges,
+                               current: LocalChanges| {
+                        Button::new(id, ico).compact().label(label).when(value == current, |b| b.primary()).on_click(
                             cx.listener(move |this, _, _, cx| {
                                 this.local = value;
                                 cx.notify();
@@ -967,8 +963,14 @@ impl Render for DialogBody {
                             .gap(px(6.))
                             .items_center()
                             .child(dim("Uncommitted changes:".into()))
-                            .child(seg("keep", "Keep them", LocalChanges::Keep, self.local))
-                            .child(seg("stash", "Stash and re-apply", LocalChanges::Stash, self.local))
+                            .child(seg("keep", IconName::ArrowRightLeft, "Keep them", LocalChanges::Keep, self.local))
+                            .child(seg(
+                                "stash",
+                                IconName::Archive,
+                                "Stash and re-apply",
+                                LocalChanges::Stash,
+                                self.local,
+                            ))
                             .into_any_element(),
                     );
                 }

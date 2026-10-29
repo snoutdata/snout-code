@@ -586,8 +586,205 @@ drawing!(
     }
 );
 
+// ----- Settings and Project Structure pages -----------------------------------------------------
+
+drawing!(
+    /// Appearance: the painter's palette, its paints (one the green), the brush leaning on
+    /// it, and the moon of dark mode over it.
+    appearance,
+    |d| {
+        d.path(
+            "M56 96C48 70 70 44 106 40C144 36 176 52 178 80C180 100 162 106 148 100C136 95 128 104 134 116C140 128 124 140 102 136C78 132 62 116 56 96Z",
+            Fill::Paper,
+        );
+        d.circle(158.0, 78.0, 6.0, Fill::Blob);
+        d.circle(84.0, 70.0, 9.0, Fill::Tint).circle(110.0, 58.0, 9.0, Fill::Accent);
+        d.circle(138.0, 60.0, 8.0, Fill::Tint).circle(80.0, 100.0, 8.0, Fill::Tint);
+        d.rotated(38.0, 178.0, 112.0, |d| {
+            d.rect(173.0, 96.0, 10.0, 46.0, 4.0, Fill::Tint);
+            d.rect(172.0, 86.0, 12.0, 12.0, 2.0, Fill::Paper);
+            d.path("M172 86C172 76 176 70 178 64C180 70 184 76 184 86Z", Fill::Paper);
+        });
+        d.path("M208 22C196 24 190 36 194 46C198 56 210 60 218 54C206 54 198 44 202 34C203 30 205 26 208 22Z", Fill::Tint);
+        d.twinkling_spark(36.0, 50.0, 0.7).twinkling_spark(196.0, 76.0, 0.5).twinkling_spark(40.0, 130.0, 0.5);
+    }
+);
+
+drawing!(
+    /// Keymap: the keyboard, and the one key lifted out of it to take new keys, the green.
+    keymap,
+    |d| {
+        d.rect(32.0, 78.0, 168.0, 58.0, 8.0, Fill::Paper);
+        for (row, y) in [88.0, 104.0].into_iter().enumerate() {
+            for k in 0..7 {
+                let x = 42.0 + row as f32 * 6.0 + k as f32 * 21.0;
+                if !(row == 0 && k == 4) {
+                    d.rect(x, y, 16.0, 11.0, 3.0, Fill::Tint);
+                }
+            }
+        }
+        d.rect(78.0, 120.0, 76.0, 9.0, 3.0, Fill::Tint);
+        thread(d, "M134 86C134 72 140 64 146 58");
+        d.rotated(-12.0, 160.0, 40.0, |d| {
+            d.rect(142.0, 20.0, 36.0, 34.0, 7.0, Fill::Accent);
+            d.rect(148.0, 25.0, 24.0, 20.0, 4.0, Fill::None);
+            d.circle(156.0, 31.0, 2.5, Fill::None).circle(164.0, 31.0, 2.5, Fill::None);
+            d.circle(156.0, 39.0, 2.5, Fill::None).circle(164.0, 39.0, 2.5, Fill::None);
+        });
+        d.twinkling_spark(44.0, 46.0, 0.7).twinkling_spark(212.0, 70.0, 0.55).twinkling_spark(104.0, 34.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Editor: a page of code in its window, indented, the line with the caret lit green,
+    /// and the tab's arrow at the margin.
+    editor,
+    |d| {
+        d.rotated(-2.0, 120.0, 84.0, |d| {
+            d.rect(46.0, 30.0, 148.0, 104.0, 8.0, Fill::Paper);
+            d.path("M46 44V38Q46 30 54 30H186Q194 30 194 38V44Z", Fill::Tint);
+            d.dot(56.0, 37.0, 1.6).dot(63.0, 37.0, 1.6).dot(70.0, 37.0, 1.6);
+            d.shape("M50 84H190V96H50Z", Fill::Accent);
+            d.line("M60 58H112").line("M76 70H150").line("M92 90H138").line("M76 110H124").line("M60 122H90");
+            d.line("M141 84V97");
+            d.line("M62 90H80").line("M75 86L80 90L75 94");
+        });
+        d.line("M214 62L224 72L214 82").line("M30 92L20 102L30 112");
+        d.twinkling_spark(34.0, 40.0, 0.7).twinkling_spark(214.0, 122.0, 0.55).twinkling_spark(206.0, 24.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Version Control: the remote's cloud, fetched on the clock, the new commit (the green)
+    /// coming down a dotted thread to the history.
+    version_control,
+    |d| {
+        cloud(d, 6.0, -8.0, 0.9, Fill::Paper);
+        d.line("M28 124H200");
+        d.line("M76 124C96 124 96 96 116 96H150");
+        d.circle(44.0, 124.0, 5.0, Fill::Paper).circle(76.0, 124.0, 5.0, Fill::Paper);
+        d.circle(116.0, 96.0, 5.0, Fill::Paper).circle(140.0, 124.0, 5.0, Fill::Paper);
+        d.circle(180.0, 124.0, 5.0, Fill::Paper);
+        thread(d, "M176 64C176 76 168 86 158 92");
+        d.circle(154.0, 96.0, 7.0, Fill::Accent);
+        d.circle(58.0, 58.0, 18.0, Fill::Paper);
+        d.line("M58 46V58L66 64");
+        d.twinkling_spark(98.0, 30.0, 0.6).twinkling_spark(218.0, 96.0, 0.5).twinkling_spark(28.0, 92.0, 0.5);
+    }
+);
+
+drawing!(
+    /// Gradle: the build's blocks stacked, the top one set in green, and the gear that runs
+    /// the daemons beside them.
+    gradle,
+    |d| {
+        d.rect(54.0, 108.0, 44.0, 30.0, 4.0, Fill::Tint);
+        d.rect(102.0, 108.0, 44.0, 30.0, 4.0, Fill::Tint);
+        d.rect(78.0, 76.0, 44.0, 30.0, 4.0, Fill::Paper);
+        d.rect(78.0, 44.0, 44.0, 30.0, 4.0, Fill::Accent);
+        d.line("M90 59L97 66L110 52");
+        d.gear(176.0, 98.0, 22.0, 9, Fill::Paper);
+        d.gear(196.0, 56.0, 12.0, 7, Fill::Tint);
+        d.twinkling_spark(40.0, 54.0, 0.7).twinkling_spark(144.0, 30.0, 0.5).twinkling_spark(218.0, 128.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Spring: a seedling in its pot, its new leaf the green, and the profile tags tied to
+    /// it.
+    spring,
+    |d| {
+        d.path("M86 104H154L146 140H94Z", Fill::Tint);
+        d.rect(80.0, 96.0, 80.0, 12.0, 4.0, Fill::Paper);
+        d.line("M120 96C120 78 116 66 120 50");
+        d.path("M120 72C104 74 90 66 86 52C102 50 116 56 120 72Z", Fill::Paper);
+        d.line("M118 70L96 56");
+        d.path("M120 54C124 36 140 26 160 28C158 46 142 56 120 54Z", Fill::Accent);
+        d.line("M122 52L150 34");
+        thread(d, "M160 100C172 100 176 92 182 86");
+        d.rotated(12.0, 196.0, 84.0, |d| {
+            d.path("M180 76H206Q212 76 212 82V90Q212 96 206 96H180L172 86Z", Fill::Paper);
+            d.circle(181.0, 86.0, 2.5, Fill::None);
+            d.line("M188 86H204");
+        });
+        d.twinkling_spark(46.0, 56.0, 0.7).twinkling_spark(198.0, 130.0, 0.5).twinkling_spark(184.0, 30.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Terminal: the terminal's window with its prompt and output, the cursor the green.
+    terminal,
+    |d| {
+        d.rotated(-3.0, 120.0, 84.0, |d| {
+            d.rect(44.0, 32.0, 152.0, 100.0, 8.0, Fill::Paper);
+            d.path("M44 46V40Q44 32 52 32H188Q196 32 196 40V46Z", Fill::Tint);
+            d.dot(54.0, 39.0, 1.6).dot(61.0, 39.0, 1.6).dot(68.0, 39.0, 1.6);
+            d.line("M58 60L66 66L58 72").line("M74 72H124");
+            d.line("M58 86H150").line("M58 98H118");
+            d.line("M58 112L66 118L58 124");
+            d.rect(74.0, 110.0, 10.0, 16.0, 2.0, Fill::Accent);
+        });
+        d.rotated(14.0, 204.0, 36.0, |d| d.placed(184.0, 18.0, 0.32, Drawing::butterfly));
+        d.twinkling_spark(32.0, 48.0, 0.7).twinkling_spark(214.0, 112.0, 0.55).twinkling_spark(120.0, 18.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Modules: the build's projects as parcels, stacked and side by side, the one in view
+    /// the green.
+    modules,
+    |d| {
+        for (x, y, fill) in [(52.0, 98.0, Fill::Tint), (104.0, 98.0, Fill::Paper), (156.0, 98.0, Fill::Tint)] {
+            d.rect(x, y, 44.0, 38.0, 4.0, fill);
+            d.line(&format!("M{} {y}V{}", x + 22.0, y + 12.0));
+        }
+        d.rect(78.0, 56.0, 44.0, 38.0, 4.0, Fill::Paper);
+        d.line("M100 56V68");
+        d.rect(130.0, 56.0, 44.0, 38.0, 4.0, Fill::Accent);
+        d.line("M152 56V68");
+        thread(d, "M100 30C100 40 112 44 126 44");
+        d.twinkling_spark(42.0, 56.0, 0.7).twinkling_spark(206.0, 46.0, 0.55).twinkling_spark(80.0, 26.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Dependencies: a parcel and what it brings in, hanging from it, the one Gradle chose
+    /// the green.
+    dependencies,
+    |d| {
+        d.rect(96.0, 26.0, 48.0, 36.0, 4.0, Fill::Paper);
+        d.line("M120 26V38");
+        d.line("M120 62V78").line("M64 78H176").line("M64 78V92").line("M120 78V92").line("M176 78V92");
+        d.rect(44.0, 92.0, 40.0, 32.0, 4.0, Fill::Tint);
+        d.rect(100.0, 92.0, 40.0, 32.0, 4.0, Fill::Accent);
+        d.rect(156.0, 92.0, 40.0, 32.0, 4.0, Fill::Tint);
+        d.line("M110 108L117 115L130 101");
+        d.twinkling_spark(46.0, 50.0, 0.7).twinkling_spark(196.0, 46.0, 0.55).twinkling_spark(214.0, 134.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Facets: the frameworks and tools a project has, as cards fanned out: Spring's leaf,
+    /// the green, on the one in front, Claude's spark on the one behind.
+    facets,
+    |d| {
+        d.rotated(-10.0, 96.0, 88.0, |d| {
+            d.rect(64.0, 44.0, 64.0, 84.0, 6.0, Fill::Tint);
+            d.spark(96.0, 70.0, 1.3);
+            d.line("M78 102H114").line("M78 112H104");
+        });
+        d.rotated(8.0, 148.0, 88.0, |d| {
+            d.rect(116.0, 40.0, 64.0, 88.0, 6.0, Fill::Paper);
+            d.path("M132 82C134 64 148 56 166 58C164 76 150 84 132 82Z", Fill::Accent);
+            d.line("M134 80L158 64");
+            d.line("M130 102H166").line("M130 112H156");
+        });
+        d.twinkling_spark(40.0, 52.0, 0.7).twinkling_spark(206.0, 40.0, 0.55).twinkling_spark(210.0, 126.0, 0.45);
+    }
+);
+
 /// Every spot drawing of this module, by name: for tests and the gallery.
-pub fn all() -> [(&'static str, &'static Drawing); 26] {
+pub fn all() -> [(&'static str, &'static Drawing); 36] {
     [
         ("discard", discard()),
         ("push_rejected", push_rejected()),
@@ -615,6 +812,16 @@ pub fn all() -> [(&'static str, &'static Drawing); 26] {
         ("gradle_failed", gradle_failed()),
         ("quiet_bell", quiet_bell()),
         ("shared_settings", shared_settings()),
+        ("appearance", appearance()),
+        ("keymap", keymap()),
+        ("editor", editor()),
+        ("version_control", version_control()),
+        ("gradle", gradle()),
+        ("spring", spring()),
+        ("terminal", terminal()),
+        ("modules", modules()),
+        ("dependencies", dependencies()),
+        ("facets", facets()),
     ]
 }
 
