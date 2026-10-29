@@ -11,7 +11,7 @@ SnoutCode is a native IDE for Java, Gradle and Spring Boot on macOS, with Git an
 
 ## Writing code
 
-- [Editor](editor.md): tabs, editing, finding text and files, Search Everywhere and the command palette.
+- [Editor](editor.md): tabs, editing, finding and replacing text across files, finding files, Search Everywhere and the command palette.
 - [Java](java.md): completion, navigation, find references, rename, quick fixes, formatting, problems, and the engine's readiness.
 - [Spring](spring.md): beans and injections, endpoints, the Spring window, and `application.yml` and `application.properties` help.
 

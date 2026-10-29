@@ -29,14 +29,16 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘P | Go to File… | |
 | ⌥⌘O | Go to Class… (⌘O is Open Project) | |
 | ⇧⌘F | Find in Files… | |
+| ⇧⌘R | Replace in Files… | |
+| ⌘↩ | Replace All | In Replace in Files |
 | ⌘L | Go to Line… | |
 | ⌘T | Go to Symbol in Workspace… | |
 | ⇧⌘O | Go to Symbol in File… | Editor |
 | ⌘F12 | File Structure… | Editor |
 | ⌃H | Type Hierarchy | Editor |
 | ⌃⌥H | Call Hierarchy | Editor |
-| ↑ ↓ | Pick the previous or next result | In a search box |
-| Esc | Close the search box | In a search box |
+| ↑ ↓ | Pick the previous or next result | In a search box, Find in Files |
+| Esc | Close the search box | In a search box, Find in Files |
 
 ## Editing
 

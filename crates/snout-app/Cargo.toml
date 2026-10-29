@@ -42,6 +42,9 @@ tree-sitter-properties = "0.3"
 ignore = "0.4"
 # Go to file.
 fuzzy-matcher = "0.3"
+# Find and Replace in Files: regular expressions, and file masks.
+regex = "1"
+globset = "0.4"
 # Reads the earlier app's eframe storage (RON), never writes it.
 ron = "0.12"
 # Claude Code's IDE connection: a WebSocket server on 127.0.0.1, the diffs it proposes,

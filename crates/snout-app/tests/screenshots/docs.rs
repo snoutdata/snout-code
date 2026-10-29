@@ -1195,6 +1195,33 @@ fn palette(projects: &Path) {
     });
     w.pump(3, &mut |_| false);
     w.snap("editor-command-palette-light");
+    // Replace in Files: a class renamed in the Java files, its test left out.
+    w.with(|ws, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.search = None;
+            ws.open_find_in_files(true, window, cx);
+        });
+        let view = ws.read(cx).find_in_files.clone().unwrap();
+        view.update(cx, |v, cx| {
+            v.find.update(cx, |i, cx| i.set_value("ProductNotFound", window, cx));
+            v.replace.update(cx, |i, cx| i.set_value("ProductMissing", window, cx));
+            v.mask.update(cx, |i, cx| i.set_value("*.java", window, cx));
+            v.toggle("word", cx);
+        });
+    });
+    let ws = w.ws.clone();
+    w.pump(10, &mut |cx| ws.read(cx).find_in_files.as_ref().is_some_and(|v| v.read(cx).match_count() > 3));
+    w.with(|ws, _, cx| {
+        let view = ws.read(cx).find_in_files.clone().unwrap();
+        view.update(cx, |v, cx| {
+            if let Some(fi) = v.found.files.iter().position(|f| f.path.ends_with("Test.java")) {
+                v.toggle_file(fi, cx);
+            }
+            v.selected = 1;
+        });
+    });
+    w.pump(1, &mut |_| false);
+    w.snap("editor-replace-in-files-light");
 }
 
 /// The debugger, stopped at a breakpoint in the greeter's loop.

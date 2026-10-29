@@ -57,6 +57,7 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         // replace is ⌥⌘F. ⌘F finds in the file.
         ("cmd-shift-f", Box::new(FindInFiles), Some("EditorPanel > Input")),
         ("cmd-alt-f", Box::new(i::Replace), Some("EditorPanel > Input")),
+        ("cmd-shift-r", Box::new(ReplaceInFiles), None),
         ("cmd-l", Box::new(GoToLine), None),
         ("cmd-shift-p", Box::new(CommandPalette), None),
         // Language features, in a Java editor.

@@ -233,8 +233,8 @@ fn find_replace_and_go_to_line_have_their_keys(cx: &mut TestAppContext) {
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
     cx.simulate_keystrokes("cmd-shift-f");
     cx.update(|_, cx| {
-        let search = ws.read(cx).search.clone().expect("⇧⌘F in the editor is still find in files");
-        assert_eq!(search.read(cx).mode, crate::search::Mode::FindInFiles);
+        let find = ws.read(cx).find_in_files.clone().expect("⇧⌘F in the editor is still find in files");
+        assert!(!find.read(cx).replace_mode);
     });
     cx.simulate_keystrokes("escape");
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));

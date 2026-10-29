@@ -18,6 +18,7 @@ SPEC = {
     "editor-search-everywhere": ("editor-search-everywhere-light", None),
     "editor-command-palette": ("editor-command-palette-light", None),
     "editor-context-menu": ("editor-context-menu-light", None),
+    "editor-replace-in-files": ("editor-replace-in-files-light", None),
     "java-completion": ("java-completion-light", None),
     "java-hover": ("java-hover-light", None),
     "java-problems": ("java-problems-light", None),

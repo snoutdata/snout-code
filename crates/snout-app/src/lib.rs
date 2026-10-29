@@ -10,6 +10,7 @@ pub mod dialogs;
 pub mod editing;
 pub mod editor;
 pub mod files;
+pub mod find_in_files;
 pub mod git_view;
 pub mod glyphs;
 pub mod host;

@@ -719,7 +719,10 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
 
 #[test]
 fn search_lists_matches_fuzzily_and_finds_text() {
-    use crate::search::{find_in_files, go_to_file, list_files};
+    use crate::search::{go_to_file, list_files};
+    let find_in_files = |host: &dyn snout_host::Host, root: &std::path::Path, files: &[String], text: &str| {
+        host.find_text(root, files, text, crate::search::LIMIT).unwrap()
+    };
     let repo = demo_repo("search-fn");
     std::fs::write(repo.join(".gitignore"), "target/\n").unwrap();
     std::fs::create_dir_all(repo.join("target")).unwrap();
@@ -754,19 +757,90 @@ fn go_to_file_and_find_in_files_open_the_file(cx: &mut TestAppContext) {
         assert!(ws.editors(cx).iter().any(|e| e.read(cx).path == repo.join("src/main.rs")));
     });
     cx.simulate_keystrokes("cmd-shift-f");
-    let search = cx.update(|_, cx| ws.read(cx).search.clone().unwrap());
-    cx.update(|w, cx| search.update(cx, |v, cx| v.set_query("e", w, cx)));
-    for _ in 0..20 {
-        cx.executor().advance_clock(std::time::Duration::from_millis(100));
-        cx.run_until_parked();
-    }
-    let search = cx.update(|_, cx| ws.read(cx).search.clone()).expect("⇧⌘F puts up the box");
-    let n = cx.update(|_, cx| search.read(cx).items.len());
+    let find = cx.update(|_, cx| ws.read(cx).find_in_files.clone()).expect("⇧⌘F puts up Find in Files");
+    cx.simulate_input("e");
+    let settle = |cx: &mut VisualTestContext| {
+        for _ in 0..20 {
+            cx.executor().advance_clock(std::time::Duration::from_millis(100));
+            cx.run_until_parked();
+        }
+    };
+    settle(cx);
+    let n = cx.update(|_, cx| find.read(cx).match_count());
     assert!(n > 2, "many lines hold an e");
     cx.simulate_keystrokes("down down up");
-    cx.update(|_, cx| assert_eq!(search.read(cx).selected, 1, "the arrows pick"));
+    cx.update(|_, cx| assert_eq!(find.read(cx).selected, 2, "the arrows pick (the first match is picked at first)"));
     cx.simulate_keystrokes("escape");
-    cx.update(|_, cx| assert!(ws.read(cx).search.is_none(), "Esc closes it"));
+    cx.update(|_, cx| assert!(ws.read(cx).find_in_files.is_none(), "Esc closes it"));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn replace_in_files_writes_ticked_matches_updates_open_editors_and_undoes(cx: &mut TestAppContext) {
+    use crate::find_in_files::{Row, Scope};
+    let repo = demo_repo("replace-ui");
+    std::fs::write(repo.join("src/a.txt"), "total = total + 1\n").unwrap();
+    std::fs::write(repo.join("src/b.txt"), "the total\n").unwrap();
+    std::fs::write(repo.join("c.md"), "total\n").unwrap();
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let settle = |cx: &mut VisualTestContext| {
+        for _ in 0..30 {
+            cx.executor().advance_clock(std::time::Duration::from_millis(100));
+            cx.run_until_parked();
+        }
+    };
+    // b.txt is open, with an edit of its own the search must see.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(repo.join("src/b.txt"), None, false, w, cx)));
+    settle(cx);
+    let b =
+        cx.update(|_, cx| ws.read(cx).editors(cx).into_iter().find(|e| e.read(cx).path.ends_with("b.txt")).unwrap());
+    cx.update(|w, cx| b.update(cx, |e, cx| e.sync_from("the total, total\n", w, cx)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_find_in_files(true, w, cx)));
+    let find = cx.update(|_, cx| ws.read(cx).find_in_files.clone()).expect("⇧⌘R puts up Replace in Files");
+    cx.update(|_, cx| assert!(find.read(cx).replace_mode));
+    cx.update(|w, cx| {
+        find.update(cx, |v, cx| {
+            v.find.update(cx, |i, cx| i.set_value("total", w, cx));
+            v.replace.update(cx, |i, cx| i.set_value("sum", w, cx));
+            v.mask.update(cx, |i, cx| i.set_value("*.txt", w, cx));
+            v.set_scope(Scope::Directory, cx);
+        })
+    });
+    settle(cx);
+    cx.update(|_, cx| {
+        let v = find.read(cx);
+        let paths: Vec<&str> = v.found.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["src/a.txt", "src/b.txt"], "the mask and the folder of the file in front");
+        assert_eq!(v.match_count(), 4, "the open editor's text, not the file's");
+    });
+    // Leave out the second match of a.txt.
+    cx.update(|_, cx| find.update(cx, |v, cx| v.toggle_hit(0, 1, cx)));
+    cx.update(|_, cx| assert_eq!(find.read(cx).rows[2], Row::Hit(0, 1)));
+    cx.update(|_, cx| find.update(cx, |v, cx| v.replace_all(cx)));
+    settle(cx);
+    assert_eq!(std::fs::read_to_string(repo.join("src/a.txt")).unwrap(), "sum = total + 1\n");
+    assert_eq!(std::fs::read_to_string(repo.join("c.md")).unwrap(), "total\n", "outside the mask");
+    cx.update(|_, cx| {
+        assert_eq!(b.read(cx).text(cx), "the sum, sum\n", "the open editor follows at once");
+        assert!(b.read(cx).dirty, "an editor with changes of its own is left unsaved");
+        assert!(ws.read(cx).replace_undo.is_some());
+    });
+    assert_eq!(std::fs::read_to_string(repo.join("src/b.txt")).unwrap(), "the total\n");
+    // One undo puts both back.
+    cx.dispatch_action(crate::menus::UndoReplaceInFiles);
+    settle(cx);
+    assert_eq!(std::fs::read_to_string(repo.join("src/a.txt")).unwrap(), "total = total + 1\n");
+    cx.update(|_, cx| assert_eq!(b.read(cx).text(cx), "the total, total\n"));
+    // Replace Selected: only the match picked.
+    cx.update(|_, cx| {
+        find.update(cx, |v, cx| {
+            v.selected = v.rows.iter().position(|r| *r == Row::Hit(1, 1)).unwrap();
+            v.replace_selected(cx);
+        })
+    });
+    settle(cx);
+    cx.update(|_, cx| assert_eq!(b.read(cx).text(cx), "the total, sum\n"));
+    assert_eq!(std::fs::read_to_string(repo.join("src/a.txt")).unwrap(), "total = total + 1\n");
     let _ = std::fs::remove_dir_all(repo);
 }
 

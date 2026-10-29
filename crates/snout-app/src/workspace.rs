@@ -71,6 +71,10 @@ pub struct Workspace {
     title: String,
     /// The go-to-file or find-in-files box, while it shows.
     pub search: Option<Entity<SearchView>>,
+    /// Find or Replace in Files, while it shows.
+    pub find_in_files: Option<Entity<crate::find_in_files::FindInFiles>>,
+    /// The last Replace in Files, to undo.
+    pub replace_undo: Option<crate::find_in_files::ReplaceUndo>,
     /// The editor tabs, to find the one a file already has.
     editors: Vec<gpui::WeakEntity<EditorPanel>>,
     /// The commit HEAD was at, to notice when it moves.
@@ -437,6 +441,8 @@ impl Workspace {
             focus: cx.focus_handle(),
             title: String::new(),
             search: None,
+            find_in_files: None,
+            replace_undo: None,
             editors: Vec::new(),
             head: None,
             status,
@@ -1101,6 +1107,84 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Put up Find in Files, or Replace in Files when `replace`, over the project: the
+    /// selection of the editor in front is what it looks for, the folder of its file the
+    /// Directory scope's, its module the Module scope's.
+    pub fn open_find_in_files(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::find_in_files::{FindEvent, FindInFiles};
+        if let Some(view) = self.find_in_files.clone() {
+            view.update(cx, |v, cx| {
+                v.set_replace_mode(replace, window, cx);
+                if !replace {
+                    v.focus_input(window, cx);
+                }
+            });
+            return;
+        }
+        let Some(root) = self.model.read(cx).project_root() else { return };
+        let editor = self.active_editor(window, cx);
+        let initial = editor.as_ref().map(|e| {
+            let s = e.read(cx).state.read(cx);
+            let range = s.selected_range();
+            s.text().slice(range).to_string()
+        });
+        let file = editor.as_ref().map(|e| e.read(cx).path.clone());
+        let directory = file
+            .as_ref()
+            .and_then(|f| f.parent())
+            .and_then(|d| d.strip_prefix(&root).ok())
+            .map(|d| d.to_string_lossy().into_owned());
+        let mut modules: Vec<(String, PathBuf)> = crate::project_model::store(cx)
+            .and_then(|s| s.read(cx).current.clone())
+            .map(|m| m.modules.iter().map(|m| (m.name.clone(), m.content_root.clone())).collect())
+            .unwrap_or_default();
+        modules.sort_by(|a, b| a.0.cmp(&b.0));
+        // The module of the file in front: the deepest folder holding it.
+        let module = file.as_ref().and_then(|f| {
+            modules
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, dir))| f.starts_with(dir))
+                .max_by_key(|(_, (_, dir))| dir.components().count())
+                .map(|(i, _)| i)
+        });
+        let weak = cx.entity().downgrade();
+        let open_root = root.clone();
+        let open: crate::find_in_files::OpenTexts = std::rc::Rc::new(move |cx: &App| {
+            let Some(ws) = weak.upgrade() else { return Default::default() };
+            ws.read(cx)
+                .editors(cx)
+                .into_iter()
+                .filter(|e| !e.read(cx).loading && e.read(cx).class_file.is_none())
+                .filter_map(|e| {
+                    let e = e.read(cx);
+                    let rel = e.path.strip_prefix(&open_root).ok()?.to_string_lossy().into_owned();
+                    Some((rel, Arc::new(e.text(cx))))
+                })
+                .collect()
+        });
+        let view = cx.new(|cx| FindInFiles::new(root, replace, initial, modules, module, directory, open, window, cx));
+        cx.subscribe_in(&view, window, |this, _, e: &FindEvent, window, cx| match e {
+            FindEvent::Close => {
+                this.find_in_files = None;
+                window.focus(&this.focus, cx);
+                cx.notify();
+            }
+            FindEvent::Open(path, at) => {
+                this.find_in_files = None;
+                this.open_file(path.clone(), Some(*at), false, window, cx);
+                cx.notify();
+            }
+            FindEvent::Replace(changes) => crate::find_in_files::apply(this, changes.clone(), false, window, cx),
+        })
+        .detach();
+        let v = view.clone();
+        cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
+        self.search = None;
+        self.find_in_files = Some(view);
+        cx.notify();
+    }
+
     /// Search Everywhere: the files of the project, and the symbols of its Java server
     /// when one runs, in one box.
     pub fn search_everywhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1486,7 +1570,9 @@ impl Render for Workspace {
                     cx.notify();
                 })
             }))
-            .on_action(cx.listener(|this, _: &FindInFiles, w, cx| this.open_search(Mode::FindInFiles, w, cx)))
+            .on_action(cx.listener(|this, _: &FindInFiles, w, cx| this.open_find_in_files(false, w, cx)))
+            .on_action(cx.listener(|this, _: &ReplaceInFiles, w, cx| this.open_find_in_files(true, w, cx)))
+            .on_action(cx.listener(|this, _: &UndoReplaceInFiles, w, cx| crate::find_in_files::undo(this, w, cx)))
             .on_action(cx.listener(|this, _: &GoToLine, w, cx| this.open_search(Mode::GoToLine, w, cx)))
             .on_action(cx.listener(|this, _: &CommandPalette, w, cx| this.open_palette(w, cx)))
             .on_action(cx.listener(|this, _: &SplitRight, w, cx| this.split_right(w, cx)))
@@ -1660,6 +1746,9 @@ impl Render for Workspace {
                     .bg(p.scrim)
                     .occlude()
                     .child(dialog)
+            }))
+            .children(self.find_in_files.clone().map(|view| {
+                div().absolute().top(px(TITLE_H + 24.)).left_0().right_0().flex().justify_center().child(view)
             }))
             .children(self.search.clone().map(|view| {
                 div().absolute().top(px(TITLE_H + 24.)).left_0().right_0().flex().justify_center().child(view)

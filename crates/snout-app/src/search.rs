@@ -1,6 +1,7 @@
-//! Go to file (⌘P) and find in files (⇧⌘F) in the open repository: a box over the window
-//! with a field and what matches. The host lists the files (so `.gitignore` holds) and
-//! searches their text; names are matched fuzzily (`fuzzy-matcher`).
+//! Go to file (⌘P), the command palette and the symbol boxes: a box over the window with a
+//! field and what matches. The host lists the files (so `.gitignore` holds); names are
+//! matched fuzzily (`fuzzy-matcher`). Find in Files has a window of its own
+//! ([`crate::find_in_files`]).
 //! ↑ ↓ pick, ↩ opens the file (at the line), Esc closes.
 
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ use gpui::{
     px, uniform_list,
 };
 use gpui_component::input::{InputEvent, InputState};
-use snout_host::{Host, HostRef, WalkOptions};
+use snout_host::{Host, WalkOptions};
 
 use crate::look;
 use crate::model::{Action, Model};
@@ -61,19 +62,9 @@ pub fn go_to_file(files: &[String], query: &str) -> Vec<(String, Vec<usize>)> {
     hits.into_iter().take(LIMIT).map(|(_, f, idx)| (f.clone(), idx)).collect()
 }
 
-/// A line that holds what find in files looked for.
-pub type Hit = snout_host::TextHit;
-
-/// Every line of the files of `root` on `host` holding `text` (a plain string; case matters
-/// only when it has capitals), up to [`LIMIT`].
-pub fn find_in_files(host: &dyn Host, root: &Path, files: &[String], text: &str) -> Vec<Hit> {
-    host.find_text(root, files, text, LIMIT).unwrap_or_default()
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     GoToFile,
-    FindInFiles,
     /// Go to a line (and column) of the editor in front: `12` or `12:5`.
     GoToLine,
     /// The command palette: every command, with its shortcut.
@@ -156,7 +147,6 @@ pub struct SearchView {
     pub mode: Mode,
     pub input: Entity<InputState>,
     files: Arc<Vec<String>>,
-    host: HostRef,
     /// Listing the files, off the UI thread.
     _listing: Option<Task<()>>,
     pub items: Vec<Item>,
@@ -178,7 +168,6 @@ impl SearchView {
     pub fn new(model: Entity<Model>, root: PathBuf, mode: Mode, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let placeholder = match mode {
             Mode::GoToFile => "Go to file",
-            Mode::FindInFiles => "Find in files",
             Mode::GoToLine => "Line, or line:column",
             Mode::Commands => "Type a command",
             Mode::Symbols => "Go to symbol",
@@ -215,7 +204,6 @@ impl SearchView {
             mode,
             input,
             files: Arc::new(Vec::new()),
-            host,
             _listing: listing,
             items: Vec::new(),
             selected: 0,
@@ -305,30 +293,6 @@ impl SearchView {
                     }));
                 }
             }
-            Mode::FindInFiles => {
-                let (root, files, host) = (self.root.clone(), self.files.clone(), self.host.clone());
-                self._search = Some(cx.spawn(async move |this, cx| {
-                    // Wait for the typing to pause.
-                    cx.background_executor().timer(Duration::from_millis(120)).await;
-                    let hits = cx
-                        .background_executor()
-                        .spawn(async move { find_in_files(&*host, &root, &files, &query) })
-                        .await;
-                    let _ = this.update(cx, |this, cx| {
-                        this.items = hits
-                            .into_iter()
-                            .map(|h| Item {
-                                detail: Some(format!("{}: {}", h.line + 1, h.text.trim())),
-                                at: Some((h.line, h.column)),
-                                path: h.path,
-                                ..Default::default()
-                            })
-                            .collect();
-                        this.selected = 0;
-                        cx.notify();
-                    });
-                }));
-            }
         }
     }
 
@@ -376,8 +340,6 @@ impl Render for SearchView {
         let count = items.len();
         let empty: SharedString = match self.mode {
             Mode::GoToFile => "No file matches".into(),
-            Mode::FindInFiles if self.input.read(cx).value().is_empty() => "Type what to look for".into(),
-            Mode::FindInFiles => "Nothing found".into(),
             Mode::GoToLine => SharedString::default(),
             Mode::Commands => "No command matches".into(),
             Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),

@@ -13,7 +13,7 @@ A native IDE for Java, Gradle and Spring Boot on macOS, written in Rust. It has 
 Each item links to its page in the user guide.
 
 - **[Projects](docs/projects.md):** open any folder as the project, with one Gradle build or many side by side. The Project view shows the modules as Gradle sees them, or the plain files. File ▸ New Project… makes a Java application or a Spring Boot application.
-- **[Editor](docs/editor.md):** tabs and split editors, find and replace, Find in Files, Go to File, Search Everywhere and the command palette.
+- **[Editor](docs/editor.md):** tabs and split editors, find and replace, Find and Replace in Files, Go to File, Search Everywhere and the command palette.
 - **[Java](docs/java.md):** completion that adds imports, go to definition (into libraries too), find references, rename, quick fixes, organize imports, formatting, parameter hints and problems. Scala classes in the build are compiled so Java sees them.
 - **[Gradle](docs/gradle.md):** sync, the Gradle window and its tasks, build problems, a JDK that suits each build's Gradle version, with a download offered when none is installed.
 - **[Run and debug](docs/run-and-debug.md):** run configurations, run icons in the gutter, tests with their results in a tree, and a debugger with breakpoints, stepping, variables and expressions.

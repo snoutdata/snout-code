@@ -1120,9 +1120,9 @@ mod shots {
             }
             Some(Select::NoResults) => {
                 cx.update_window(handle.into(), |_, window, cx| {
-                    ws.update(cx, |ws, cx| ws.open_search(snout_app::search::Mode::FindInFiles, window, cx));
-                    let view = ws.read(cx).search.clone().unwrap();
-                    view.update(cx, |v, cx| v.input.update(cx, |i, cx| i.set_value("zebraPattern", window, cx)));
+                    ws.update(cx, |ws, cx| ws.open_find_in_files(false, window, cx));
+                    let view = ws.read(cx).find_in_files.clone().unwrap();
+                    view.update(cx, |v, cx| v.find.update(cx, |i, cx| i.set_value("zebraPattern", window, cx)));
                 })
                 .unwrap();
             }

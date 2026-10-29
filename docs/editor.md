@@ -73,14 +73,34 @@ In the find bar, ↩ goes to the next match, ⇧↩ to the previous one, and Esc
 
 ## Find in Files
 
-Press ⇧⌘F (File ▸ Find in Files…) to search the text of every file in the project.
+Press ⇧⌘F (File ▸ Find in Files…, or Edit ▸ Find in Files…) to search the text of the project's files. The text selected in the editor in front, if any, is filled in.
 
 - Type what to look for. The search runs once you pause typing.
-- The text is a plain string, not a pattern. Case matters only when what you type has capitals.
-- Files that `.gitignore` excludes are left out, and so is the `.git` folder.
-- Use ↑ and ↓ to pick a result, and ↩ to open the file at that line. Esc closes the box.
+- The buttons right of the field match case (**Aa**), only whole words, and treat the text as a regular expression.
+- Pick where to look: the whole **Project**, a **Module** (the one of the file in front at first; **Choose…** picks another), a **Directory** (the folder of the file in front at first, from the project's folder), or the **Open Files**.
+- The **file mask** narrows the files by name: `*.java, *.kt` takes those, `!*Test.java` leaves those out. A pattern with a `/` is matched against the path, such as `src/main/**`.
+- Files that `.gitignore` excludes are left out, and so is the `.git` folder. A file open in an editor is searched as the editor has it, unsaved changes included.
 
-At most 200 results are shown.
+The matches show as a tree, grouped by file; click a file's arrow to fold it. Under the tree, the lines around the match picked. Use ↑ and ↓ to pick a match, and ↩ (or a double click) to open the file at that line. Esc closes the window.
+
+At most 5,000 matches are shown; the line at the bottom says when there were more.
+
+## Replace in Files
+
+Press ⇧⌘R (File ▸ Replace in Files…, or Edit ▸ Replace in Files…), or click the replace button in Find in Files, to replace text across the project. Everything Find in Files does works the same, with a second field for what to put in place of each match.
+
+![Replace in Files](images/editor-replace-in-files.png)
+
+*`ProductNotFound` renamed in the Java files, its test left out.*
+
+- Each match shows struck through, with what replaces it after it. The preview under the tree shows the change the picked row makes, as removed and added lines.
+- Every match and every file has a tick box. Untick what should stay as it is; a file's box ticks or unticks all its matches.
+- With a regular expression, the replacement can name the groups of the match: `$1`, `${name}`. `$$` is a dollar sign.
+- **Replace All** (⌘↩ in a field) replaces every ticked match. **Replace Selected** replaces only the picked match, or the ticked matches of the picked file.
+
+Files are written where the project is, so a project on a remote machine (see [Remote SSH](remote-ssh.md)) works the same. A file open in an editor takes the new text at once, as an edit of its own: ⌘Z in that editor takes it back. It is saved, unless it had unsaved changes before, in which case it stays unsaved. A file that changed since the search is left alone, and the line at the bottom says so.
+
+**Edit ▸ Undo Replace in Files** puts every file of the last replacement back as it was, in one step. A file changed again since is left as it is.
 
 ## Go to File
 
