@@ -179,6 +179,9 @@ pub struct ConsolePanel {
     /// When the console was made: an agent waits a moment for the window's IDE server, so
     /// its first session starts connected, with the hooks.
     born: Instant,
+    /// Text to type into a session once its agent is up (it has printed), by folder.
+    queued: Vec<(PathBuf, String)>,
+    _queue: Option<gpui::Task<()>>,
 }
 
 /// How long the first session waits for the IDE server's variables at most.
@@ -260,6 +263,8 @@ impl ConsolePanel {
             model,
             kind,
             sessions: HashMap::new(),
+            queued: Vec::new(),
+            _queue: None,
             program: None,
             error: None,
             selection: None,
@@ -569,6 +574,43 @@ impl ConsolePanel {
         if let Some(s) = self.sessions.get(root) {
             s.pty.paste(text);
         }
+    }
+
+    /// Type `text` into the session of `root` as a paste once its agent is up (the session
+    /// runs and has printed): at once when it is, else as soon as it is (within 30 seconds).
+    pub fn type_when_ready(&mut self, root: &Path, text: &str, cx: &mut Context<Self>) {
+        let up = |s: Option<&Session>| s.is_some_and(|s| !s.pty.contents().trim().is_empty());
+        if up(self.sessions.get(root)) {
+            return self.type_text(root, text);
+        }
+        self.queued.push((root.to_owned(), text.to_owned()));
+        if self._queue.is_some() {
+            return;
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        self._queue = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(200)).await;
+                let left = this.update(cx, |this, _| {
+                    let sessions = &this.sessions;
+                    this.queued.retain(|(root, text)| match sessions.get(root) {
+                        Some(s) if up(Some(s)) => {
+                            s.pty.paste(text);
+                            false
+                        }
+                        _ => true,
+                    });
+                    if Instant::now() > deadline {
+                        this.queued.clear();
+                    }
+                    !this.queued.is_empty()
+                });
+                if !matches!(left, Ok(true)) {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| this._queue = None);
+        }));
     }
 
     /// Send `bytes` to the session of `root` as keys typed (`\r` for Return).

@@ -43,6 +43,13 @@ pub struct ProjectSettings {
     /// Java editors show the names of the parameters literal arguments are passed to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub param_hints: Option<bool>,
+    /// When the editor's hover shows: `after_delay` or `while_command_held`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_hover: Option<crate::settings::ShowHover>,
+    /// How long the pointer rests before the hover shows, in milliseconds (0 to 3000).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 0, max = 3000))]
+    pub hover_delay_ms: Option<u64>,
     /// How often the project is fetched in the background, in minutes (5 to 120).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 5, max = 120))]
@@ -116,6 +123,8 @@ pub enum Key {
     SoftWrap,
     ShowWhitespace,
     ParamHints,
+    ShowHover,
+    HoverDelayMs,
     FetchMinutes,
     DaemonIdleMinutes,
     Jdk,
@@ -126,11 +135,13 @@ pub enum Key {
 }
 
 impl Key {
-    pub const ALL: [Key; 11] = [
+    pub const ALL: [Key; 13] = [
         Key::TabSize,
         Key::SoftWrap,
         Key::ShowWhitespace,
         Key::ParamHints,
+        Key::ShowHover,
+        Key::HoverDelayMs,
         Key::FetchMinutes,
         Key::DaemonIdleMinutes,
         Key::Jdk,
@@ -147,6 +158,8 @@ impl Key {
             Key::SoftWrap => "soft_wrap",
             Key::ShowWhitespace => "show_whitespace",
             Key::ParamHints => "param_hints",
+            Key::ShowHover => "show_hover",
+            Key::HoverDelayMs => "hover_delay_ms",
             Key::FetchMinutes => "fetch_minutes",
             Key::DaemonIdleMinutes => "daemon_idle_minutes",
             Key::Jdk => "jdk",
@@ -164,6 +177,8 @@ impl Key {
             Key::SoftWrap => p.soft_wrap.is_some(),
             Key::ShowWhitespace => p.show_whitespace.is_some(),
             Key::ParamHints => p.param_hints.is_some(),
+            Key::ShowHover => p.show_hover.is_some(),
+            Key::HoverDelayMs => p.hover_delay_ms.is_some(),
             Key::FetchMinutes => p.fetch_minutes.is_some(),
             Key::DaemonIdleMinutes => p.daemon_idle_minutes.is_some(),
             Key::Jdk => p.jdk.is_some(),
@@ -181,6 +196,8 @@ impl Key {
             Key::SoftWrap => p.soft_wrap = None,
             Key::ShowWhitespace => p.show_whitespace = None,
             Key::ParamHints => p.param_hints = None,
+            Key::ShowHover => p.show_hover = None,
+            Key::HoverDelayMs => p.hover_delay_ms = None,
             Key::FetchMinutes => p.fetch_minutes = None,
             Key::DaemonIdleMinutes => p.daemon_idle_minutes = None,
             Key::Jdk => p.jdk = None,
@@ -240,6 +257,8 @@ plain!(
     soft_wrap,
     show_whitespace,
     param_hints,
+    show_hover,
+    hover_delay_ms,
     fetch_minutes,
     daemon_idle_minutes,
     terminal_shell,
@@ -255,6 +274,7 @@ impl ProjectSettings {
     /// The values brought within the ranges the app allows (a hand edit may go beyond them).
     fn bounded(mut self) -> Self {
         self.tab_size = self.tab_size.map(|t| t.clamp(1, 8));
+        self.hover_delay_ms = self.hover_delay_ms.map(|m| m.min(crate::settings::HOVER_DELAY_MAX));
         self.fetch_minutes = self.fetch_minutes.map(|m| m.clamp(5, 120));
         self.daemon_idle_minutes = self.daemon_idle_minutes.map(|m| m.clamp(1, 240));
         self

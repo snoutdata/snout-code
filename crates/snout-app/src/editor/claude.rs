@@ -63,6 +63,12 @@ pub enum ClaudeRequest {
     /// No more changes this way in this file: go to the next (or previous) file's.
     NextFile,
     PrevFile,
+    /// Ask the console's agent to fix a problem on these lines (0-based, inclusive): what
+    /// it is asked after the mention of the file and lines.
+    AskToFix {
+        lines: (u32, u32),
+        text: String,
+    },
 }
 
 /// Who writes in a tab: the agent's name as its caret's flag says it, and its colour.

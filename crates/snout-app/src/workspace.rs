@@ -283,7 +283,7 @@ impl Workspace {
         cx.set_global(crate::processes::ProcessesHandle(processes.clone()));
         let spring = cx.new(|cx| crate::spring::Spring::new(runs.clone(), hub.clone(), model.clone(), cx));
         cx.set_global(crate::spring::SpringHandle(spring.clone()));
-        let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), cx));
+        let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), window, cx));
         let references = cx.new(|cx| crate::lang::panels::ReferencesPanel::new(hub.clone(), cx));
         let projects = cx.new(|cx| ProjectsView::new(model.clone(), window, cx));
         let files = cx.new(|cx| crate::files::FileTree::new(model.clone(), cx));
@@ -420,6 +420,10 @@ impl Workspace {
             }),
             cx.subscribe_in(&model, window, Self::on_model_event),
             cx.subscribe_in(&hub, window, Self::on_hub_event),
+            cx.subscribe_in(&problems, window, |this, _, e: &crate::lang::panels::ProblemsEvent, window, cx| {
+                let crate::lang::panels::ProblemsEvent::AskToFix { path, lines, text } = e;
+                crate::claude_ide::bridge::ask_to_fix(this, path.clone(), *lines, text, window, cx);
+            }),
             cx.subscribe_in(&runs, window, Self::on_runs_event),
             cx.subscribe_in(&spring, window, Self::on_spring_event),
             cx.subscribe_in(&project, window, |this, _, e: &crate::project_view::ProjectViewEvent, window, cx| {
@@ -1365,7 +1369,7 @@ impl Workspace {
         cx.subscribe_in(&sheet, window, |this, _, e: &SettingsEvent, window, cx| {
             let close = match e {
                 SettingsEvent::Apply { user, project, close } => {
-                    this.apply_layers((**user).clone(), project.clone(), window, cx);
+                    this.apply_layers((**user).clone(), project.as_deref().cloned(), window, cx);
                     *close
                 }
                 SettingsEvent::OpenJson(which) => {

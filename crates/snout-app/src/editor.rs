@@ -30,8 +30,10 @@ use crate::editing::{self, Edit};
 use crate::lang::providers::DocLink;
 
 mod claude;
+pub mod context_actions;
 mod inlay;
 mod lang_features;
+pub mod problem_hover;
 mod refactor;
 mod run_gutter;
 pub mod settings_lang;
@@ -43,6 +45,7 @@ pub use claude::{
 };
 pub use inlay::{ParamHint, argument_at, hint_label, is_param_hint};
 pub use lang_features::{class_file_name, is_class_file_path};
+pub use problem_hover::{Bulb, CannedLang, Fixes, HoverCard, Spot};
 pub use refactor::{Refactoring, new_name};
 pub use run_gutter::{CODE_PAD, GutterMenu, Lanes, PLAIN_PAD, runnables_of};
 pub use spring_gutter::{SpringItem, spring_items, spring_of};
@@ -71,6 +74,8 @@ actions!(
         ExtractField,
         Inline,
         FormatSelection,
+        ShowContextActions,
+        ApplyTopFix,
     ]
 );
 
@@ -91,6 +96,9 @@ pub struct EditorDefaults {
     pub show_whitespace: bool,
     /// Java editors show the names of the parameters literal arguments are passed to.
     pub param_hints: bool,
+    /// When the hover card shows, and after how long a rest.
+    pub show_hover: crate::settings::ShowHover,
+    pub hover_delay: Duration,
 }
 
 impl Global for EditorDefaults {}
@@ -102,6 +110,8 @@ impl EditorDefaults {
             soft_wrap: s.soft_wrap,
             show_whitespace: s.show_whitespace,
             param_hints: s.param_hints,
+            show_hover: s.show_hover,
+            hover_delay: Duration::from_millis(s.hover_delay_ms.min(crate::settings::HOVER_DELAY_MAX)),
         }
     }
 
@@ -111,6 +121,8 @@ impl EditorDefaults {
             soft_wrap: false,
             show_whitespace: false,
             param_hints: true,
+            show_hover: Default::default(),
+            hover_delay: Duration::from_millis(crate::settings::HOVER_DELAY_MS),
         })
     }
 }
@@ -269,6 +281,8 @@ pub struct EditorPanel {
     pub settings_file: Option<crate::settings_json::Which>,
     /// What the server reports about the file, as it sent it.
     pub problems: Vec<lsp_types::Diagnostic>,
+    /// The hover card, the gutter's bulb and the context actions.
+    pub hover: problem_hover::HoverState,
     /// The call whose arguments are being typed, and the task asking about it.
     pub signature: Option<lsp_types::SignatureHelp>,
     _signature: Option<Task<()>>,
@@ -403,6 +417,7 @@ impl EditorPanel {
             cx.subscribe(&state, |this, state, e: &InputEvent, cx| match e {
                 InputEvent::Change => {
                     this.revision += 1;
+                    this.hide_card(cx);
                     this.param_hints_changed(cx);
                     this.lang_changed(cx);
                     this.check_settings_text(cx);
@@ -444,6 +459,8 @@ impl EditorPanel {
             cx.observe(&state, |this, state, cx| {
                 this.match_brackets(cx);
                 this.follow_signature(cx);
+                this.bulb_soon(cx);
+                this.card_follow_scroll(cx);
                 let caret = state.read(cx).cursor();
                 if caret != this.caret_seen {
                     this.caret_seen = caret;
@@ -494,6 +511,7 @@ impl EditorPanel {
             lang: None,
             settings_file: None,
             problems: Vec::new(),
+            hover: Default::default(),
             signature: None,
             _signature: None,
             signature_line: None,
@@ -1443,6 +1461,14 @@ impl Render for EditorPanel {
             .on_action(cx.listener(|this, _: &MoveLineUp, w, cx| this.move_lines(true, w, cx)))
             .on_action(cx.listener(|this, _: &MoveLineDown, w, cx| this.move_lines(false, w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSoftWrap, w, cx| this.toggle_soft_wrap(w, cx)))
+            .on_action(cx.listener(|this, _: &ShowContextActions, w, cx| this.show_context_actions(w, cx)))
+            .on_action(cx.listener(|this, _: &ApplyTopFix, w, cx| this.apply_top_fix(w, cx)))
+            // GPUI Kit's Quick Fix shows the context actions too.
+            .on_action(
+                cx.listener(|this, _: &gpui_component::input::ToggleCodeActions, w, cx| {
+                    this.show_context_actions(w, cx)
+                }),
+            )
             .when(self.lang.is_some(), |d| {
                 d.on_action(cx.listener(|this, _: &FindReferences, _, cx| this.find_references(cx)))
                     .on_action(cx.listener(|this, _: &RenameSymbol, w, cx| this.start_rename(w, cx)))
@@ -1477,16 +1503,28 @@ impl Render for EditorPanel {
                     .font_family(look::mono_font(cx))
                     .id("editor-body")
                     .debug_selector(|| "editor-body".into())
-                    .on_mouse_move(
-                        cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.gutter_hover(e.position, cx)),
+                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
+                        this.gutter_hover(e.position, cx);
+                        this.hover_move(e.position, e.modifiers, e.pressed_button.is_some(), cx);
+                    }))
+                    .on_modifiers_changed(
+                        cx.listener(|this, e: &gpui::ModifiersChangedEvent, _, cx| {
+                            this.hover_modifiers(e.modifiers, cx)
+                        }),
                     )
                     .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                         if !*hovered && this.gutter_tip.take().is_some() {
                             cx.notify();
                         }
+                        if !*hovered {
+                            this.hover_left(cx);
+                        }
                     }))
                     .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
-                        if this.gutter_press(e, window, cx) || this.command_click(e, window, cx) {
+                        if this.bulb_press(e, window, cx)
+                            || this.gutter_press(e, window, cx)
+                            || this.command_click(e, window, cx)
+                        {
                             window.prevent_default();
                             cx.stop_propagation();
                         }
@@ -1526,6 +1564,8 @@ impl Render for EditorPanel {
                     .children(self.rename_box(cx))
                     .children(self.hint_popup(cx))
                     .children(self.choices_popup(cx))
+                    .children(self.card_view(cx))
+                    .children(self.actions_view(cx))
                     .children(chip)
                     .children(self.agent_card_view(cx))
                     .children(self.context.render(cx)),
@@ -1593,7 +1633,7 @@ pub fn context_menu(
                 .item(action_item("Inline", I::FoldVertical, Box::new(Inline)))
         });
         menu.item(action_item("Go to Definition", I::SquareArrowOutUpRight, Box::new(i::GoToDefinition)))
-            .item(action_item("Quick Fix…", I::Lightbulb, Box::new(i::ToggleCodeActions)))
+            .item(action_item("Show Context Actions…", I::Lightbulb, Box::new(ShowContextActions)))
             .item(submenu_item("Refactor", I::Wrench, refactor))
             .separator()
     } else {

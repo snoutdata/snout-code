@@ -164,6 +164,116 @@ mod shots {
         Connecting,
         /// The bar offering a JDK the project needs.
         JdkBar,
+        /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
+        /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
+        /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
+        Fixes(u8),
+    }
+
+    const SHOP: &str = "package demo;\n\nimport java.math.BigDecimal;\nimport java.util.List;\nimport java.util.Map;\n\n/** An order and its total. */\npublic class Order {\n    private final BigDecimal total;\n\n    public Order(BigDecimal total) {\n        this.total = total;\n    }\n\n    public LocalDate placed() {\n        return LocalDate.now();\n    }\n\n    public BigDecimal rounded() {\n        return total.setScale(2, BigDecimal.ROUND_HALF_EVEN);\n    }\n}\n";
+
+    fn fix_diag(
+        line: u32,
+        a: u32,
+        b: u32,
+        code: i32,
+        sev: lsp_types::DiagnosticSeverity,
+        msg: &str,
+    ) -> lsp_types::Diagnostic {
+        lsp_types::Diagnostic {
+            range: lsp_types::Range::new(lsp_types::Position::new(line, a), lsp_types::Position::new(line, b)),
+            severity: Some(sev),
+            code: Some(lsp_types::NumberOrString::Number(code)),
+            source: Some("Java".into()),
+            message: msg.into(),
+            ..Default::default()
+        }
+    }
+
+    fn shop_problems() -> Vec<lsp_types::Diagnostic> {
+        use lsp_types::DiagnosticSeverity as S;
+        vec![
+            fix_diag(3, 7, 21, 268435844, S::WARNING, "The import java.util.List is never used"),
+            fix_diag(4, 7, 20, 268435844, S::WARNING, "The import java.util.Map is never used"),
+            fix_diag(14, 11, 20, 16777218, S::ERROR, "LocalDate cannot be resolved to a type"),
+            fix_diag(15, 15, 24, 570425394, S::ERROR, "LocalDate cannot be resolved"),
+            fix_diag(
+                19,
+                45,
+                58,
+                67108967,
+                S::WARNING,
+                "The field BigDecimal.ROUND_HALF_EVEN is deprecated since version 9",
+            ),
+        ]
+    }
+
+    /// The engine's answers for `Order.java`, canned.
+    fn shop_lang(path: &Path) -> snout_app::editor::CannedLang {
+        use lsp_types::{CodeAction, CodeActionKind, Position, Range, TextEdit};
+        let uri = snout_lang::uri::from_path(path);
+        let actions = move |_: &Path, range: &Range| {
+            let at = |l: u32, a: u32, b: u32| Range::new(Position::new(l, a), Position::new(l, b));
+            let fix = |title: &str, d: &lsp_types::Diagnostic, edits: Vec<TextEdit>| CodeAction {
+                title: title.into(),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![d.clone()]),
+                is_preferred: Some(true),
+                edit: Some(snout_app::lang::fixes::file_edit(&uri, edits)),
+                ..Default::default()
+            };
+            let mut out = Vec::new();
+            for d in shop_problems().iter().filter(|d| d.range.start.line == range.start.line) {
+                match d.code {
+                    Some(lsp_types::NumberOrString::Number(16777218 | 570425394)) => {
+                        out.push(fix(
+                            "Import 'LocalDate' (java.time)",
+                            d,
+                            vec![TextEdit::new(at(3, 0, 0), "import java.time.LocalDate;\n".into())],
+                        ));
+                        out.push(CodeAction {
+                            title: "Create class 'LocalDate'".into(),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![d.clone()]),
+                            ..Default::default()
+                        });
+                    }
+                    Some(lsp_types::NumberOrString::Number(67108967)) => out.push(fix(
+                        "Replace with RoundingMode.HALF_EVEN",
+                        d,
+                        vec![TextEdit::new(d.range, "RoundingMode.HALF_EVEN".into())],
+                    )),
+                    _ => {
+                        let l = d.range.start.line;
+                        out.push(fix(
+                            "Remove unused import",
+                            d,
+                            vec![TextEdit::new(
+                                Range::new(Position::new(l, 0), Position::new(l + 1, 0)),
+                                String::new(),
+                            )],
+                        ));
+                        out.push(CodeAction {
+                            title: "Organize imports".into(),
+                            kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+            for t in ["Generate toString()", "Generate hashCode() and equals()"] {
+                out.push(CodeAction { title: t.into(), kind: Some(CodeActionKind::SOURCE), ..Default::default() });
+            }
+            out
+        };
+        snout_app::editor::CannedLang {
+            actions: std::rc::Rc::new(actions),
+            hover: std::rc::Rc::new(|_, word| {
+                (word == "LocalDate").then(|| {
+                    "```java\njava.time.LocalDate\n```\nA date without a time-zone in the ISO-8601 calendar system, such as `2007-12-03`.".into()
+                })
+            }),
+        }
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -1233,6 +1343,102 @@ sleep 30
                     view.update(cx, |v, cx| v.find.update(cx, |i, cx| i.set_value("zebraPattern", window, cx)));
                 })
                 .unwrap();
+            }
+            Some(Select::Fixes(kind)) => {
+                std::fs::create_dir_all(repo.join("src/main/java/demo")).unwrap();
+                let file = repo.join("src/main/java/demo/Order.java");
+                std::fs::write(&file, SHOP).unwrap();
+                cx.update(|cx| cx.set_global(shop_lang(&file)));
+                let at = if kind == 1 { (3, 9) } else { (14, 4) };
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some(at)), cx)));
+                cx.run_until_parked();
+                let editor = editor_named(&ws, "Order.java", &mut cx);
+                cx.update(|cx| editor.update(cx, |e, cx| e.set_diagnostics(shop_problems(), cx)));
+                // The engine's problems in the project, for the Problems window.
+                cx.update_window(handle.into(), |_, window, cx| {
+                    use lsp_types::DiagnosticSeverity as S;
+                    let hub = ws.read(cx).hub.clone();
+                    let uri = |p: &str| snout_lang::uri::from_path(&repo.join(p)).as_str().to_owned();
+                    hub.update(cx, |h, cx| {
+                        // As the last compile reported them (the window lists both alike).
+                        let mut all: Vec<(String, lsp_types::Diagnostic)> =
+                            shop_problems().into_iter().map(|d| (uri("src/main/java/demo/Order.java"), d)).collect();
+                        for i in 0..14 {
+                            let msg = format!("The value of the local variable step{i} is not used");
+                            all.push((
+                                uri("src/main/java/demo/OrderService.java"),
+                                fix_diag(20 + i * 3, 12, 18, 536870973, S::WARNING, &msg),
+                            ));
+                        }
+                        all.push((
+                            uri("src/main/java/demo/OrderService.java"),
+                            fix_diag(9, 4, 30, 1, S::INFORMATION, "Field can be final"),
+                        ));
+                        let web = uri("src/main/java/demo/web/OrderController.java");
+                        all.push((
+                            web.clone(),
+                            fix_diag(
+                                31,
+                                15,
+                                26,
+                                16777235,
+                                S::ERROR,
+                                "Type mismatch: cannot convert from List<Order> to Order",
+                            ),
+                        ));
+                        all.push((
+                            web,
+                            fix_diag(
+                                12,
+                                7,
+                                40,
+                                268435844,
+                                S::WARNING,
+                                "The import org.springframework.http.HttpStatus is never used",
+                            ),
+                        ));
+                        h.set_build_problems(all, cx);
+                    });
+                    if kind >= 2 {
+                        ws.update(cx, |ws, cx| ws.show_problems(window, cx));
+                    }
+                })
+                .unwrap();
+                settle(handle.into(), &mut cx);
+                match kind {
+                    0 => cx.update(|cx| {
+                        editor.update(cx, |e, cx| {
+                            let t = e.text(cx);
+                            let at = t.find("LocalDate placed").unwrap() + 3;
+                            e.show_card(snout_app::editor::Spot::Text(at - 3..at + 6), at, cx);
+                        })
+                    }),
+                    1 => cx
+                        .update_window(handle.into(), |_, window, cx| {
+                            editor.update(cx, |e, cx| e.show_context_actions(window, cx));
+                        })
+                        .unwrap(),
+                    3 => cx
+                        .update_window(handle.into(), |_, window, cx| {
+                            let problems = ws.read(cx).problems.clone();
+                            problems.update(cx, |p, cx| {
+                                p.filter.update(cx, |f, cx| f.set_value("import", window, cx));
+                            });
+                        })
+                        .unwrap(),
+                    _ => {}
+                }
+                settle(handle.into(), &mut cx);
+                if kind == 3 {
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        let problems = ws.read(cx).problems.clone();
+                        problems.update(cx, |p, cx| {
+                            let i = p.problems.iter().position(|q| q.text.contains("java.util.Map")).unwrap();
+                            p.open_actions(i, gpui::point(px(430.), px(764.)), window, cx);
+                        });
+                    })
+                    .unwrap();
+                }
             }
             Some(Select::JdkBar) => {
                 cx.update_window(handle.into(), |_, _, cx| {
@@ -2516,6 +2722,13 @@ sleep 30
         real_debug_shot("debug-real-dark", ThemeChoice::Dark);
         real_java_shots(ThemeChoice::Dark);
         real_boot_shot(ThemeChoice::Dark);
+        for (mode, theme) in [("light", ThemeChoice::Light), ("dark", ThemeChoice::Dark)] {
+            for (i, what) in
+                ["fix-hover", "fix-actions", "problems-window", "problems-filtered"].into_iter().enumerate()
+            {
+                shot(&format!("{what}-{mode}"), theme, Activity::Project, Some(Select::Fixes(i as u8)));
+            }
+        }
         shot("editor-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));
         shot("editor-light", ThemeChoice::Light, Activity::Project, Some(Select::Editor));
         shot("palette-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Editor));

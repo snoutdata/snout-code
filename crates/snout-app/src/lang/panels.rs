@@ -1,5 +1,5 @@
-//! The bottom dock's Problems tab (every error and warning the servers report) and
-//! References tab (the last Find References), each row opening its place.
+//! The bottom dock's References tab (the last Find References), each row opening its place.
+//! The Problems tab is [`super::problems`].
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,6 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px, relative, uniform_list,
 };
 use lsp_types::{DiagnosticSeverity, Location, Position, Uri};
-use std::str::FromStr as _;
 
 use super::hub::{HubEvent, LangHub};
 use crate::look;
@@ -104,76 +103,7 @@ fn rows_view(id: &'static str, rows: Vec<Row>, hub: Entity<LangHub>, cx: &mut gp
     .px(px(4.))
 }
 
-/// Every problem the servers report.
-pub struct ProblemsPanel {
-    hub: Entity<LangHub>,
-    focus: FocusHandle,
-}
-
-impl ProblemsPanel {
-    pub fn new(hub: Entity<LangHub>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&hub, |_, _, cx| cx.notify()).detach();
-        Self { hub, focus: cx.focus_handle() }
-    }
-
-    /// Errors and warnings, as the tab counts them.
-    pub fn counts(&self, cx: &gpui::App) -> (usize, usize) {
-        let all = self.hub.read(cx).all_problems();
-        let errors = all.iter().filter(|(_, d)| d.severity == Some(DiagnosticSeverity::ERROR)).count();
-        (errors, all.len() - errors)
-    }
-}
-
-crate::panels::panel!(ProblemsPanel, "Problems", |_, _| "Problems".into(), true);
-
-impl Render for ProblemsPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
-        let hub = self.hub.read(cx);
-        let roots: Vec<PathBuf> = hub.servers.keys().cloned().collect();
-        let root_of = |path: &Path| roots.iter().filter(|r| path.starts_with(r)).max_by_key(|r| r.as_os_str().len());
-        let rows: Vec<Row> = hub
-            .all_problems()
-            .into_iter()
-            .filter_map(|(uri, d)| {
-                let uri = Uri::from_str(&uri).ok()?;
-                let path = snout_lang::uri::to_path(&uri);
-                let root = path.as_deref().and_then(root_of).or(roots.first());
-                Some(Row {
-                    file: short(&uri, root.map(PathBuf::as_path)).into(),
-                    place: format!("{}:{}", d.range.start.line + 1, d.range.start.character + 1).into(),
-                    text: d.message.lines().next().unwrap_or_default().to_owned().into(),
-                    severity: Some(d.severity.unwrap_or(DiagnosticSeverity::ERROR)),
-                    at: d.range.start,
-                    uri,
-                })
-            })
-            .collect();
-        let (errors, warnings) = self.counts(cx);
-        let summary = match (errors, warnings) {
-            (0, 0) => "No problems".to_owned(),
-            (e, w) => format!("{e} {}, {w} {}", plural(e, "error"), plural(w, "warning")),
-        };
-        let empty = rows.is_empty();
-        div()
-            .id("problems")
-            .size_full()
-            .bg(p.panel)
-            .flex()
-            .flex_col()
-            .text_size(px(12.5))
-            .when(!empty, |d| d.child(div().flex_none().px(px(10.)).py(px(4.)).text_color(p.weak()).child(summary)))
-            .when(empty, |d| {
-                d.child(
-                    crate::components::EmptyState::new(snout_core::art::spots::no_problems(), "No problems")
-                        .hint("Nothing to fix in the files the Java server checked.")
-                        .on(p.panel)
-                        .compact(),
-                )
-            })
-            .when(!empty, |d| d.child(rows_view("problem", rows, self.hub.clone(), cx)))
-    }
-}
+pub use super::problems::{ProblemsEvent, ProblemsPanel};
 
 fn plural(n: usize, word: &str) -> String {
     if n == 1 { word.to_owned() } else { format!("{word}s") }

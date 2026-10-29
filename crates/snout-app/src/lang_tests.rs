@@ -165,11 +165,10 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     let hello = hello.expect("the line is laid out");
     let hovered = pump_until(cx, 30, |cx| {
         cx.simulate_mouse_move(hello, None, Modifiers::none());
-        cx.update(|_, cx| editor.read(cx).state.read(cx).hover_popover().is_some())
+        cx.update(|_, cx| editor.read(cx).hover.card.as_ref().is_some_and(|c| c.info.is_some()))
     });
     assert!(hovered, "a hover shows");
-    let hover =
-        cx.update(|_, cx| format!("{:?}", editor.read(cx).state.read(cx).hover_popover().unwrap().hover.contents));
+    let hover = cx.update(|_, cx| editor.read(cx).hover.card.as_ref().unwrap().info.clone().unwrap());
     assert!(hover.contains("hello"), "{hover}");
 
     // Completion after `Lib.`.
@@ -259,19 +258,36 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     assert!(squiggles >= 1);
     caret_at(&editor, "\"text\"", 0, 1, cx);
     cx.simulate_keystrokes("cmd-.");
-    let fixes = pump_until(cx, 30, |cx| {
-        cx.update(|_, cx| !editor.read(cx).state.read(cx).code_action_menu_state().items.is_empty())
-    });
+    let fixes =
+        pump_until(cx, 30, |cx| {
+            cx.update(|_, cx| {
+                editor.read(cx).hover.actions.as_ref().is_some_and(|l| {
+                    l.entries.iter().any(|e| matches!(e, crate::editor::context_actions::Entry::Fix(_)))
+                })
+            })
+        });
     assert!(fixes, "quick fixes are offered");
     cx.simulate_keystrokes("escape");
-    // The Problems tab lists it, and a click goes to it.
+    // The Problems tab lists it under its file, and a double click goes to it.
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_problems(w, cx)));
     cx.run_until_parked();
     caret_at(&editor, "package", 0, 0, cx);
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_problems(w, cx)));
     cx.run_until_parked();
-    let row = cx.debug_bounds("problem-row-0").expect("a Problems row");
-    cx.simulate_click(row.center(), Modifiers::none());
+    let row = cx.debug_bounds("problem-row-1").expect("a Problems row");
+    cx.simulate_event(gpui::MouseDownEvent {
+        position: row.center(),
+        button: gpui::MouseButton::Left,
+        modifiers: Modifiers::none(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        position: row.center(),
+        button: gpui::MouseButton::Left,
+        modifiers: Modifiers::none(),
+        click_count: 2,
+    });
     cx.run_until_parked();
     let line = cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
     let bad_line = cx.update(|_, cx| editor.read(cx).problems[0].range.start.line);

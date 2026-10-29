@@ -828,7 +828,7 @@ pub fn send_selection(ws: &mut Workspace, window: &mut Window, cx: &mut Context<
     if !connected {
         let rel = root.as_ref().and_then(|r| path.strip_prefix(r).ok()).unwrap_or(&path).to_string_lossy().into_owned();
         if let (Some(console), Some(root)) = (console.as_ref(), root.as_ref()) {
-            console.update(cx, |c, _| c.type_text(root, &mention_text(&rel, lines)));
+            console.update(cx, |c, cx| c.type_when_ready(root, &mention_text(&rel, lines), cx));
         }
     }
     let shown: Range<usize> = match lines {
@@ -839,6 +839,65 @@ pub fn send_selection(ws: &mut Workspace, window: &mut Window, cx: &mut Context<
     editor.update(cx, |e, cx| e.light_in(std::iter::once(shown).collect(), color, window, cx));
     if let Some(console) = console {
         let note = sent_note(&name, lines, "Claude");
+        console.update(cx, |c, cx| c.show_note(note, cx));
+    }
+}
+
+/// How long after the `at_mentioned` the words of a request are typed, so they follow the
+/// mention in Claude Code's prompt.
+const AFTER_MENTION: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The prompt typed for an agent that hears no `at_mentioned`: the mention of the file and
+/// lines, then `text`.
+pub fn ask_prompt(rel: &str, lines: (u32, u32), text: &str) -> String {
+    format!("{}{text}", mention_text(rel, Some(lines)))
+}
+
+/// Ask to Fix (the hover card, the context actions, the Problems window): put the file's
+/// `lines` and `text` (what is wrong) in the prompt of the console's agent, and bring the
+/// console forward; the user reads it and presses Return. Claude Code connected to the window
+/// hears the lines as an `at_mentioned`, the words typed after it; any other agent (Codex, a
+/// command of your own, a `claude` not connected) gets the mention typed with them.
+pub fn ask_to_fix(
+    ws: &mut Workspace,
+    path: PathBuf,
+    lines: (u32, u32),
+    text: &str,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let agent = agents::console_agent(cx);
+    let connected = agent.id == agents::CLAUDE && ws.claude.as_ref().is_some_and(|b| b.clients() > 0);
+    if connected && let Some(b) = ws.claude.as_ref() {
+        b.server.notify("at_mentioned", mention_params(&path, Some(lines)));
+    }
+    show_console(ws, window, cx);
+    let console = crate::console::console_of(ws, cx);
+    let root = ws.model.read(cx).project_root();
+    let rel = root.as_ref().and_then(|r| path.strip_prefix(r).ok()).unwrap_or(&path).to_string_lossy().into_owned();
+    if let (Some(console), Some(root)) = (console.as_ref(), root.clone()) {
+        if connected {
+            let (console, words) = (console.downgrade(), text.to_owned());
+            cx.spawn(async move |_, cx| {
+                cx.background_executor().timer(AFTER_MENTION).await;
+                let _ = console.update(cx, |c, cx| c.type_when_ready(&root, &words, cx));
+            })
+            .detach();
+        } else {
+            console.update(cx, |c, cx| c.type_when_ready(&root, &ask_prompt(&rel, lines, text), cx));
+        }
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if let Some(editor) = ws.editors(cx).into_iter().find(|e| e.read(cx).path == path) {
+        let color = agent.color(&palette(cx));
+        let shown: Range<usize> = lines.0 as usize..lines.1 as usize + 1;
+        editor.update(cx, |e, cx| e.light_in(std::iter::once(shown).collect(), color, window, cx));
+    }
+    if let Some(console) = console {
+        let note = match lines {
+            (a, b) if a == b => format!("Asked {} to fix {name} line {}", agent.short, a + 1),
+            (a, b) => format!("Asked {} to fix {name} lines {}\u{2013}{}", agent.short, a + 1, b + 1),
+        };
         console.update(cx, |c, cx| c.show_note(note, cx));
     }
 }
@@ -1670,6 +1729,7 @@ pub fn editor_request(
         changes.read(cx).set.file(&path).and_then(|f| f.hunks.iter().position(|h| h.new_lines == *lines))
     };
     match request {
+        ClaudeRequest::AskToFix { lines, text } => ask_to_fix(ws, path.clone(), *lines, text, window, cx),
         ClaudeRequest::AcceptHunk(lines) => {
             if let Some(ix) = hunk(lines, cx) {
                 accept_hunk(ws, &path, ix, window, cx);

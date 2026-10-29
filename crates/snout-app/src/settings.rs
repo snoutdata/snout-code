@@ -107,6 +107,12 @@ pub struct Settings {
     pub show_whitespace: bool,
     /// Java editors show the names of the parameters literal arguments are passed to.
     pub param_hints: bool,
+    /// When the editor's hover (problems, their fixes and what a symbol is) shows: `after_delay`
+    /// (the pointer rests for `hover_delay_ms`) or `while_command_held`. ⌘ always shows it.
+    pub show_hover: ShowHover,
+    /// How long the pointer rests before the hover shows, in milliseconds (0 to 3000).
+    #[schemars(range(min = 0, max = 3000))]
+    pub hover_delay_ms: u64,
     /// How often the projects are fetched in the background, in minutes (5 to 120).
     #[schemars(range(min = 5, max = 120))]
     pub fetch_minutes: u64,
@@ -190,6 +196,32 @@ pub struct Settings {
     pub external_terminal_command: String,
 }
 
+/// When the editor's hover shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ShowHover {
+    /// Once the pointer rests on a symbol or a problem for the delay.
+    #[default]
+    AfterDelay,
+    /// Only while ⌘ is held.
+    WhileCommandHeld,
+}
+
+impl ShowHover {
+    pub const ALL: [Self; 2] = [Self::AfterDelay, Self::WhileCommandHeld];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AfterDelay => "After a delay",
+            Self::WhileCommandHeld => "Only while \u{2318} is held",
+        }
+    }
+}
+
+/// How long the pointer rests before the hover shows, by default, and at most.
+pub const HOVER_DELAY_MS: u64 = 500;
+pub const HOVER_DELAY_MAX: u64 = 3000;
+
 /// The shape of a terminal's cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum TerminalCursor {
@@ -240,6 +272,8 @@ impl Default for Settings {
             soft_wrap: false,
             show_whitespace: false,
             param_hints: true,
+            show_hover: ShowHover::default(),
+            hover_delay_ms: HOVER_DELAY_MS,
             fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,
             claude_path: None,
             console_agent: Default::default(),
@@ -416,6 +450,7 @@ pub fn migrate(mut s: Settings) -> Settings {
     s.terminal_font_size = s.terminal_font_size.filter(|v| (TERMINAL_FONT_MIN..=TERMINAL_FONT_MAX).contains(v));
     s.terminal_font = s.terminal_font.filter(|f| !f.trim().is_empty());
     s.terminal_scrollback = s.terminal_scrollback.clamp(1000, 1_000_000);
+    s.hover_delay_ms = s.hover_delay_ms.min(HOVER_DELAY_MAX);
     s
 }
 

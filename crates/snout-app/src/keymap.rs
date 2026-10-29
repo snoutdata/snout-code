@@ -79,6 +79,12 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-alt-shift-f", Box::new(e::ExtractField), Some("EditorPanel")),
         ("cmd-alt-n", Box::new(e::Inline), Some("EditorPanel")),
         ("ctrl-space", Box::new(i::ShowCompletions), Some("EditorPanel > Input")),
+        // Show Context Actions: the fixes and actions at the caret. ⌥↩ as in IntelliJ, and ⌘.
+        // (GPUI Kit's Quick Fix key) too; the menus show the last, ⌥↩. ⌥⇧↩ applies the best fix.
+        ("cmd-.", Box::new(e::ShowContextActions), Some("EditorPanel > Input")),
+        ("alt-enter", Box::new(e::ShowContextActions), Some("EditorPanel > Input")),
+        ("alt-enter", Box::new(e::ShowContextActions), Some("ProblemsPanel")),
+        ("alt-shift-enter", Box::new(e::ApplyTopFix), Some("EditorPanel > Input")),
         ("escape", Box::new(e::CancelRename), Some("RenameBox > Input")),
         ("cmd-t", Box::new(GoToSymbol), None),
         ("cmd-f12", Box::new(FileStructure), Some("EditorPanel")),
@@ -212,13 +218,26 @@ fn keys_of(b: &KeyBinding, cx: &App) -> String {
     b.keystrokes().iter().map(|k| k.unparse(os)).collect::<Vec<_>>().join(" ")
 }
 
-/// Keys as GPUI writes them (`cmd-shift-p`), as the menus show them (⇧⌘P).
+/// Keys as GPUI writes them (`cmd-shift-p`), as the menus show them (⇧⌘P; Return as ↩).
 pub fn display(keys: &str, cx: &App) -> String {
     let os = cx.platform_info().os;
     keys.split_whitespace()
         .map(|k| Keystroke::parse_with_os(k, os).map(|k| k.display(os).to_string()).unwrap_or_else(|_| k.to_owned()))
+        .map(|k| match k.strip_suffix("enter") {
+            Some(mods) if os == gpui::OperatingSystem::Mac => format!("{mods}\u{21a9}"),
+            _ => k,
+        })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The keys of `action` as the menus show them (its last binding, which they show), if
+/// it has any.
+pub fn shortcut(action: &dyn Action, cx: &App) -> Option<String> {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    let b = keymap.bindings_for_action(action).next_back()?;
+    Some(display(&keys_of(b, cx), cx))
 }
 
 /// One command of the keymap.

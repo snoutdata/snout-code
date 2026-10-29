@@ -4,10 +4,12 @@
 
 pub mod classes;
 pub mod edits;
+pub mod fixes;
 pub mod hierarchy;
 pub mod hub;
 pub mod java;
 pub mod panels;
+pub mod problems;
 pub mod providers;
 pub mod remote_engine;
 pub mod structure;

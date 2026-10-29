@@ -1392,6 +1392,28 @@ impl LangHub {
         async move { Ok(call.await?.as_str().unwrap_or_default().to_owned()) }
     }
 
+    /// Every diagnostic of every server and of the last compile, information and hints too,
+    /// with the build each came from (none for the compile's), in no order.
+    pub fn all_diagnostics(&self) -> Vec<(String, Diagnostic, Option<PathBuf>)> {
+        self.servers
+            .values()
+            .flat_map(|s| s.diagnostics.iter().map(move |(uri, list)| (s.root.clone(), uri, list)))
+            .flat_map(|(root, uri, list)| list.iter().map(move |d| (uri.clone(), d.clone(), Some(root.clone()))))
+            .chain(self.build_problems.iter().map(|(u, d)| (u.clone(), d.clone(), None)))
+            .collect()
+    }
+
+    /// The build whose engine reports on `uri` (or has it open), else any.
+    pub fn engine_root_for(&self, uri: &Uri) -> Option<PathBuf> {
+        let key = uri_key(uri);
+        self.servers
+            .values()
+            .find(|s| s.diagnostics.contains_key(&key))
+            .map(|s| s.root.clone())
+            .or_else(|| self.root_of(uri))
+            .or_else(|| self.servers.keys().next().cloned())
+    }
+
     /// Every diagnostic of every server, worst first then by file and line.
     pub fn all_problems(&self) -> Vec<(String, Diagnostic)> {
         let mut out: Vec<(String, Diagnostic)> = self

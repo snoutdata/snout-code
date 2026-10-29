@@ -51,6 +51,7 @@ impl EditorPanel {
             completions: RefCell::new((Vec::new(), Rope::new())),
             typed: std::cell::Cell::new(false),
             config: crate::spring::is_config_file(&path),
+            hovers: Default::default(),
         });
         providers::install(&link, &self.state, cx);
         self.lang = Some(link);
@@ -117,7 +118,11 @@ impl EditorPanel {
     /// Show what the server reports: squiggles (GPUI Kit draws them, and the message on
     /// hover) and a dot in the gutter.
     pub fn set_diagnostics(&mut self, list: Vec<lsp_types::Diagnostic>, cx: &mut Context<Self>) {
+        if self.problems != list {
+            self.hover.problems_rev += 1;
+        }
         self.problems = list;
+        self.bulb_soon(cx);
         // The engine has checked the file: its hints are known now.
         self.param_hints_soon(cx);
         let problems = self.problems.clone();
@@ -492,13 +497,16 @@ impl EditorPanel {
         }));
     }
 
-    /// A dot beside each line with an error or a warning.
+    /// A dot beside each line with an error or a warning; on the caret's line, when the
+    /// engine has fixes there, a bulb instead.
     pub(super) fn problem_marks(&self, cx: &App) -> impl IntoElement {
         let p = palette(cx);
         let (state, problems) = (self.state.clone(), self.problems.clone());
+        let (bulb, painted) = (self.hover.bulb, self.hover.bulb_painted.clone());
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
+                painted.set(None);
                 if problems.is_empty() {
                     return;
                 }
@@ -526,6 +534,26 @@ impl EditorPanel {
                     let Some(b) = s.range_to_bounds(&(at..at)) else { continue };
                     let r = px(3.5);
                     let center = point(bounds.left() + px(5.5), b.top() + line_height / 2.);
+                    if let Some(bulb) = bulb.filter(|b| b.line as usize == line) {
+                        let color = if bulb.error { p.error } else { p.warn };
+                        let size = px(12.);
+                        let at = gpui::Bounds::new(
+                            point(center.x - size / 2., center.y - size / 2.),
+                            gpui::size(size, size),
+                        );
+                        let ground = at.dilate(px(2.));
+                        window.paint_quad(gpui::fill(ground, color.opacity(0.16)).corner_radii(px(4.)));
+                        let _ = window.paint_svg(
+                            at,
+                            gpui_kit_assets::IconName::Lightbulb.path(),
+                            None,
+                            gpui::TransformationMatrix::unit(),
+                            color,
+                            cx,
+                        );
+                        painted.set(Some(ground));
+                        continue;
+                    }
                     let dot = gpui::Bounds::new(point(center.x - r, center.y - r), size(r * 2., r * 2.));
                     window.paint_quad(gpui::fill(dot, if error { p.error } else { p.warn }).corner_radii(r));
                 }
@@ -657,6 +685,7 @@ impl EditorPanel {
                 completions: RefCell::new((Vec::new(), Rope::new())),
                 typed: std::cell::Cell::new(false),
                 config: false,
+                hovers: Default::default(),
             });
             providers::install(&link, &self.state, cx);
             self.lang = Some(link);

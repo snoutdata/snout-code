@@ -390,16 +390,18 @@ fn the_engine_feeds_the_gutter_the_window_hints_fixes_and_properties(cx: &mut Te
         cx.update(|_, cx| {
             editor
                 .read(cx)
-                .state
-                .read(cx)
-                .code_action_menu_state()
-                .items
-                .iter()
-                .any(|i| i.action.title.contains("with @Qualifier"))
+                .hover
+                .actions
+                .as_ref()
+                .is_some_and(|l| l.entries.iter().any(|e| e.label("Claude").contains("with @Qualifier")))
         })
     });
     assert!(offered, "⌘. offers to inject one with @Qualifier");
-    cx.simulate_keystrokes("enter");
+    let pick = cx.update(|_, cx| {
+        let l = editor.read(cx).hover.actions.as_ref().unwrap();
+        l.entries.iter().position(|e| e.label("Claude").contains("with @Qualifier")).unwrap()
+    });
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.pick_action(pick, w, cx)));
     let fixed = pump_until(cx, 30, |cx| cx.update(|_, cx| editor.read(cx).text(cx).contains("@Qualifier(\"")));
     assert!(fixed, "the quick fix adds the qualifier");
     assert!(cx.update(|_, cx| {

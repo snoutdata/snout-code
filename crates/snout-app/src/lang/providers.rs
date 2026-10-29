@@ -9,7 +9,7 @@ use std::rc::Rc;
 use anyhow::Result;
 use gpui::{App, Entity, SharedString, Task, WeakEntity, Window};
 use gpui_component::input::{
-    CodeActionProvider, CompletionProvider, DefinitionProvider, EditorState, HoverProvider, Rope, RopeExt as _,
+    CodeActionProvider, CompletionProvider, DefinitionProvider, EditorState, Rope, RopeExt as _,
 };
 use lsp_types::{
     CodeAction, CodeActionOrCommand, CompletionContext, CompletionItem, CompletionResponse, CompletionTextEdit,
@@ -36,6 +36,8 @@ pub struct DocLink {
     pub typed: std::cell::Cell<bool>,
     /// A Spring Boot configuration file (properties or YAML), which the engine serves.
     pub config: bool,
+    /// The hover request of the word last asked about.
+    pub hovers: HoverCache,
 }
 
 impl DocLink {
@@ -55,6 +57,32 @@ impl DocLink {
     /// `textDocument` and `position` for byte `offset`.
     pub fn at(&self, text: &Rope, offset: usize) -> Value {
         json!({ "textDocument": { "uri": self.uri.as_str() }, "position": text::to_lsp(text, offset) })
+    }
+
+    /// What the server says about the symbol at byte `offset`: its markdown and the range
+    /// (bytes) it is about. The editor's hover card asks this; GPUI Kit's own hover is off.
+    pub fn hover_markdown(&self, text: &Rope, offset: usize, cx: &mut App) -> Task<Option<(String, Range<usize>)>> {
+        let call = self.hovers.hover(text, offset, cx, |cx| {
+            let call = self.ask(text, "textDocument/hover", self.at(text, offset), cx);
+            cx.background_executor().spawn(async move {
+                let v = call.await.map_err(|e| e.to_string())?;
+                if v.is_null() {
+                    return Ok(None);
+                }
+                let hover: Hover = serde_json::from_value(v).map_err(|e| e.to_string())?;
+                Ok((!hover_is_empty(&hover)).then_some(hover))
+            })
+        });
+        let rope = text.clone();
+        cx.background_executor().spawn(async move {
+            let hover = call.await.ok().flatten()?;
+            let range = hover
+                .range
+                .map(|r| text::range_from_lsp(&rope, r))
+                .or_else(|| rope.word_range(offset))
+                .unwrap_or(offset..offset);
+            Some((hover_markdown(&hover), range))
+        })
     }
 
     fn emit(&self, event: HubEvent, cx: &mut App) {
@@ -98,11 +126,11 @@ impl HoverCache {
 }
 
 /// The providers of one Java editor.
-pub struct JavaProviders(pub Rc<DocLink>, HoverCache);
+pub struct JavaProviders(pub Rc<DocLink>);
 
 impl JavaProviders {
     pub fn new(link: Rc<DocLink>) -> Self {
-        Self(link, HoverCache::default())
+        Self(link)
     }
 }
 
@@ -112,10 +140,13 @@ pub fn install(link: &Rc<DocLink>, state: &Entity<EditorState>, cx: &mut App) {
     let open_link = link.clone();
     state.update(cx, |s, cx| {
         let lsp = s.lsp_mut();
-        lsp.hover_provider = Some(providers.clone());
+        // The editor's own hover card shows what the server says, and the problems there.
+        lsp.hover_provider = None;
         lsp.completion_provider = Some(providers.clone());
-        lsp.definition_provider = Some(providers.clone());
-        lsp.code_action_providers = vec![providers];
+        lsp.definition_provider = Some(providers);
+        // The editor's own context actions (⌥↩, ⌘.) ask for code actions; GPUI Kit's menu
+        // has none to show.
+        lsp.code_action_providers.clear();
         lsp.completion_menu.max_width = gpui::px(520.);
         lsp.show_document = Some(Rc::new(move |params, _, cx| {
             if params.uri == open_link.uri {
@@ -142,25 +173,17 @@ pub fn uninstall(state: &Entity<EditorState>, cx: &mut App) {
     });
 }
 
-impl HoverProvider for JavaProviders {
-    fn hover(&self, text: &Rope, offset: usize, _: &mut Window, cx: &mut App) -> Task<Result<Option<Hover>>> {
-        let link = self.0.clone();
-        self.1.hover(text, offset, cx, |cx| {
-            let call = link.ask(text, "textDocument/hover", link.at(text, offset), cx);
-            let rope = text.clone();
-            cx.background_executor().spawn(async move {
-                let v = call.await.map_err(|e| e.to_string())?;
-                if v.is_null() {
-                    return Ok(None);
-                }
-                let mut hover: Hover = serde_json::from_value(v).map_err(|e| e.to_string())?;
-                if hover_is_empty(&hover) {
-                    return Ok(None);
-                }
-                hover.range = hover.range.map(|r| text::range_to_kit(&rope, r));
-                Ok(Some(hover))
-            })
-        })
+/// A hover's contents as one markdown text.
+pub fn hover_markdown(h: &Hover) -> String {
+    use lsp_types::{HoverContents, MarkedString};
+    let one = |m: &MarkedString| match m {
+        MarkedString::String(s) => s.clone(),
+        MarkedString::LanguageString(l) => format!("```{}\n{}\n```", l.language, l.value),
+    };
+    match &h.contents {
+        HoverContents::Scalar(m) => one(m),
+        HoverContents::Array(a) => a.iter().map(one).collect::<Vec<_>>().join("\n\n"),
+        HoverContents::Markup(m) => m.value.clone(),
     }
 }
 

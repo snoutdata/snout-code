@@ -178,7 +178,7 @@ pub enum SettingsEvent {
     /// (and close when `close` says so).
     Apply {
         user: Box<Settings>,
-        project: Option<ProjectSettings>,
+        project: Option<Box<ProjectSettings>>,
         close: bool,
     },
     /// Close, and open the settings of this scope as JSON in a tab.
@@ -447,6 +447,8 @@ impl SettingsView {
         next.soft_wrap = d.soft_wrap;
         next.show_whitespace = d.show_whitespace;
         next.param_hints = d.param_hints;
+        next.show_hover = d.show_hover;
+        next.hover_delay_ms = d.hover_delay_ms;
         next.fetch_minutes = d.fetch_minutes;
         next.daemon_idle_minutes = d.daemon_idle_minutes;
         next.claude_path = d.claude_path.clone();
@@ -473,7 +475,7 @@ impl SettingsView {
         next.external_terminal = d.external_terminal;
         next.external_terminal_command = d.external_terminal_command.clone();
         self.draft = next.clone();
-        cx.emit(SettingsEvent::Apply { user: Box::new(next), project, close });
+        cx.emit(SettingsEvent::Apply { user: Box::new(next), project: project.map(Box::new), close });
     }
 
     /// Change what the page shows: the user's settings, or in the project's scope, the
@@ -762,6 +764,12 @@ fn step_lines(lines: usize, by: i32) -> usize {
         100_000
     };
     (lines as i64 + i64::from(by) * step as i64).clamp(1_000, 1_000_000) as usize
+}
+
+/// The hover's delay one step up (`by` 1) or down: 50 ms at a time to 300, then 100.
+fn step_delay(ms: u64, by: i32) -> u64 {
+    let step = if ms < 300 || (ms == 300 && by < 0) { 50 } else { 100 };
+    (ms as i64 + i64::from(by) * step).clamp(0, crate::settings::HOVER_DELAY_MAX as i64) as u64
 }
 
 /// The daemons' idle time one step up (`by` 1) or down: a minute at a time up to 5, then 5.
@@ -1246,9 +1254,17 @@ impl SettingsView {
             Page::Keymap => body.child(self.keymap_page(cx)).into_any_element(),
             Page::Editor => {
                 let view = cx.entity();
-                let marks =
-                    [Key::TabSize, Key::SoftWrap, Key::ShowWhitespace, Key::ParamHints].map(|k| self.mark(k, cx));
-                let [tab_mark, wrap_mark, space_mark, hints_mark] = marks;
+                let marks = [
+                    Key::TabSize,
+                    Key::SoftWrap,
+                    Key::ShowWhitespace,
+                    Key::ParamHints,
+                    Key::ShowHover,
+                    Key::HoverDelayMs,
+                ]
+                .map(|k| self.mark(k, cx));
+                let [tab_mark, wrap_mark, space_mark, hints_mark, hover_mark, delay_mark] = marks;
+                let delay_view = cx.entity();
                 body.child(section("Indentation", &p))
                     .child(marked(
                         row(
@@ -1300,6 +1316,55 @@ impl SettingsView {
                         .debug_selector(|| "settings-param-hints".into())
                         .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.param_hints = !s.param_hints))),
                         hints_mark,
+                    ))
+                    .child(section("Hover", &p))
+                    .child(marked(
+                        row(
+                            "Show hover",
+                            div().flex().items_center().gap(px(6.)).children(crate::settings::ShowHover::ALL.map(
+                                |h| {
+                                    let (id, ico) = match h {
+                                        crate::settings::ShowHover::AfterDelay => {
+                                            ("settings-hover-delay", IconName::Timer)
+                                        }
+                                        crate::settings::ShowHover::WhileCommandHeld => {
+                                            ("settings-hover-command", IconName::Command)
+                                        }
+                                    };
+                                    look::toggle(id, ico, h.label(), d.show_hover == h, &p)
+                                        .debug_selector(move || id.to_owned())
+                                        .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.show_hover = h)))
+                                },
+                            )),
+                            &p,
+                        ),
+                        hover_mark,
+                    ))
+                    .child(marked(
+                        row(
+                            "Delay",
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(stepper(
+                                    "settings-hover-delay-ms",
+                                    d.hover_delay_ms.to_string(),
+                                    move |by, _, cx| {
+                                        delay_view.update(cx, |v, cx| {
+                                            v.set(cx, |s| s.hover_delay_ms = step_delay(s.hover_delay_ms, by))
+                                        })
+                                    },
+                                    &p,
+                                ))
+                                .child(div().text_color(p.fg_dim).child("ms")),
+                            &p,
+                        ),
+                        delay_mark,
+                    ))
+                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                        "For problems and their fixes, and what a symbol is. \u{2318} always shows it at once, \
+                         with the link to the declaration.",
                     ))
                     .child(section("Preview", &p))
                     .child(editor_preview(&d, &p))
