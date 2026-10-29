@@ -514,3 +514,93 @@ fn type_and_call_hierarchies_open_level_by_level(cx: &mut TestAppContext) {
     assert!(names.iter().any(|n| n == "Type Hierarchy") && names.iter().any(|n| n == "Call Hierarchy"));
     t.stop();
 }
+
+#[gpui::test]
+fn go_to_class_finds_project_library_and_jdk_classes(cx: &mut TestAppContext) {
+    let _engine = crate::tests::engine_lock();
+    let Some(t) = start(cx, "java-classes", "Shop.java") else { return };
+    let (ws, editor, cx) = (t.ws.clone(), t.editor.clone(), &mut *t.cx);
+    let rows = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            ws.read(cx)
+                .search
+                .as_ref()
+                .map(|s| {
+                    s.read(cx).items.iter().map(|i| (i.path.clone(), i.detail.clone().unwrap_or_default())).collect()
+                })
+                .unwrap_or_else(Vec::<(String, String)>::new)
+        })
+    };
+    // A class of the project, by the start of its name. Right after the start the index may
+    // still be filling: ask again until it answers.
+    let mut found = false;
+    for _ in 0..10 {
+        caret_at(&editor, "package", 0, 0, cx);
+        cx.simulate_keystrokes("cmd-alt-o");
+        assert!(cx.update(|_, cx| {
+            ws.read(cx).search.as_ref().is_some_and(|s| s.read(cx).mode == crate::search::Mode::Classes)
+        }));
+        cx.simulate_input("Circ");
+        let w = ws.clone();
+        let hit = pump_until(cx, 6, |cx| {
+            cx.update(|_, cx| {
+                w.read(cx).search.as_ref().is_some_and(|s| s.read(cx).items.iter().any(|i| i.path == "Circle"))
+            })
+        });
+        if hit {
+            found = true;
+            break;
+        }
+        cx.simulate_keystrokes("escape");
+    }
+    assert!(found, "Circle is found: {:?}", rows(cx));
+    let first = rows(cx)[0].clone();
+    assert_eq!(first, ("Circle".to_owned(), "demo.shop".to_owned()), "the project's class first");
+    // Only types: a method named alike is no class.
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("total");
+    pump_until(cx, 6, |_| false);
+    assert!(!rows(cx).iter().any(|(n, _)| n.starts_with("total")), "{:?}", rows(cx));
+    // A JDK class, by letters of its name in order, and its package and module beside it.
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("arrlist");
+    let w = ws.clone();
+    let jdk = pump_until(cx, 20, |cx| {
+        cx.update(|_, cx| {
+            w.read(cx).search.as_ref().is_some_and(|s| {
+                s.read(cx)
+                    .items
+                    .iter()
+                    .any(|i| i.path == "ArrayList" && i.detail.as_deref().is_some_and(|d| d.starts_with("java.util")))
+            })
+        })
+    });
+    assert!(jdk, "ArrayList of the JDK: {:?}", rows(cx));
+    // ↩ on it opens its source, read only.
+    let at = cx.update(|_, cx| {
+        let s = ws.read(cx).search.clone().unwrap();
+        let s = s.read(cx);
+        s.items
+            .iter()
+            .position(|i| i.path == "ArrayList" && i.detail.as_deref().is_some_and(|d| d.starts_with("java.util")))
+            .unwrap()
+    });
+    let search = cx.update(|_, cx| ws.read(cx).search.clone().unwrap());
+    cx.update(|_, cx| {
+        search.update(cx, |s, cx| {
+            s.selected = at;
+            s.open_selected(cx);
+        })
+    });
+    let w = ws.clone();
+    let opened = pump_until(cx, 60, |cx| {
+        cx.update(|_, cx| {
+            w.read(cx).editors(cx).iter().any(|e| {
+                let e = e.read(cx);
+                e.class_file.is_some() && e.text(cx).contains("class ArrayList")
+            })
+        })
+    });
+    assert!(opened, "ArrayList opens read only");
+    t.stop();
+}

@@ -1679,6 +1679,19 @@ mod shots {
         }
         pump(&mut cx, 1, &|_| false);
         save(&mut cx, "java-call-hierarchy");
+        cx.update_window(handle.into(), |_, window, cx| ws.update(cx, |w, cx| w.open_classes(window, cx))).unwrap();
+        let search = cx.update(|cx| ws.read(cx).search.clone()).expect("Go to Class");
+        cx.update_window(handle.into(), |_, window, cx| search.update(cx, |s, cx| s.set_query("Shap", window, cx)))
+            .unwrap();
+        pump(&mut cx, 30, &|cx| cx.update(|cx| search.read(cx).items.len() >= 3));
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-go-to-class");
+        cx.update(|cx| {
+            ws.update(cx, |w, cx| {
+                w.search = None;
+                cx.notify();
+            })
+        });
         cx.update_window(handle.into(), |_, window, cx| {
             ws.update(cx, |w, cx| w.toggle_tool(snout_app::workspace::Tool::Hierarchy, window, cx));
         })

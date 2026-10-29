@@ -45,6 +45,8 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-a", Box::new(i::SelectAll), Some("Workspace")),
         ("cmd-s", Box::new(e::Save), Some("EditorPanel")),
         ("cmd-p", Box::new(GoToFile), None),
+        // Go to Class: ⌘O opens a project.
+        ("cmd-alt-o", Box::new(GoToClass), None),
         ("cmd-shift-a", Box::new(SearchEverywhere), None),
         ("cmd-,", Box::new(OpenSettings), None),
         ("escape", Box::new(s::SearchClose), Some("BranchPopup")),

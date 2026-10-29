@@ -82,6 +82,8 @@ pub enum Mode {
     Symbols,
     /// The file's symbols as a tree, the one the caret is in picked (File Structure, ⌘F12).
     Structure,
+    /// Classes of the project, its libraries and the JDK (Go to Class, ⌥⌘O).
+    Classes,
 }
 
 /// Where the symbol box gets its rows: the query in, the matching symbols out.
@@ -134,7 +136,7 @@ pub struct Item {
     pub target: Option<(PathBuf, lsp_types::Uri, lsp_types::Position)>,
     /// For a symbol of the file's tree: its kind and visibility, how deep it is, and whether
     /// the caret is in it.
-    pub symbol: Option<(lsp_types::SymbolKind, crate::lang::symbols::Visibility)>,
+    pub symbol: Option<(lsp_types::SymbolKind, Option<crate::lang::symbols::Visibility>)>,
     pub depth: usize,
     pub current: bool,
 }
@@ -181,6 +183,7 @@ impl SearchView {
             Mode::Commands => "Type a command",
             Mode::Symbols => "Go to symbol",
             Mode::Structure => "Filter the file's symbols",
+            Mode::Classes => "Go to class, in the project, its libraries and the JDK",
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
@@ -190,19 +193,22 @@ impl SearchView {
         })
         .detach();
         let host = crate::host::host(cx);
-        let listing = (!matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols | Mode::Structure)).then(|| {
-            let list = cx.background_executor().spawn({
-                let (host, root) = (host.clone(), root.clone());
-                async move { list_files(&*host, &root) }
-            });
-            cx.spawn(async move |this, cx| {
-                let files = list.await;
-                let _ = this.update(cx, |this, cx| {
-                    this.files = Arc::new(files);
-                    this.update(cx);
-                });
-            })
-        });
+        let listing =
+            (!matches!(mode, Mode::GoToLine | Mode::Commands | Mode::Symbols | Mode::Structure | Mode::Classes)).then(
+                || {
+                    let list = cx.background_executor().spawn({
+                        let (host, root) = (host.clone(), root.clone());
+                        async move { list_files(&*host, &root) }
+                    });
+                    cx.spawn(async move |this, cx| {
+                        let files = list.await;
+                        let _ = this.update(cx, |this, cx| {
+                            this.files = Arc::new(files);
+                            this.update(cx);
+                        });
+                    })
+                },
+            );
         let mut this = Self {
             model,
             root,
@@ -265,7 +271,7 @@ impl SearchView {
                     .collect();
                 cx.notify();
             }
-            Mode::Symbols | Mode::Structure => {
+            Mode::Symbols | Mode::Structure | Mode::Classes => {
                 let Some(source) = self.symbols.clone() else { return };
                 self._search = Some(cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(Duration::from_millis(120)).await;
@@ -377,6 +383,8 @@ impl Render for SearchView {
             Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),
             Mode::Symbols => "No symbol matches".into(),
             Mode::Structure => "No symbol matches".into(),
+            Mode::Classes if self.input.read(cx).value().is_empty() => "Type a class name, or its capitals".into(),
+            Mode::Classes => "No class matches".into(),
         };
         // Nothing typed yet: a plain line saying what to type, no drawing.
         let blank = self.input.read(cx).value().trim().is_empty();
@@ -431,7 +439,7 @@ impl Render for SearchView {
                         .when_some(item.symbol, |d, (kind, visibility)| {
                             d.pl(px(8. + 16. * item.depth as f32))
                                 .child(crate::lang::symbols::badge(kind, &p))
-                                .child(crate::lang::symbols::visibility_mark(visibility, &p))
+                                .when_some(visibility, |d, v| d.child(crate::lang::symbols::visibility_mark(v, &p)))
                         })
                         .child(div().flex_none().whitespace_nowrap().child(name))
                         .child(div().flex_none().whitespace_nowrap().text_color(p.weak()).child(dir))

@@ -97,6 +97,7 @@ actions!(
         TypeHierarchy,
         CallHierarchy,
         ShowHierarchy,
+        GoToClass,
     ]
 );
 
@@ -142,6 +143,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Search Everywhere…", Box::new(SearchEverywhere)),
         ("Settings…", Box::new(OpenSettings)),
         ("Go to File…", Box::new(GoToFile)),
+        ("Go to Class…", Box::new(GoToClass)),
         ("Go to Line…", Box::new(GoToLine)),
         ("Find in Files…", Box::new(FindInFiles)),
         ("Find in File", Box::new(i::Search)),
@@ -361,6 +363,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Revert All Claude Changes", crate::claude_ide::RevertAllClaude),
         ]),
         Menu::new("Navigate").items([
+            MenuItem::action("Go to Class…", GoToClass),
             MenuItem::action("Go to File…", GoToFile),
             MenuItem::action("Go to Symbol in Workspace…", GoToSymbol),
             MenuItem::action("Go to Symbol in File…", GoToSymbolInFile),

@@ -2,6 +2,7 @@
 //! by the Gradle model). The hub runs the servers; the providers answer GPUI Kit's editor;
 //! the panels list problems and references.
 
+pub mod classes;
 pub mod edits;
 pub mod hierarchy;
 pub mod hub;

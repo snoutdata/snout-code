@@ -50,7 +50,17 @@ Rest the pointer on a name to see its type and documentation. On a squiggle, you
 - The definition opens in its file, with the caret on it.
 - A class of a library opens in a read only tab named after the class, such as `String.class`. It shows the library's source when the build has a source jar for it. The status bar shows a lock. You can go to definitions from there too.
 
-To find a class, method or field by name instead, use Go to Symbol (⌘T) or Search Everywhere (⇧⌘A). See [The editor](editor.md#go-to-symbol).
+To find a class, method or field by name instead, use Go to Class (⌥⌘O, below), Go to Symbol (⌘T) or Search Everywhere (⇧⌘A). See [The editor](editor.md#go-to-symbol).
+
+## Go to Class
+
+Press ⌥⌘O (Navigate ▸ Go to Class…) and type part of a class's name. It finds classes, interfaces, enums and records, of the project and of its libraries and the JDK too. (⌥⌘O, because ⌘O opens a project.)
+
+- Type the start of the name (`Circ`), its capitals (`AL` for `ArrayList`), or some of its letters in order (`arrlst`). The closest names come first, and the project's own classes before the libraries' when they match alike.
+- Each row shows the class's package, and for a library's class, the jar or the JDK module it comes from, such as `java.util  java.base`.
+- ↑ ↓ pick, ↩ opens the class. A library's class opens read only, with its source when the build has a source jar for it, as Go to Definition shows it.
+
+![Go to Class, with classes of the project and of the JDK](images/go-to-class.png)
 
 ## The structure of a file
 

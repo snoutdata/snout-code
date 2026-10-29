@@ -1398,6 +1398,7 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
+            .on_action(cx.listener(|this, _: &GoToClass, w, cx| this.open_classes(w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
             .on_action(cx.listener(|this, _: &crate::claude_ide::AcceptAllClaude, w, cx| {

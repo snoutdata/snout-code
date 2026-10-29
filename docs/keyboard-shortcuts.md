@@ -27,6 +27,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⇧⌘P | Command Palette… | |
 | ⇧⌘A | Search Everywhere… | |
 | ⌘P | Go to File… | |
+| ⌥⌘O | Go to Class… (⌘O is Open Project) | |
 | ⇧⌘F | Find in Files… | |
 | ⌘L | Go to Line… | |
 | ⌘T | Go to Symbol in Workspace… | |

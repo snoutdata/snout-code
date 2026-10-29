@@ -91,6 +91,7 @@ Press ⌘L (Edit ▸ Go to Line…) in an editor and type a line number, such as
 
 Symbols come from the Java engine, so these work for the Java files of a Gradle build.
 
+- **Go to Class** (⌥⌘O, Navigate ▸ Go to Class…): classes of the project, its libraries and the JDK, by name. See [Java](java.md#go-to-class).
 - **Go to Symbol in Workspace** (⌘T, Navigate ▸ Go to Symbol in Workspace…): classes, methods and fields of the whole project, by name.
 - **Go to Symbol in File** (⇧⌘O in an editor, Navigate ▸ Go to Symbol in File…): the symbols of the file in front.
 - **File Structure** (⌘F12 in an editor, Navigate ▸ File Structure…) and the **Structure** window (⌘7) show the file's symbols as a tree. See [Java](java.md#the-structure-of-a-file).

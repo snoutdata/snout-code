@@ -354,7 +354,7 @@ impl Workspace {
                         path: r.symbol.name.clone(),
                         detail: Some(r.symbol.detail.trim().to_owned()).filter(|d| !d.is_empty()),
                         target: Some((root.clone(), uri.clone(), r.symbol.selection.start)),
-                        symbol: Some((r.symbol.kind, r.symbol.visibility)),
+                        symbol: Some((r.symbol.kind, Some(r.symbol.visibility))),
                         depth: r.depth,
                         current: current.as_ref() == Some(&r.path),
                         ..Default::default()
@@ -364,6 +364,41 @@ impl Workspace {
         });
         let model = self.model.clone();
         let view = cx.new(|cx| SearchView::new(model, PathBuf::new(), Mode::Structure, window, cx));
+        view.update(cx, |v, cx| v.set_symbols(source, cx));
+        cx.subscribe_in(&view, window, move |this, _, e: &SearchEvent, window, cx| {
+            this.search = None;
+            match e {
+                SearchEvent::OpenLocation(root, uri, at) => {
+                    this.open_location(root.clone(), uri.clone(), *at, window, cx);
+                }
+                _ => window.focus(&this.focus, cx),
+            }
+            cx.notify();
+        })
+        .detach();
+        let v = view.clone();
+        cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
+        self.search = Some(view);
+        cx.notify();
+    }
+
+    /// ⌥⌘O: Go to Class, over the project's classes, its libraries' and the JDK's.
+    pub fn open_classes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let editor = self.active_editor(window, cx);
+        let root = editor.and_then(|e| e.read(cx).lang.as_ref().map(|l| l.root.clone())).or_else(|| {
+            let repo = self.model.read(cx).project_root()?;
+            self.hub.read(cx).engine_root(&repo)
+        });
+        let Some(root) = root else {
+            self.model.update(cx, |m, cx| {
+                m.message = "Classes come from the Java engine, which starts with a Gradle project".into();
+                cx.notify();
+            });
+            return;
+        };
+        let source = crate::lang::classes::source(self.hub.clone(), root);
+        let model = self.model.clone();
+        let view = cx.new(|cx| SearchView::new(model, PathBuf::new(), Mode::Classes, window, cx));
         view.update(cx, |v, cx| v.set_symbols(source, cx));
         cx.subscribe_in(&view, window, move |this, _, e: &SearchEvent, window, cx| {
             this.search = None;
