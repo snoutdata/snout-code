@@ -163,7 +163,12 @@ pub struct ConsolePanel {
     focused: bool,
     blink_shown: bool,
     blink_since: Instant,
+    /// A note over the console's corner for a moment: what was just sent to the agent.
+    note: Option<(SharedString, Instant)>,
 }
+
+/// How long the console's note shows.
+pub const NOTE_TIME: Duration = Duration::from_millis(4_000);
 
 impl gpui::EventEmitter<gpui_component::dock::PanelEvent> for ConsolePanel {}
 
@@ -240,7 +245,53 @@ impl ConsolePanel {
             focused: false,
             blink_shown: true,
             blink_since: Instant::now(),
+            note: None,
         }
+    }
+
+    /// Show `text` over the console's corner for a moment.
+    pub fn show_note(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.note = Some((text.into(), Instant::now()));
+        cx.notify();
+    }
+
+    /// The note showing now, if any.
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_ref().filter(|(_, at)| at.elapsed() < NOTE_TIME).map(|(t, _)| t.as_ref())
+    }
+
+    /// The note over the console's lower right corner.
+    fn note_view(&self, p: &Palette, cx: &App) -> Option<gpui::AnyElement> {
+        let text = self.note()?.to_owned();
+        let mark = p.claude().mark;
+        Some(
+            div()
+                .absolute()
+                .bottom(px(10.))
+                .right(px(14.))
+                .child(
+                    div()
+                        .id("console-note")
+                        .debug_selector(|| "console-note".into())
+                        .h(px(28.))
+                        .pl(px(8.))
+                        .pr(px(10.))
+                        .flex()
+                        .items_center()
+                        .gap(px(7.))
+                        .rounded(px(7.))
+                        .bg(p.card)
+                        .border_1()
+                        .border_color(mix(mark, 0.45, p.border))
+                        .shadow_md()
+                        .font_family(look::ui_font(cx))
+                        .text_size(px(12.))
+                        .text_color(p.fg)
+                        .child(crate::components::icon(crate::components::IconName::Send, 13., mark))
+                        .child(div().whitespace_nowrap().child(text)),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Show the cursor at once and start its blinking over (after a key, a click).
@@ -273,6 +324,10 @@ impl ConsolePanel {
 
     /// Redraw on new output; re-read the repository once the agent goes quiet.
     fn tick(&mut self, cx: &mut Context<Self>) {
+        if self.note.as_ref().is_some_and(|(_, at)| at.elapsed() >= NOTE_TIME) {
+            self.note = None;
+            cx.notify();
+        }
         if self.focused && self.model.read(cx).settings.terminal_cursor_blink {
             let shown = (self.blink_since.elapsed().as_millis() / BLINK.as_millis()).is_multiple_of(2);
             if shown != self.blink_shown {
@@ -767,7 +822,14 @@ impl Render for ConsolePanel {
                 ))
                 .into_any_element()
         };
-        div().size_full().bg(p.panel).flex().flex_col().child(header(title, Some(running), buttons)).child(body)
+        let note = self.note_view(&p, cx);
+        div()
+            .size_full()
+            .bg(p.panel)
+            .flex()
+            .flex_col()
+            .child(header(title, Some(running), buttons))
+            .child(div().relative().flex_1().min_h_0().flex().flex_col().child(body).children(note))
     }
 }
 

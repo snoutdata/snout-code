@@ -138,10 +138,12 @@ impl Drop for Review {
     }
 }
 
-/// Lines a followed edit changed, fading.
+/// Lines a followed edit changed (or lines sent to an agent), fading.
 pub struct Flash {
     pub lines: Vec<Range<usize>>,
     pub step: u32,
+    /// The colour they light in; none: the new text's.
+    pub color: Option<gpui::Hsla>,
 }
 
 /// The gutter runs of `hunks` (Claude's unreviewed changes) and each one's first line.
@@ -386,7 +388,7 @@ impl EditorPanel {
             let at = self.state.read(cx).text().line_start_offset(first);
             self.state.update(cx, |s, cx| s.set_selected_range(at..at, cx));
         }
-        self.flash = Some(Flash { lines, step: 0 });
+        self.flash = Some(Flash { lines, step: 0, color: None });
         self._flash_task = Some(cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(FLASH_TICK).await;
@@ -441,7 +443,7 @@ impl EditorPanel {
                 .collect(),
             None => Vec::new(),
         };
-        let flash = self.flash.as_ref().map(|f| (f.lines.clone(), f.strength()));
+        let flash = self.flash.as_ref().map(|f| (f.lines.clone(), f.strength(), f.color));
         // A live edit's parts, in its frame's bytes.
         let live = self.live.as_ref().map(|l| {
             let pulse = if l.striking() { 0.75 + 0.25 * ((l.tick as f32) * 0.35).sin().abs() } else { 1. };
@@ -507,10 +509,14 @@ impl EditorPanel {
                                 band(&line_run(r), lit);
                             }
                         }
-                        if let Some((runs, strength)) = &flash {
+                        if let Some((runs, strength, color)) = &flash {
+                            let (c, a) = match color {
+                                Some(c) => (*c, 0.28),
+                                None => (lit, (lit.a * 1.8).min(0.45)),
+                            };
                             for run in runs {
                                 // It starts brighter than the typed text's band, then fades.
-                                band(run, lit.opacity((lit.a * 1.8).min(0.45) * strength));
+                                band(run, c.opacity(a * strength));
                             }
                         }
                         for m in marks.iter().filter(|m| m.removed > 0) {
@@ -865,8 +871,23 @@ impl EditorPanel {
     /// at it part way).
     pub fn hold_flash(&mut self, lines: Vec<Range<usize>>, step: u32, cx: &mut Context<Self>) {
         self._flash_task = None;
-        self.flash = Some(Flash { lines, step });
+        self.flash = Some(Flash { lines, step, color: None });
         cx.notify();
+    }
+
+    /// Light `lines` in `color` and let them fade, the caret and the view staying where they
+    /// are (the lines just sent to an agent).
+    pub fn light_in(
+        &mut self,
+        lines: Vec<Range<usize>>,
+        color: gpui::Hsla,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.light(lines, window, cx);
+        if let Some(f) = self.flash.as_mut() {
+            f.color = Some(color);
+        }
     }
 
     /// Light `lines` and let them fade, the caret staying where it is.

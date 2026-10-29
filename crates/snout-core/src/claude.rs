@@ -10,8 +10,14 @@ use snout_host::{Cmd, Host, Process, Stdio};
 
 /// Inherited variables that would make Claude Code think it runs nested inside another
 /// session (the app started from a Claude Code terminal), or misreport the terminal.
-pub const ENV_REMOVE: &[&str] =
-    &["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "TERM_PROGRAM", "TERM_PROGRAM_VERSION"];
+pub const ENV_REMOVE: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SSE_PORT",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+];
 
 /// Patches longer than this are cut; the stat at their head still names every file.
 const MAX_PATCH: usize = 60_000;

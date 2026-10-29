@@ -713,12 +713,45 @@ fn track_selection(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Wor
     }
 }
 
-/// ⌥⌘K: tell Claude Code about the selection (or the file) in the editor in front, and
-/// bring its console forward. Without a connection, the mention is typed into the
-/// console instead.
+/// The `at_mentioned` notification for `path`, its lines `lines` (0-based, inclusive) or
+/// the whole file. Claude Code takes the lines as numbers or not at all: a `null` makes it
+/// drop the whole notification, so a whole file leaves them out.
+pub fn mention_params(path: &Path, lines: Option<(u32, u32)>) -> Value {
+    let mut v = json!({ "filePath": path.to_string_lossy() });
+    if let Some((a, b)) = lines {
+        v["lineStart"] = json!(a);
+        v["lineEnd"] = json!(b);
+    }
+    v
+}
+
+/// The mention as Claude Code types it into its prompt: `@path#L3-5 ` (1-based), the path
+/// from the project.
+pub fn mention_text(rel: &str, lines: Option<(u32, u32)>) -> String {
+    match lines {
+        Some((a, b)) if a == b => format!("@{rel}#L{} ", a + 1),
+        Some((a, b)) => format!("@{rel}#L{}-{} ", a + 1, b + 1),
+        None => format!("@{rel} "),
+    }
+}
+
+/// What the note by the console says was sent.
+pub fn sent_note(name: &str, lines: Option<(u32, u32)>, agent: &str) -> String {
+    match lines {
+        Some((a, b)) if a == b => format!("Sent {name} line {} to {agent}", a + 1),
+        Some((a, b)) => format!("Sent {name} lines {}\u{2013}{} to {agent}", a + 1, b + 1),
+        None => format!("Sent {name} to {agent}"),
+    }
+}
+
+/// ⌥⌘K: tell the agent about the selection (or the file) in the editor in front, and bring
+/// its console forward. Claude Code connected to the window hears it as an `at_mentioned`
+/// and puts the mention in its prompt; any other agent (or a `claude` not connected) gets
+/// the mention typed into the console. The lines sent light up for a moment, and a note by
+/// the console says what went.
 pub fn send_selection(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
-    let Some(editor) = ws.active_editor(window, cx) else { return };
-    let (path, lines) = {
+    let Some(editor) = ws.active_editor(window, cx).filter(|e| e.read(cx).class_file.is_none()) else { return };
+    let (path, name, lines) = {
         let e = editor.read(cx);
         let s = e.state.read(cx);
         let rope = s.text();
@@ -729,31 +762,30 @@ pub fn send_selection(ws: &mut Workspace, window: &mut Window, cx: &mut Context<
             let end = if b.character == 0 && b.line > a.line { b.line - 1 } else { b.line };
             (a.line, end)
         });
-        (e.path.clone(), lines)
+        (e.path.clone(), e.name().to_string(), lines)
     };
     let connected = ws.claude.as_ref().is_some_and(|b| b.clients() > 0);
     if connected && let Some(b) = ws.claude.as_ref() {
-        b.server.notify(
-            "at_mentioned",
-            json!({
-                "filePath": path.to_string_lossy(),
-                "lineStart": lines.map(|l| l.0),
-                "lineEnd": lines.map(|l| l.1),
-            }),
-        );
+        b.server.notify("at_mentioned", mention_params(&path, lines));
     }
     show_console(ws, window, cx);
+    let console = crate::console::console_of(ws, cx);
+    let root = ws.model.read(cx).project_root();
     if !connected {
-        let root = ws.model.read(cx).project_root();
         let rel = root.as_ref().and_then(|r| path.strip_prefix(r).ok()).unwrap_or(&path).to_string_lossy().into_owned();
-        let mention = match lines {
-            Some((a, b)) if a == b => format!("@{rel}#L{} ", a + 1),
-            Some((a, b)) => format!("@{rel}#L{}-{} ", a + 1, b + 1),
-            None => format!("@{rel} "),
-        };
-        if let (Some(console), Some(root)) = (crate::console::console_of(ws, cx), root) {
-            console.update(cx, |c, _| c.type_text(&root, &mention));
+        if let (Some(console), Some(root)) = (console.as_ref(), root.as_ref()) {
+            console.update(cx, |c, _| c.type_text(root, &mention_text(&rel, lines)));
         }
+    }
+    let shown: Range<usize> = match lines {
+        Some((a, b)) => a as usize..b as usize + 1,
+        None => 0..editor.read(cx).line_count(cx),
+    };
+    let color = palette(cx).claude().mark;
+    editor.update(cx, |e, cx| e.light_in(std::iter::once(shown).collect(), color, window, cx));
+    if let Some(console) = console {
+        let note = sent_note(&name, lines, "Claude");
+        console.update(cx, |c, cx| c.show_note(note, cx));
     }
 }
 

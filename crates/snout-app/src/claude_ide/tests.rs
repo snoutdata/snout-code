@@ -449,6 +449,47 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     let line = |s: &str| accepted.lines().position(|l| l.contains(s)).unwrap();
     assert_eq!(mention["lineStart"], line("public class"));
     assert_eq!(mention["lineEnd"], line("public String"));
+    // It shows: the lines sent light up in the editor, and a note by the console says what went.
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    let (first, last) = (line("public class") + 1, line("public String") + 1);
+    cx.update(|_, cx| {
+        let note = console.read(cx).note().map(str::to_owned);
+        assert_eq!(note, Some(format!("Sent Hello.java lines {first}\u{2013}{last} to Claude")));
+        let flash = editor.read(cx).flash.as_ref().expect("the lines sent light up");
+        assert_eq!(flash.lines, vec![first - 1..last]);
+        assert!(flash.color.is_some(), "in Claude's colour");
+    });
+
+    // No selection: the whole file, without lines. Claude Code drops a mention whose lines are
+    // null, so they are left out (its schema takes numbers or nothing).
+    cx.update(|w, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, cx| {
+            s.set_selected_range(0..0, cx);
+            s.focus(w, cx);
+        });
+    });
+    cx.simulate_keystrokes("cmd-alt-k");
+    pump_until(cx, "the whole file's mention", |_| c.notes("at_mentioned").len() >= 2);
+    let whole = c.notes("at_mentioned")[1].clone();
+    assert_eq!(whole, json!({ "filePath": hello.to_string_lossy() }), "no null lines");
+    cx.update(|_, cx| assert_eq!(console.read(cx).note(), Some("Sent Hello.java to Claude")));
+
+    // From the right click's menu, which has the keyboard while it shows: the editor it
+    // opened on.
+    cx.update(|w, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, cx| {
+            s.set_selected_range(0..4, cx);
+            s.focus(w, cx);
+        });
+        let at = gpui::point(gpui::px(200.), gpui::px(200.));
+        editor.update(cx, |e, cx| e.open_context_menu_at(at, true, None, w, cx));
+    });
+    pump(cx, 50);
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::editor::SendToClaude), cx));
+    pump_until(cx, "the menu's mention", |_| c.notes("at_mentioned").len() >= 3);
+    assert_eq!(c.notes("at_mentioned")[2]["lineStart"], 0);
 
     // The server goes with the window; so does its lock file.
     let lock_path = cx.update(|_, cx| ws.read(cx).claude.as_ref().unwrap().server.lock_path().unwrap());
