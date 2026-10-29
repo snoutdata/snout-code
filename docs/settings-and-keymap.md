@@ -58,6 +58,12 @@ and warnings differ in lightness as well as colour.
 - **Size**: from 8 to 32. The default is 13. View ▸ Zoom In (⌘=), Zoom Out (⌘-) and Actual
   Size (⌘0) change it too.
 
+**Quitting**
+
+- **Confirm before quitting** (on by default): ⌘Q and the window's close button ask first.
+  Off, SnoutCode quits at once, unless quitting would lose unsaved changes or stop something
+  running: then it always asks. See [Quitting](getting-started.md#quitting).
+
 ## Editor
 
 **Indentation**

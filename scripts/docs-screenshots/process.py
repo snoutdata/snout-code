@@ -12,6 +12,7 @@ from PIL import Image
 # output name: (raw name, crop box (left, top, right, bottom) or None)
 SPEC = {
     "getting-started-welcome": ("welcome-light", None),
+    "getting-started-quit": ("quit-dialog-light", (760, 120, 2120, 860)),
     "projects-project-view": ("projects-project-view-light", None),
     "projects-new-spring": ("projects-new-spring-light", (580, 260, 2300, 1540)),
     "projects-new-dependencies": ("projects-new-deps-light", (580, 260, 2300, 1540)),

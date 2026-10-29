@@ -72,7 +72,9 @@ impl Page {
     /// Words the search finds the page by, besides its title.
     fn keywords(self) -> &'static str {
         match self {
-            Page::Appearance => "theme colors studio vivid deep classic dark light system font size interface",
+            Page::Appearance => {
+                "theme colors studio vivid deep classic dark light system font size interface quit quitting confirm"
+            }
             Page::Keymap => "shortcuts keys bindings",
             Page::Editor => "tab size indent soft wrap whitespace font",
             Page::VersionControl => "git fetch interval background",
@@ -480,6 +482,23 @@ impl SettingsView {
                             &p,
                         ),
                         &p,
+                    ))
+                    .child(section("Quitting", &p))
+                    .child(
+                        div().py(px(6.)).child(
+                            look::checkbox(
+                                "settings-confirm-quit",
+                                "Confirm before quitting",
+                                d.confirm_quit,
+                                true,
+                                &p,
+                            )
+                            .debug_selector(|| "settings-confirm-quit".into())
+                            .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.confirm_quit = !s.confirm_quit))),
+                        ),
+                    )
+                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(
+                        "SnoutCode always asks when quitting would lose unsaved changes or stop something running.",
                     ))
                     .into_any_element()
             }

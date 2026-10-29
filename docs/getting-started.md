@@ -76,6 +76,28 @@ its repository. Add `:line` or `:line:column` to a file to put the caret there.
 /Applications/SnoutCode.app/Contents/MacOS/snout-code ~/projects/shop/src/main/java/shop/App.java:42
 ```
 
+## Quitting
+
+Press ⌘Q (SnoutCode ▸ Quit SnoutCode), or close the window: closing the last window quits.
+SnoutCode asks first:
+
+![Quit SnoutCode?](images/getting-started-quit.png)
+
+*Quitting with a file unsaved and a program running.*
+
+- With unsaved files, it names them: **Save All and Quit** (⏎) saves them first, **Discard
+  and Quit** (⌘⌫) drops the changes, **Cancel** (Esc) stays.
+- It names what would stop: a program running or being debugged, a Gradle build or tests in
+  progress, Claude Code editing a file, and on a remote machine the connection and what the
+  project runs there.
+- When nothing would be lost or stopped, tick **Don't ask again** to quit at once from then
+  on. Settings ▸ Appearance ▸ **Confirm before quitting** turns the question back on. It is
+  always asked when something would be lost or stopped.
+
+The window goes the moment you quit. The Java engine, its language server and Gradle daemons,
+and the programs and terminals SnoutCode started are stopped right after, in the background,
+so you can open SnoutCode again at once.
+
 ## Java support
 
 Java support starts by itself for a Gradle project. While the Java engine starts, the status

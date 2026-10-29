@@ -108,10 +108,17 @@ pub fn run() {
         remote::askpass::run();
         return;
     }
+    // A quitting app hands its processes to this program again, run as the reaper.
+    if std::env::var_os(workspace::quit::REAP_ENV).is_some() {
+        workspace::quit::reap();
+        return;
+    }
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut App| {
         // The workspace's host, made here: this thread is the UI thread.
         cx.set_global(host::HostGlobal(snout_host::from_env()));
+        // Quitting hides the app and exits it (the tests keep their process).
+        cx.set_global(workspace::quit::RealQuit);
         let store = Store::for_user();
         let settings = store.as_ref().map(Store::load).unwrap_or_default();
         init(&settings, cx);
@@ -136,10 +143,10 @@ pub fn run() {
     });
 }
 
-/// SIGTERM, SIGINT and SIGHUP quit the app as ⌘Q does, without asking about unsaved tabs:
-/// the quit handlers stop the engines (and with them jdtls, the Gradle runs and the programs
-/// being run or debugged) instead of leaving them behind. A second signal while that runs
-/// ends the app at once.
+/// SIGTERM, SIGINT and SIGHUP quit the app as ⌘Q does once answered, without asking about
+/// unsaved tabs: the window goes and the engines (and with them jdtls, the Gradle runs and
+/// the programs being run or debugged) are stopped rather than left behind. A second signal
+/// while that runs ends the app at once.
 fn quit_on_signals(cx: &mut App) {
     use std::sync::atomic::{AtomicBool, Ordering};
     static SIGNALLED: AtomicBool = AtomicBool::new(false);
@@ -158,7 +165,7 @@ fn quit_on_signals(cx: &mut App) {
             cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
             if SIGNALLED.load(Ordering::SeqCst) {
                 eprintln!("Quitting on a signal");
-                cx.update(|cx| cx.quit());
+                cx.update(workspace::quit::quit_from_signal);
                 return;
             }
         }

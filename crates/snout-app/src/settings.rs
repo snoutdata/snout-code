@@ -118,6 +118,9 @@ pub struct Settings {
     /// How long the Java engine's own Gradle daemons stay without a build before they stop, in
     /// minutes.
     pub daemon_idle_minutes: u64,
+    /// Ask before quitting, even when nothing would be lost or stopped (when something
+    /// would, SnoutCode always asks).
+    pub confirm_quit: bool,
 }
 
 impl Default for Settings {
@@ -152,6 +155,7 @@ impl Default for Settings {
             sessions: Default::default(),
             keymap: Default::default(),
             daemon_idle_minutes: crate::processes::DEFAULT_IDLE_MINUTES,
+            confirm_quit: true,
         }
     }
 }

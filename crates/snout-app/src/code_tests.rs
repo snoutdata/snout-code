@@ -901,3 +901,48 @@ fn the_status_bar_shows_where_the_file_sits(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("breadcrumbs").is_none());
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn quitting_asks_about_unsaved_files_and_what_runs_and_may_skip_the_question(cx: &mut TestAppContext) {
+    use crate::model::{Dialog, QuitChoice};
+    let (repo, model, ws, editor, cx) = open_text("Q.java", "class Q {}\n", (0, 0), cx);
+    // Nothing to lose: the dialog asks, as Settings says, and offers not to ask again.
+    cx.dispatch_action(crate::menus::Quit);
+    cx.run_until_parked();
+    let dialog = cx.update(|_, cx| model.read(cx).dialog.clone());
+    assert!(matches!(&dialog, Some(Dialog::Quit(info)) if info.is_empty()), "{dialog:?}");
+    cx.update(gpui_component::WindowExt::close_all_dialogs);
+    // A changed tab: named, and asked about even with the question switched off.
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.state.update(cx, |s, cx| s.insert("x", w, cx))));
+    cx.update(|_, cx| model.update(cx, |m, _| m.settings.confirm_quit = false));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.request_quit(w, cx)));
+    cx.run_until_parked();
+    let dialog = cx.update(|_, cx| model.read(cx).dialog.clone());
+    match &dialog {
+        Some(Dialog::Quit(info)) => assert_eq!(info.unsaved, ["Q.java"]),
+        other => panic!("{other:?}"),
+    }
+    cx.update(gpui_component::WindowExt::close_all_dialogs);
+    cx.update(|_, cx| assert!(!ws.read(cx).quitting, "Cancel stays"));
+    // Save All and Quit: written, then the app goes.
+    act(&model, cx, Action::Quit(QuitChoice { save: Some(true), dont_ask: false }));
+    for _ in 0..20 {
+        cx.executor().advance_clock(std::time::Duration::from_millis(50));
+        cx.run_until_parked();
+    }
+    assert_eq!(std::fs::read_to_string(repo.join("Q.java")).unwrap(), "xclass Q {}\n");
+    cx.update(|_, cx| assert!(ws.read(cx).quitting));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn with_nothing_to_lose_and_the_question_off_quitting_goes_at_once(cx: &mut TestAppContext) {
+    let (repo, model, ws, _, cx) = open_text("R.java", "class R {}\n", (0, 0), cx);
+    act(&model, cx, Action::Quit(crate::model::QuitChoice { save: None, dont_ask: true }));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(!model.read(cx).settings.confirm_quit, "Don't ask again switches the question off");
+        assert!(ws.read(cx).quitting);
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}

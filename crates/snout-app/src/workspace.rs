@@ -31,6 +31,7 @@ use crate::status::StatusBar;
 use crate::theme::{self, palette};
 
 mod lang_ui;
+pub mod quit;
 mod remote_ui;
 mod run_ui;
 pub mod session;
@@ -129,6 +130,8 @@ pub struct Workspace {
     /// The project whose tabs show.
     shown: Option<PathBuf>,
     _save_layout: Option<Task<()>>,
+    /// Quitting has begun: the window is going.
+    pub quitting: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -474,6 +477,7 @@ impl Workspace {
             panels,
             shown: root.clone(),
             _save_layout: None,
+            quitting: false,
             _subscriptions: subscriptions,
         };
         crate::claude_ide::bridge::start(&mut this, window, cx);
@@ -496,12 +500,23 @@ impl Workspace {
         }
         let size = this.model.read(cx).settings.editor_font_size;
         cx.set_global(crate::editor::EditorFont(size.clamp(crate::editor::FONT_MIN, crate::editor::FONT_MAX)));
-        // Closing the window with unsaved changes asks first.
+        // Closing the last window quits: as ⌘Q does, asking first if need be. Another
+        // window closes on its own, asking about its unsaved changes.
         let weak = cx.weak_entity();
+        cx.set_global(quit::CurrentWorkspace(weak.clone()));
         window.on_window_should_close(cx, move |window, cx| {
+            let last = cx.windows().len() <= 1;
             weak.update(cx, |this, cx| {
+                if this.quitting {
+                    return true;
+                }
                 this.save_layout(cx);
-                this.confirm_unsaved(false, window, cx)
+                if last {
+                    this.request_quit(window, cx);
+                    false
+                } else {
+                    this.confirm_unsaved(false, window, cx)
+                }
             })
             .unwrap_or(true)
         });
@@ -905,6 +920,7 @@ impl Workspace {
             ModelEvent::Closed => self.after_close(window, cx),
             ModelEvent::Switch(path) => self.switch_project(path.clone(), window, cx),
             ModelEvent::NewProject => self.open_new_project(window, cx),
+            ModelEvent::Quit(choice) => self.on_quit_choice(*choice, window, cx),
             ModelEvent::PickRemoteFolder(then) => self.pick_remote(remote_ui::Purpose::Then(then.0), window, cx),
             ModelEvent::OpenFile(path, at, preview) => {
                 model.update(cx, |m, _| m.pending_file = None);
@@ -1603,11 +1619,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &crate::editor::SendToClaude, w, cx| {
                 crate::claude_ide::bridge::send_selection(this, w, cx)
             }))
-            .on_action(cx.listener(|this, _: &Quit, w, cx| {
-                if this.confirm_unsaved(true, w, cx) {
-                    cx.quit();
-                }
-            }))
+            .on_action(cx.listener(|this, _: &Quit, w, cx| this.request_quit(w, cx)))
             .on_action(cx.listener(|this, _: &PrevCommit, w, cx| this.step_commit(true, w, cx)))
             .on_action(cx.listener(|this, _: &NextCommit, w, cx| this.step_commit(false, w, cx)));
         let root = act!(root, Open, free, |_| Action::PickFolder);
@@ -1788,7 +1800,7 @@ fn in_terminal(window: &Window) -> bool {
 
 /// Actions every window answers, whatever has focus.
 pub fn app_actions(cx: &mut App) {
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Quit, cx| quit::quit_requested(cx));
     cx.on_action(|_: &Source, cx| cx.open_url(SOURCE_URL));
     cx.on_action(|_: &Issues, cx| cx.open_url(ISSUES_URL));
     cx.on_action(|_: &Website, cx| cx.open_url(WEBSITE_URL));

@@ -407,6 +407,25 @@ fn settings_pages(projects: &Path) {
         w.pump(2, &mut |_| false);
         w.snap(name);
     }
+    // Quit SnoutCode?, with a file unsaved and the application running.
+    let shop = copy(projects, "settings", "shop");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);
+    let e = w.open(&shop.join("src/main/java/com/example/shop/service/OrderService.java"), Some((22, 0)));
+    w.caret(&e, "public", 0);
+    w.insert(&e, " ");
+    w.with(|ws, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let mut info = ws.quit_info(cx);
+            info.stops.push("Running ShopApplication".into());
+            ws.model.update(cx, |m, cx| {
+                m.dialog = Some(snout_app::model::Dialog::Quit(info));
+                cx.emit(snout_app::model::ModelEvent::Dialog);
+            });
+            let _ = window;
+        })
+    });
+    w.pump(2, &mut |_| false);
+    w.snap("quit-dialog-light");
 }
 
 fn git(projects: &Path, theme: ThemeChoice, mode: &str) {

@@ -88,18 +88,60 @@ pub enum Mood {
 pub enum Dialog {
     About,
     Error(String),
-    Info { title: String, text: String, mood: Mood },
+    Info {
+        title: String,
+        text: String,
+        mood: Mood,
+    },
     ConfirmDiscard(Vec<FileEntry>),
     ConfirmCheckout(CheckoutTarget),
     Checkout,
     NewBranch(Option<StartPoint>),
-    DeleteBranch { name: String, upstream: Option<RemoteRef> },
+    DeleteBranch {
+        name: String,
+        upstream: Option<RemoteRef>,
+    },
     DeleteRemoteBranch(RemoteRef),
     ConfirmDeleteFiles(Vec<FileEntry>),
-    PullProblem { problem: PullProblem, details: String },
+    PullProblem {
+        problem: PullProblem,
+        details: String,
+    },
     InitRepo(PathBuf),
-    GroupName { rename: Option<String>, repo: Option<PathBuf> },
-    Clone { parent: String },
+    GroupName {
+        rename: Option<String>,
+        repo: Option<PathBuf>,
+    },
+    Clone {
+        parent: String,
+    },
+    /// Quit SnoutCode? What would be lost or stopped.
+    Quit(QuitInfo),
+}
+
+/// What quitting now would lose or stop, for the Quit dialog.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct QuitInfo {
+    /// The names of the tabs with unsaved changes.
+    pub unsaved: Vec<String>,
+    /// What would stop, in plain words: "Debugging Main", "Gradle build :app:build".
+    pub stops: Vec<String>,
+}
+
+impl QuitInfo {
+    /// Nothing would be lost or stopped: the dialog may be skipped.
+    pub fn is_empty(&self) -> bool {
+        self.unsaved.is_empty() && self.stops.is_empty()
+    }
+}
+
+/// How the user answered the Quit dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuitChoice {
+    /// Save the unsaved tabs first (true), drop them (false), or there were none.
+    pub save: Option<bool>,
+    /// "Don't ask again" was ticked.
+    pub dont_ask: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -174,6 +216,8 @@ pub enum Action {
     ClearRecent,
     /// Put up the New Project dialog.
     ShowNewProject,
+    /// Quit, as the Quit dialog was answered.
+    Quit(QuitChoice),
 }
 
 /// What the workspace should do in response to the model.
@@ -201,6 +245,8 @@ pub enum ModelEvent {
     /// Ask for a folder of the remote machine the window works on (the Mac's folder dialog
     /// cannot see it), then handle the action made of it.
     PickRemoteFolder(AfterPick),
+    /// Quit, as the Quit dialog was answered.
+    Quit(QuitChoice),
 }
 
 /// What to do with a folder picked: the action made of it.
@@ -1309,6 +1355,12 @@ impl Model {
             Action::ToggleConsole => {
                 self.settings.console_open = !self.settings.console_open;
                 cx.emit(ModelEvent::ToggleConsole);
+            }
+            Action::Quit(choice) => {
+                if choice.dont_ask {
+                    self.settings.confirm_quit = false;
+                }
+                cx.emit(ModelEvent::Quit(choice));
             }
             Action::Copy(text) => cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)),
             Action::Reveal(path) => cx.reveal_path(&path),

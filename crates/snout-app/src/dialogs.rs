@@ -39,7 +39,7 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
         window.close_all_dialogs(cx);
     }
     let width = match dialog {
-        Dialog::Checkout => 600.,
+        Dialog::Checkout | Dialog::Quit(_) => 600.,
         Dialog::Error(_) | Dialog::PullProblem { .. } | Dialog::Clone { .. } | Dialog::ConfirmCheckout(_) => 560.,
         _ => 520.,
     };
@@ -137,6 +137,17 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
             Some(spots::clone_repo()),
             Some("Copy a remote repository to this computer and open it.".into()),
         ),
+        Dialog::Quit(info) if info.is_empty() => {
+            (Tone::Neutral, Some(spots::info()), Some("The window closes, and the Java engine stops with it.".into()))
+        }
+        Dialog::Quit(info) if info.unsaved.is_empty() => {
+            (Tone::Warning, Some(spots::warning()), Some("What runs now stops when SnoutCode quits.".into()))
+        }
+        Dialog::Quit(info) => {
+            let files =
+                if info.unsaved.len() == 1 { "a file".to_owned() } else { format!("{} files", info.unsaved.len()) };
+            (Tone::Warning, Some(spots::warning()), Some(format!("You have unsaved changes in {files}.").into()))
+        }
     }
 }
 
@@ -167,6 +178,7 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
             let _ = m;
             "Clone repository".into()
         }
+        Dialog::Quit(_) => "Quit SnoutCode?".into(),
     }
 }
 
@@ -181,6 +193,8 @@ pub struct DialogBody {
     with_upstream: bool,
     local: LocalChanges,
     cursor: usize,
+    /// Quit: "Don't ask again" is ticked.
+    dont_ask: bool,
     /// Holds the keyboard in a dialog with no field, so ⌘⌫ and ⏎ reach it.
     focus: FocusHandle,
 }
@@ -240,6 +254,7 @@ impl DialogBody {
             with_upstream: false,
             local: LocalChanges::Keep,
             cursor: 0,
+            dont_ask: false,
         }
     }
 
@@ -307,6 +322,11 @@ impl DialogBody {
     fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.dialog {
             Dialog::About | Dialog::Error(_) | Dialog::Info { .. } => self.close(window, cx),
+            Dialog::Quit(ref info) => {
+                let save = (!info.unsaved.is_empty()).then_some(true);
+                let dont_ask = self.dont_ask && info.is_empty();
+                self.act(Action::Quit(crate::model::QuitChoice { save, dont_ask }), window, cx)
+            }
             Dialog::NewBranch(_) | Dialog::GroupName { .. } | Dialog::Clone { .. } | Dialog::Checkout => {
                 self.confirm(window, cx)
             }
@@ -325,6 +345,9 @@ impl DialogBody {
                 upstream: upstream.filter(|_| self.with_upstream),
             }),
             Dialog::DeleteRemoteBranch(r) => Some(Action::DeleteRemoteBranch(r)),
+            Dialog::Quit(info) if !info.unsaved.is_empty() => {
+                Some(Action::Quit(crate::model::QuitChoice { save: Some(false), dont_ask: false }))
+            }
             _ => None,
         }
     }
@@ -374,6 +397,105 @@ fn pick_items(m: &Model, query: &str) -> Vec<PickItem> {
         items.push(PickItem { target, label: query.to_owned(), detail: described, section: "Commit" });
     }
     items
+}
+
+/// The Cancel button of a dialog.
+fn cancel_button(cx: &mut Context<DialogBody>) -> AnyElement {
+    Button::new("cancel")
+        .focusable()
+        .label("Cancel")
+        .kbd("Esc")
+        .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
+        .into_any_element()
+}
+
+impl DialogBody {
+    /// Quit SnoutCode?: what stops and what is unsaved, and the buttons for it.
+    fn quit_body(
+        &mut self,
+        info: &crate::model::QuitInfo,
+        body: &mut Vec<AnyElement>,
+        buttons: &mut Vec<AnyElement>,
+        cancel: AnyElement,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::model::QuitChoice;
+        let p = palette(cx);
+        if !info.unsaved.is_empty() {
+            body.push(
+                div()
+                    .id("quit-unsaved")
+                    .max_h(px(150.))
+                    .overflow_y_scrollbar()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .children(info.unsaved.iter().enumerate().map(|(i, name)| {
+                        FileChip::new(("quit-file", i), name.clone()).status("Unsaved", p.warn).max_chars(46)
+                    }))
+                    .into_any_element(),
+            );
+        }
+        if !info.stops.is_empty() {
+            let lines = info.stops.iter().map(|s| format!("• {s}")).collect::<Vec<_>>().join("\n");
+            body.push(
+                crate::components::callout_with(Tone::Warning, Some("These stop:".into()), lines, &p)
+                    .debug_selector(|| "quit-stops".into())
+                    .into_any_element(),
+            );
+        }
+        if info.is_empty() {
+            let on = self.dont_ask;
+            body.push(
+                Checkbox::new("quit-dont-ask")
+                    .label("Don't ask again (Settings, Appearance: Confirm before quitting)")
+                    .checked(on)
+                    .on_click(cx.listener(|this, v: &bool, _, cx| {
+                        this.dont_ask = *v;
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+        }
+        buttons.push(cancel);
+        let quit = |save: Option<bool>, dont_ask: bool| Action::Quit(QuitChoice { save, dont_ask });
+        if info.unsaved.is_empty() {
+            buttons.push(
+                Button::new("ok")
+                    .primary()
+                    .focusable()
+                    .icon(IconName::Power)
+                    .label("Quit")
+                    .kbd("⏎")
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        let dont_ask = this.dont_ask;
+                        this.act(quit(None, dont_ask), w, cx)
+                    }))
+                    .into_any_element(),
+            );
+        } else {
+            buttons.push(
+                Button::new("danger")
+                    .danger()
+                    .focusable()
+                    .icon(IconName::Trash)
+                    .label("Discard and Quit")
+                    .kbd("⌘⌫")
+                    .on_click(cx.listener(move |this, _, w, cx| this.act(quit(Some(false), false), w, cx)))
+                    .into_any_element(),
+            );
+            buttons.push(
+                Button::new("ok")
+                    .primary()
+                    .focusable()
+                    .icon(IconName::Save)
+                    .label("Save All and Quit")
+                    .kbd("⏎")
+                    .on_click(cx.listener(move |this, _, w, cx| this.act(quit(Some(true), false), w, cx)))
+                    .into_any_element(),
+            );
+        }
+    }
 }
 
 impl Render for DialogBody {
@@ -864,6 +986,11 @@ impl Render for DialogBody {
                         .into_any_element(),
                 );
             }
+            // Below, in its own function.
+            Dialog::Quit(_) => {}
+        }
+        if let Dialog::Quit(info) = self.dialog.clone() {
+            self.quit_body(&info, &mut body, &mut buttons, cancel_button(cx), cx);
         }
         let _ = window;
         div()
