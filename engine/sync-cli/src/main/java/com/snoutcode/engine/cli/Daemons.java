@@ -60,6 +60,18 @@ final class Daemons {
         return cacheDir.resolve("daemons").resolve(hash).toFile();
     }
 
+    /** The system property naming a registry for the builds given none (the engine's tests set it). */
+    static final String FALLBACK_REGISTRY = "snout.engine.daemonRegistry";
+
+    /**
+     * The registry for a build whose options name none, from {@link #FALLBACK_REGISTRY}; null
+     * (Gradle's own registry) when the property is not set.
+     */
+    static File fallbackRegistry() {
+        String dir = System.getProperty(FALLBACK_REGISTRY);
+        return dir == null || dir.isBlank() ? null : new File(dir);
+    }
+
     /** Sets how long the daemons started from now on may stay idle (at least a minute). */
     static void idleMinutes(int minutes) {
         idleMinutes = Math.max(1, minutes);

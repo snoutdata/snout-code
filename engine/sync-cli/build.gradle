@@ -21,6 +21,8 @@ dependencies {
     implementation "org.gradle:gradle-tooling-api:${rootProject.toolingApiVersion}"
     implementation 'com.google.code.gson:gson:2.11.0'
     runtimeOnly 'org.slf4j:slf4j-nop:1.7.36'
+    // StopTestDaemons listens to the test run's end.
+    testImplementation 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -56,6 +58,9 @@ tasks.named('test') {
     systemProperty 'snout.test.gradleVersion', gradle.gradleVersion
     systemProperty 'snout.test.fixtures', file('src/test/fixtures').absolutePath
     systemProperty 'snout.test.scratch', layout.buildDirectory.dir('test-scratch').get().asFile.absolutePath
+    // The builds the tests run get a daemon registry of their own, never ~/.gradle/daemon, with
+    // the engine's short idle time; StopTestDaemons stops them when the tests end.
+    systemProperty 'snout.engine.daemonRegistry', layout.buildDirectory.dir('test-daemons').get().asFile.absolutePath
 }
 
 // The self-contained distribution the app runs: the installed CLI with jdtls and the importer

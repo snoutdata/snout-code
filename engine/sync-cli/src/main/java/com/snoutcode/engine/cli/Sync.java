@@ -116,8 +116,9 @@ public final class Sync {
         if (options.gradleVersion != null) {
             connector.useGradleVersion(options.gradleVersion);
         }
-        if (options.daemonRegistry != null) {
-            Daemons.configure(connector, options.daemonRegistry);
+        File registry = options.daemonRegistry != null ? options.daemonRegistry : Daemons.fallbackRegistry();
+        if (registry != null) {
+            Daemons.configure(connector, registry);
         }
         return connector;
     }
