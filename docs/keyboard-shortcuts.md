@@ -9,6 +9,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | Shortcut | Command | Where |
 |---|---|---|
 | ⌘, | Settings… | |
+| ⌘; | Project Structure… (see [Project Structure](project-structure.md)) | |
 | ⌘Q | Quit SnoutCode (asks first, see [Quitting](getting-started.md#quitting)) | |
 | ⌘1 | Show Project | |
 | ⌘2 | Show Git | |

@@ -7,7 +7,7 @@
 //!
 //! `scripts/docs-screenshots.sh` sets it all up and writes `docs/images`. `SNOUT_DOCS_JDK`
 //! names the JDK the builds run on; `SNOUT_DOCS_ONLY` takes only the parts it names
-//! (ledger, java, javatools, debug, welcome, wizard, settings, git, claude, palette, remote), separated
+//! (ledger, java, javatools, debug, welcome, wizard, settings, structure, git, claude, palette, remote), separated
 //! by commas. `remote` needs Docker and the Linux server builds; `SNOUT_DOCS_SSH_DIR` is a
 //! short folder for ssh's control sockets.
 
@@ -317,6 +317,9 @@ pub fn run(projects: PathBuf) {
     }
     if wanted("settings") {
         settings_pages(&projects);
+    }
+    if wanted("structure") {
+        structure(&projects);
     }
     if wanted("git") {
         git(&projects, ThemeChoice::Light, "light");
@@ -763,6 +766,116 @@ fn expand(w: &mut Win, ids: Vec<snout_app::project_view::NodeId>) {
             cx.notify();
         });
     });
+}
+
+/// Put up Project Structure and wait until it has read the model and found the JDKs.
+fn open_structure(w: &mut Win) -> Entity<snout_app::structure::ProjectStructureView> {
+    w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.open_project_structure(window, cx)));
+    let ws = w.ws.clone();
+    let view = w.cx.update(|cx| ws.read(cx).project_structure.clone()).expect("Project Structure is up");
+    let v = view.clone();
+    let ok = w.pump(60, &mut |cx| {
+        let v = v.read(cx);
+        v.structure().is_some() && v.detected.is_some()
+    });
+    assert!(ok, "Project Structure reads the model");
+    view
+}
+
+fn structure_page(
+    w: &mut Win,
+    view: &Entity<snout_app::structure::ProjectStructureView>,
+    f: impl FnOnce(&mut snout_app::structure::ProjectStructureView),
+) {
+    let v = view.clone();
+    w.cx.update(|cx| {
+        v.update(cx, |v, cx| {
+            f(v);
+            cx.notify();
+        })
+    });
+    w.pump(2, &mut |_| false);
+}
+
+/// Project Structure on the multi-module build (its pages) and on the Spring app (its
+/// dependencies' conflicts, and the facets).
+fn structure(projects: &Path) {
+    use snout_app::structure::data::{Edge, NodeKind};
+    use snout_app::structure::{ModuleSel, Page, Scope};
+    let ledger = copy(projects, "structure", "ledger");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![ledger.clone()], Some(ledger.clone())), true);
+    w.activity(Activity::Project);
+    engine_ready(&mut w, &ledger, 900);
+    let view = open_structure(&mut w);
+    w.snap("structure-project-light");
+    structure_page(&mut w, &view, |v| {
+        v.page = Page::Modules;
+        v.selected = Some(ModuleSel::Module("ledger:core".into()));
+    });
+    w.snap("structure-modules-light");
+    structure_page(&mut w, &view, |v| {
+        v.page = Page::Dependencies;
+        v.dep_module = Some("ledger:app".into());
+        v.scope = Scope::Runtime;
+        v.open.clear();
+        let s = v.structure().unwrap();
+        let g = s.module("ledger:app").unwrap().graph(Scope::Runtime).unwrap().clone();
+        // The projects it declares open, and the library the core brings in.
+        for e in &g.roots {
+            if let Edge::To { to, .. } = e {
+                v.open.insert(vec![*to]);
+                if matches!(g.nodes[*to].kind, NodeKind::Project { ref path, .. } if path == ":core") {
+                    for d in &g.nodes[*to].deps {
+                        if let Edge::To { to: lib, .. } = d {
+                            v.open.insert(vec![*to, *lib]);
+                        }
+                    }
+                }
+            }
+        }
+    });
+    w.snap("structure-dependencies-light");
+    structure_page(&mut w, &view, |v| {
+        v.page = Page::Sdks;
+        v.selected_jdk = v.detected.as_ref().and_then(|d| d.first()).map(|j| j.home.clone());
+    });
+    w.snap("structure-sdks-light");
+    w.shutdown();
+
+    let shop = copy(projects, "structure", "shop");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), true);
+    w.activity(Activity::Project);
+    engine_ready(&mut w, &shop, 900);
+    let ws = w.ws.clone();
+    let spring = w.cx.update(|cx| ws.read(cx).spring.clone());
+    let ok = w.pump(900, &mut |cx| spring.read(cx).loaded);
+    println!("docs: structure spring loaded {ok}");
+    let view = open_structure(&mut w);
+    structure_page(&mut w, &view, |v| {
+        v.page = Page::Dependencies;
+        v.scope = Scope::Test;
+        v.conflicts_only = true;
+    });
+    w.snap("structure-conflicts-light");
+    structure_page(&mut w, &view, |v| {
+        v.conflicts_only = false;
+        v.page = Page::Facets;
+    });
+    w.snap("structure-facets-light");
+    w.shutdown();
+
+    // The Modules page in the dark.
+    let ledger = copy(projects, "structure", "ledger");
+    let mut w = Win::new(settings(ThemeChoice::Dark, vec![ledger.clone()], Some(ledger.clone())), true);
+    w.activity(Activity::Project);
+    engine_ready(&mut w, &ledger, 900);
+    let view = open_structure(&mut w);
+    structure_page(&mut w, &view, |v| {
+        v.page = Page::Modules;
+        v.selected = Some(ModuleSel::Module("ledger:app".into()));
+    });
+    w.snap("structure-modules-dark");
+    w.shutdown();
 }
 
 /// The multi-module build: the Project view and the Gradle window.

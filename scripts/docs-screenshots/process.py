@@ -66,6 +66,13 @@ SPEC = {
     "settings-and-keymap-overridden": ("settings-overridden-light", (580, 320, 2300, 1480)),
     "settings-and-keymap-json-problems": ("settings-json-problems-light", None),
     "settings-and-keymap-json-completion": ("settings-json-completion-light", None),
+    "project-structure-project": ("structure-project-light", (420, 220, 2460, 1580)),
+    "project-structure-modules": ("structure-modules-light", (420, 220, 2460, 1580)),
+    "project-structure-modules-dark": ("structure-modules-dark", (420, 220, 2460, 1580)),
+    "project-structure-dependencies": ("structure-dependencies-light", (420, 220, 2460, 1580)),
+    "project-structure-conflicts": ("structure-conflicts-light", (420, 220, 2460, 1580)),
+    "project-structure-sdks": ("structure-sdks-light", (420, 220, 2460, 1580)),
+    "project-structure-facets": ("structure-facets-light", (420, 220, 2460, 1580)),
 }
 
 

@@ -10,7 +10,7 @@
 # then crops, resizes (1600 px wide at most) and optimises the shots into docs/images.
 #
 # `parts` takes only some of them, separated by commas: ledger, java, javatools, debug, welcome,
-# wizard, settings, git, claude, palette, remote. The images of parts not taken stay.
+# wizard, settings, structure, git, claude, palette, remote. The images of parts not taken stay.
 #
 # Needs: Docker (for remote), the network the first time (Gradle, Spring Boot, a JDK 21 and
 # Pillow), and a JDK 21 (SNOUT_JDK21, JAVA_HOME, an installed one, or the one snout.sh
@@ -25,7 +25,7 @@ HERE="$ROOT/scripts/docs-screenshots"
 TMP="${TMPDIR:-/tmp}"
 TMP="${TMP%/}"
 SCRATCH="${SNOUT_DOCS_SCRATCH:-$TMP/snoutcode-docs}"
-PARTS="${1:-ledger,java,javatools,debug,welcome,wizard,settings,git,claude,palette,remote}"
+PARTS="${1:-ledger,java,javatools,debug,welcome,wizard,settings,structure,git,claude,palette,remote}"
 REAL_HOME="$HOME"
 DOCS_HOME="$SCRATCH/home"
 RAW="$SCRATCH/raw"

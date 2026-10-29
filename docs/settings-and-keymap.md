@@ -165,6 +165,9 @@ The chosen JDK is used the next time the Java engine starts for the project: whe
 the project again, or start SnoutCode again. A JDK that cannot run the build's Gradle version,
 or is older than the Java level the build asks for, is passed over for one that fits.
 
+File ▸ Project Structure… (⌘;) sets the same project JDK on its Project page, and adds,
+removes and downloads JDKs on its SDKs page (see [Project Structure](project-structure.md)).
+
 **Gradle daemons**
 
 - **Stop idle daemons after**: how long SnoutCode's own Gradle daemons stay without a build

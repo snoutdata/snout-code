@@ -101,6 +101,8 @@ If the download fails, the bar says why and offers **Try again**.
 
 The Java engine restarts on the chosen JDK the next time it starts. A JDK that the build's Gradle version cannot run on is not used.
 
+[Project Structure](project-structure.md) (⌘;) sets the JDK of every build of the project, adds a JDK from a folder SnoutCode did not find, and shows each module's source sets, Java levels and dependencies, with the versions that lost a conflict and the line of the build file that declares each.
+
 ## Gradle daemons
 
 The Java engine runs Gradle on daemons of its own:
