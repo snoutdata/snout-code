@@ -63,7 +63,7 @@ A project can set these, by their names in the file:
 | Terminal ▸ Shell ▸ Arguments | `terminal_shell_args` | a list, such as `["-l"]` |
 | Terminal ▸ Shell ▸ Environment | `terminal_env` | `{ "NAME": "value" }`, in place of yours |
 
-The other pages (Appearance, Keymap, Claude Code), and the rest of the Terminal page, hold
+The other pages (Appearance, Keymap, Agents), and the rest of the Terminal page, hold
 settings that are yours alone; in the **Project** scope they say so. Run configurations are kept per project already: see
 [Run and debug](run-and-debug.md).
 
@@ -261,16 +261,30 @@ test report's link, which only Ghostty draws. Its title names the shell.
 
 See [Terminal](terminal.md#open-in-external-terminal).
 
-## Tools ▸ Claude Code
+## Tools ▸ Agents
 
-**Program**
+![Settings, Agents](images/settings-and-keymap-agents.png)
 
-- **Claude Code**: the `claude` program to run. Leave it empty to find `claude` on your `PATH`,
-  in `~/.local/bin` and the usual places. See [Claude Code](claude-code.md).
+**The console runs**
 
-The Claude Code commands are on the Keymap page with the others: Send Selection to Claude,
-Accept and Reject Claude's Change, Next and Previous Claude Change, Accept and Revert Claude
-Change at Caret, and Accept All and Revert All Claude Changes.
+- The agents SnoutCode knows: Claude Code, Codex, and your own. Each card shows the agent's
+  colour (its caret, its marks in the gutter, its dots) and icon, and how SnoutCode follows it.
+  Click one to have the console run it (`console_agent`: `claude`, `codex` or `custom`).
+
+**Programs**
+
+- **Claude Code** and **Codex**: the `claude` and `codex` programs to run (`claude_path`,
+  `codex_path`). Leave them empty to find them on your `PATH`, in `~/.local/bin` and the usual
+  places.
+- **Your agent** and **Its name**: the command line of any other agent, run in the project with
+  `/bin/sh -c` (`custom_agent_command`), and the name its caret and marks show
+  (`custom_agent_name`).
+
+See [Coding agents](agents.md).
+
+The agents' commands are on the Keymap page with the others: Send Selection to Claude, Accept
+and Reject Claude's Change, Next and Previous Claude Change, Accept and Revert Claude Change at
+Caret, Accept All and Revert All Claude Changes, Show Agent Changes, and Annotate with Agents.
 
 ## Keymap
 

@@ -392,6 +392,7 @@ fn settings_pages(projects: &Path) {
         (Page::Editor, ThemeChoice::Light, "settings-editor-light", 0.),
         (Page::Terminal, ThemeChoice::Light, "settings-terminal-light", 235.),
         (Page::Terminal, ThemeChoice::Light, "settings-terminal-shell-light", 2000.),
+        (Page::ClaudeCode, ThemeChoice::Light, "settings-agents-light", 0.),
     ] {
         let shop = copy(projects, "settings", "shop");
         let mut w = Win::new(settings(theme, vec![shop.clone()], Some(shop)), false);
@@ -622,17 +623,20 @@ fn claude(projects: &Path) {
     #[derive(PartialEq, Clone, Copy)]
     enum Step {
         Console,
-        Strike,
+        Start,
         Typing,
         Fade,
+        Card,
         Inline,
     }
     for (step, theme, name) in [
         (Step::Console, ThemeChoice::Light, "claude-console-light"),
-        (Step::Strike, ThemeChoice::Light, "claude-live-strike-light"),
-        (Step::Typing, ThemeChoice::Light, "claude-live-typing-light"),
+        (Step::Start, ThemeChoice::Light, "agents-start-light"),
+        (Step::Typing, ThemeChoice::Light, "agents-presence-light"),
+        (Step::Typing, ThemeChoice::Dark, "agents-presence-dark"),
         (Step::Fade, ThemeChoice::Light, "claude-changes-light"),
         (Step::Fade, ThemeChoice::Dark, "claude-changes-dark"),
+        (Step::Card, ThemeChoice::Light, "agents-review-light"),
         (Step::Inline, ThemeChoice::Light, "claude-inline-light"),
     ] {
         let shop = copy(projects, "claude", "shop");
@@ -680,6 +684,14 @@ fn claude(projects: &Path) {
         w.act(Action::ToggleConsole);
         w.cx.update(|cx| cx.set_global(snout_app::claude_ide::IdeStatus { clients: 1 }));
         w.pump(4, &mut |_| false);
+        if step == Step::Start {
+            // The session ended: the console's illustrated Start.
+            let root = shop.clone();
+            w.cx.update(|cx| console.update(cx, |c, cx| c.end_session(&root, cx)));
+            w.pump(1, &mut |_| false);
+            w.snap(name);
+            continue;
+        }
         if step == Step::Console {
             // What Claude changed, in the Git view beside it.
             std::fs::write(&file, &v2).unwrap();
@@ -708,19 +720,26 @@ fn claude(projects: &Path) {
         w.cx.update(|cx| {
             changes.update(cx, |c, cx| {
                 c.root = Some(s2.clone());
-                c.set.new_turn("claude", Some("Add bulk discounts".into()));
+                c.set.new_turn("claude", Some("Make the bulk discount configurable in application.yml".into()));
                 c.hooks_heard = true;
                 c.set.before_edit(&f2, Some(Arc::new(v1b.clone())));
                 c.record(f2.clone(), Some(Arc::new(v2b.clone())), None, "Edit".into(), Source::Hook, "claude", cx);
+                let edit = snout_app::claude_ide::ledger::EditRecord::now(
+                    "claude",
+                    c.set.turn,
+                    Some("Make the bulk discount configurable in application.yml".into()),
+                    "Edit",
+                );
+                c.ledger.record(&f2, Some(&v1b), &v2b, edit);
                 c.set.before_edit(&t2, None);
                 let text = "package com.example.shop.service;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport java.math.BigDecimal;\nimport org.junit.jupiter.api.Test;\n\nclass BulkDiscountTest {\n\n    @Test\n    void usesTheConfiguredThreshold() {\n        PriceCalculator prices = new PriceCalculator(new BigDecimal(\"0.20\"), 5, new BigDecimal(\"0.15\"));\n        assertEquals(BigDecimal.ZERO, prices.discount(new BigDecimal(\"40.00\"), 4));\n        assertEquals(new BigDecimal(\"7.50\"), prices.discount(new BigDecimal(\"50.00\"), 5));\n    }\n}\n";
                 c.record(t2.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, "claude", cx);
                 let old = Some(Some(Arc::new(yml_v1.clone())));
                 c.record(y2.clone(), Some(Arc::new(yml_v2.clone())), old, String::new(), Source::Watcher, "claude", cx);
                 c.expanded.insert(f2.clone());
-                let tool = if matches!(step, Step::Strike | Step::Typing) { "Edit" } else { "Write" };
+                let tool = if step == Step::Typing { "Edit" } else { "Write" };
                 c.activity = Some(Doing { path: f2.clone(), tool: tool.into(), at: Instant::now(), done: false });
-                if matches!(step, Step::Fade | Step::Inline) {
+                if matches!(step, Step::Fade | Step::Card | Step::Inline) {
                     c.activity = None;
                     c.pending.push(PendingDiff {
                         tab: "✻ [Claude Code] README.md ⧉".into(),
@@ -736,11 +755,11 @@ fn claude(projects: &Path) {
         w.pump(1, &mut |_| false);
         let (e2, v2c) = (e.clone(), v2.clone());
         w.with(|ws, window, cx| {
-            if step != Step::Typing {
+            if !matches!(step, Step::Typing | Step::Card) {
                 ws.update(cx, |ws, cx| ws.toggle_tool(Tool::ClaudeChanges, window, cx));
             }
             e2.update(cx, |e, cx| match step {
-                Step::Strike | Step::Typing => {
+                Step::Typing => {
                     e.animate_edit(
                         &v2c,
                         true,
@@ -751,13 +770,13 @@ fn claude(projects: &Path) {
                         window,
                         cx,
                     );
-                    e.hold_live_at(if step == Step::Strike { 0. } else { 0.55 }, window, cx);
+                    e.hold_live_at(0.55, window, cx);
                 }
                 _ => {
                     e.animate_edit(&v2c, false, None, window, cx);
                 }
             });
-            if matches!(step, Step::Fade | Step::Inline) {
+            if matches!(step, Step::Fade | Step::Card | Step::Inline) {
                 ws.update(cx, snout_app::claude_ide::bridge::sync_bases);
             }
         });
@@ -765,11 +784,17 @@ fn claude(projects: &Path) {
         let (e3, v1c, v2d) = (e.clone(), v1.clone(), v2.clone());
         w.with(|_, window, cx| {
             e3.update(cx, |e, cx| match step {
-                Step::Fade => {
-                    let hunks = snout_app::claude_ide::review::hunks(&v1c, &v2d);
-                    let lines: Vec<std::ops::Range<usize>> =
-                        hunks.iter().map(|h| h.new_lines.clone()).filter(|l| !l.is_empty()).collect();
-                    e.hold_flash(lines, 8, cx);
+                Step::Card => {
+                    // The card of the constructor's mark, and Annotate with Agents.
+                    let _ = (&v1c, &v2d);
+                    if let Some(run) = e.agent_lane(cx).into_iter().filter(|r| !r.lines.is_empty()).nth(1) {
+                        e.agent_card = Some(snout_app::editor::AgentCard {
+                            lines: run.lines.clone(),
+                            edit: run.edit,
+                            at: gpui::point(gpui::px(600.), gpui::px(250.)),
+                        });
+                    }
+                    e.toggle_annotate(cx);
                 }
                 Step::Inline => {
                     let first = e.claude_hunks.first().map_or(0, |h| h.new_lines.start);

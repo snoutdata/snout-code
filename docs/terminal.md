@@ -1,7 +1,7 @@
 # Terminal
 
 SnoutCode has two terminals in the bottom dock: the **Terminal** tab, your login shell in the
-open project, and the [Claude Code](claude-code.md) console. Both are real terminals: colours,
+open project, and the [agent](agents.md) console. Both are real terminals: colours,
 full-screen programs such as `vim`, `less` and `htop`, and the mouse wheel work as they do in a
 terminal app. On a project opened over [Remote SSH](remote-ssh.md), the shell and Claude Code
 run on the remote machine; the terminal itself is drawn on your Mac.

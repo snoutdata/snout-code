@@ -14,7 +14,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘1 | Show Project | |
 | ⌘2 | Show Git | |
 | ⌘7 | Show or hide the Structure window | |
-| ⌘J | Show or hide the Claude Code console | |
+| ⌘J | Show or hide the agent console | |
 | F5 | Refresh (⌘R is Rerun) | |
 | ⌘= or ⌘+ | Zoom In | |
 | ⌘- | Zoom Out | |
@@ -28,6 +28,8 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⇧⌘P | Command Palette… | |
 | ⇧⌘A | Search Everywhere… | |
 | ⌘P | Go to File… | |
+| ⌘E | Recent Files… | |
+| ⌘N | New File… | |
 | ⌥⌘O | Go to Class… (⌘O is Open Project) | |
 | ⇧⌘F | Find in Files… | |
 | ⇧⌘R | Replace in Files… | |
@@ -139,12 +141,12 @@ These have no key out of the box; the command palette and **View ▸ Tool Window
 
 See [Git](git.md).
 
-## Claude Code
+## Coding agents
 
 | Shortcut | Command | Where |
 |---|---|---|
-| ⌘J | Show or hide the Claude Code console | |
-| ⌥⌘K | Send Selection to Claude | Editor |
+| ⌘J | Show or hide the agent console | |
+| ⌥⌘K | Send Selection to Claude (the console's agent) | Editor |
 | ⌘↩ | Accept Claude's Change | A change Claude Code proposes |
 | Esc | Reject Claude's Change | A change Claude Code proposes |
 | ⌃⌥⇧↓ | Next Claude Change | Editor |
@@ -153,8 +155,9 @@ See [Git](git.md).
 | ⌥⌘Z | Revert Claude Change at Caret | Editor |
 | ⌥⇧⌘Y | Accept All Claude Changes | |
 | ⌥⇧⌘Z | Revert All Claude Changes | |
+| (none) | Show Agent Changes, Annotate with Agents | |
 
-See [Claude Code](claude-code.md).
+See [Coding agents](agents.md).
 
 ## Terminal
 

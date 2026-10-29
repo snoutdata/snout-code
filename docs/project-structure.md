@@ -105,7 +105,7 @@ The one the project runs on says **This project's**. Click a JDK to see its vers
 What SnoutCode found for the frameworks and tools of the project. The page is read only; its buttons open the Settings page where each is set.
 
 - **Spring**: **Detected** when a module applies the Spring Boot plugin or the Spring model has beans. It lists those modules with their Spring Boot version, the beans in the Spring model, the **Active profiles** the beans are evaluated under, the profiles the project knows, and its configuration files (`application*.properties`, `application*.yml` and `bootstrap*` in the resources). Click a configuration file to open it. **Spring Settings** opens Settings ▸ Frameworks ▸ Spring, where the active profiles are chosen (see [Spring](spring.md)).
-- **Claude Code**: whether the `claude` program was found, and how many Claude Code sessions are connected to SnoutCode. **Claude Code Settings** opens Settings ▸ Tools ▸ Claude Code (see [Claude Code](claude-code.md)).
+- **Claude Code**: whether the `claude` program was found, and how many Claude Code sessions are connected to SnoutCode. **Claude Code Settings** opens Settings ▸ Tools ▸ Agents (see [Coding agents](agents.md)).
 
 ## Remote SSH
 

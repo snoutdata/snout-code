@@ -15,7 +15,7 @@ The project you open is a Git repository, or a folder inside one. The Git view a
 - **Toolbar** across the top: Open, Pull, Fetch, Push, Stage, Unstage, Discard, Delete, Refresh, Check Out…, New Branch, then the theme menu, GitHub and Claude.
 - **Left column:** the Repositories list, and below it the branches and tags.
 - **Middle:** Files and Commit side by side, Changes under them, and the Journal at the bottom.
-- **Right:** the Claude Code console, when it is open (⌘J). See [Claude Code](claude-code.md).
+- **Right:** the Claude Code console, when it is open (⌘J). See [Coding agents](agents.md).
 
 Drag the edges between panes to resize them. In the Git view, the status bar shows the branch, its upstream and how far ahead (↑) and behind (↓) it is, for example `main → origin/main  ↑1`.
 
@@ -119,7 +119,7 @@ You do not have to stage first. The label beside the Commit button says what the
 
 Click **Draft** (or **Repository ▸ Draft Commit Message**) to have Claude Code write the message. It reads exactly what the commit would record, follows the style of your recent commit subjects, and builds on anything you already typed. Click **Stop** to cancel.
 
-Draft runs `claude` on its own, with its tools turned off, and does not touch the console's session. It needs Claude Code installed; see [Claude Code](claude-code.md).
+Draft runs `claude` on its own, with its tools turned off, and does not touch the console's session. It needs Claude Code installed; see [Coding agents](agents.md).
 
 ## Check Out
 

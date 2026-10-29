@@ -20,7 +20,9 @@ Java files of a Gradle build also get the language features described in [Java](
 - **Right click** a tab for **Close**, **Close Others**, **Close Tabs to the Right** and **Close All**, **Keep Open** for a preview tab, and **Copy Path**, **Reveal in Finder** and **Open in External Terminal** (at the file's folder).
 - **Split** with ⌘\ (View ▸ Split Editor Right). The file in front opens a second time in a new group to the right. Both views show the same text: what you type in one shows in the other.
 
-The tab bar also shows what Claude Code is doing with a file: a badge with the number of changes it proposes, or a small dot when it changed the file while the editor did not follow. See [Claude Code](claude-code.md).
+The tab bar also shows what an agent is doing with a file: a badge with the number of changes Claude Code proposes, the agent's dot (pulsing while it writes there), or a dot in its colour while its changes wait for review. See [Coding agents](agents.md).
+
+Every tab closes, the last one too (×, ⌘W, a middle click). With no tab open, the editor shows the ways to a file with their keys (Go to File ⌘P, Recent Files ⌘E, Search Everywhere ⇧⌘A, Find in Files ⇧⌘F, New File ⌘N) and the files you opened lately.
 
 ### Tabs come back with the project
 

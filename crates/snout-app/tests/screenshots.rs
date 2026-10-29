@@ -10,12 +10,26 @@ fn main() {
         docs::run(projects.into());
         return;
     }
+    // The real `claude` against the window, when asked for (see `screenshots/agent_e2e.rs`).
+    if let (Some(claude), Some(project), Some(lock), Some(out)) = (
+        std::env::var_os("SNOUT_E2E_CLAUDE"),
+        std::env::var_os("SNOUT_E2E_PROJECT"),
+        std::env::var_os("SNOUT_E2E_LOCK_DIR"),
+        std::env::var_os("SNOUT_SCREENSHOT"),
+    ) {
+        agent_e2e::run(claude.into(), project.into(), lock.into(), out.into());
+        return;
+    }
     shots::run();
 }
 
 #[cfg(target_os = "macos")]
 #[path = "screenshots/docs.rs"]
 mod docs;
+
+#[cfg(target_os = "macos")]
+#[path = "screenshots/agent_e2e.rs"]
+mod agent_e2e;
 
 #[cfg(not(target_os = "macos"))]
 fn main() {

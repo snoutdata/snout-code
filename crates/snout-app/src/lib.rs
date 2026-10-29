@@ -210,7 +210,14 @@ pub fn open_window(
     splash: Option<gpui::WindowHandle<splash::Splash>>,
     cx: &mut App,
 ) -> Option<gpui::AnyWindowHandle> {
-    let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
+    let mut bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
+    // Where to put the window instead (`x,y`), for runs driven from a script.
+    if let Some((x, y)) = std::env::var("SNOUT_WINDOW_ORIGIN")
+        .ok()
+        .and_then(|v| v.split_once(',').and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?))))
+    {
+        bounds.origin = gpui::point(px(x), px(y));
+    }
     let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),

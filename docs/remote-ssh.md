@@ -54,7 +54,7 @@ Processes on the remote machine get the environment of your login shell there: `
 
 ## Claude Code on the remote machine
 
-The Claude Code console runs `claude` on the remote machine, and it connects to the window as it does on your Mac: proposed changes open in the editor, it sees your selection, the editor follows and plays out its edits, and the Claude Changes window lists them. See [Claude Code](claude-code.md).
+The Claude Code console runs `claude` on the remote machine, and it connects to the window as it does on your Mac: proposed changes open in the editor, it sees your selection, the editor follows and plays out its edits, and the Agent Changes window lists them. See [Coding agents](agents.md).
 
 - SnoutCode writes its lock file into the remote machine's `~/.claude/ide/` (or `$CLAUDE_CONFIG_DIR/ide/`), so a `claude` there finds the window, and gives the console's `claude` the hooks' settings in a folder of the remote machine's temporary folder.
 - `claude` reaches the window through two ports on the remote machine's loopback (127.0.0.1), one for the editor connection and one for the hooks. The server listens on them and carries each connection back to your Mac over the SSH connection; nothing else is opened, and the SSH server needs no port forwarding allowed.
