@@ -54,7 +54,7 @@ A `claude` started in the console connects to SnoutCode as its IDE. The header s
 - check whether a file has unsaved changes, and save it;
 - propose a change for you to accept or reject in the editor.
 
-SnoutCode also passes the console's `claude` extra settings for its hooks, so it hears about every file edit Claude Code makes, including the ones you let it make without asking. Your own Claude Code settings are never changed.
+SnoutCode also passes the console's `claude` extra settings for its hooks, so it hears about every file edit Claude Code makes, including the ones you let it make without asking. Your own Claude Code settings are never changed. The hooks post to SnoutCode with `curl`, on the machine `claude` runs on.
 
 ### Review a proposed change
 
@@ -105,9 +105,11 @@ To review the changes:
 | See a file's changes | Click its chevron to list them in the window, or click the file to open it with its changes inline. |
 | Keep or undo one change | Use the buttons on the change: **Accept this change** or **Revert this change**. |
 | Keep or undo a whole file | Hover the file and use **Accept the file** or **Revert the file**. |
-| Keep or undo everything | **Accept All** keeps every change and empties the list. **Revert All** puts back every file as it was before Claude changed it. |
+| Keep or undo everything | **Accept All** (⌥⇧⌘Y) keeps every change and empties the list. **Revert All** (⌥⇧⌘Z) puts back every file as it was before Claude changed it. |
 
 Reverting puts back exactly what the file held before Claude's first edit since your last review. Reverting a file Claude created deletes it. Accepting only takes the change off the list; the file stays as it is.
+
+Accept All Claude Changes (⌥⇧⌘Y) and Revert All Claude Changes (⌥⇧⌘Z) work wherever the keyboard is, not only in the window. They are also in the Code menu and the command palette (⇧⌘P), and their keys can be changed in the keymap.
 
 ### Review in the editor
 
@@ -130,4 +132,6 @@ Draft runs `claude` on its own in print mode, with its tools turned off, and sen
 
 ## On a remote machine
 
-In a project on a remote machine, the console runs `claude` on that machine. Its connection to the editor (proposed changes, the selection, Claude Changes) works for projects on your Mac only, for now. See [Remote SSH](remote-ssh.md).
+In a project on a remote machine, the console runs `claude` on that machine, and everything on this page works as it does on your Mac: proposed changes, the selection, following and playing out Claude's edits, the Claude Changes window, Accept All and Revert All. Install `claude` (and `curl`, for the hooks) on that machine.
+
+SnoutCode writes the lock file into that machine's `~/.claude/ide/`, and `claude` reaches the window through ports of that machine's loopback that the SSH connection carries back to your Mac. A revert writes the file on that machine. See [Remote SSH](remote-ssh.md#claude-code-on-the-remote-machine).

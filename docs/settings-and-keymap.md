@@ -73,8 +73,8 @@ or is older than the Java level the build asks for, is passed over for one that 
 
 - **Stop idle daemons after**: how long SnoutCode's own Gradle daemons stay without a build
   before they stop. From 1 to 240 minutes, a minute at a time up to 5, then in steps of 5. The
-  default is 15. A new value holds for the daemons started after the Java engine starts
-  again. See [Processes](processes.md).
+  default is 15. **Apply** or **OK** saves it; a new value holds for the daemons started after
+  the Java engine starts again. See [Processes](processes.md).
 
 ## Tools ▸ Claude Code
 
@@ -82,6 +82,10 @@ or is older than the Java level the build asks for, is passed over for one that 
 
 - **Claude Code**: the `claude` program to run. Leave it empty to find `claude` on your `PATH`,
   in `~/.local/bin` and the usual places. See [Claude Code](claude-code.md).
+
+The Claude Code commands are on the Keymap page with the others: Send Selection to Claude,
+Accept and Reject Claude's Change, Next and Previous Claude Change, Accept and Revert Claude
+Change at Caret, and Accept All and Revert All Claude Changes.
 
 ## Keymap
 

@@ -25,29 +25,7 @@ The Java features come from SnoutCode's Java engine (`engine/`, see [engine/READ
 
 ### Remote SSH
 
-The window stays on your Mac; the project, Git, the Java engine, builds, runs, the program you debug and terminals are on a Linux machine you reach with your system's `ssh` (so `~/.ssh/config`, the SSH agent and `ProxyJump` apply). The full guide is [docs/remote-ssh.md](docs/remote-ssh.md).
-
-**Requirements.** The remote machine runs Linux on x86_64 or aarch64 (any distribution: the server SnoutCode installs is one static binary), with `git` and `tar`, and `curl` or `wget` to download Java for the engine (without the internet there, the Mac downloads it and copies it over). On the Mac, `ssh <host>` should work; a password, a key's passphrase or a new host key is asked for in a SnoutCode dialog. A host can be a `Host` entry of `~/.ssh/config` or of a file it `Include`s:
-
-```
-Host devbox
-  HostName devbox.example.com
-  User me
-  IdentityFile ~/.ssh/id_ed25519
-```
-
-**Connect.** File ▸ Connect to SSH Host… lists your recent hosts and those of your ssh config, or takes `user@host`. The first connection installs the server (a few seconds, in the status bar's background tasks); then pick a folder of the remote machine, and the window opens again on it with the host's name in the title bar. The first time, the engine gets Java 21 and its files copied there (a minute or two). Processes there get your login shell's environment (`PATH`, `JAVA_HOME`). File ▸ Open Recent lists remote projects as `shop on devbox`.
-
-**Reconnect.** When the connection drops, SnoutCode connects again by itself, and the status bar says so; builds, programs, terminals and the engine keep running on the remote machine, their output kept. After two minutes of trying it stops and offers **Reconnect** (in the status bar and the host's menu in the title bar).
-
-**Disconnect.** File ▸ Close Remote Connection (or the host's menu) opens the window again on your Mac. The server stops by itself after three hours without a window connected, and stops what it runs.
-
-**What it puts on the remote machine:** `~/.snout-code/server/<version>/` (the server, checked by SHA-256, and its `daemon.sock`, `daemon.pid` and `daemon.log`), `~/.snout-code/engine/<hash>/` (the engine's files, once per engine build), `~/.snout-code/jdks/` (Java 21 from Eclipse Temurin, checked by SHA-256) and the engine's caches in `~/.cache/SnoutCode/`. To remove it all (the next connection installs it again):
-
-```sh
-for server in ~/.snout-code/server/*/snout-server; do "$server" --stop; done
-rm -rf ~/.snout-code ~/.cache/SnoutCode
-```
+The window stays on your Mac while the project, Git, the Java engine, builds, runs, terminals and Claude Code are on a Linux machine you reach with `ssh`. SnoutCode installs its small server there by itself and reconnects when the link drops. See [docs/remote-ssh.md](docs/remote-ssh.md).
 
 ## Building
 

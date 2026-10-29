@@ -112,6 +112,8 @@ See [Git](git.md).
 | ⌃⌥⇧↑ | Previous Claude Change | Editor |
 | ⌥⌘Y | Accept Claude Change at Caret | Editor |
 | ⌥⌘Z | Revert Claude Change at Caret | Editor |
+| ⌥⇧⌘Y | Accept All Claude Changes | |
+| ⌥⇧⌘Z | Revert All Claude Changes | |
 
 See [Claude Code](claude-code.md).
 
