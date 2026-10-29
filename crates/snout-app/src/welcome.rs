@@ -125,7 +125,7 @@ impl Render for WelcomePanel {
         let hover = p.button_hover;
         let host = crate::host::host(cx);
 
-        let action = |id: &'static str, g: Icon, title: &'static str, note: &'static str, a: Option<Action>| {
+        let action = |id: &'static str, g: Icon, title: &'static str, note: String, a: Option<Action>| {
             let model = model.clone();
             let enabled = a.is_some();
             div()
@@ -194,15 +194,24 @@ impl Render for WelcomePanel {
                 "welcome-open",
                 Icon::Folder,
                 "Open Project…",
-                "A folder on this Mac",
+                match crate::remote::connection(cx) {
+                    Some((host, _)) => format!("A folder on {host}"),
+                    None => "A folder on this Mac".into(),
+                },
                 Some(Action::PickFolder),
             ))
-            .child(action("welcome-clone", Icon::Fetch, "Clone Repository…", "From a Git URL", Some(Action::ShowClone)))
+            .child(action(
+                "welcome-clone",
+                Icon::Fetch,
+                "Clone Repository…",
+                "From a Git URL".into(),
+                Some(Action::ShowClone),
+            ))
             .child(action(
                 "welcome-new",
                 Icon::Plus,
                 "New Project…",
-                "Java or Spring Boot, with Gradle",
+                "Java or Spring Boot, with Gradle".into(),
                 Some(Action::ShowNewProject),
             ));
 

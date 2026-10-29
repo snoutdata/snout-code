@@ -462,6 +462,8 @@ impl Host for LocalHost {
         Ok(system
             .processes()
             .iter()
+            // On Linux the threads of a process are listed too.
+            .filter(|(_, p)| p.thread_kind().is_none())
             .map(|(pid, p)| ProcInfo {
                 pid: pid.as_u32(),
                 parent: p.parent().map(Pid::as_u32),

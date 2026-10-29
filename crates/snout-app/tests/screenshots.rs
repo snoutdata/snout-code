@@ -117,6 +117,10 @@ mod shots {
         /// The Processes window: the engine, its language server and Gradle daemons, a run,
         /// a test JVM, a terminal and a leftover.
         Processes,
+        /// Remote SSH: 0 Connect to SSH Host with the hosts of an ssh config, 1 the folder
+        /// picker of the remote machine, 2 a window on a remote machine whose connection is
+        /// coming back (the title bar and the status bar say so).
+        Remote(u8),
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -335,6 +339,81 @@ mod shots {
                     });
                 })
                 .unwrap();
+            }
+            Some(Select::Remote(step)) => {
+                use snout_app::remote::{Connection, Recents, Remote};
+                let status = match step {
+                    2 => snout_remote::Status::Reconnecting { attempt: 1, error: None },
+                    _ => snout_remote::Status::Connected,
+                };
+                let connection = (step > 0).then(|| Connection { name: "devbox".into(), host: None, status });
+                let recents = Recents {
+                    hosts: vec!["devbox".into()],
+                    projects: vec![snout_app::remote::RemoteProject {
+                        host: "devbox".into(),
+                        path: "/home/dev/demo".into(),
+                    }],
+                };
+                // While it comes back, the engine is still on its way there.
+                let tasks = (step == 2)
+                    .then(|| snout_app::background::BgTask {
+                        title: "Java engine on devbox".into(),
+                        stage: "Downloading Java 21 for the engine".into(),
+                        percent: Some(42),
+                        ..Default::default()
+                    })
+                    .into_iter()
+                    .collect();
+                cx.update(|cx| cx.set_global(Remote { recents, connection, tasks, ..Default::default() }));
+                match step {
+                    0 => {
+                        // An ssh config with an Include, as the dialog reads it.
+                        let ssh = std::env::temp_dir().join(format!("snout-shot-ssh-{}", std::process::id()));
+                        std::fs::create_dir_all(ssh.join("conf.d")).unwrap();
+                        std::fs::write(
+                            ssh.join("config"),
+                            "Host build-arm build-x86\n  User ci\nInclude conf.d/*\nHost *\n  ServerAliveInterval 30\n",
+                        )
+                        .unwrap();
+                        std::fs::write(ssh.join("conf.d/work"), "Host staging gpu-box\n").unwrap();
+                        // SAFETY: the harness runs one shot at a time on this thread.
+                        unsafe { std::env::set_var(snout_app::remote::SSH_CONFIG_ENV, ssh.join("config")) };
+                        cx.update_window(handle.into(), |_, window, cx| {
+                            ws.update(cx, |w, cx| w.open_connect(window, cx))
+                        })
+                        .unwrap();
+                        cx.run_until_parked();
+                        unsafe { std::env::remove_var(snout_app::remote::SSH_CONFIG_ENV) };
+                    }
+                    1 => {
+                        // The remote machine's folders, here this Mac's.
+                        let home = repo.join("remote-home");
+                        for d in ["demo", "billing-service", "notes", ".cache", "shop-platform"] {
+                            std::fs::create_dir_all(home.join(d)).unwrap();
+                        }
+                        cx.update_window(handle.into(), |_, window, cx| {
+                            let host = snout_app::host::host(cx);
+                            let picker = cx.new(|cx| {
+                                snout_app::remote::picker::FolderPicker::new(host, "devbox".into(), home, window, cx)
+                            });
+                            ws.update(cx, |w, cx| {
+                                w.remote_picker = Some(picker);
+                                cx.notify();
+                            });
+                        })
+                        .unwrap();
+                        cx.run_until_parked();
+                        cx.update_window(handle.into(), |_, _, cx| {
+                            let picker = ws.read(cx).remote_picker.clone().unwrap();
+                            picker.update(cx, |p, cx| {
+                                p.selected = Some("demo".into());
+                                cx.notify();
+                            });
+                        })
+                        .unwrap();
+                    }
+                    _ => {}
+                }
             }
             Some(Select::NewProject(page)) => {
                 cx.update_window(handle.into(), |_, window, cx| {
@@ -1685,6 +1764,42 @@ mod shots {
     }
 
     /// The splash window on its own.
+    /// ssh's question in SnoutCode's dialog (the askpass helper): a password, or a host key.
+    fn askpass_shot(name: &str, theme: ThemeChoice, prompt: &'static str) {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit_assets::AllAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        let settings = Settings { theme, ..Settings::default() };
+        cx.update(|cx| snout_app::init(&settings, cx));
+        let handle = cx
+            .open_window(size(px(460.), px(200.)), |window, cx| {
+                let view = cx.new(|cx| snout_app::remote::askpass::Askpass::new(prompt.into(), window, cx));
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            })
+            .unwrap();
+        cx.allow_parking();
+        for _ in 0..3 {
+            cx.advance_clock(Duration::from_millis(300));
+            cx.run_until_parked();
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        }
+        let image = cx.capture_screenshot(handle.into()).expect("offscreen rendering must be available");
+        let first = image.get_pixel(0, 0);
+        assert!(image.pixels().any(|p| p != first), "{name}: the dialog is blank");
+        if let Some(dir) = std::env::var_os("SNOUT_SCREENSHOT") {
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(dir.join(format!("{name}.png"))).unwrap();
+        }
+        println!("screenshot {name}: ok");
+    }
+
     fn splash_shot(name: &str, theme: ThemeChoice) {
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
@@ -1748,6 +1863,17 @@ mod shots {
         shot("new-project-java-light", ThemeChoice::Light, Activity::Project, Some(Select::NewProject(0)));
         shot("new-project-spring-dark", ThemeChoice::Dark, Activity::Project, Some(Select::NewProject(1)));
         shot("new-project-deps-dark", ThemeChoice::Dark, Activity::Project, Some(Select::NewProject(2)));
+        shot("remote-connect-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Remote(0)));
+        shot("remote-connect-light", ThemeChoice::Light, Activity::Project, Some(Select::Remote(0)));
+        shot("remote-picker-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Remote(1)));
+        shot("remote-reconnecting-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Remote(2)));
+        shot("remote-reconnecting-light", ThemeChoice::Light, Activity::Project, Some(Select::Remote(2)));
+        askpass_shot("remote-askpass-dark", ThemeChoice::Dark, "dev@devbox's password:");
+        askpass_shot(
+            "remote-askpass-hostkey-light",
+            ThemeChoice::Light,
+            "The authenticity of host 'devbox (10.0.0.5)' can't be established.\nED25519 key fingerprint is SHA256:4y1k8sV0Q9.\nAre you sure you want to continue connecting (yes/no/[fingerprint])?",
+        );
         shot("tasks-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Tasks));
         shot("tasks-light", ThemeChoice::Light, Activity::Project, Some(Select::Tasks));
         shot("review-streaming-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Review(Some(0.45))));

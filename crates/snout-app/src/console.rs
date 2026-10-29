@@ -83,6 +83,8 @@ pub struct ConsolePanel {
     /// Where the grid was last painted, and its cell size, for the pointer.
     grid: Option<(Bounds<Pixels>, gpui::Size<Pixels>)>,
     shown_gen: u64,
+    /// The folders whose session is being started.
+    starting: std::collections::HashSet<PathBuf>,
     focus: FocusHandle,
 }
 
@@ -155,6 +157,7 @@ impl ConsolePanel {
             selecting: false,
             grid: None,
             shown_gen: 0,
+            starting: Default::default(),
             focus: cx.focus_handle(),
         }
     }
@@ -206,6 +209,7 @@ impl ConsolePanel {
             Kind::Shell => Vec::new(),
         };
         let root = root.to_owned();
+        self.starting.insert(root.clone());
         let started = cx.background_executor().spawn({
             let root = root.clone();
             async move {
@@ -225,6 +229,7 @@ impl ConsolePanel {
         cx.spawn_in(window, async move |this, cx| {
             let result = started.await;
             let _ = this.update_in(cx, |this, window, cx| {
+                this.starting.remove(&root);
                 match result {
                     Ok(pty) => {
                         this.sessions.insert(root, Session { pty, seen_gen: 0, refreshed: Instant::now() });
@@ -246,6 +251,11 @@ impl ConsolePanel {
         cx.notify();
     }
 
+    /// Why the program could not start, if it could not.
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
     pub fn session_text(&self, root: &Path) -> Option<String> {
         self.sessions.get(root).map(|s| s.pty.contents())
     }
@@ -255,6 +265,13 @@ impl ConsolePanel {
         if let Some(s) = self.sessions.get(root) {
             let bracketed = s.pty.parser().screen().bracketed_paste();
             s.pty.send(&pty::paste_bytes(text, bracketed));
+        }
+    }
+
+    /// Send `bytes` to the session of `root` as keys typed (`\r` for Return).
+    pub fn type_keys(&self, root: &Path, bytes: &[u8]) {
+        if let Some(s) = self.sessions.get(root) {
+            s.pty.send(bytes);
         }
     }
 
@@ -382,7 +399,7 @@ impl Render for ConsolePanel {
                 .child(look::centered_note(format!("Open a repository to run {} in it", kind.title()), &p));
         };
         let wanted = kind == Kind::Shell || self.model.read(cx).settings.console_open;
-        if wanted && !self.sessions.contains_key(&root) && self.error.is_none() {
+        if wanted && !self.sessions.contains_key(&root) && !self.starting.contains(&root) && self.error.is_none() {
             self.start(&root, &[], window, cx);
         }
         let (title, exit) = match self.sessions.get_mut(&root) {

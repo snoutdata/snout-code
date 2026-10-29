@@ -198,6 +198,19 @@ pub enum ModelEvent {
     /// Another project is to open in place of the one open: the workspace settles the
     /// open tabs first, then calls [`Model::switch_project`].
     Switch(PathBuf),
+    /// Ask for a folder of the remote machine the window works on (the Mac's folder dialog
+    /// cannot see it), then handle the action made of it.
+    PickRemoteFolder(AfterPick),
+}
+
+/// What to do with a folder picked: the action made of it.
+#[derive(Clone, Copy, Debug)]
+pub struct AfterPick(pub fn(PathBuf) -> Action);
+
+impl PartialEq for AfterPick {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::fn_addr_eq(self.0, other.0)
+    }
 }
 
 pub struct OutputLine {
@@ -1498,6 +1511,10 @@ impl Model {
 
     /// Ask for a folder, then run `then` with it.
     fn pick_folder(&mut self, prompt: &str, then: fn(PathBuf) -> Action, cx: &mut Context<Self>) {
+        if crate::remote::is_remote(cx) {
+            cx.emit(ModelEvent::PickRemoteFolder(AfterPick(then)));
+            return;
+        }
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,

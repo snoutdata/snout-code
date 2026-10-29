@@ -68,3 +68,8 @@ harness = false
 name = "host_probe"
 path = "tests/host_probe.rs"
 harness = false
+
+[[test]]
+name = "remote_e2e"
+path = "tests/remote_e2e.rs"
+harness = false

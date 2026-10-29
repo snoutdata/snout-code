@@ -25,6 +25,10 @@ pub struct SshTarget {
     /// from the agent or unencrypted files.
     pub batch_mode: bool,
     pub ssh_program: PathBuf,
+    /// The program ssh runs to ask for a password, a passphrase or whether to trust a host
+    /// key (`SSH_ASKPASS`); it runs with [`ASKPASS_ENV`] set. With one, prompts are allowed
+    /// (no `BatchMode`).
+    pub askpass: Option<PathBuf>,
     /// The daemon stops after this long without a client.
     pub idle_timeout: Duration,
     /// How long the connection and the handshake may take.
@@ -40,6 +44,7 @@ impl SshTarget {
             control_dir: Some(std::env::temp_dir().join("snout-ssh")),
             batch_mode: true,
             ssh_program: "ssh".into(),
+            askpass: None,
             idle_timeout: Duration::from_secs(3 * 60 * 60),
             connect_timeout: Duration::from_secs(30),
         }
@@ -56,7 +61,7 @@ impl SshTarget {
         opt(format!("ConnectTimeout={}", self.connect_timeout.as_secs().max(1)));
         opt("ServerAliveInterval=15".into());
         opt("ServerAliveCountMax=3".into());
-        if self.batch_mode {
+        if self.batch_mode && self.askpass.is_none() {
             opt("BatchMode=yes".into());
         }
         if let Some(dir) = &self.control_dir {
@@ -71,6 +76,13 @@ impl SshTarget {
             opt("ControlPersist=10m".into());
         }
         c.args(&self.extra_args);
+        if let Some(askpass) = &self.askpass {
+            c.env("SSH_ASKPASS", askpass).env("SSH_ASKPASS_REQUIRE", "force").env(ASKPASS_ENV, "1");
+            // Older ssh asks only with a display.
+            if std::env::var_os("DISPLAY").is_none() {
+                c.env("DISPLAY", ":0");
+            }
+        }
         c
     }
 
@@ -130,6 +142,9 @@ impl SshTarget {
             .status();
     }
 }
+
+/// Set in the environment of the [`SshTarget::askpass`] program ssh runs.
+pub const ASKPASS_ENV: &str = "SNOUT_ASKPASS";
 
 /// What [`install`] found or put on the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,6 +209,11 @@ fn ssh_failure(what: &str, out: &std::process::Output) -> io::Error {
 /// the binary there (if any) with ours by checksum, and upload ours through ssh's stdin
 /// when they differ. The upload is checked on the host before it replaces anything.
 pub fn install(target: &SshTarget, binaries: &Path) -> io::Result<Installed> {
+    install_with(target, binaries, &|| {})
+}
+
+/// [`install`], calling `uploading` before it uploads the server.
+pub fn install_with(target: &SshTarget, binaries: &Path, uploading: &dyn Fn()) -> io::Result<Installed> {
     let dir = remote_dir();
     let probe = format!(
         "uname -s; uname -m; f=\"{dir}/snout-server\"; if [ -f \"$f\" ]; then \
@@ -219,6 +239,7 @@ pub fn install(target: &SshTarget, binaries: &Path) -> io::Result<Installed> {
     if present.as_deref() == Some(sha256.as_str()) {
         return Ok(Installed { os, arch, path, sha256, uploaded: false });
     }
+    uploading();
     let upload = format!(
         "set -e; d=\"{dir}\"; mkdir -p \"$d\"; chmod 700 \"$HOME/.snout-code\" 2>/dev/null || true; \
          t=\"$d/snout-server.$$.part\"; cat > \"$t\"; \

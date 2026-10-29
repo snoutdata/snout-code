@@ -80,7 +80,7 @@ pub fn init(settings: &Settings, cx: &mut App) {
     keymap::init(&settings.keymap, cx);
     editor::register_languages();
     workspace::app_actions(cx);
-    cx.set_menus(menus::bar(settings, &model::recent_projects(settings)));
+    cx.set_menus(menus::bar(settings, &model::recent_projects(settings), &remote::recents(cx).projects));
 }
 
 /// The model over the settings in `store`, opening `open` (a path from the command line).
@@ -99,6 +99,11 @@ pub fn model(store: Option<Store>, open: Option<std::path::PathBuf>, cx: &mut Ap
 
 /// Start the app: one window on the saved repositories.
 pub fn run() {
+    // ssh runs this program to ask for a password or a passphrase (see `remote::askpass`).
+    if std::env::var_os(snout_remote::ASKPASS_ENV).is_some() {
+        remote::askpass::run();
+        return;
+    }
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut App| {
         // The workspace's host, made here: this thread is the UI thread.
@@ -165,7 +170,22 @@ fn open_main(
     splash: Option<gpui::WindowHandle<splash::Splash>>,
     cx: &mut App,
 ) {
+    remote::init(store.clone(), cx);
     let model = model(store, open, cx);
+    if open_window(model, splash, cx).is_none() {
+        cx.quit();
+        return;
+    }
+    cx.activate(true);
+}
+
+/// A main window on `model`; `splash` closes once it has painted, and the background fetch
+/// starts then.
+pub fn open_window(
+    model: Entity<Model>,
+    splash: Option<gpui::WindowHandle<splash::Splash>>,
+    cx: &mut App,
+) -> Option<gpui::AnyWindowHandle> {
     let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
     let opened = cx.open_window(
         WindowOptions {
@@ -195,10 +215,11 @@ fn open_main(
             cx.new(|cx| gpui_component::Root::new(view, window, cx))
         },
     );
-    if let Err(e) = opened {
-        eprintln!("Could not open the window: {e}");
-        cx.quit();
-        return;
+    match opened {
+        Ok(handle) => Some(handle.into()),
+        Err(e) => {
+            eprintln!("Could not open the window: {e}");
+            None
+        }
     }
-    cx.activate(true);
 }

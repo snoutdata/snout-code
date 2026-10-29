@@ -17,11 +17,12 @@
 
 mod host;
 mod ssh;
+pub mod ssh_config;
 
 pub use host::{Connector, RemoteHost, Status};
 pub use snout_remote_proto as proto;
 pub use snout_remote_proto::Client;
-pub use ssh::{Installed, SshTarget, connect, install, platform_binary};
+pub use ssh::{ASKPASS_ENV, Installed, SshTarget, connect, install, install_with, platform_binary};
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -60,7 +61,14 @@ impl RemoteSession {
     /// Install the server if needed (`binaries` holds `snout-server-linux-x86_64` and
     /// `snout-server-linux-aarch64`, see `scripts/build-server-linux.sh`) and connect.
     pub fn open(target: SshTarget, binaries: &Path) -> io::Result<RemoteSession> {
-        let installed = install(&target, binaries)?;
+        Self::open_with(target, binaries, &|_| {})
+    }
+
+    /// [`Self::open`], telling `say` what it does: `"connecting"`, then `"installing"` when
+    /// it uploads the server.
+    pub fn open_with(target: SshTarget, binaries: &Path, say: &dyn Fn(&str)) -> io::Result<RemoteSession> {
+        say("connecting");
+        let installed = install_with(&target, binaries, &|| say("installing"))?;
         let client = connect(&target, &installed)?;
         Ok(RemoteSession {
             target,
@@ -136,7 +144,11 @@ impl RemoteSession {
 }
 
 impl Connector for RemoteSession {
+    /// The connection [`RemoteSession::open`] made, while it lives; then new ones.
     fn connect(&self) -> io::Result<Client> {
+        if let Some(c) = self.current.lock().unwrap().take().filter(|c| c.is_alive()) {
+            return Ok(c);
+        }
         self.connect_once()
     }
 

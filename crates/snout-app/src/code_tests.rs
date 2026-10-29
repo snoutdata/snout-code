@@ -552,7 +552,7 @@ fn file_menu_open_recent_lists_projects_newest_first_and_opens_one(cx: &mut Test
     let recent = cx.update(|_, cx| model.read(cx).recent_projects());
     assert_eq!(recent, [b.clone(), a.clone()], "most recent first");
     // The menu bar's File ▸ Open Recent, and the palette, list the same.
-    let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects()));
+    let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects(), &[]));
     let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
     let names: Vec<String> = file.items.iter().filter_map(menu_item_name).collect();
     let first = ["New Project…", "Open Project…", "Open Recent", "Close Project"].map(String::from);

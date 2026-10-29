@@ -526,6 +526,14 @@ impl LangHub {
         let saved = self.model.read(cx).settings.project_jdks.get(root).cloned();
         let (host, home, root_buf) = (self.host.clone(), self.home.clone(), root.to_owned());
         let look = cx.background_executor().spawn(async move {
+            // On a remote machine the engine and its Java may still be on their way there:
+            // they come first (the JDK it downloads is one the build may run on).
+            if java::is_remote(&*host) && java::engine_dist(&*host).is_none() {
+                let progress = java::DownloadProgress::default();
+                if let Err(e) = super::remote_engine::install(&*host, &|_| {}, &progress) {
+                    eprintln!("[java] the engine could not be installed: {e:#}");
+                }
+            }
             let saved = saved.and_then(|h| java::jdk_at(&*host, &h));
             let req = java::requirement(&*host, &root_buf);
             let jdk = saved.filter(|j| req.fits(j.major)).or_else(|| {
@@ -689,6 +697,13 @@ impl LangHub {
         let generation = server.generation;
         let root_buf = root.to_owned();
         let start = cx.background_executor().spawn(async move {
+            // On a remote machine the engine may still be on its way there (or not yet asked
+            // for): put it there first.
+            if java::is_remote(&*host) && java::engine_dist(&*host).is_none() {
+                let progress = java::DownloadProgress::default();
+                super::remote_engine::install(&*host, &|_| {}, &progress)
+                    .map_err(|e| format!("The Java engine could not be installed: {e:#}"))?;
+            }
             let dist =
                 java::engine_dist(&*host).ok_or_else(|| "The Java engine is not built (run snout.sh)".to_owned())?;
             let command = java::engine_command(&*host, &dist, &root_buf, &jdk.home, idle_minutes);

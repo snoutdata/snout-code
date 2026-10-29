@@ -181,6 +181,33 @@ impl Workspace {
             .into_any_element()
         };
 
+        // The remote machine the project is on: its name, a dot saying how the connection
+        // is, and a menu to reconnect or close it.
+        let remote_widget = crate::remote::connection(cx).map(|(host, status)| {
+            let (text, dot) = crate::remote::describe_status(&host, &status, &p);
+            let lost = matches!(status, snout_remote::Status::Lost(_));
+            Trigger(
+                bar_button("title-remote", &p)
+                    .child(div().flex_none().size(px(7.)).rounded_full().bg(dot))
+                    .child(icon(Icon::Terminal, 14., p.fg_dim))
+                    .child(div().max_w(px(200.)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(host))
+                    .child(icon(Icon::ChevronDown, 12., p.fg_dim)),
+            )
+            .dropdown_menu(move |menu, _, _| {
+                let menu = menu.item(PopupMenuItem::new(text.clone()).disabled(true)).separator();
+                let menu = if lost {
+                    menu.item(PopupMenuItem::new("Reconnect").on_click(|_, _, cx| crate::remote::reconnect(cx)))
+                } else {
+                    menu
+                };
+                menu.item(
+                    PopupMenuItem::new("Close Remote Connection")
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::CloseRemote), cx)),
+                )
+            })
+            .into_any_element()
+        });
+
         // The branch: its name, and the popup of branches and repository actions.
         let branch_widget = branch.map(|b| {
             div()
@@ -310,6 +337,7 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .gap(px(2.))
+                    .children(remote_widget)
                     .child(project)
                     .children(branch_widget)
                     .child(div().flex_1())

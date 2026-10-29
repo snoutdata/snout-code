@@ -89,8 +89,15 @@ actions!(
         ShowProcesses,
         StopIdleProcesses,
         RestartJava,
+        ConnectSsh,
+        CloseRemote,
     ]
 );
+
+/// File ▸ Open Recent: open this project of a remote machine.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct OpenRemoteRecent(pub crate::remote::RemoteProject);
 
 /// Hide a tool window's dock: the right one when true, else the bottom one.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
@@ -123,6 +130,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("New Project…", Box::new(NewProject)),
         ("Open Project…", Box::new(Open)),
         ("Close Project", Box::new(CloseProject)),
+        ("Connect to SSH Host…", Box::new(ConnectSsh)),
+        ("Close Remote Connection", Box::new(CloseRemote)),
         ("Clear Recent Projects", Box::new(ClearRecent)),
         ("Search Everywhere…", Box::new(SearchEverywhere)),
         ("Settings…", Box::new(OpenSettings)),
@@ -209,12 +218,19 @@ pub const SOURCE_URL: &str = "https://github.com/snoutdata/snout-code";
 pub const ISSUES_URL: &str = "https://github.com/snoutdata/snout-code/issues";
 pub const WEBSITE_URL: &str = "https://snoutdata.com";
 
-/// File ▸ Open Recent: the recent projects, most recent first, then Clear Recent.
-fn recent_items(recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
+/// File ▸ Open Recent: the recent projects, most recent first, then those of remote
+/// machines, then Clear Recent.
+fn recent_items(recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> Vec<MenuItem> {
     let mut items: Vec<MenuItem> = recent
         .iter()
         .map(|path| MenuItem::action(crate::model::Model::dir_name(path), OpenRecent(path.clone())))
         .collect();
+    if !remote.is_empty() {
+        if !items.is_empty() {
+            items.push(MenuItem::separator());
+        }
+        items.extend(remote.iter().map(|p| MenuItem::action(p.label(), OpenRemoteRecent(p.clone()))));
+    }
     if !items.is_empty() {
         items.push(MenuItem::separator());
     }
@@ -222,8 +238,9 @@ fn recent_items(recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
     items
 }
 
-/// The whole bar, its check marks taken from `s`; `recent` fills File ▸ Open Recent.
-pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
+/// The whole bar, its check marks taken from `s`; `recent` and `remote` (the remote
+/// machines' projects) fill File ▸ Open Recent.
+pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> Vec<Menu> {
     let check = |item: MenuItem, on: bool| item.checked(on);
     vec![
         Menu::new("SnoutCode").items([
@@ -238,8 +255,11 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
         Menu::new("File").items([
             MenuItem::action("New Project…", NewProject),
             MenuItem::action("Open Project…", Open),
-            MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent))),
+            MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent, remote))),
             MenuItem::action("Close Project", CloseProject),
+            MenuItem::separator(),
+            MenuItem::action("Connect to SSH Host…", ConnectSsh),
+            MenuItem::action("Close Remote Connection", CloseRemote),
             MenuItem::separator(),
             MenuItem::action("Find Repositories in Folder…", FindRepos),
             MenuItem::action("Clone from GitHub…", CloneRepo),
@@ -356,8 +376,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf]) -> Vec<Menu> {
 }
 
 /// What the bar shows that can change, to rebuild it only then.
-pub type MenuState = (bool, bool, bool, ThemeChoice, Vec<std::path::PathBuf>);
+pub type MenuState = (bool, bool, bool, ThemeChoice, Vec<std::path::PathBuf>, Vec<crate::remote::RemoteProject>);
 
-pub fn checks(s: &Settings, recent: &[std::path::PathBuf]) -> MenuState {
-    (s.console_open, s.side_by_side, s.compact, s.theme, recent.to_vec())
+pub fn checks(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> MenuState {
+    (s.console_open, s.side_by_side, s.compact, s.theme, recent.to_vec(), remote.to_vec())
 }

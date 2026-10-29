@@ -82,6 +82,9 @@ pub fn installed(host: &dyn Host) -> Option<PathBuf> {
 /// host has none of SnoutCode's), then the jars. `say` hears each step; `progress` counts
 /// the bytes of a download or a copy. Returns the engine's folder there.
 pub fn install(host: &dyn Host, say: &dyn Fn(&str), progress: &DownloadProgress) -> anyhow::Result<PathBuf> {
+    // One at a time: the app's own install, and an engine start that waits for it.
+    static ONE: Mutex<()> = Mutex::new(());
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let dist = local_dist().context("the Java engine is not built (run snout.sh)")?;
     let hash = dist_hash(&dist).context("read the engine")?;
     let dir = engines_dir(host).join(&hash);

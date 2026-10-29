@@ -129,10 +129,12 @@ impl Link {
             self.connector.reset();
             match self.connector.connect() {
                 Ok(c) => {
+                    eprintln!("[remote] connected to {} again", self.connector.name());
                     self.adopt(c);
                     return;
                 }
                 Err(e) => {
+                    eprintln!("[remote] reconnecting to {}: {e}", self.connector.name());
                     attempt += 1;
                     let mut st = lock(&self.st);
                     if st.status == Status::Closed {
@@ -190,6 +192,7 @@ impl Link {
     fn dropped(self: &Arc<Self>, generation: u64) {
         let mut st = lock(&self.st);
         if st.generation == generation && st.status == Status::Connected {
+            eprintln!("[remote] the connection to {} dropped: reconnecting", self.connector.name());
             self.start_reconnect(&mut st);
         }
     }
@@ -287,6 +290,11 @@ impl RemoteHost {
 
     pub fn status(&self) -> Status {
         self.link.status()
+    }
+
+    /// How many connections were made: 1, then one more for each reconnect.
+    pub fn connections(&self) -> u64 {
+        lock(&self.link.st).generation
     }
 
     /// The current connection (waiting while one is being made), for what the [`Host`]

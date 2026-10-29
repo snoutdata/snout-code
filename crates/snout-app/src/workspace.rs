@@ -31,6 +31,7 @@ use crate::status::StatusBar;
 use crate::theme::{self, palette};
 
 mod lang_ui;
+mod remote_ui;
 mod run_ui;
 pub mod session;
 mod stripes;
@@ -104,6 +105,10 @@ pub struct Workspace {
     pub config_dialog: Option<Entity<crate::run::config_dialog::ConfigDialog>>,
     /// The New Project dialog, while it shows.
     pub new_project: Option<Entity<crate::new_project::NewProjectView>>,
+    /// Connect to SSH Host, while it shows.
+    pub connect_dialog: Option<Entity<crate::remote::dialog::ConnectDialog>>,
+    /// The folder picker of a remote machine, while it shows.
+    pub remote_picker: Option<Entity<crate::remote::picker::FolderPicker>>,
     /// Claude Code's connection to this window, when the app runs one.
     pub claude: Option<crate::claude_ide::bridge::Bridge>,
     /// Every panel the window made, and where it goes when a layout does not place it.
@@ -433,6 +438,8 @@ impl Workspace {
             welcome,
             config_dialog: None,
             new_project: None,
+            connect_dialog: None,
+            remote_picker: None,
             claude: None,
             panels,
             shown: root.clone(),
@@ -865,6 +872,7 @@ impl Workspace {
             ModelEvent::Closed => self.after_close(window, cx),
             ModelEvent::Switch(path) => self.switch_project(path.clone(), window, cx),
             ModelEvent::NewProject => self.open_new_project(window, cx),
+            ModelEvent::PickRemoteFolder(then) => self.pick_remote(remote_ui::Purpose::Then(then.0), window, cx),
             ModelEvent::OpenFile(path, at, preview) => {
                 model.update(cx, |m, _| m.pending_file = None);
                 self.open_file(path.clone(), *at, *preview, window, cx)
@@ -1256,15 +1264,20 @@ impl Workspace {
 
     fn sync_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let m = self.model.read(cx);
-        let title = m.title();
+        // The window's title names the remote machine the project is on.
+        let title = match crate::remote::connection(cx) {
+            Some((host, _)) => m.title().replacen(" · SnoutCode", &format!(" [{host}] · SnoutCode"), 1),
+            None => m.title(),
+        };
         if title != self.title {
             window.set_window_title(&title);
             self.title = title;
         }
         let recent = m.recent_projects();
-        let checks = menus::checks(&m.settings, &recent);
+        let remote = crate::remote::recents(cx).projects;
+        let checks = menus::checks(&m.settings, &recent, &remote);
         if self.menu_checks.as_ref() != Some(&checks) {
-            cx.set_menus(menus::bar(&m.settings, &recent));
+            cx.set_menus(menus::bar(&m.settings, &recent, &remote));
             self.menu_checks = Some(checks);
         }
     }
@@ -1357,6 +1370,12 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
             .on_action(cx.listener(|this, _: &NewProject, w, cx| this.open_new_project(w, cx)))
+            .on_action(cx.listener(|this, _: &ConnectSsh, w, cx| this.open_connect(w, cx)))
+            .on_action(cx.listener(|this, a: &OpenRemoteRecent, w, cx| this.open_remote_recent(a.0.clone(), w, cx)))
+            // Greyed out without a connection.
+            .when(crate::remote::is_remote(cx), |d| {
+                d.on_action(cx.listener(|this, _: &CloseRemote, w, cx| this.close_remote(w, cx)))
+            })
             .on_action(cx.listener(|this, a: &HideToolWindow, w, cx| {
                 let place = if a.0 { DockPlacement::Right } else { DockPlacement::Bottom };
                 this.hide_dock(place, w, cx)
@@ -1539,6 +1558,30 @@ impl Render for Workspace {
                     .bg(gpui::black().opacity(0.4))
                     .occlude()
                     .child(sheet)
+            }))
+            .children(self.connect_dialog.clone().map(|dialog| {
+                div()
+                    .id("connect-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui::black().opacity(0.4))
+                    .occlude()
+                    .child(dialog)
+            }))
+            .children(self.remote_picker.clone().map(|picker| {
+                div()
+                    .id("remote-picker-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui::black().opacity(0.4))
+                    .occlude()
+                    .child(picker)
             }))
             .children(self.new_project.clone().map(|dialog| {
                 div()

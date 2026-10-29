@@ -454,6 +454,48 @@ impl StatusBar {
     }
 }
 
+/// The connection to the remote machine, when the window works on one: its name and a dot
+/// while it is up; while it comes back, or once it is lost (with Reconnect), saying so.
+fn remote_item(cx: &mut Context<StatusBar>) -> Option<gpui::AnyElement> {
+    let (host, status) = crate::remote::connection(cx)?;
+    let p = palette(cx);
+    let (text, dot) = crate::remote::describe_status(&host, &status, &p);
+    let up = status == snout_remote::Status::Connected;
+    let lost = matches!(status, snout_remote::Status::Lost(_));
+    let hover = p.button_hover;
+    Some(
+        div()
+            .id("status-remote")
+            .debug_selector(|| "status-remote".into())
+            .flex_none()
+            .h(px(20.))
+            .px(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .rounded(px(4.))
+            .whitespace_nowrap()
+            .child(div().flex_none().size(px(7.)).rounded_full().bg(dot))
+            .child(if up { host.clone() } else { text })
+            .when(!up && !lost, |d| d.child(Spinner::new().xsmall()))
+            .when(lost, |d| {
+                d.child(
+                    div()
+                        .id("status-reconnect")
+                        .debug_selector(|| "status-reconnect".into())
+                        .px(px(6.))
+                        .rounded(px(4.))
+                        .text_color(p.accent)
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(hover))
+                        .child("Reconnect")
+                        .on_click(|_, _, cx| crate::remote::reconnect(cx)),
+                )
+            })
+            .into_any_element(),
+    )
+}
+
 impl Render for StatusBar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
@@ -523,6 +565,7 @@ impl Render for StatusBar {
             })
             .children(java_item)
             .children(self.tasks_item(cx))
+            .children(remote_item(cx))
             .when_some(java.filter(|(_, busy)| !busy), |d, (text, busy)| {
                 d.child(
                     div()

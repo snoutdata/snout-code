@@ -135,6 +135,16 @@ impl Store {
         Self { file: support.join("SnoutCode").join("settings.json"), legacy: support.join("snout").join("app.ron") }
     }
 
+    /// A store of its own at `file`, with no earlier app's settings to start from.
+    pub fn at(file: PathBuf) -> Self {
+        Self { file, legacy: PathBuf::from("/nonexistent/snout/app.ron") }
+    }
+
+    /// The folder of the app's own files.
+    pub fn dir(&self) -> PathBuf {
+        self.file.parent().map(Path::to_path_buf).unwrap_or_default()
+    }
+
     /// The store for this user, or none without a home folder (then nothing is saved).
     pub fn for_user() -> Option<Self> {
         std::env::var_os("HOME").map(|h| Self::in_home(Path::new(&h)))

@@ -149,6 +149,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
     if let Some(runs) = crate::run::runs(cx) {
         out.extend(runs.read(cx).tasks());
     }
+    out.extend(crate::remote::tasks(cx));
     if let Some(job) = &model.job {
         out.push(BgTask { title: "Git".into(), stage: job.clone(), percent: None, ..Default::default() });
     }
