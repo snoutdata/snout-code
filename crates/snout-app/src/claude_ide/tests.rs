@@ -1111,3 +1111,48 @@ fn the_lines_an_agent_wrote_keep_its_name(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }
+
+/// The console's one header row says which agent runs and how it is; End leaves it ended
+/// (an illustrated Start, no new session on its own) until Start.
+#[gpui::test]
+fn the_console_says_its_agent_and_state_and_stays_ended(cx: &mut TestAppContext) {
+    use crate::console::Status;
+    let (repo, lock_dir, model, ws, _client, cx) = connected("console-header", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    // `tail -f /dev/null` stands in for `claude`, started as New would start it (the
+    // console still hidden, so it starts nothing by itself).
+    hook_command(&ws, cx);
+    cx.update(|_, cx| cx.set_global(super::IdeArgs::default()));
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some("/usr/bin/tail".into())));
+    let args = ["-f".to_owned(), "/dev/null".to_owned()];
+    // Under the whole suite's load a process can fail to start now and then: a few tries.
+    let mut status = Status::NotRunning;
+    for _ in 0..5 {
+        cx.update(|w, cx| console.update(cx, |c, cx| c.start(&repo, &args, w, cx)));
+        pump_until(cx, "the session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
+        pump(cx, 200);
+        status = cx.update(|_, cx| console.update(cx, |c, cx| c.status(Some(&repo), cx)));
+        if status != Status::Exited {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    assert_eq!(status, Status::Connected, "Claude Code runs and sees the editor");
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
+    pump(cx, 200);
+    // End: no new session starts by itself; Start does.
+    cx.update(|w, cx| {
+        let focus = gpui::Focusable::focus_handle(console.read(cx), cx);
+        w.focus(&focus, cx);
+    });
+    assert!(cx.debug_bounds("console-header").is_some() && cx.debug_bounds("console-agent").is_some());
+    console.update_in(cx, |c, _, cx| c.end_session(&repo, cx));
+    pump(cx, 500);
+    let status = cx.update(|_, cx| console.update(cx, |c, cx| c.status(Some(&repo), cx)));
+    assert_eq!(status, Status::NotRunning, "it stays ended");
+    assert!(cx.debug_bounds("console-start").is_some(), "the empty state's Start button");
+    cx.update(|w, cx| console.update(cx, |c, cx| c.start(&repo, &[], w, cx)));
+    pump_until(cx, "the new session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}

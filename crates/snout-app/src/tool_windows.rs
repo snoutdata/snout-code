@@ -13,7 +13,9 @@ use crate::theme::palette;
 /// The title a tool window's header shows, by the dock name of its panel.
 pub fn title(panel_name: &str) -> &str {
     match panel_name {
-        "Claude" => "Claude Code",
+        // The console's header row names the agent it runs.
+        "Claude" => "Console",
+        "Claude Changes" => "Agent Changes",
         "Side" => "Project",
         other => other,
     }
@@ -73,7 +75,8 @@ impl Render for NotificationsPanel {
 mod tests {
     #[test]
     fn tool_windows_have_readable_titles() {
-        assert_eq!(super::title("Claude"), "Claude Code");
+        assert_eq!(super::title("Claude"), "Console");
+        assert_eq!(super::title("Claude Changes"), "Agent Changes");
         assert_eq!(super::title("Terminal"), "Terminal");
         assert_eq!(super::title("Side"), "Project");
     }

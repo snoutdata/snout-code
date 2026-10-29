@@ -31,7 +31,6 @@ use snout_core::claude::{ENV_REMOVE, find_claude};
 use snout_core::pty::{self, KeyInput, Launch, Pty, Rgb};
 use snout_core::term::{Attrs, CursorShape, EngineKind, Frame, Underline, Width};
 
-use crate::art::glyph;
 use crate::look;
 use crate::model::{Action, Model};
 use crate::theme::{Palette, mix, palette};
@@ -175,7 +174,15 @@ pub struct ConsolePanel {
     blink_since: Instant,
     /// A note over the console's corner for a moment: what was just sent to the agent.
     note: Option<(SharedString, Instant)>,
+    /// The folders whose session the user ended: none starts there on its own.
+    ended: std::collections::HashSet<PathBuf>,
+    /// When the console was made: an agent waits a moment for the window's IDE server, so
+    /// its first session starts connected, with the hooks.
+    born: Instant,
 }
+
+/// How long the first session waits for the IDE server's variables at most.
+const IDE_WAIT: Duration = Duration::from_secs(4);
 
 /// How long the console's note shows.
 pub const NOTE_TIME: Duration = Duration::from_millis(4_000);
@@ -202,10 +209,11 @@ impl gpui_component::dock::BasePanel for ConsolePanel {
 }
 
 impl gpui_component::dock::Panel for ConsolePanel {
-    fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // The agent's name is in the header row under it, with its status.
         match self.kind {
-            Kind::Claude => self.agent(cx).name.to_string(),
-            Kind::Shell => self.kind.title().to_owned(),
+            Kind::Claude => "Console",
+            Kind::Shell => self.kind.title(),
         }
     }
 
@@ -232,6 +240,12 @@ impl ConsolePanel {
     fn new(model: Entity<Model>, kind: Kind, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
         cx.observe_global::<crate::claude_ide::IdeStatus>(|_, cx| cx.notify()).detach();
+        cx.observe_global::<crate::claude_ide::IdeEnv>(|_, cx| cx.notify()).detach();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(IDE_WAIT).await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
         // The reader thread cannot reach GPUI; look for new output on a short timer.
         cx.spawn(async move |this, cx| {
             loop {
@@ -259,6 +273,8 @@ impl ConsolePanel {
             blink_shown: true,
             blink_since: Instant::now(),
             note: None,
+            ended: Default::default(),
+            born: Instant::now(),
         }
     }
 
@@ -426,6 +442,7 @@ impl ConsolePanel {
     /// the UI thread, the session shows once it runs.
     pub fn start(&mut self, root: &Path, args: &[String], window: &mut Window, cx: &mut Context<Self>) {
         self.sessions.remove(root);
+        self.ended.remove(root);
         self.note_engine(root, cx);
         self.error = None;
         let host = crate::host::host(cx);
@@ -767,165 +784,41 @@ impl Render for ConsolePanel {
         let p = palette(cx);
         let root = self.root(cx).or_else(|| self.model.read(cx).project_root());
         let kind = self.kind;
-        let connected =
-            kind == Kind::Claude && cx.try_global::<crate::claude_ide::IdeStatus>().is_some_and(|s| s.clients > 0);
-        let follow = self.model.read(cx).settings.follow_claude;
-        let header = |title: String, running: Option<bool>, buttons: Vec<gpui::AnyElement>| {
-            let title = title.trim().trim_start_matches(['✳', '✻', '·', '✶', '✢', '*', ' ']).to_owned();
-            div()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .h(px(22.))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .when(kind == Kind::Claude, |d| d.child(glyph(Glyph::Spark, 16., p.fg)))
-                        .child(div().whitespace_nowrap().child(kind.title()))
-                        .when_some(running, |d, on| {
-                            d.child(div().size(px(7.)).rounded(px(4.)).bg(if on { p.ok } else { p.fg_dim }))
-                        })
-                        .when(connected, |d| {
-                            d.child(
-                                div()
-                                    .id("claude-connected")
-                                    .debug_selector(|| "claude-connected".into())
-                                    .flex_none()
-                                    .whitespace_nowrap()
-                                    .px(px(7.))
-                                    .h(px(18.))
-                                    .flex()
-                                    .items_center()
-                                    .rounded(px(9.))
-                                    .bg(p.wash(p.ok))
-                                    .text_color(p.ok)
-                                    .text_size(px(11.5))
-                                    .tooltip(|w, cx| {
-                                        gpui_component::tooltip::Tooltip::new(
-                                            "Claude Code sees the editor: its selection, open files and problems, \
-                                             and proposes changes there for you to accept or reject.",
-                                        )
-                                        .build(w, cx)
-                                    })
-                                    .child("Claude connected"),
-                            )
-                        })
-                        .when(!title.is_empty() && title != kind.title(), |d| {
-                            d.child(
-                                div().min_w_0().text_color(p.fg_dim).overflow_hidden().whitespace_nowrap().child(title),
-                            )
-                        })
-                        .child(div().flex_1())
-                        .child(div().flex().items_center().gap(px(2.)).children(buttons)),
-                )
-                .child(div().h(px(4.)))
-                .child(look::separator(&p))
-        };
-        let hide = look::icon_button("hide", Glyph::Close, "Hide (⌘J); the session keeps running", true, &p)
-            .on_click(cx.listener(|this, _, _, cx| this.model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx))))
-            .into_any_element();
         let Some(root) = root else {
-            return div()
-                .size_full()
-                .bg(p.panel)
-                .flex()
-                .flex_col()
-                .child(header(String::new(), None, vec![hide]))
-                .child(
-                    crate::components::EmptyState::new(snout_core::art::spots::no_project(), "No repository open")
-                        .hint(format!("Open a repository to run {} in it.", kind.title()))
-                        .on(p.panel)
-                        .compact(),
-                );
+            let hint = match kind {
+                Kind::Claude => format!("Open a repository to run {} in it.", self.agent(cx).name),
+                Kind::Shell => "Open a repository to run a shell in it.".to_owned(),
+            };
+            return div().size_full().bg(p.panel).flex().flex_col().child(self.header(None, &p, cx)).child(
+                crate::components::EmptyState::new(snout_core::art::spots::no_project(), "No repository open")
+                    .hint(hint)
+                    .on(p.panel)
+                    .compact(),
+            );
         };
         let wanted = kind == Kind::Shell || self.model.read(cx).settings.console_open;
-        if wanted && !self.sessions.contains_key(&root) && !self.starting.contains(&root) && self.error.is_none() {
+        // The window's IDE server gives the agent its variables a moment after the window
+        // opens: the first session waits for them (a little while at most).
+        let ide_ready = kind == Kind::Shell
+            || cx.try_global::<crate::claude_ide::IdeConfig>().is_none()
+            || cx.try_global::<crate::claude_ide::IdeEnv>().is_some_and(|e| !e.0.is_empty())
+            || self.born.elapsed() >= IDE_WAIT;
+        if wanted
+            && ide_ready
+            && !self.sessions.contains_key(&root)
+            && !self.starting.contains(&root)
+            && !self.ended.contains(&root)
+            && self.error.is_none()
+        {
             self.start(&root, &[], window, cx);
         }
-        let (title, exit) = match self.sessions.get_mut(&root) {
-            Some(s) => (s.pty.title(), s.pty.exit_status().map(str::to_owned)),
-            None => (String::new(), None),
-        };
-        let running = self.sessions.contains_key(&root) && exit.is_none();
-        let restart =
-            |id: &'static str, g: Glyph, label: &'static str, tip: &'static str, args: Vec<String>, root: PathBuf| {
-                look::chip_button(id, g, label, true, &p)
-                    .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
-                    .on_click(cx.listener(move |this, _, window, cx| this.start(&root, &args, window, cx)))
-                    .into_any_element()
-            };
-        let follow_button = look::toggle("follow", crate::components::IconName::ArrowDownToLine, "Follow", follow, &p)
-            .h(px(22.))
-            .tooltip(move |w, cx| {
-                let tip = if follow {
-                    "Following: the editor opens the files Claude Code changes and lights the change"
-                } else {
-                    "Not following: a dot on a tab marks a file Claude Code changed"
-                };
-                gpui_component::tooltip::Tooltip::new(tip).build(w, cx)
-            })
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.model.update(cx, |m, cx| {
-                    m.settings.follow_claude = !m.settings.follow_claude;
-                    m.persist();
-                    cx.notify();
-                })
-            }))
-            .into_any_element();
-        let mut buttons = match kind {
-            Kind::Claude => vec![
-                follow_button,
-                restart("new", Glyph::Plus, "New", "Restart with a new conversation", Vec::new(), root.clone()),
-                restart(
-                    "continue",
-                    Glyph::Refresh,
-                    "Continue",
-                    "Restart with the most recent conversation in this folder (claude --continue)",
-                    continue_args(&self.session_agent(&root, cx)),
-                    root.clone(),
-                ),
-            ],
-            Kind::Shell => vec![restart("new", Glyph::Plus, "New", "Start a new shell", Vec::new(), root.clone())],
-        };
-        if running {
-            let r = root.clone();
-            buttons.push(
-                look::chip_button("end", Glyph::Stop, "End", true, &p)
-                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("End this session").build(w, cx))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(mut s) = this.sessions.remove(&r) {
-                            s.pty.kill();
-                        }
-                        this.note_engine(&r, cx);
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            );
-        }
-        if kind == Kind::Claude {
-            buttons.push(div().w(px(4.)).into_any_element());
-            buttons.push(hide);
-        }
-
+        let exit = self.sessions.get_mut(&root).and_then(|s| s.pty.exit_status().map(str::to_owned));
         let body = if self.sessions.contains_key(&root) {
             self.terminal(&root, exit, window, cx).into_any_element()
+        } else if self.starting.contains(&root) {
+            div().flex_1().into_any_element()
         } else {
-            let r = root.clone();
-            div()
-                .p(px(12.))
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .child(self.error.clone().unwrap_or_else(|| "Not running".into()))
-                .child(look::small_button("start", crate::components::IconName::Play, "Start", &p).on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.error = None;
-                        this.start(&r, &[], window, cx)
-                    }),
-                ))
-                .into_any_element()
+            self.not_running(&root, &p, cx)
         };
         let note = self.note_view(&p, cx);
         div()
@@ -933,8 +826,387 @@ impl Render for ConsolePanel {
             .bg(p.panel)
             .flex()
             .flex_col()
-            .child(header(title, Some(running), buttons))
+            .child(self.header(Some(&root), &p, cx))
             .child(div().relative().flex_1().min_h_0().flex().flex_col().child(body).children(note))
+    }
+}
+
+/// What the status pill says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    NotRunning,
+    Starting,
+    /// Running, and (for Claude Code) connected to the window: it sees the editor.
+    Connected,
+    /// Claude Code running without the connection (it cannot see the editor).
+    NotConnected,
+    Running,
+    /// The agent is at work on a turn.
+    Working,
+    Exited,
+}
+
+impl Status {
+    fn label(self) -> &'static str {
+        match self {
+            Status::NotRunning => "Not running",
+            Status::Starting => "Starting",
+            Status::Connected => "Connected",
+            Status::NotConnected => "Not connected",
+            Status::Running => "Running",
+            Status::Working => "Working",
+            Status::Exited => "Ended",
+        }
+    }
+
+    fn tip(self, agent: &str) -> String {
+        match self {
+            Status::NotRunning => format!("{agent} is not running in this project"),
+            Status::Starting => format!("{agent} is starting"),
+            Status::Connected => format!(
+                "{agent} sees the editor: its selection, open files and problems; it proposes changes there for \
+                 you to accept or reject, and its edits show as it makes them"
+            ),
+            Status::NotConnected => format!("{agent} runs, but has not connected to the editor yet"),
+            Status::Running => format!("{agent} runs; the files it changes show as it works"),
+            Status::Working => format!("{agent} is at work on your prompt"),
+            Status::Exited => format!("{agent} has ended"),
+        }
+    }
+}
+
+impl ConsolePanel {
+    /// What the pill in the header says for the session of `root`.
+    pub fn status(&mut self, root: Option<&Path>, cx: &App) -> Status {
+        let Some(root) = root else { return Status::NotRunning };
+        if self.starting.contains(root) {
+            return Status::Starting;
+        }
+        let Some(s) = self.sessions.get_mut(root) else { return Status::NotRunning };
+        if s.pty.exit_status().is_some() {
+            return Status::Exited;
+        }
+        if self.kind == Kind::Shell {
+            return Status::Running;
+        }
+        if s.turn.is_some() {
+            return Status::Working;
+        }
+        match s.agent.as_ref().map(|a| a.id) {
+            Some(crate::agents::CLAUDE) => {
+                if cx.try_global::<crate::claude_ide::IdeStatus>().is_some_and(|s| s.clients > 0) {
+                    Status::Connected
+                } else {
+                    Status::NotConnected
+                }
+            }
+            _ => Status::Running,
+        }
+    }
+
+    /// The one header row: the agent (a menu to pick another), the status pill, the
+    /// session's title, then Follow, New, Continue, End and Hide.
+    fn header(&mut self, root: Option<&PathBuf>, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use crate::components::IconName;
+        let kind = self.kind;
+        let agent = match root {
+            Some(r) => self.session_agent(r, cx),
+            None => self.agent(cx),
+        };
+        let status = self.status(root.map(PathBuf::as_path), cx);
+        let running = matches!(status, Status::Connected | Status::NotConnected | Status::Running | Status::Working);
+        let title = root
+            .and_then(|r| self.sessions.get_mut(r))
+            .map(|s| s.pty.title())
+            .unwrap_or_default()
+            .trim()
+            .trim_start_matches(['✳', '✻', '·', '✶', '✢', '*', ' '])
+            .to_owned();
+        let color = agent.color(p);
+        // The session's own title, unless it only names the agent again.
+        let show_title = !title.is_empty() && running && title != agent.name.as_ref() && title != agent.short.as_ref();
+        let who = match kind {
+            Kind::Claude => self.agent_picker(&agent, p, cx),
+            Kind::Shell => div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(crate::components::icon(IconName::SquareTerminal, 14., p.fg))
+                .child(div().font_weight(gpui::FontWeight::MEDIUM).child("Terminal"))
+                .into_any_element(),
+        };
+        let pill_color = match status {
+            Status::Connected => p.ok,
+            Status::Working => color,
+            Status::NotConnected => p.warn,
+            Status::Running | Status::Starting => p.info(),
+            Status::NotRunning | Status::Exited => p.fg_dim,
+        };
+        let tip = status.tip(if kind == Kind::Shell { "The shell" } else { agent.name.as_ref() });
+        let pill = div()
+            .id("console-status")
+            .debug_selector(|| "console-status".into())
+            .flex_none()
+            .h(px(20.))
+            .pl(px(7.))
+            .pr(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(5.))
+            .rounded(px(10.))
+            .bg(p.wash(pill_color))
+            .text_color(if p.dark { pill_color } else { mix(pill_color, 0.8, p.fg) })
+            .text_size(px(11.5))
+            .whitespace_nowrap()
+            .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+            .child(if status == Status::Working {
+                crate::claude_ide::bridge::pulse_dot(pill_color, "console-status-dot")
+            } else {
+                div().flex_none().size(px(7.)).rounded_full().bg(pill_color).into_any_element()
+            })
+            .child(status.label());
+        let mut buttons: Vec<gpui::AnyElement> = Vec::new();
+        if kind == Kind::Claude {
+            let follow = self.model.read(cx).settings.follow_claude;
+            buttons.push(
+                look::toggle("follow", IconName::ArrowDownToLine, "Follow", follow, p)
+                    .h(px(22.))
+                    .tooltip(move |w, cx| {
+                        let tip = if follow {
+                            "Following: the editor goes to the files the agent changes, as it types"
+                        } else {
+                            "Not following: the editor stays where you are; dots mark what the agent changed"
+                        };
+                        gpui_component::tooltip::Tooltip::new(tip).build(w, cx)
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.model.update(cx, |m, cx| {
+                            m.settings.follow_claude = !m.settings.follow_claude;
+                            m.persist();
+                            cx.notify();
+                        })
+                    }))
+                    .into_any_element(),
+            );
+        }
+        if let Some(root) = root.cloned() {
+            let tip: &'static str = match kind {
+                Kind::Claude => "Start again with a new conversation",
+                Kind::Shell => "Start a new shell",
+            };
+            let r = root.clone();
+            buttons.push(
+                look::chip_button("new", Glyph::Plus, "New", true, p)
+                    .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
+                    .on_click(cx.listener(move |this, _, window, cx| this.start(&r, &[], window, cx)))
+                    .into_any_element(),
+            );
+            let resume = continue_args(&agent);
+            if kind == Kind::Claude && !resume.is_empty() {
+                let r = root.clone();
+                buttons.push(
+                    look::chip_button("continue", Glyph::Refresh, "Continue", true, p)
+                        .tooltip(|w, cx| {
+                            gpui_component::tooltip::Tooltip::new(
+                                "Start again on the most recent conversation in this folder",
+                            )
+                            .build(w, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| this.start(&r, &resume, window, cx)))
+                        .into_any_element(),
+                );
+            }
+            if running {
+                let r = root.clone();
+                buttons.push(
+                    look::chip_button("end", Glyph::Stop, "End", true, p)
+                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("End this session").build(w, cx))
+                        .on_click(cx.listener(move |this, _, _, cx| this.end_session(&r, cx)))
+                        .into_any_element(),
+                );
+            }
+        }
+        if kind == Kind::Claude {
+            buttons.push(div().w(px(2.)).into_any_element());
+            buttons.push(
+                look::icon_button("hide", Glyph::Close, "Hide (⌘J); the session keeps running", true, p)
+                    .on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx))
+                        }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        div()
+            .id("console-header")
+            .debug_selector(|| "console-header".into())
+            .flex_none()
+            .h(px(36.))
+            .pl(px(12.))
+            .pr(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .border_b_1()
+            .border_color(p.border)
+            .font_family(look::ui_font(cx))
+            .text_size(px(12.5))
+            .child(who)
+            .child(pill)
+            .when(show_title, |d| {
+                d.child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .text_color(p.fg_dim)
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .child(title),
+                )
+            })
+            .when(!show_title, |d| d.child(div().flex_1()))
+            .child(div().flex_none().flex().items_center().gap(px(2.)).children(buttons))
+            .into_any_element()
+    }
+
+    /// The agent's name with its icon in its colour, a menu of the others under it.
+    fn agent_picker(&self, agent: &crate::agents::Agent, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use crate::agents::ConsoleAgent;
+        use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+        let color = agent.color(p);
+        let model = self.model.clone();
+        let chosen = self.model.read(cx).settings.console_agent;
+        let agents = crate::agents::known(&self.model.read(cx).settings);
+        let hover = p.button_hover;
+        look::Trigger(
+            div()
+                .id("console-agent")
+                .debug_selector(|| "console-agent".into())
+                .flex_none()
+                .h(px(26.))
+                .pl(px(4.))
+                .pr(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(7.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(20.))
+                        .rounded(px(5.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(mix(color, 0.2, p.panel))
+                        .child(crate::components::icon(agent.icon, 12., color)),
+                )
+                .child(div().whitespace_nowrap().font_weight(gpui::FontWeight::MEDIUM).child(agent.name.clone()))
+                .child(crate::components::icon(crate::components::IconName::ChevronDown, 12., p.fg_dim)),
+        )
+        .dropdown_menu(move |mut menu, _, _| {
+            for (a, which) in agents.iter().zip(ConsoleAgent::ALL) {
+                let model = model.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(a.name.clone())
+                        .icon(crate::components::menu_icon(a.icon))
+                        .checked(which == chosen)
+                        .on_click(move |_, _, cx| {
+                            model.update(cx, |m, cx| {
+                                m.settings.console_agent = which;
+                                m.persist();
+                                cx.notify();
+                            })
+                        }),
+                );
+            }
+            menu
+        })
+        .into_any_element()
+    }
+
+    /// End the session of `root`: it stays ended (no new one starts on its own) until
+    /// Start, New or Continue.
+    pub fn end_session(&mut self, root: &Path, cx: &mut Context<Self>) {
+        if let Some(mut s) = self.sessions.remove(root) {
+            s.pty.kill();
+        }
+        self.ended.insert(root.to_owned());
+        self.note_engine(root, cx);
+        cx.notify();
+    }
+
+    /// The console with no session: the agent's drawing, what it does, Start and Continue.
+    fn not_running(&self, root: &Path, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use crate::components::IconName;
+        let agent = self.agent(cx);
+        let (title, hint, start): (String, String, &'static str) = match self.kind {
+            Kind::Shell => ("The shell is not running".into(), "Start a shell in the project.".into(), "Start Shell"),
+            Kind::Claude => {
+                let start = match agent.id {
+                    crate::agents::CLAUDE => "Start Claude",
+                    crate::agents::CODEX => "Start Codex",
+                    _ => "Start Agent",
+                };
+                let hint = match agent.id {
+                    crate::agents::CLAUDE => {
+                        "It sees the editor, and its edits type themselves in, in its colour, for you to review.".into()
+                    }
+                    _ => "The files it changes type themselves in, in its colour, for you to review.".to_owned(),
+                };
+                (format!("{} is not running", agent.name), hint, start)
+            }
+        };
+        let hint = self.error.clone().unwrap_or(hint);
+        let (r1, r2) = (root.to_owned(), root.to_owned());
+        let resume = continue_args(&agent);
+        let continue_button = (self.kind == Kind::Claude && !resume.is_empty()).then(|| {
+            look::small_button("console-continue", IconName::RotateCcw, "Continue last session", p)
+                .debug_selector(|| "console-continue".into())
+                .h(px(28.))
+                .px(px(12.))
+                .on_click(cx.listener(move |this, _, window, cx| this.start(&r2, &resume, window, cx)))
+        });
+        // Side by side: the console is a short pane.
+        div()
+            .id("console-not-running")
+            .debug_selector(|| "console-not-running".into())
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(28.))
+            .px(px(24.))
+            .py(px(12.))
+            .child(crate::art::drawing_on(snout_core::art::spots::agent_console(), 156., 104., p.panel))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .max_w(px(420.))
+                    .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
+                    .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
+                    .child(
+                        div()
+                            .mt(px(10.))
+                            .flex()
+                            .gap(px(8.))
+                            .child(
+                                look::primary_button("console-start", IconName::Play, start, true, p)
+                                    .debug_selector(|| "console-start".into())
+                                    .on_click(cx.listener(move |this, _, window, cx| this.start(&r1, &[], window, cx))),
+                            )
+                            .children(continue_button),
+                    ),
+            )
+            .into_any_element()
     }
 }
 

@@ -449,6 +449,33 @@ drawing!(
 );
 
 drawing!(
+    /// An agent's console, waiting to start: the terminal with its prompt and the agent's
+    /// spark, and beside it the page it will write on, its caret in the green with the
+    /// little flag of its name, the line it writes lit.
+    agent_console,
+    |d| {
+        d.rotated(-4.0, 82.0, 84.0, |d| {
+            d.rect(24.0, 40.0, 112.0, 84.0, 8.0, Fill::Paper);
+            d.path("M24 54V48Q24 40 32 40H128Q136 40 136 48V54Z", Fill::Tint);
+            d.dot(34.0, 47.0, 1.6).dot(41.0, 47.0, 1.6).dot(48.0, 47.0, 1.6);
+            d.line("M38 70L45 75L38 80").line("M52 80H96");
+            d.line("M38 94H118").line("M38 106H90");
+            d.spark(114.0, 72.0, 0.6);
+        });
+        d.rotated(5.0, 178.0, 86.0, |d| {
+            sheet(d, 146.0, 34.0, 66.0, 96.0, Fill::Paper, 0);
+            d.line("M154 54H198").line("M154 66H190").line("M154 78H196");
+            d.shape("M150 96H206V108H150Z", Fill::Tint);
+            d.line("M154 102H176");
+            d.rect(178.0, 94.0, 3.0, 16.0, 1.0, Fill::Accent);
+            d.rect(178.0, 84.0, 20.0, 9.0, 2.5, Fill::Accent);
+            d.line("M154 120H184");
+        });
+        d.twinkling_spark(36.0, 26.0, 0.6).twinkling_spark(126.0, 136.0, 0.5).twinkling_spark(220.0, 30.0, 0.55);
+    }
+);
+
+drawing!(
     /// Connecting to a remote machine: this computer and the server, a dotted thread between
     /// them with the green on its way along it.
     remote_connecting,
@@ -784,7 +811,7 @@ drawing!(
 );
 
 /// Every spot drawing of this module, by name: for tests and the gallery.
-pub fn all() -> [(&'static str, &'static Drawing); 36] {
+pub fn all() -> [(&'static str, &'static Drawing); 37] {
     [
         ("discard", discard()),
         ("push_rejected", push_rejected()),
@@ -805,6 +832,7 @@ pub fn all() -> [(&'static str, &'static Drawing); 36] {
         ("no_processes", no_processes()),
         ("no_results", no_results()),
         ("claude_idle", claude_idle()),
+        ("agent_console", agent_console()),
         ("remote_connecting", remote_connecting()),
         ("remote_lost", remote_lost()),
         ("debugger_idle", debugger_idle()),
