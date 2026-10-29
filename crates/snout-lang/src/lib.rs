@@ -56,6 +56,7 @@ pub fn client_capabilities() -> Value {
             "references": {},
             "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
             "formatting": {},
+            "rangeFormatting": {},
             "rename": { "prepareSupport": true },
             "codeAction": {
                 "codeActionLiteralSupport": {

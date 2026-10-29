@@ -212,3 +212,36 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
     let _ = &t.model;
     t.stop();
 }
+
+#[gpui::test]
+fn formats_the_selection_or_else_the_file(cx: &mut TestAppContext) {
+    let _engine = crate::tests::engine_lock();
+    let Some(mut t) = start(cx, "java-format", "Shop.java") else { return };
+    let original = t.text();
+    let messy = original
+        .replace("        double sum = 0;", "double   sum =  0;")
+        .replace("        int tax = 7;", "int   tax=7;");
+    t.put_back(&messy);
+
+    // ⌥⌘L with a line selected: that line only.
+    let mut formatted = false;
+    for _ in 0..10 {
+        t.select("double   sum =  0;", 0);
+        t.cx.simulate_keystrokes("cmd-alt-l");
+        if t.wait_for_text(5, |s| s.contains("        double sum = 0;")) {
+            formatted = true;
+            break;
+        }
+    }
+    assert!(formatted, "the selected line is formatted: {}", t.text());
+    assert!(t.text().contains("int   tax=7;"), "the rest is left as it was");
+
+    // Nothing selected: the whole file.
+    let editor = t.editor.clone();
+    caret_at(&editor, "package", 0, 0, t.cx);
+    t.cx.simulate_keystrokes("cmd-alt-l");
+    assert!(t.wait_for_text(30, |s| s.contains("        int tax = 7;")), "{}", t.text());
+    let names: Vec<String> = crate::menus::commands(&[]).into_iter().map(|(n, _)| n.to_string()).collect();
+    assert!(names.iter().any(|n| n == "Format Selection"));
+    t.stop();
+}

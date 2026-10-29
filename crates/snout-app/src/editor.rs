@@ -65,6 +65,7 @@ actions!(
         ExtractConstant,
         ExtractField,
         Inline,
+        FormatSelection,
     ]
 );
 
@@ -1363,6 +1364,7 @@ impl Render for EditorPanel {
                 d.on_action(cx.listener(|this, _: &FindReferences, _, cx| this.find_references(cx)))
                     .on_action(cx.listener(|this, _: &RenameSymbol, w, cx| this.start_rename(w, cx)))
                     .on_action(cx.listener(|this, _: &FormatDocument, _, cx| this.format_document(cx)))
+                    .on_action(cx.listener(|this, _: &FormatSelection, _, cx| this.format_selection(cx)))
                     .on_action(cx.listener(|this, _: &OrganizeImports, _, cx| this.organize_imports(cx)))
                     .on_action(cx.listener(|this, _: &ShowSignature, _, cx| this.ask_signature(cx)))
                     .on_action(cx.listener(|this, _: &CancelRename, w, cx| this.cancel_rename(w, cx)))

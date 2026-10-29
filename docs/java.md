@@ -96,9 +96,12 @@ Press ⌘. (Code ▸ Quick Fix…) to list the fixes and actions the engine offe
 
 Press ⌥⇧O (Code ▸ Organize Imports). The imports are sorted, unused ones are removed, and missing ones are added where only one class fits.
 
-## Format the file
+## Format code
 
-Press ⌥⇧F (Code ▸ Format Document) to format the whole file. It keeps the file's own indentation, tabs or spaces.
+- Press ⌥⌘L (Code ▸ Format Selection) to format the lines you selected and leave the rest of the file as it is. With nothing selected, it formats the whole file.
+- Press ⌥⇧F (Code ▸ Format Document) to format the whole file, whatever is selected.
+
+Both keep the file's own indentation, tabs or spaces.
 
 ## Errors and warnings
 

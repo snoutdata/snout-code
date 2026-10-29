@@ -420,6 +420,34 @@ impl EditorPanel {
         .detach();
     }
 
+    /// ⌥⌘L: the server's formatting of the lines selected, or of the whole file when
+    /// nothing is selected.
+    pub fn format_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(link) = self.lang.clone() else { return };
+        let (rope, selection) = {
+            let s = self.state.read(cx);
+            (s.text().clone(), s.selected_range())
+        };
+        if selection.is_empty() {
+            return self.format_document(cx);
+        }
+        let params = json!({
+            "textDocument": { "uri": link.uri.as_str() },
+            "range": text::range_to_lsp(&rope, &selection),
+            "options": { "tabSize": self.info.width, "insertSpaces": !self.info.tabs }
+        });
+        let call = link.ask(&rope, "textDocument/rangeFormatting", params, cx);
+        let uri = link.uri.clone();
+        cx.spawn(async move |_, cx| {
+            let Ok(v) = call.await else { return };
+            let edits: Vec<TextEdit> = serde_json::from_value(v).unwrap_or_default();
+            if !edits.is_empty() {
+                cx.update(|cx| emit_edits(&link, uri, edits, cx));
+            }
+        })
+        .detach();
+    }
+
     /// ⇧⌥O: imports sorted, unused ones gone, missing ones added where only one fits.
     pub fn organize_imports(&mut self, cx: &mut Context<Self>) {
         let Some(link) = self.lang.clone() else { return };

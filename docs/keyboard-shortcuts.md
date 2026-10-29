@@ -71,6 +71,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌥⌘N | Inline | Editor |
 | ⌘. | Quick Fix… | Editor |
 | ⌥⇧F | Format Document | Editor |
+| ⌥⌘L | Format Selection (the whole file when nothing is selected) | Editor |
 | ⌥⇧O | Organize Imports | Editor |
 | ⇧⌘M | Show Problems | |
 
