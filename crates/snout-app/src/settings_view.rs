@@ -67,6 +67,12 @@ impl Page {
         matches!(self, Page::Editor | Page::VersionControl | Page::Gradle | Page::Spring)
     }
 
+    /// Some of the page's settings may be set for a project (all of them when
+    /// [`Page::per_project`]): the Terminal page's shell and variables.
+    pub fn has_project_rows(self) -> bool {
+        self.per_project() || self == Page::Terminal
+    }
+
     /// The page's icon, in the list and over the page.
     pub fn icon(self) -> crate::components::IconName {
         use crate::components::IconName;
@@ -106,7 +112,7 @@ impl Page {
             Page::VersionControl => "How SnoutCode keeps your projects' Git up to date.",
             Page::Gradle => "The JDK each build runs on, and how long SnoutCode's Gradle daemons stay.",
             Page::Spring => "The profiles the Spring window evaluates the beans under.",
-            Page::Terminal => "The engine behind the Terminal tab and the Claude Code console.",
+            Page::Terminal => "How the terminals look and what they run, and the terminal app to open folders in.",
             Page::ClaudeCode => "The claude program SnoutCode starts in its console.",
         }
     }
@@ -145,7 +151,10 @@ impl Page {
             Page::VersionControl => "git fetch interval background",
             Page::Gradle => "build tools jdk java daemon idle timeout",
             Page::Spring => "frameworks boot profiles active beans",
-            Page::Terminal => "tools engine ghostty built-in builtin shell console emulator vt",
+            Page::Terminal => {
+                "tools engine ghostty built-in builtin shell console emulator vt font cursor blink scrollback \
+                 environment variables copy select option meta"
+            }
             Page::ClaudeCode => "tools agent console program path",
         }
     }
@@ -190,6 +199,10 @@ pub struct SettingsView {
     profiles: Entity<InputState>,
     pub search: Entity<InputState>,
     claude: Entity<InputState>,
+    /// The Terminal page's shell, its arguments, and a variable to add (`NAME=value`).
+    shell: Entity<InputState>,
+    shell_args: Entity<InputState>,
+    new_var: Entity<InputState>,
     /// The JDKs on this Mac, for the Gradle page.
     jdks: Vec<Jdk>,
     /// The Gradle builds the Gradle page lists.
@@ -263,6 +276,36 @@ impl SettingsView {
             }
         })
         .detach();
+        let shown = draft.clone();
+        let shell = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Your login shell ($SHELL)")
+                .default_value(shown.terminal_shell.clone())
+        });
+        cx.subscribe(&shell, |this, input, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change) {
+                let text = input.read(cx).value().trim().to_owned();
+                this.set(cx, |s| s.terminal_shell = text);
+            }
+        })
+        .detach();
+        let shell_args = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("No arguments").default_value(shown.terminal_shell_args.join(" "))
+        });
+        cx.subscribe(&shell_args, |this, input, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change) {
+                let args: Vec<String> = input.read(cx).value().split_whitespace().map(str::to_owned).collect();
+                this.set(cx, |s| s.terminal_shell_args = args);
+            }
+        })
+        .detach();
+        let new_var = cx.new(|cx| InputState::new(window, cx).placeholder("NAME=value, then Return"));
+        cx.subscribe_in(&new_var, window, |this, _, e: &InputEvent, window, cx| {
+            if matches!(e, InputEvent::PressEnter { .. }) {
+                this.add_var(window, cx);
+            }
+        })
+        .detach();
         let key_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search commands or shortcuts"));
         cx.subscribe(&key_search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -280,6 +323,9 @@ impl SettingsView {
             page: Page::Appearance,
             search,
             claude,
+            shell,
+            shell_args,
+            new_var,
             jdks,
             builds,
             key_search,
@@ -328,6 +374,7 @@ impl SettingsView {
         }
         self.scope = scope;
         self.sync_profiles_field(window, cx);
+        self.sync_shell_fields(window, cx);
         cx.notify();
     }
 
@@ -355,6 +402,17 @@ impl SettingsView {
         next.keymap = d.keymap.clone();
         next.confirm_quit = d.confirm_quit;
         next.terminal_engine = d.terminal_engine;
+        next.terminal_font = d.terminal_font.clone();
+        next.terminal_font_size = d.terminal_font_size;
+        next.terminal_line_height = d.terminal_line_height;
+        next.terminal_cursor = d.terminal_cursor;
+        next.terminal_cursor_blink = d.terminal_cursor_blink;
+        next.terminal_scrollback = d.terminal_scrollback;
+        next.terminal_shell = d.terminal_shell.clone();
+        next.terminal_shell_args = d.terminal_shell_args.clone();
+        next.terminal_env = d.terminal_env.clone();
+        next.terminal_copy_on_select = d.terminal_copy_on_select;
+        next.terminal_option_as_meta = d.terminal_option_as_meta;
         self.draft = next.clone();
         cx.emit(SettingsEvent::Apply { user: Box::new(next), project, close });
     }
@@ -380,6 +438,9 @@ impl SettingsView {
         if key == Key::SpringProfiles {
             self.sync_profiles_field(window, cx);
         }
+        if matches!(key, Key::TerminalShell | Key::TerminalShellArgs) {
+            self.sync_shell_fields(window, cx);
+        }
         cx.notify();
     }
 
@@ -404,6 +465,29 @@ impl SettingsView {
             }
         }
         cx.notify();
+    }
+
+    /// The shell fields show the scope's values.
+    fn sync_shell_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let s = self.shown();
+        let args = s.terminal_shell_args.join(" ");
+        if self.shell.read(cx).value() != s.terminal_shell {
+            self.shell.update(cx, |i, cx| i.set_value(s.terminal_shell.clone(), window, cx));
+        }
+        let typed: Vec<String> = self.shell_args.read(cx).value().split_whitespace().map(str::to_owned).collect();
+        if typed != s.terminal_shell_args {
+            self.shell_args.update(cx, |i, cx| i.set_value(args, window, cx));
+        }
+    }
+
+    /// Add the variable typed (`NAME=value`) to the terminals' environment.
+    fn add_var(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.new_var.read(cx).value().to_string();
+        let Some((name, value)) = parse_var(&text) else { return };
+        self.set(cx, |s| {
+            s.terminal_env.insert(name, value);
+        });
+        self.new_var.update(cx, |i, cx| i.set_value("", window, cx));
     }
 
     /// The profile names field shows those of the scope's mode.
@@ -556,6 +640,14 @@ impl SettingsView {
     }
 }
 
+/// A variable typed as `NAME=value` (spaces around the name trimmed); `None` without a name.
+fn parse_var(text: &str) -> Option<(String, String)> {
+    let (name, value) = text.split_once('=')?;
+    let name = name.trim();
+    let ok = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    ok.then(|| (name.to_owned(), value.to_owned()))
+}
+
 /// Profile names typed in a field: separated by commas or spaces.
 fn profile_names(text: &str) -> Vec<String> {
     text.split([',', ' ']).map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned).collect()
@@ -584,6 +676,33 @@ pub(crate) fn row(label: &'static str, control: impl IntoElement, p: &Palette) -
 
 pub(crate) fn section(text: &'static str, p: &Palette) -> gpui::Div {
     div().pt(px(14.)).pb(px(6.)).text_color(p.fg_dim).text_size(px(12.)).font_weight(FontWeight::MEDIUM).child(text)
+}
+
+/// A count with thousands apart: `10,000`.
+fn group_digits(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The scrollback one step up (`by` 1) or down: by a thousand lines to 10,000, then by
+/// 10,000 to 100,000, then by 100,000.
+fn step_lines(lines: usize, by: i32) -> usize {
+    let at = if by < 0 { lines.saturating_sub(1) } else { lines };
+    let step = if at < 10_000 {
+        1_000
+    } else if at < 100_000 {
+        10_000
+    } else {
+        100_000
+    };
+    (lines as i64 + i64::from(by) * step as i64).clamp(1_000, 1_000_000) as usize
 }
 
 /// The daemons' idle time one step up (`by` 1) or down: a minute at a time up to 5, then 5.
@@ -763,7 +882,8 @@ fn engine_card(engine: EngineKind, on: bool, p: &Palette) -> gpui::Stateful<gpui
 
 /// A terminal as the chosen engine draws it, in the theme's colours: its title bar with the
 /// engine's name, then a short session.
-fn terminal_preview(engine: EngineKind, p: &Palette) -> gpui::Div {
+fn terminal_preview(engine: EngineKind, look: crate::console::TermLook, shell: &str, p: &Palette) -> gpui::Div {
+    let shell = std::path::Path::new(shell.trim()).file_name().and_then(|n| n.to_str()).unwrap_or("zsh").to_owned();
     let shown = engine.or_available();
     let ico = if shown == EngineKind::Ghostty { IconName::Ghost } else { IconName::SquareTerminal };
     let hues = p.hues;
@@ -786,7 +906,7 @@ fn terminal_preview(engine: EngineKind, p: &Palette) -> gpui::Div {
                 .border_b_1()
                 .border_color(p.border)
                 .children([hues[3], hues[6], hues[1]].map(|c| div().size(px(8.)).rounded_full().bg(c)))
-                .child(div().ml(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child("zsh in shop"))
+                .child(div().ml(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(format!("{shell} in shop")))
                 .child(div().flex_1())
                 .child(crate::components::badge_with_icon(
                     format!("{} engine", shown.label()),
@@ -795,7 +915,7 @@ fn terminal_preview(engine: EngineKind, p: &Palette) -> gpui::Div {
                     p,
                 )),
         )
-        .child(div().px(px(10.)).py(px(8.)).child(crate::console::preview(shown)))
+        .child(div().px(px(10.)).py(px(8.)).child(crate::console::preview(shown, look)))
 }
 
 /// Java code as the editor shows it with these settings: its indentation at the tab size,
@@ -932,7 +1052,7 @@ fn swatch(t: ColorTheme, dark: bool, on: bool, p: &Palette) -> gpui::Stateful<gp
 impl SettingsView {
     fn page_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        if self.scope == Scope::Project && !self.page.per_project() {
+        if self.scope == Scope::Project && !self.page.has_project_rows() {
             let title = self.page.title();
             return crate::components::EmptyState::new(
                 snout_core::art::spots::shared_settings(),
@@ -1419,8 +1539,36 @@ impl SettingsView {
         }
     }
 
-    /// Settings ▸ Terminal: the engine new terminals start with, and those running.
+    /// Settings ▸ Tools ▸ Terminal: the engine, the look (with a preview), what the Terminal
+    /// tab runs, and how keys and selection behave. In the project's scope only what a
+    /// project may set: the shell and the variables.
     fn terminal_page(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let shell = self.terminal_shell_rows(d, cx);
+        if self.scope == Scope::Project {
+            return div()
+                .flex()
+                .flex_col()
+                .child(shell)
+                .child(div().pt(px(14.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                    "The terminals' look, engine and keys, and the external terminal, are yours: they are the same \
+                     in every project.",
+                ))
+                .into_any_element();
+        }
+        div()
+            .flex()
+            .flex_col()
+            .child(self.terminal_engine_rows(d, cx))
+            .child(self.terminal_look_rows(d, cx))
+            .child(shell)
+            .child(self.terminal_behaviour_rows(d, cx))
+            .child(self.terminal_running(d, cx))
+            .into_any_element()
+    }
+
+    /// The engine cards, and beside them what the engine is and why Ghostty may be missing.
+    fn terminal_engine_rows(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
         use crate::components::{Tone, callout_with};
         let p = palette(cx);
         let chosen = d.terminal_engine;
@@ -1432,12 +1580,6 @@ impl SettingsView {
                 card
             }
         }));
-        let open: Vec<(String, EngineKind)> = cx
-            .try_global::<crate::console::OpenTerminals>()
-            .map(|o| o.0.iter().map(|((kind, root), e)| (format!("{kind} in {}", Model::dir_name(root)), *e)).collect())
-            .unwrap_or_default();
-        let others = open.iter().filter(|(_, e)| *e != chosen).count();
-        // The cards, and beside them what the engine is and why Ghostty may be missing.
         let about = div()
             .flex_1()
             .min_w_0()
@@ -1454,17 +1596,275 @@ impl SettingsView {
                         .debug_selector(|| "settings-ghostty-unavailable".into()),
                 )
             });
-        let mut body = div()
+        div()
             .flex()
             .flex_col()
             .child(section("Terminal engine", &p))
-            .child(div().flex().items_start().gap(px(16.)).child(cards).child(about));
-        body = body.child(section("Preview", &p)).child(terminal_preview(chosen, &p));
-        if chosen.or_available() == EngineKind::Builtin {
-            body = body.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                "Ghostty also draws the deprecated call struck through, its curly warning line, and the test report's link.",
-            ));
-        }
+            .child(div().flex().items_start().gap(px(16.)).child(cards).child(about))
+            .into_any_element()
+    }
+
+    /// Typeface, size, line height and cursor, then the preview drawn with them.
+    fn terminal_look_rows(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        use crate::settings::{TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, TerminalCursor};
+        let p = palette(cx);
+        let view = cx.entity();
+        let mut fonts = vec![(String::new(), format!("Editor's ({})", d.editor_font))];
+        fonts.extend(EDITOR_FONTS.iter().map(|(v, l)| ((*v).to_owned(), (*l).to_owned())));
+        let font_now = d.terminal_font.clone().unwrap_or_default();
+        let pick_font = {
+            let view = view.clone();
+            move |v: String, cx: &mut App| {
+                view.update(cx, |this, cx| this.set(cx, |s| s.terminal_font = (!v.is_empty()).then_some(v)))
+            }
+        };
+        let size = d.terminal_font_size.unwrap_or(d.editor_font_size);
+        let size_view = view.clone();
+        let size_row = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(stepper(
+                "settings-terminal-size",
+                format!("{size}"),
+                move |by, _, cx| {
+                    size_view.update(cx, |v, cx| {
+                        v.set(cx, |s| {
+                            let now = s.terminal_font_size.unwrap_or(s.editor_font_size);
+                            s.terminal_font_size = Some((now + by as f32).clamp(TERMINAL_FONT_MIN, TERMINAL_FONT_MAX));
+                        })
+                    })
+                },
+                &p,
+            ))
+            .child(if d.terminal_font_size.is_some() {
+                crate::components::Button::new("settings-terminal-size-editor", IconName::RotateCcw)
+                    .debug_selector("settings-terminal-size-editor")
+                    .compact()
+                    .ghost()
+                    .label("Use the editor's")
+                    .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.terminal_font_size = None)))
+                    .into_any_element()
+            } else {
+                div().text_size(px(12.)).text_color(p.fg_dim).child("The editor's size").into_any_element()
+            });
+        let height_view = view.clone();
+        let cursor = |c: TerminalCursor, cx: &mut Context<Self>| {
+            let ico = match c {
+                TerminalCursor::Block => IconName::Square,
+                TerminalCursor::Bar => IconName::TextCursor,
+                TerminalCursor::Underline => IconName::Underline,
+            };
+            let id = format!("settings-terminal-cursor-{}", c.label().to_lowercase());
+            look::toggle(SharedString::from(id.clone()), ico, c.label(), d.terminal_cursor == c, &p)
+                .debug_selector(move || id.clone())
+                .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.terminal_cursor = c)))
+        };
+        let cursors = div()
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .children(TerminalCursor::ALL.map(|c| cursor(c, cx)))
+            .child(div().w(px(12.)))
+            .child(
+                look::checkbox("settings-terminal-blink", "Blink", d.terminal_cursor_blink, true, &p)
+                    .debug_selector(|| "settings-terminal-blink".into())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.set(cx, |s| s.terminal_cursor_blink = !s.terminal_cursor_blink)
+                    })),
+            );
+        div()
+            .flex()
+            .flex_col()
+            .child(section("Look", &p))
+            .child(row("Font", choice("settings-terminal-font", &font_now, fonts, pick_font, &p), &p))
+            .child(row("Size", size_row, &p))
+            .child(row(
+                "Line height",
+                stepper(
+                    "settings-terminal-line-height",
+                    format!("{:.1}", d.terminal_line_height),
+                    move |by, _, cx| {
+                        height_view.update(cx, |v, cx| {
+                            v.set(cx, |s| {
+                                let next = (s.terminal_line_height * 10.).round() + by as f32;
+                                s.terminal_line_height = (next / 10.).clamp(1., 2.);
+                            })
+                        })
+                    },
+                    &p,
+                ),
+                &p,
+            ))
+            .child(row("Cursor", cursors, &p))
+            .child(section("Preview", &p))
+            .child(terminal_preview(d.terminal_engine, crate::console::TermLook::of(d), &d.terminal_shell, &p))
+            .when(d.terminal_engine.or_available() == EngineKind::Builtin, |b| {
+                b.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                    "Ghostty also draws the deprecated call struck through, its curly warning line, and the test \
+                     report's link.",
+                ))
+            })
+            .into_any_element()
+    }
+
+    /// The program the Terminal tab runs, its arguments, and the variables added: the rows a
+    /// project may set for itself.
+    fn terminal_shell_rows(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let [shell_mark, args_mark, env_mark] =
+            [Key::TerminalShell, Key::TerminalShellArgs, Key::TerminalEnv].map(|k| self.mark(k, cx));
+        let remote = crate::remote::is_remote(cx);
+        let vars = d.terminal_env.iter().map(|(name, value)| {
+            let name2 = name.clone();
+            let id = format!("settings-terminal-var-{name}");
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .py(px(2.))
+                .child(crate::components::icon(IconName::Variable, 13., p.fg_dim))
+                .child(div().font_family(look::MONO).text_size(px(12.5)).child(format!("{name}={value}")))
+                .child(
+                    crate::components::IconButton::new(SharedString::from(id), IconName::X, "Remove this variable")
+                        .size(20.)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let name = name2.clone();
+                            this.set(cx, move |s| {
+                                s.terminal_env.remove(&name);
+                            })
+                        })),
+                )
+                .into_any_element()
+        });
+        let vars: Vec<AnyElement> = vars.collect();
+        div()
+            .flex()
+            .flex_col()
+            .child(section("Shell", &p))
+            .child(marked(
+                row("Program", div().w(px(300.)).child(look::field(&self.shell, false, None, &p)), &p),
+                shell_mark,
+            ))
+            .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(if remote {
+                "Empty: the login shell of your account on the remote machine."
+            } else {
+                "Empty: your login shell. On a remote machine, your shell there."
+            }))
+            .child(marked(
+                row("Arguments", div().w(px(300.)).child(look::field(&self.shell_args, false, None, &p)), &p),
+                args_mark,
+            ))
+            .child(
+                div()
+                    .pl(px(162.))
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child("Separated by spaces. -l starts a login shell."),
+            )
+            .child(marked(
+                row(
+                    "Environment",
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(div().w(px(300.)).child(look::field(&self.new_var, false, None, &p)))
+                        .child(
+                            crate::components::Button::new("settings-terminal-add-var", IconName::Plus)
+                                .debug_selector("settings-terminal-add-var")
+                                .compact()
+                                .label("Add")
+                                .on_click(cx.listener(|this, _, w, cx| this.add_var(w, cx))),
+                        ),
+                    &p,
+                ),
+                env_mark,
+            ))
+            .child(div().pl(px(162.)).flex().flex_col().children(vars).when(d.terminal_env.is_empty(), |d| {
+                d.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child("Added to the terminals and the Claude Code console you start after a change."),
+                )
+            }))
+            .into_any_element()
+    }
+
+    /// Scrollback, selection and the Option key.
+    fn terminal_behaviour_rows(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let view = cx.entity();
+        div()
+            .flex()
+            .flex_col()
+            .child(section("Behaviour", &p))
+            .child(row(
+                "Scrollback",
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(stepper(
+                        "settings-terminal-scrollback",
+                        group_digits(d.terminal_scrollback),
+                        move |by, _, cx| {
+                            view.update(cx, |v, cx| {
+                                v.set(cx, |s| s.terminal_scrollback = step_lines(s.terminal_scrollback, by))
+                            })
+                        },
+                        &p,
+                    ))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child("lines, for terminals started after a change"),
+                    ),
+                &p,
+            ))
+            .child(check_line(
+                look::checkbox(
+                    "settings-terminal-copy-on-select",
+                    "Copy text as soon as it is selected",
+                    d.terminal_copy_on_select,
+                    true,
+                    &p,
+                )
+                .debug_selector(|| "settings-terminal-copy-on-select".into())
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.set(cx, |s| s.terminal_copy_on_select = !s.terminal_copy_on_select)
+                })),
+                None,
+            ))
+            .child(check_line(
+                look::checkbox(
+                    "settings-terminal-option-meta",
+                    "Use Option as Meta (\u{2325}F moves a word, not \u{192})",
+                    d.terminal_option_as_meta,
+                    true,
+                    &p,
+                )
+                .debug_selector(|| "settings-terminal-option-meta".into())
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.set(cx, |s| s.terminal_option_as_meta = !s.terminal_option_as_meta)
+                })),
+                None,
+            ))
+            .into_any_element()
+    }
+
+    /// The terminals running and their engines.
+    fn terminal_running(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let chosen = d.terminal_engine;
+        let open: Vec<(String, EngineKind)> = cx
+            .try_global::<crate::console::OpenTerminals>()
+            .map(|o| o.0.iter().map(|((kind, root), e)| (format!("{kind} in {}", Model::dir_name(root)), *e)).collect())
+            .unwrap_or_default();
+        let others = open.iter().filter(|(_, e)| *e != chosen).count();
+        let mut body = div().flex().flex_col();
         if !open.is_empty() {
             body = body.child(section("Running now", &p)).children(open.into_iter().map(|(what, e)| {
                 let ico = if e == EngineKind::Ghostty { IconName::Ghost } else { IconName::SquareTerminal };
@@ -1916,7 +2316,27 @@ mod tests {
     }
 
     #[test]
+    fn the_scrollback_steps_by_thousands_then_more() {
+        assert_eq!(super::step_lines(10_000, 1), 20_000);
+        assert_eq!(super::step_lines(10_000, -1), 9_000);
+        assert_eq!(super::step_lines(1_000, -1), 1_000);
+        assert_eq!(super::step_lines(100_000, -1), 90_000);
+        assert_eq!(super::group_digits(1_000_000), "1,000,000");
+        assert_eq!(super::group_digits(999), "999");
+    }
+
+    #[test]
+    fn a_variable_is_typed_as_name_equals_value() {
+        assert_eq!(super::parse_var(" JAVA_OPTS =-Xmx2g -Da=b"), Some(("JAVA_OPTS".into(), "-Xmx2g -Da=b".into())));
+        assert_eq!(super::parse_var("=x"), None);
+        assert_eq!(super::parse_var("NO VALUE"), None);
+        assert_eq!(super::parse_var("A B=c"), None);
+    }
+
+    #[test]
     fn the_search_finds_pages_by_title_group_and_keyword() {
+        assert!(Page::Terminal.matches("cursor"));
+        assert!(Page::Terminal.matches("scrollback"));
         assert!(Page::Gradle.matches("build"));
         assert!(Page::Gradle.matches("JDK"));
         assert!(Page::Gradle.matches("daemon"));

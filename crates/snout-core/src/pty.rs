@@ -35,6 +35,8 @@ pub struct Launch<'a> {
     pub env: &'a [(&'a str, String)],
     /// Inherited variables to drop.
     pub env_remove: &'a [&'a str],
+    /// How many lines of history the terminal keeps ([`crate::term::SCROLLBACK`] by default).
+    pub scrollback: usize,
 }
 
 /// State written by the reader and terminal threads.
@@ -93,6 +95,7 @@ impl Pty {
         wake: impl Fn() + Send + 'static,
     ) -> anyhow::Result<Self> {
         let size = (24, 80);
+        let scrollback = launch.scrollback;
         let mut cmd = Cmd::new(launch.program).args(launch.args).cwd(launch.cwd);
         for name in launch.env_remove {
             cmd = cmd.env_remove(name);
@@ -113,9 +116,9 @@ impl Pty {
         std::thread::Builder::new().name("terminal".into()).spawn(move || {
             let wanted = engine.or_available();
             let mut error = (wanted != engine).then(|| engine.unavailable().unwrap_or_default().to_owned());
-            let made = wanted.create(size.0, size.1, fg, bg).or_else(|e| {
+            let made = wanted.create_with(size.0, size.1, fg, bg, scrollback).or_else(|e| {
                 error = Some(e);
-                EngineKind::Builtin.create(size.0, size.1, fg, bg)
+                EngineKind::Builtin.create_with(size.0, size.1, fg, bg, scrollback)
             });
             let Ok(mut e) = made else { return };
             let _ = ready_tx.send((e.kind(), error));
@@ -654,7 +657,14 @@ mod tests {
         // Ask for the cursor position, then echo what the terminal answered (minus ESC).
         let script = r#"printf 'hello \033[31mred\033[0m\n'; stty raw -echo; printf '\033[6n'; r=$(dd bs=1 count=6 2>/dev/null); stty sane; printf 'reply:%s\n' "$(printf %s "$r" | tr -d '\033')"; read line; echo "got:$line""#;
         let args = ["-c".to_owned(), script.to_owned()];
-        let launch = Launch { program: Path::new("/bin/sh"), args: &args, cwd: &dir, env: &[], env_remove: &[] };
+        let launch = Launch {
+            program: Path::new("/bin/sh"),
+            args: &args,
+            cwd: &dir,
+            env: &[],
+            env_remove: &[],
+            scrollback: crate::term::SCROLLBACK,
+        };
         let mut term = Pty::spawn(&*snout_host::local(), &launch, engine, (255, 255, 255), (0, 0, 0), || {}).unwrap();
         assert_eq!(term.engine(), engine);
         wait_for(&term, "hello red");

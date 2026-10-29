@@ -143,7 +143,63 @@ pub struct Settings {
     /// `Builtin`, or `Ghostty` in builds that include it (the default there). New terminals
     /// start with it; open ones keep the engine they started with.
     pub terminal_engine: snout_core::term::EngineKind,
+    /// The terminals' typeface; unset, the editor's (`editor_font`). Applies to open terminals.
+    pub terminal_font: Option<String>,
+    /// The terminals' text size, 8 to 32; unset, the editor's (`editor_font_size`).
+    #[schemars(range(min = 8, max = 32))]
+    pub terminal_font_size: Option<f32>,
+    /// The height of a terminal's line, as a multiple of its text size (1 to 2).
+    #[schemars(range(min = 1, max = 2))]
+    pub terminal_line_height: f32,
+    /// The cursor's shape: `Block`, `Bar` or `Underline`. A program can still ask for another.
+    pub terminal_cursor: TerminalCursor,
+    /// The cursor blinks while the terminal has the keyboard.
+    pub terminal_cursor_blink: bool,
+    /// How many lines of history each terminal keeps (1,000 to 1,000,000), for the terminals
+    /// started after a change.
+    #[schemars(range(min = 1000, max = 1000000))]
+    pub terminal_scrollback: usize,
+    /// The program the Terminal tab runs. Empty: your login shell (`$SHELL`); on a remote
+    /// machine, the shell of your account there.
+    pub terminal_shell: String,
+    /// The arguments it starts with (`["-l"]`: a login shell).
+    pub terminal_shell_args: Vec<String>,
+    /// Variables added to the environment of the terminals and the Claude Code console, as
+    /// names and values (`{ "JAVA_TOOL_OPTIONS": "-Xmx2g" }`), for the terminals started
+    /// after a change.
+    pub terminal_env: std::collections::BTreeMap<String, String>,
+    /// Text selected in a terminal is copied at once, without ⌘C.
+    pub terminal_copy_on_select: bool,
+    /// Option sends Meta (Esc and the key) in the terminals, as shells and editors expect;
+    /// off, Option types the characters of the keyboard layout (⌥E é, ⌥2 ™).
+    pub terminal_option_as_meta: bool,
 }
+
+/// The shape of a terminal's cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub enum TerminalCursor {
+    #[default]
+    Block,
+    Bar,
+    Underline,
+}
+
+impl TerminalCursor {
+    pub const ALL: [Self; 3] = [Self::Block, Self::Bar, Self::Underline];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Block => "Block",
+            Self::Bar => "Bar",
+            Self::Underline => "Underline",
+        }
+    }
+}
+
+/// The terminal settings' defaults that are not plain values.
+pub const TERMINAL_LINE_HEIGHT: f32 = 1.3;
+pub const TERMINAL_FONT_MIN: f32 = 8.;
+pub const TERMINAL_FONT_MAX: f32 = 32.;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -182,6 +238,17 @@ impl Default for Settings {
             sdks: Vec::new(),
             remote_sdks: Default::default(),
             terminal_engine: snout_core::term::EngineKind::preferred(),
+            terminal_font: None,
+            terminal_font_size: None,
+            terminal_line_height: TERMINAL_LINE_HEIGHT,
+            terminal_cursor: TerminalCursor::default(),
+            terminal_cursor_blink: true,
+            terminal_scrollback: snout_core::term::SCROLLBACK,
+            terminal_shell: String::new(),
+            terminal_shell_args: vec!["-l".into()],
+            terminal_env: Default::default(),
+            terminal_copy_on_select: false,
+            terminal_option_as_meta: true,
         }
     }
 }
@@ -322,6 +389,12 @@ pub fn migrate(mut s: Settings) -> Settings {
     if s.editor_font.trim().is_empty() {
         s.editor_font = defaults.editor_font;
     }
+    if !(1.0..=2.0).contains(&s.terminal_line_height) {
+        s.terminal_line_height = defaults.terminal_line_height;
+    }
+    s.terminal_font_size = s.terminal_font_size.filter(|v| (TERMINAL_FONT_MIN..=TERMINAL_FONT_MAX).contains(v));
+    s.terminal_font = s.terminal_font.filter(|f| !f.trim().is_empty());
+    s.terminal_scrollback = s.terminal_scrollback.clamp(1000, 1_000_000);
     s
 }
 

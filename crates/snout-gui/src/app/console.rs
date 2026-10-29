@@ -67,7 +67,14 @@ impl Console {
             );
             return;
         };
-        let launch = Launch { program: &program, args, cwd: root, env: &[], env_remove: ENV_REMOVE };
+        let launch = Launch {
+            program: &program,
+            args,
+            cwd: root,
+            env: &[],
+            env_remove: ENV_REMOVE,
+            scrollback: snout_core::term::SCROLLBACK,
+        };
         match Terminal::spawn(&launch, ctx) {
             Ok(term) => {
                 self.sessions.insert(root.to_owned(), Session { term, seen_gen: 0, refreshed: Instant::now() });

@@ -871,14 +871,19 @@ fn the_terminal_tab_runs_on_ghostty(cx: &mut TestAppContext) {
 fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     use gpui_component::dock::DockPlacement;
     let repo = demo_repo(&format!("terminal-{}", engine.label().to_lowercase()));
-    let (_, ws, cx) = open(cx, Settings { terminal_engine: engine, ..with_repo(&repo) });
+    // The shell and a variable from the settings; text copied as soon as it is selected.
+    let mut settings = Settings { terminal_engine: engine, ..with_repo(&repo) };
+    settings.terminal_shell = "/bin/sh".into();
+    settings.terminal_shell_args = Vec::new();
+    settings.terminal_env.insert("SNOUT_TERM_VAR".into(), "from-the-settings".into());
+    settings.terminal_copy_on_select = true;
+    let (_, ws, cx) = open(cx, settings);
     let terminal = cx.update(|_, cx| {
         let ws = ws.read(cx);
         let view = ws.dock.read(cx).panel(ws.tabs.terminal).expect("the terminal is docked").clone();
         view.view().downcast::<crate::console::ConsolePanel>().unwrap()
     });
     cx.update(|_, cx| assert_eq!(terminal.read(cx).kind, crate::console::Kind::Shell));
-    cx.update(|_, cx| terminal.update(cx, |t, _| t.program = Some("/bin/sh".into())));
     // Show the docks, open the bottom dock and bring the terminal forward.
     cx.update(|w, cx| {
         ws.update(cx, |ws, cx| {
@@ -910,6 +915,21 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     cx.update(|_, cx| assert_eq!(terminal.read(cx).session_engine(&repo), Some(engine)));
     cx.simulate_keystrokes("p w d enter");
     wait(cx, repo.file_name().unwrap().to_str().unwrap());
+    cx.update(|_, cx| terminal.read(cx).type_keys(&repo, b"echo $SNOUT_TERM_VAR\r"));
+    wait(cx, "\nfrom-the-settings");
+    // A drag over the first row selects it, and the selection is on the clipboard at once.
+    let grid = cx.debug_bounds("terminal-grid").expect("the terminal is drawn");
+    let (from, to) = (
+        grid.origin + gpui::point(gpui::px(8.), gpui::px(8.)),
+        grid.origin + gpui::point(gpui::px(200.), gpui::px(8.)),
+    );
+    cx.simulate_mouse_down(from, gpui::MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+    cx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+    let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default();
+    assert!(!copied.trim().is_empty(), "copy on select put the selection on the clipboard");
+    // A click lets go of the selection (⌘F would look for it).
+    cx.simulate_click(from, gpui::Modifiers::none());
     // A colourful line, a link, and ⌘F finding text in the scrollback.
     let typed =
         "printf '\\033[32mgreen\\033[0m https://example.com\\n'; for i in $(seq 1 60); do echo filler $i; done\r";

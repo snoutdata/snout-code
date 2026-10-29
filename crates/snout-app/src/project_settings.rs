@@ -61,6 +61,16 @@ pub struct ProjectSettings {
     /// application files), or a list of profile names.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spring_profiles: Option<ActiveProfiles>,
+    /// The program the Terminal tab runs in this project. Empty: the login shell (`$SHELL`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_shell: Option<String>,
+    /// The arguments it starts with (`["-l"]`: a login shell).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_shell_args: Option<Vec<String>>,
+    /// Variables added to the environment of the project's terminals and Claude Code console,
+    /// in place of the user's (`{ "SPRING_PROFILES_ACTIVE": "dev" }`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_env: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// The Spring profiles as the project file writes them: `"any"`, `"config"` or a list.
@@ -110,10 +120,13 @@ pub enum Key {
     DaemonIdleMinutes,
     Jdk,
     SpringProfiles,
+    TerminalShell,
+    TerminalShellArgs,
+    TerminalEnv,
 }
 
 impl Key {
-    pub const ALL: [Key; 8] = [
+    pub const ALL: [Key; 11] = [
         Key::TabSize,
         Key::SoftWrap,
         Key::ShowWhitespace,
@@ -122,6 +135,9 @@ impl Key {
         Key::DaemonIdleMinutes,
         Key::Jdk,
         Key::SpringProfiles,
+        Key::TerminalShell,
+        Key::TerminalShellArgs,
+        Key::TerminalEnv,
     ];
 
     /// Its name in the file.
@@ -135,6 +151,9 @@ impl Key {
             Key::DaemonIdleMinutes => "daemon_idle_minutes",
             Key::Jdk => "jdk",
             Key::SpringProfiles => "spring_profiles",
+            Key::TerminalShell => "terminal_shell",
+            Key::TerminalShellArgs => "terminal_shell_args",
+            Key::TerminalEnv => "terminal_env",
         }
     }
 
@@ -149,6 +168,9 @@ impl Key {
             Key::DaemonIdleMinutes => p.daemon_idle_minutes.is_some(),
             Key::Jdk => p.jdk.is_some(),
             Key::SpringProfiles => p.spring_profiles.is_some(),
+            Key::TerminalShell => p.terminal_shell.is_some(),
+            Key::TerminalShellArgs => p.terminal_shell_args.is_some(),
+            Key::TerminalEnv => p.terminal_env.is_some(),
         }
     }
 
@@ -163,6 +185,9 @@ impl Key {
             Key::DaemonIdleMinutes => p.daemon_idle_minutes = None,
             Key::Jdk => p.jdk = None,
             Key::SpringProfiles => p.spring_profiles = None,
+            Key::TerminalShell => p.terminal_shell = None,
+            Key::TerminalShellArgs => p.terminal_shell_args = None,
+            Key::TerminalEnv => p.terminal_env = None,
         }
     }
 }
@@ -210,7 +235,17 @@ macro_rules! plain {
     };
 }
 
-plain!(tab_size, soft_wrap, show_whitespace, param_hints, fetch_minutes, daemon_idle_minutes);
+plain!(
+    tab_size,
+    soft_wrap,
+    show_whitespace,
+    param_hints,
+    fetch_minutes,
+    daemon_idle_minutes,
+    terminal_shell,
+    terminal_shell_args,
+    terminal_env,
+);
 
 impl ProjectSettings {
     pub fn is_empty(&self) -> bool {
@@ -305,6 +340,20 @@ mod tests {
         s.fetch_minutes = 30;
         take_back(&under, &mut s);
         assert_eq!(s, Settings { fetch_minutes: 30, ..user });
+    }
+
+    #[test]
+    fn a_project_sets_its_own_shell_and_variables() {
+        let user = Settings::default();
+        let project =
+            parse(r#"{ "terminal_shell": "/bin/bash", "terminal_env": { "SPRING_PROFILES_ACTIVE": "dev" } }"#).unwrap();
+        let mut s = user.clone();
+        let under = put_over(&project, &mut s);
+        assert_eq!(s.terminal_shell, "/bin/bash");
+        assert_eq!(s.terminal_env.get("SPRING_PROFILES_ACTIVE").map(String::as_str), Some("dev"));
+        assert_eq!(s.terminal_shell_args, ["-l"], "the user's arguments");
+        take_back(&under, &mut s);
+        assert_eq!(s, user);
     }
 
     #[test]

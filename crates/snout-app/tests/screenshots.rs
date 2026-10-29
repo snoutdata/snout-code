@@ -106,6 +106,8 @@ mod shots {
         Editor,
         /// The Settings sheet on a page.
         Settings(snout_app::settings_view::Page),
+        /// The Settings sheet on a page, scrolled down this far (in points).
+        SettingsScrolled(snout_app::settings_view::Page, f32),
         /// The background tasks' popover: the engine build and a Git job running.
         Tasks,
         /// A change Claude Code proposes, under review in its tab: part way through
@@ -211,6 +213,9 @@ sleep 30
         /// The terminal engine the next shots take.
         static ENGINE: std::cell::Cell<snout_core::term::EngineKind> =
             const { std::cell::Cell::new(snout_core::term::EngineKind::Builtin) };
+        /// The next shots' terminals are set up: another typeface and size, a taller line, a
+        /// bar cursor, a shell and variables.
+        static TERMINAL_SET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     /// `shot` with the terminals on another engine.
@@ -250,6 +255,16 @@ sleep 30
             current,
             ..Settings::default()
         };
+        if TERMINAL_SET.get() {
+            settings.terminal_font = Some("Menlo".into());
+            settings.terminal_font_size = Some(14.);
+            settings.terminal_line_height = 1.5;
+            settings.terminal_cursor = snout_app::settings::TerminalCursor::Bar;
+            settings.terminal_shell = "/bin/bash".into();
+            settings.terminal_env.insert("JAVA_TOOL_OPTIONS".into(), "-Xmx2g".into());
+            settings.terminal_env.insert("SPRING_PROFILES_ACTIVE".into(), "dev".into());
+            settings.terminal_copy_on_select = true;
+        }
         if matches!(select, Some(Select::Nothing)) {
             // The Welcome page's recent projects, opened a while ago.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -408,7 +423,7 @@ sleep 30
                     .unwrap();
                 }
             }
-            Some(Select::Settings(page)) => {
+            Some(Select::Settings(page)) | Some(Select::SettingsScrolled(page, _)) => {
                 cx.update_window(handle.into(), |_, window, cx| {
                     ws.update(cx, |ws, cx| ws.open_settings(window, cx));
                 })
@@ -423,6 +438,33 @@ sleep 30
                     });
                 })
                 .unwrap();
+                if let Some(Select::SettingsScrolled(_, by)) = select {
+                    // Drawn once, then the wheel over the page.
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                        let at = gpui::point(px(900.), px(500.));
+                        window.dispatch_event(
+                            gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                                position: at,
+                                pressed_button: None,
+                                modifiers: Default::default(),
+                            }),
+                            cx,
+                        );
+                        window.dispatch_event(
+                            gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                                position: at,
+                                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-by))),
+                                modifiers: Default::default(),
+                                touch_phase: gpui::TouchPhase::Moved,
+                                source: Default::default(),
+                            }),
+                            cx,
+                        );
+                    })
+                    .unwrap();
+                }
             }
             Some(Select::Keymap) => {
                 cx.update_window(handle.into(), |_, window, cx| {
@@ -2513,6 +2555,32 @@ sleep 30
             let slug = page.title().to_lowercase().replace(' ', "-");
             for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
                 shot(&format!("settings-page-{slug}-{mode}"), theme, Activity::Project, Some(Select::Settings(page)));
+            }
+        }
+        TERMINAL_SET.set(true);
+        shot(
+            "settings-page-terminal-set-light",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::Settings(Page::Terminal)),
+        );
+        shot(
+            "settings-page-terminal-set-preview-light",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::SettingsScrolled(Page::Terminal, 420.)),
+        );
+        shot(
+            "settings-page-terminal-set-end-dark",
+            ThemeChoice::Dark,
+            Activity::Project,
+            Some(Select::SettingsScrolled(Page::Terminal, 2000.)),
+        );
+        TERMINAL_SET.set(false);
+        for (by, part) in [(560., "middle"), (2000., "end")] {
+            for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
+                let name = format!("settings-page-terminal-{part}-{mode}");
+                shot(&name, theme, Activity::Project, Some(Select::SettingsScrolled(Page::Terminal, by)));
             }
         }
         // The Terminal page's preview in every colour theme, light and dark: its colours read

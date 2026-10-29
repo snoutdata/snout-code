@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::pty::{KeyInput, Rgb};
 
-/// How many lines of scrollback each terminal keeps.
+/// How many lines of scrollback a terminal keeps unless told otherwise.
 pub const SCROLLBACK: usize = 10_000;
 
 /// Which engine a terminal runs.
@@ -66,10 +66,24 @@ impl EngineKind {
     /// A new engine of this kind on a `rows`×`cols` screen, with default colours `fg` on `bg`.
     /// Call it on the thread that will use the engine.
     pub fn create(self, rows: u16, cols: u16, fg: Rgb, bg: Rgb) -> Result<Box<dyn Engine>, String> {
+        self.create_with(rows, cols, fg, bg, SCROLLBACK)
+    }
+
+    /// [`EngineKind::create`], keeping `scrollback` lines of history.
+    pub fn create_with(
+        self,
+        rows: u16,
+        cols: u16,
+        fg: Rgb,
+        bg: Rgb,
+        scrollback: usize,
+    ) -> Result<Box<dyn Engine>, String> {
         match self {
-            Self::Builtin => Ok(Box::new(builtin::Builtin::new(rows, cols, fg, bg))),
+            Self::Builtin => Ok(Box::new(builtin::Builtin::new(rows, cols, fg, bg, scrollback))),
             #[cfg(feature = "ghostty")]
-            Self::Ghostty => ghostty::Ghostty::new(rows, cols, fg, bg).map(|e| Box::new(e) as Box<dyn Engine>),
+            Self::Ghostty => {
+                ghostty::Ghostty::new(rows, cols, fg, bg, scrollback).map(|e| Box::new(e) as Box<dyn Engine>)
+            }
             #[cfg(not(feature = "ghostty"))]
             Self::Ghostty => Err(self.unavailable().unwrap_or_default().to_owned()),
         }

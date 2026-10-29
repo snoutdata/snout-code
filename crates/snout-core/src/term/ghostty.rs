@@ -17,7 +17,7 @@ use libghostty_vt::terminal::{
 };
 use libghostty_vt::{RenderState, Terminal, TerminalOptions, key};
 
-use super::{Attrs, Cell, Color, Cursor, CursorShape, Engine, EngineKind, Frame, Modes, SCROLLBACK, Underline, Width};
+use super::{Attrs, Cell, Color, Cursor, CursorShape, Engine, EngineKind, Frame, Modes, Underline, Width};
 use crate::pty::{self, KeyInput, Rgb};
 
 /// What the terminal's callbacks write, for the engine to pick up.
@@ -58,9 +58,9 @@ fn err(e: libghostty_vt::Error) -> String {
 }
 
 impl Ghostty {
-    pub(super) fn new(rows: u16, cols: u16, fg: Rgb, bg: Rgb) -> Result<Self, String> {
+    pub(super) fn new(rows: u16, cols: u16, fg: Rgb, bg: Rgb, scrollback: usize) -> Result<Self, String> {
         let shared = Rc::new(RefCell::new(Shared { replies: Vec::new(), dark: dark(bg) }));
-        let mut term = Terminal::new(TerminalOptions { cols, rows, max_scrollback: SCROLLBACK }).map_err(err)?;
+        let mut term = Terminal::new(TerminalOptions { cols, rows, max_scrollback: scrollback }).map_err(err)?;
         // The same palette as the built-in engine, for the colour queries (OSC 4).
         let mut palette = term.default_color_palette().map_err(err)?;
         for i in 0..=255u8 {

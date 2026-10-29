@@ -40,7 +40,56 @@ use snout_core::art::Glyph;
 const QUIET: Duration = Duration::from_millis(800);
 /// ...and at most this often while it keeps printing.
 const BUSY_REFRESH: Duration = Duration::from_secs(3);
-const FONT_SIZE: f32 = 13.0;
+/// How long the cursor shows, and then hides, while it blinks.
+const BLINK: Duration = Duration::from_millis(530);
+
+/// How the terminals look, as the settings say: their typeface and size (the editor's
+/// unless set), the line height, and the cursor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TermLook {
+    pub family: SharedString,
+    pub size: f32,
+    pub line_height: f32,
+    pub cursor: crate::settings::TerminalCursor,
+    pub blink: bool,
+}
+
+impl TermLook {
+    pub fn of(s: &crate::settings::Settings) -> Self {
+        Self {
+            family: s.terminal_font.clone().unwrap_or_else(|| s.editor_font.clone()).into(),
+            size: s.terminal_font_size.unwrap_or(s.editor_font_size),
+            line_height: s.terminal_line_height,
+            cursor: s.terminal_cursor,
+            blink: s.terminal_cursor_blink,
+        }
+    }
+
+    /// A row's height.
+    pub fn cell_h(&self) -> Pixels {
+        (px(self.size) * self.line_height).round()
+    }
+
+    /// The cursor's shape: the program's when it asked for one (bar, underline), else the
+    /// settings'.
+    fn shape(&self, asked: CursorShape) -> CursorShape {
+        use crate::settings::TerminalCursor;
+        match (asked, self.cursor) {
+            (CursorShape::Block, TerminalCursor::Bar) => CursorShape::Bar,
+            (CursorShape::Block, TerminalCursor::Underline) => CursorShape::Underline,
+            (asked, _) => asked,
+        }
+    }
+}
+
+/// The cursor's rectangle at `at`, one cell of `cell` in size, in `shape`.
+fn cursor_rect(at: Point<Pixels>, cell: gpui::Size<Pixels>, shape: CursorShape) -> Bounds<Pixels> {
+    match shape {
+        CursorShape::Block => Bounds::new(at, cell),
+        CursorShape::Bar => Bounds::new(at, size(px(2.), cell.height)),
+        CursorShape::Underline => Bounds::new(point(at.x, at.y + cell.height - px(2.)), size(cell.width, px(2.))),
+    }
+}
 
 pub fn build<T>(model: &Entity<Model>, _window: &mut Window, cx: &mut Context<T>) -> Option<Arc<dyn BasePanelView>> {
     let console = cx.new(|cx| ConsolePanel::new(model.clone(), Kind::Claude, cx));
@@ -109,6 +158,11 @@ pub struct ConsolePanel {
     starting: std::collections::HashSet<PathBuf>,
     find: Option<Find>,
     focus: FocusHandle,
+    /// Whether the terminal had the keyboard when last drawn, and the blinking cursor's
+    /// phase: shown or not, since when.
+    focused: bool,
+    blink_shown: bool,
+    blink_since: Instant,
 }
 
 impl gpui::EventEmitter<gpui_component::dock::PanelEvent> for ConsolePanel {}
@@ -183,7 +237,16 @@ impl ConsolePanel {
             starting: Default::default(),
             find: None,
             focus: cx.focus_handle(),
+            focused: false,
+            blink_shown: true,
+            blink_since: Instant::now(),
         }
+    }
+
+    /// Show the cursor at once and start its blinking over (after a key, a click).
+    fn wake_cursor(&mut self) {
+        self.blink_shown = true;
+        self.blink_since = Instant::now();
     }
 
     /// Note which engine the session of `root` runs, or that it ended.
@@ -210,6 +273,13 @@ impl ConsolePanel {
 
     /// Redraw on new output; re-read the repository once the agent goes quiet.
     fn tick(&mut self, cx: &mut Context<Self>) {
+        if self.focused && self.model.read(cx).settings.terminal_cursor_blink {
+            let shown = (self.blink_since.elapsed().as_millis() / BLINK.as_millis()).is_multiple_of(2);
+            if shown != self.blink_shown {
+                self.blink_shown = shown;
+                cx.notify();
+            }
+        }
         let Some(root) = self.root(cx) else { return };
         let Some(s) = self.sessions.get_mut(&root) else { return };
         if s.pty.frame_gen() != self.shown_gen {
@@ -238,18 +308,25 @@ impl ConsolePanel {
         self.error = None;
         let host = crate::host::host(cx);
         let kind = self.kind;
-        let configured = self.model.read(cx).settings.claude_path.clone();
-        let engine = self.model.read(cx).settings.terminal_engine;
+        let settings = &self.model.read(cx).settings;
+        let configured = settings.claude_path.clone();
+        let engine = settings.terminal_engine;
+        let scrollback = settings.terminal_scrollback;
+        let shell = Some(settings.terminal_shell.trim()).filter(|s| !s.is_empty()).map(PathBuf::from);
+        let shell_args = settings.terminal_shell_args.clone();
+        let added: Vec<(String, String)> = settings.terminal_env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let program = self.program.clone();
-        let shell_args = ["-l".to_owned()];
         let args = if kind == Kind::Shell && args.is_empty() { &shell_args[..] } else { args }.to_vec();
         let p = palette(cx);
         let (fg, bg) = (rgb(p.fg), rgb(p.panel));
-        // Claude Code connects to this window's IDE server, and its hooks report its edits.
-        let env = match kind {
-            Kind::Claude => cx.try_global::<crate::claude_ide::IdeEnv>().map(|e| e.0.clone()).unwrap_or_default(),
-            Kind::Shell => Vec::new(),
-        };
+        // The settings' variables, then for Claude Code those that connect it to this
+        // window's IDE server, and its hooks report its edits.
+        let mut env = added;
+        if kind == Kind::Claude
+            && let Some(ide) = cx.try_global::<crate::claude_ide::IdeEnv>()
+        {
+            env.extend(ide.0.iter().map(|(k, v)| ((*k).to_owned(), v.clone())));
+        }
         let mut args = args;
         if kind == Kind::Claude
             && let Some(extra) = cx.try_global::<crate::claude_ide::IdeArgs>()
@@ -263,13 +340,14 @@ impl ConsolePanel {
             async move {
                 let found = match kind {
                     Kind::Claude => configured.or_else(|| find_claude(&*host)),
-                    Kind::Shell => {
+                    Kind::Shell => shell.or_else(|| {
                         Some(host.info().var("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from))
-                    }
+                    }),
                 };
                 let program = program.or(found).ok_or(None)?;
                 let env_remove: &[&str] = if kind == Kind::Claude { ENV_REMOVE } else { &[] };
-                let launch = Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove };
+                let env: Vec<(&str, String)> = env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+                let launch = Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove, scrollback };
                 Pty::spawn(&*host, &launch, engine, fg, bg, || {})
                     .map_err(|e| Some(format!("Could not start {}: {e}", program.display())))
             }
@@ -345,8 +423,9 @@ impl ConsolePanel {
             cx.stop_propagation();
             return;
         }
+        let meta = self.model.read(cx).settings.terminal_option_as_meta;
         let Some(s) = self.sessions.get(root) else { return };
-        let mods = pty::Mods { shift: m.shift, alt: m.alt, ctrl: m.control, cmd: m.platform };
+        let mut mods = pty::Mods { shift: m.shift, alt: m.alt, ctrl: m.control, cmd: m.platform };
         let key = match k.key.as_str() {
             "up" => Some(pty::Key::Up),
             "down" => Some(pty::Key::Down),
@@ -369,8 +448,20 @@ impl ConsolePanel {
         let mut chars = k.key.chars();
         let base = chars.next().filter(|_| chars.next().is_none());
         let base = base.or((k.key == "space").then_some(' '));
-        let input = KeyInput { key, mods, text: k.key_char.as_deref(), base };
+        // Option as Meta: the key itself after Esc (⌥F is Esc f, not ƒ). Otherwise Option
+        // types what the keyboard layout makes of the key, as plain text.
+        let meta_text = base.map(|c| if m.shift { c.to_uppercase().collect::<String>() } else { c.to_string() });
+        let text = if key.is_none() && m.alt && meta {
+            meta_text.as_deref()
+        } else {
+            if key.is_none() && m.alt {
+                mods.alt = false;
+            }
+            k.key_char.as_deref()
+        };
+        let input = KeyInput { key, mods, text, base };
         if s.pty.key(&input) {
+            self.wake_cursor();
             self.selection = None;
             cx.stop_propagation();
             cx.notify();
@@ -689,7 +780,7 @@ impl ConsolePanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let p = palette(cx);
-        let mono: SharedString = look::MONO.into();
+        let look = TermLook::of(&self.model.read(cx).settings);
         let (fg0, bg0) = (rgb(p.fg), rgb(p.panel));
         if let Some(s) = self.sessions.get(root) {
             s.pty.set_colors(fg0, bg0);
@@ -697,11 +788,17 @@ impl ConsolePanel {
         let view = cx.entity();
         let selection = self.selection;
         let focused = self.focus.is_focused(_window);
+        if focused != self.focused {
+            self.focused = focused;
+            self.wake_cursor();
+        }
+        let cursor_shown = !(look.blink && focused) || self.blink_shown;
         let (r1, r2, r3) = (root.to_owned(), root.to_owned(), root.to_owned());
         let start = root.to_owned();
         let find_bar = self.find_bar(&p, cx);
         let grid = div()
             .id("terminal")
+            .debug_selector(|| "terminal-grid".into())
             .flex_1()
             .min_h_0()
             .flex()
@@ -756,6 +853,7 @@ impl ConsolePanel {
                 let root = root.to_owned();
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus, cx);
+                    this.wake_cursor();
                     let cell = this.cell_at(e.position);
                     // ⌘-click opens the link under the pointer.
                     if e.modifiers.platform
@@ -779,13 +877,28 @@ impl ConsolePanel {
                     cx.notify();
                 }
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| this.selecting = false))
+            .on_mouse_up(MouseButton::Left, {
+                let root = root.to_owned();
+                cx.listener(move |this, _, _, cx| {
+                    this.selecting = false;
+                    // Copy on select: the text selected goes to the clipboard at once.
+                    if this.model.read(cx).settings.terminal_copy_on_select
+                        && let Some(text) = this
+                            .selection
+                            .filter(|(a, b)| a != b)
+                            .zip(this.sessions.get(&root))
+                            .and_then(|(sel, s)| s.pty.frame().selected_text(sel))
+                    {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                })
+            })
             .child(
                 canvas(|_, _, _| {}, {
                     let root = root.to_owned();
                     move |bounds, _, window, cx| {
                         view.update(cx, |this, cx| {
-                            this.paint(&root, bounds, &mono, focused, selection, &p, window, cx)
+                            this.paint(&root, bounds, &look, (focused, cursor_shown), selection, &p, window, cx)
                         });
                     }
                 })
@@ -800,20 +913,20 @@ impl ConsolePanel {
         &mut self,
         root: &Path,
         bounds: Bounds<Pixels>,
-        family: &SharedString,
-        focused: bool,
+        look: &TermLook,
+        (focused, cursor_shown): (bool, bool),
         selection: Option<((u16, u16), (u16, u16))>,
         p: &Palette,
         window: &mut Window,
         cx: &mut App,
     ) {
         let Some(s) = self.sessions.get_mut(root) else { return };
-        let font: Font = font(family.clone());
-        let font_size = px(FONT_SIZE);
+        let font: Font = font(look.family.clone());
+        let font_size = px(look.size);
         let ts = window.text_system().clone();
         let id = ts.resolve_font(&font);
         let cell_w = ts.advance(id, font_size, 'M').map(|s| s.width).unwrap_or(px(8.));
-        let cell_h = (font_size * 1.3).round();
+        let cell_h = look.cell_h();
         let inner = Bounds::new(
             point(bounds.left() + px(6.), bounds.top() + px(4.)),
             size(bounds.size.width - px(12.), bounds.size.height - px(8.)),
@@ -860,14 +973,11 @@ impl ConsolePanel {
             let _ = line.paint_background(origin, cell_h, TextAlign::Left, None, window, cx);
             let _ = line.paint(origin, cell_h, TextAlign::Left, None, window, cx);
         }
-        if let Some(cur) = frame.cursor {
+        if let Some(cur) = frame.cursor.filter(|_| cursor_shown) {
             let at = point(inner.left() + cell_w * f32::from(cur.col), inner.top() + cell_h * f32::from(cur.row));
-            let rect = match cur.shape {
-                CursorShape::Block => Bounds::new(at, size(cell_w, cell_h)),
-                CursorShape::Bar => Bounds::new(at, size(px(2.), cell_h)),
-                CursorShape::Underline => Bounds::new(point(at.x, at.y + cell_h - px(2.)), size(cell_w, px(2.))),
-            };
-            if focused || cur.shape != CursorShape::Block {
+            let shape = look.shape(cur.shape);
+            let rect = cursor_rect(at, size(cell_w, cell_h), shape);
+            if focused || shape != CursorShape::Block {
                 window.paint_quad(gpui::fill(rect, p.fg.opacity(0.7)));
             } else {
                 window.paint_quad(gpui::outline(rect, p.fg.opacity(0.6), gpui::BorderStyle::Solid));
@@ -917,16 +1027,17 @@ fn preview_frame(engine: EngineKind, cols: u16, fg: Rgb, bg: Rgb) -> Option<Fram
     Some(frame)
 }
 
-/// A terminal's screen as `engine` draws a short session, in the theme's colours: for the
-/// Terminal settings page. As tall as [`PREVIEW_ROWS`], as wide as its container.
-pub fn preview(engine: EngineKind) -> impl IntoElement {
-    let cell_h = (px(FONT_SIZE) * 1.3).round();
+/// A terminal's screen as `engine` draws a short session, in the theme's colours and the
+/// settings' `look`: for the Terminal settings page. As tall as [`PREVIEW_ROWS`], as wide as
+/// its container.
+pub fn preview(engine: EngineKind, look: TermLook) -> impl IntoElement {
+    let cell_h = look.cell_h();
     canvas(
         |_, _, _| {},
         move |bounds, _, window, cx| {
             let p = palette(cx);
-            let font: Font = font(SharedString::from(look::MONO));
-            let font_size = px(FONT_SIZE);
+            let font: Font = font(look.family.clone());
+            let font_size = px(look.size);
             let ts = window.text_system().clone();
             let id = ts.resolve_font(&font);
             let cell_w = ts.advance(id, font_size, 'M').map(|s| s.width).unwrap_or(px(8.));
@@ -953,7 +1064,8 @@ pub fn preview(engine: EngineKind) -> impl IntoElement {
             }
             if let Some(cur) = frame.cursor {
                 let at = point(bounds.left() + cell_w * f32::from(cur.col), bounds.top() + cell_h * f32::from(cur.row));
-                window.paint_quad(gpui::fill(Bounds::new(at, size(cell_w, cell_h)), p.fg.opacity(0.7)));
+                let rect = cursor_rect(at, size(cell_w, cell_h), look.shape(cur.shape));
+                window.paint_quad(gpui::fill(rect, p.fg.opacity(0.7)));
             }
         },
     )

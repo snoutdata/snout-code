@@ -1,7 +1,7 @@
 //! The built-in engine: the `vt100` crate, with answers to the queries TUIs send at
 //! start-up (cursor position, device attributes, colours) and the window title.
 
-use super::{Attrs, Cell, Color, Cursor, Engine, EngineKind, Frame, Modes, SCROLLBACK, Underline, Width};
+use super::{Attrs, Cell, Color, Cursor, Engine, EngineKind, Frame, Modes, Underline, Width};
 use crate::pty::Rgb;
 
 /// Parser callbacks: replies to the child's queries are queued here.
@@ -57,9 +57,9 @@ pub(super) struct Builtin {
 }
 
 impl Builtin {
-    pub(super) fn new(rows: u16, cols: u16, fg: Rgb, bg: Rgb) -> Self {
+    pub(super) fn new(rows: u16, cols: u16, fg: Rgb, bg: Rgb, scrollback: usize) -> Self {
         let hooks = Hooks { replies: Vec::new(), title: String::new(), fg, bg };
-        Self { parser: vt100::Parser::new_with_callbacks(rows, cols, SCROLLBACK, hooks) }
+        Self { parser: vt100::Parser::new_with_callbacks(rows, cols, scrollback, hooks) }
     }
 }
 
