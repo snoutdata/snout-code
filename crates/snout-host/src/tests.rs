@@ -227,6 +227,25 @@ fn lists_and_stops_processes() {
     assert_eq!(child.wait().unwrap().signal, Some(15));
 }
 
+/// A process its parent reaps as it ends (an engine's jdtls and Gradle daemon, which the
+/// engine waits for) is gone at once: the stop does not wait out its grace for it.
+#[test]
+fn a_stop_ends_when_the_processes_are_gone_not_after_the_grace() {
+    let host = LocalHost::new();
+    let child = host.spawn(&Cmd::new("/bin/sleep").arg("30")).unwrap();
+    let pid = child.pid().unwrap();
+    let start = host.processes(false).unwrap().into_iter().find(|p| p.pid == pid).unwrap().start;
+    // Reaped as soon as it ends, as a parent waiting on it does.
+    let reaper = std::thread::spawn(move || {
+        let mut child = child;
+        child.wait().unwrap()
+    });
+    let t0 = std::time::Instant::now();
+    assert_eq!(host.stop_processes(&[(pid, start)], Duration::from_secs(10)), 1);
+    assert!(t0.elapsed() < Duration::from_secs(2), "stopped in {:?}", t0.elapsed());
+    assert_eq!(reaper.join().unwrap().signal, Some(15), "ended by SIGTERM, not killed");
+}
+
 #[test]
 fn runs_a_terminal() {
     let host = LocalHost::new();

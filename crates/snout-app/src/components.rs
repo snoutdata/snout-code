@@ -176,6 +176,7 @@ pub struct Button {
     focusable: bool,
     wide: bool,
     tooltip: Option<SharedString>,
+    selector: Option<&'static str>,
     on_click: Option<Handler>,
 }
 
@@ -192,8 +193,15 @@ impl Button {
             focusable: false,
             wide: false,
             tooltip: None,
+            selector: None,
             on_click: None,
         }
+    }
+
+    /// The name the tests find the button by (`debug_bounds`).
+    pub fn debug_selector(mut self, name: &'static str) -> Self {
+        self.selector = Some(name);
+        self
     }
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
@@ -362,6 +370,7 @@ impl RenderOnce for Button {
         let icon_size = if self.compact { 13. } else { 14. };
         button_base(self.id, self.variant, self.disabled, self.compact, self.focusable, self.label.is_none(), &p)
             .when(self.wide, |d| d.w_full())
+            .when_some(self.selector, |d, s| d.debug_selector(move || s.to_owned()))
             .when_some(self.tooltip, |d, t| d.tooltip(tip(t)))
             .when_some(self.icon, |d, i| d.child(icon(i, icon_size, ink)))
             .when_some(self.label, |d, l| d.child(l))

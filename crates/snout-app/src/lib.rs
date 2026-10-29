@@ -50,6 +50,8 @@ mod lang_tests;
 #[cfg(test)]
 mod project_tests;
 #[cfg(test)]
+mod quit_tests;
+#[cfg(test)]
 mod run_tests;
 #[cfg(test)]
 mod session_tests;

@@ -158,6 +158,8 @@ impl Workspace {
         }
         let started = Instant::now();
         let real = cx.has_global::<RealQuit>();
+        // The window goes before anything else is done.
+        self.hidden = true;
         if real {
             cx.hide();
             cx.set_activation_policy(gpui::ActivationPolicy::Accessory);
@@ -189,8 +191,9 @@ impl Workspace {
             if let Some(gone) = lock_gone {
                 let _ = gone.recv_timeout(Duration::from_millis(300));
             }
-            if remote {
-                // The remote machine's server stops them there, as briefly as it can.
+            if remote || !real {
+                // The remote machine's server stops them there, as briefly as it can (and
+                // the tests, which have no app to hand them over from, stop them here).
                 host.stop_processes(&targets, Duration::from_millis(1500));
             } else if let Err(e) = spawn_reaper(&targets, REAP_GRACE, &[]) {
                 eprintln!("[quit] could not hand the processes over: {e}; stopping them here");

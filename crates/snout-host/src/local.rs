@@ -477,44 +477,33 @@ impl Host for LocalHost {
     }
 
     fn stop_processes(&self, targets: &[(u32, u64)], grace: Duration) -> usize {
-        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System};
+        use sysinfo::{Pid, Signal};
         if targets.is_empty() {
             return 0;
         }
-        let mut system = System::new();
-        let pids: Vec<Pid> = targets.iter().map(|(p, _)| Pid::from_u32(*p)).collect();
-        system.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), ProcessRefreshKind::new());
-        fn same(system: &System, (pid, start): (u32, u64)) -> Option<&sysinfo::Process> {
-            system.process(Pid::from_u32(pid)).filter(|p| {
-                p.start_time() == start
-                    && !matches!(p.status(), sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead)
-            })
-        }
-        let mut asked = Vec::new();
-        for &t in targets {
-            if let Some(p) = same(&system, t) {
-                if p.kill_with(Signal::Term).is_none() {
-                    p.kill();
-                }
-                asked.push(t);
+        let (system, asked) = running(targets);
+        for &(pid, _) in &asked {
+            if let Some(p) = system.process(Pid::from_u32(pid))
+                && p.kill_with(Signal::Term).is_none()
+            {
+                p.kill();
             }
         }
         let deadline = Instant::now() + grace;
         loop {
-            system.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), ProcessRefreshKind::new());
-            let left: Vec<(u32, u64)> = asked.iter().copied().filter(|t| same(&system, *t).is_some()).collect();
+            let (system, left) = running(&asked);
             if left.is_empty() {
                 break;
             }
             if Instant::now() >= deadline {
-                for t in left {
-                    if let Some(p) = same(&system, t) {
+                for (pid, _) in left {
+                    if let Some(p) = system.process(Pid::from_u32(pid)) {
                         p.kill();
                     }
                 }
                 break;
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(50));
         }
         asked.len()
     }
@@ -528,4 +517,27 @@ impl Host for LocalHost {
         let r = unsafe { libc::kill(pid, 0) };
         r == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
+}
+
+/// The processes of `targets` (pid and start time) that still run, each read afresh: a
+/// `System` keeps the processes it saw until it lists them all again, so one kept between
+/// checks would show a process long gone (its parent reaped it) as running, and the stop
+/// would wait out its grace and then kill the pid, whoever has it by then. A process whose
+/// start time differs (its pid was taken since) or that is a zombie is not running.
+fn running(targets: &[(u32, u64)]) -> (sysinfo::System, Vec<(u32, u64)>) {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let pids: Vec<Pid> = targets.iter().map(|(p, _)| Pid::from_u32(*p)).collect();
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), ProcessRefreshKind::new());
+    let alive = targets
+        .iter()
+        .copied()
+        .filter(|&(pid, start)| {
+            system.process(Pid::from_u32(pid)).is_some_and(|p| {
+                p.start_time() == start
+                    && !matches!(p.status(), sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead)
+            })
+        })
+        .collect();
+    (system, alive)
 }

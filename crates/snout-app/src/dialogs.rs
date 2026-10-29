@@ -402,6 +402,7 @@ fn pick_items(m: &Model, query: &str) -> Vec<PickItem> {
 /// The Cancel button of a dialog.
 fn cancel_button(cx: &mut Context<DialogBody>) -> AnyElement {
     Button::new("cancel")
+        .debug_selector("dialog-cancel")
         .focusable()
         .label("Cancel")
         .kbd("Esc")
@@ -448,6 +449,7 @@ impl DialogBody {
             let on = self.dont_ask;
             body.push(
                 Checkbox::new("quit-dont-ask")
+                    .debug_selector(|| "quit-dont-ask".into())
                     .label("Don't ask again (Settings, Appearance: Confirm before quitting)")
                     .checked(on)
                     .on_click(cx.listener(|this, v: &bool, _, cx| {
@@ -462,6 +464,7 @@ impl DialogBody {
         if info.unsaved.is_empty() {
             buttons.push(
                 Button::new("ok")
+                    .debug_selector("quit-ok")
                     .primary()
                     .focusable()
                     .icon(IconName::Power)
@@ -476,6 +479,7 @@ impl DialogBody {
         } else {
             buttons.push(
                 Button::new("danger")
+                    .debug_selector("quit-discard")
                     .danger()
                     .focusable()
                     .icon(IconName::Trash)
@@ -486,6 +490,7 @@ impl DialogBody {
             );
             buttons.push(
                 Button::new("ok")
+                    .debug_selector("quit-save-all")
                     .primary()
                     .focusable()
                     .icon(IconName::Save)

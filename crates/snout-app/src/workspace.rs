@@ -136,6 +136,8 @@ pub struct Workspace {
     _save_layout: Option<Task<()>>,
     /// Quitting has begun: the window is going.
     pub quitting: bool,
+    /// Quitting hid the window (and the app): the first thing it does.
+    pub hidden: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -484,6 +486,7 @@ impl Workspace {
             shown: root.clone(),
             _save_layout: None,
             quitting: false,
+            hidden: false,
             _subscriptions: subscriptions,
         };
         crate::claude_ide::bridge::start(&mut this, window, cx);

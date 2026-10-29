@@ -96,7 +96,8 @@ SnoutCode asks first:
 
 The window goes the moment you quit. The Java engine, its language server and Gradle daemons,
 and the programs and terminals SnoutCode started are stopped right after, in the background,
-so you can open SnoutCode again at once.
+so you can open SnoutCode again at once. Each is asked to stop and usually has within a
+second; one still there after 12 seconds is ended.
 
 ## Java support
 
