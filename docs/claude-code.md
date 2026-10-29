@@ -60,7 +60,7 @@ SnoutCode also passes the console's `claude` extra settings for its hooks, so it
 
 When Claude Code asks before it edits a file, the change opens in that file's tab:
 
-1. The new text types itself into the tab. New lines show in green, and a red rule marks where lines were removed.
+1. The new text types itself into the tab. New lines show in blue, and an orange rule marks where lines were removed.
 2. A bar over the tab says **Claude Code proposes a change** (or **Claude Code proposes a new file**), with the lines added and removed.
 3. Click **Accept** or press ⌘↩ to keep it. Click **Reject** or press Esc to put the text back.
 
@@ -72,7 +72,7 @@ Accept Claude's Change and Reject Claude's Change are also in the command palett
 
 With **Follow** on (the default), the editor follows the files Claude Code changes:
 
-- It opens the file, scrolls to the change and plays it out: the removed text shows struck through in red, the new text types itself in, then a green band fades. Very large edits appear at once instead.
+- It opens the file, scrolls to the change and plays it out: the removed text shows struck through in orange, the new text types itself in, then a blue band fades. Very large edits appear at once instead.
 - It never jumps while you are typing. A file that changes while you are typing, or while another file is in front, gets its turn a moment later.
 - Lines Claude changed keep a mark in the gutter until you review them. Hover the mark for the keys.
 
