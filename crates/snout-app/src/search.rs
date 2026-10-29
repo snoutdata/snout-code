@@ -79,6 +79,10 @@ pub enum Mode {
     Structure,
     /// Classes of the project, its libraries and the JDK (Go to Class, ⌥⌘O).
     Classes,
+    /// The files opened this session, the latest first (⌘E).
+    RecentFiles,
+    /// A new file: its path in the project (⌘N).
+    NewFile,
 }
 
 /// Where the symbol box gets its rows: the query in, the matching symbols out.
@@ -138,6 +142,8 @@ pub struct Item {
 
 pub enum SearchEvent {
     Close,
+    /// Make this file and open it (New File).
+    NewFile(PathBuf),
     /// Go to a symbol: its build, document and position.
     OpenLocation(PathBuf, lsp_types::Uri, lsp_types::Position),
     GoToLine(u32, u32),
@@ -179,6 +185,8 @@ impl SearchView {
             Mode::Symbols => "Go to symbol",
             Mode::Structure => "Filter the file's symbols",
             Mode::Classes => "Go to class, in the project, its libraries and the JDK",
+            Mode::RecentFiles => "Recent files",
+            Mode::NewFile => "New file: its path in the project, like src/main/java/App.java",
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
@@ -197,6 +205,8 @@ impl SearchView {
                 | Mode::Symbols
                 | Mode::Structure
                 | Mode::Classes
+                | Mode::RecentFiles
+                | Mode::NewFile
         ))
         .then(|| {
             let list = cx.background_executor().spawn({
@@ -257,7 +267,22 @@ impl SearchView {
         let query = self.input.read(cx).value().to_string();
         self.selected = 0;
         match self.mode {
-            Mode::GoToLine => cx.notify(),
+            Mode::GoToLine | Mode::NewFile => cx.notify(),
+            Mode::RecentFiles => {
+                let q = query.trim().to_lowercase();
+                let root = self.root.clone();
+                self.items = self
+                    .model
+                    .read(cx)
+                    .recent_files
+                    .iter()
+                    .filter_map(|p| p.strip_prefix(&root).ok())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .filter(|p| q.is_empty() || p.to_lowercase().contains(&q))
+                    .map(|path| Item { path, ..Default::default() })
+                    .collect();
+                cx.notify();
+            }
             Mode::Commands | Mode::Tasks | Mode::Profiles => {
                 self.items = match_commands(&self.commands, &query)
                     .into_iter()
@@ -319,6 +344,13 @@ impl SearchView {
     }
 
     pub fn open_selected(&mut self, cx: &mut Context<Self>) {
+        if self.mode == Mode::NewFile {
+            let rel = self.input.read(cx).value().trim().trim_start_matches('/').to_owned();
+            if !rel.is_empty() && !rel.ends_with('/') {
+                cx.emit(SearchEvent::NewFile(self.root.join(rel)));
+            }
+            return;
+        }
         if self.mode == Mode::GoToLine {
             if let Some((line, column)) = parse_line(&self.input.read(cx).value()) {
                 cx.emit(SearchEvent::GoToLine(line, column));
@@ -362,6 +394,8 @@ impl Render for SearchView {
             Mode::Structure => "No symbol matches".into(),
             Mode::Classes if self.input.read(cx).value().is_empty() => "Type a class name, or its capitals".into(),
             Mode::Classes => "No class matches".into(),
+            Mode::RecentFiles => "No recent file matches".into(),
+            Mode::NewFile => "Return makes the file and opens it".into(),
         };
         // Nothing typed yet: a plain line saying what to type, no drawing.
         let blank = self.input.read(cx).value().trim().is_empty();

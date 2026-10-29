@@ -583,7 +583,7 @@ fn file_menu_open_recent_lists_projects_newest_first_and_opens_one(cx: &mut Test
     let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects(), &[]));
     let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
     let names: Vec<String> = file.items.iter().filter_map(menu_item_name).collect();
-    let first = ["New Project…", "Open Project…", "Open Recent", "Close Project"].map(String::from);
+    let first = ["New File…", "New Project…", "Open Project…", "Open Recent", "Close Project"].map(String::from);
     assert!(names.starts_with(&first), "{names:?}");
     let sub = file
         .items

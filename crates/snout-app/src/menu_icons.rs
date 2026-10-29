@@ -174,6 +174,8 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "SpringAtCaret" => sf("leaf", L::Leaf),
         "SpringProfiles" => sf("person.crop.rectangle.stack", L::Layers),
         "SendToClaude" => sf("paperplane", L::Send),
+        "RecentFiles" => sf("clock.arrow.circlepath", L::FileClock),
+        "NewFile" => sf("doc.badge.plus", L::FilePlus),
         "AcceptAllClaude" => sf("checkmark.seal", L::CheckCheck),
         "RevertAllClaude" => sf("arrow.uturn.backward.circle", L::Undo2),
         "ShowAgentChanges" => sf("doc.badge.clock", L::FileClock),

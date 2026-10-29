@@ -12,6 +12,8 @@ use crate::settings::{Settings, ThemeChoice};
 actions!(
     snout,
     [
+        RecentFiles,
+        NewFile,
         About,
         Quit,
         Open,
@@ -148,6 +150,11 @@ pub struct HideToolWindow(pub bool);
 #[action(namespace = snout, no_json)]
 pub struct OpenInTerminalAt(pub std::path::PathBuf);
 
+/// Close the editor tab of this panel (by its entity id), even the last one.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct CloseEditorTab(pub u64);
+
 /// File ▸ Open Recent: open this project.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = snout, no_json)]
@@ -182,6 +189,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Open Settings (JSON)", Box::new(OpenSettingsJson)),
         ("Open Project Settings (JSON)", Box::new(OpenProjectSettingsJson)),
         ("Go to File…", Box::new(GoToFile)),
+        ("Recent Files…", Box::new(RecentFiles)),
+        ("New File…", Box::new(NewFile)),
         ("Go to Class…", Box::new(GoToClass)),
         ("Go to Line…", Box::new(GoToLine)),
         ("Find in Files…", Box::new(FindInFiles)),
@@ -345,6 +354,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Quit SnoutCode", Quit),
         ]),
         Menu::new("File").items([
+            MenuItem::action("New File…", NewFile),
             MenuItem::action("New Project…", NewProject),
             MenuItem::action("Open Project…", Open),
             MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent, remote))),
@@ -363,6 +373,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::separator(),
             MenuItem::action("Search Everywhere…", SearchEverywhere),
             MenuItem::action("Go to File…", GoToFile),
+            MenuItem::action("Recent Files…", RecentFiles),
             MenuItem::action("Find in Files…", FindInFiles),
             MenuItem::action("Replace in Files…", ReplaceInFiles),
             MenuItem::action("Command Palette…", CommandPalette),

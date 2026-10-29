@@ -356,6 +356,8 @@ struct GitJob {
 pub struct Model {
     pub settings: Settings,
     store: Option<Store>,
+    /// The files opened this session, the latest first (the empty editor and Recent Files).
+    pub recent_files: Vec<PathBuf>,
     saved: Settings,
     pub repo: Option<Repo>,
     /// The folder opened as the project, as it was opened: the repository's root or any
@@ -439,6 +441,16 @@ pub struct Model {
 impl EventEmitter<ModelEvent> for Model {}
 
 impl Model {
+    /// `path` was opened (or came to the front): first among the recent files.
+    pub fn note_recent_file(&mut self, path: &Path) {
+        if path.as_os_str().is_empty() {
+            return;
+        }
+        self.recent_files.retain(|p| p != path);
+        self.recent_files.insert(0, path.to_owned());
+        self.recent_files.truncate(30);
+    }
+
     /// The folder of the app's own files, when it keeps any (never in tests).
     pub fn store_dir(&self) -> Option<PathBuf> {
         self.store.as_ref().map(Store::dir)
@@ -453,6 +465,7 @@ impl Model {
             project_settings_error: None,
             project_under: Default::default(),
             user_file_stamp: store.as_ref().and_then(Store::stamp),
+            recent_files: Vec::new(),
             user_settings_error: None,
             pending_file: None,
             confirm_switch: false,

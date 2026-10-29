@@ -1,7 +1,8 @@
-//! The Welcome page: the center's tab while no file is open. The wordmark and version with a
-//! small drawing; Open Project, Clone Repository and New Project; and the recent projects,
-//! each with its path, branch and when it was last opened, narrowed by a search box. The
-//! first file opened takes its place.
+//! The Welcome page: the center's tab while no file is open. With no project: the wordmark
+//! and version with a small drawing; Open Project, Clone Repository and New Project; and the
+//! recent projects, each with its path, branch and when it was last opened, narrowed by a
+//! search box. With a project open and no tab: the empty editor, its drawing, the ways to a
+//! file with their keys, and the files opened lately. The first file opened takes its place.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -107,9 +108,149 @@ fn tilde(path: &Path, home: &Path) -> String {
     }
 }
 
-impl Render for WelcomePanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl WelcomePanel {
+    /// The editor with no tab open: the drawing, the ways to a file (each with its keys),
+    /// and the files opened lately.
+    fn empty_editor(&self, root: &Path, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use crate::components::IconName;
         let p = palette(cx);
+        let hover = p.row_hover();
+        let keys = |a: &dyn gpui::Action| {
+            window.bindings_for_action(a).last().map(|b| {
+                let os = cx.platform_info().os;
+                b.keystrokes().iter().map(|k| k.display(os).to_string()).collect::<Vec<_>>().join(" ")
+            })
+        };
+        let ways: [(&'static str, IconName, &'static str, Box<dyn gpui::Action>); 5] = [
+            ("empty-go-to-file", IconName::FileSearch, "Go to File", Box::new(crate::menus::GoToFile)),
+            ("empty-recent-files", IconName::FileClock, "Recent Files", Box::new(crate::menus::RecentFiles)),
+            (
+                "empty-search-everywhere",
+                IconName::Search,
+                "Search Everywhere",
+                Box::new(crate::menus::SearchEverywhere),
+            ),
+            ("empty-find-in-files", IconName::TextSearch, "Find in Files", Box::new(crate::menus::FindInFiles)),
+            ("empty-new-file", IconName::FilePlus, "New File", Box::new(crate::menus::NewFile)),
+        ];
+        let rows = ways.into_iter().map(|(id, ico, label, action)| {
+            let k = keys(action.as_ref()).unwrap_or_default();
+            div()
+                .id(id)
+                .debug_selector(move || id.to_owned())
+                .w(px(300.))
+                .h(px(30.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .child(crate::components::icon(ico, 14., p.accent))
+                .child(div().flex_1().text_color(p.fg).child(label))
+                .when(!k.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .px(px(6.))
+                            .h(px(20.))
+                            .flex()
+                            .items_center()
+                            .rounded(px(4.))
+                            .bg(p.card)
+                            .border_1()
+                            .border_color(mix(p.border, 0.8, p.card))
+                            .text_size(px(11.5))
+                            .text_color(p.fg_dim)
+                            .child(k),
+                    )
+                })
+                .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+        });
+        let recent: Vec<PathBuf> =
+            self.model.read(cx).recent_files.iter().filter(|f| f.starts_with(root)).take(5).cloned().collect();
+        let files = recent.into_iter().enumerate().map(|(i, path)| {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let dir = path
+                .parent()
+                .and_then(|d| d.strip_prefix(root).ok())
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let model = self.model.clone();
+            div()
+                .id(("empty-recent", i))
+                .debug_selector(move || format!("empty-recent-{i}"))
+                .w(px(300.))
+                .h(px(28.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .child(crate::icons::file_icon(&path, 14., &p))
+                .child(div().flex_none().text_color(p.fg).child(name))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .text_size(px(11.5))
+                        .text_color(p.fg_dim)
+                        .child(dir),
+                )
+                .on_click(move |_, _, cx| {
+                    let path = path.clone();
+                    model.update(cx, |m, cx| m.handle(Action::OpenFile(path, None), cx));
+                })
+        });
+        let files: Vec<_> = files.collect();
+        div()
+            .id("empty-editor")
+            .debug_selector(|| "empty-editor".into())
+            .size_full()
+            .overflow_y_scrollbar()
+            .bg(p.panel)
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .py(px(24.))
+            .gap(px(4.))
+            .child(crate::art::drawing_on(snout_core::art::spots::editor(), 176., 176. / 1.5, p.panel))
+            .child(div().mt(px(4.)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("No files open"))
+            .child(
+                div().mb(px(10.)).text_size(px(12.5)).text_color(p.fg_dim).child("Open one from the Project tree, or:"),
+            )
+            .children(rows)
+            .when(!files.is_empty(), |d| {
+                d.child(
+                    div()
+                        .w(px(300.))
+                        .mt(px(14.))
+                        .mb(px(4.))
+                        .px(px(10.))
+                        .text_size(px(11.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(p.fg_dim)
+                        .child("Recent files"),
+                )
+                .children(files)
+            })
+            .into_any_element()
+    }
+}
+
+impl Render for WelcomePanel {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
+        // A project open with no tab: the empty editor.
+        if let Some(root) = self.model.read(cx).project_root() {
+            return self.empty_editor(&root, window, cx);
+        }
         let model = self.model.clone();
         let recent = self.shown(cx);
         let branches: std::collections::HashMap<PathBuf, Option<String>> = recent
@@ -337,6 +478,7 @@ impl Render for WelcomePanel {
                     ),
                 ),
             )
+            .into_any_element()
     }
 }
 

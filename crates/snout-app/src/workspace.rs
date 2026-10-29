@@ -600,6 +600,49 @@ impl Workspace {
         });
     }
 
+    /// Close the editor tab whose panel is `id` (asking first about unsaved changes): even
+    /// the last one, the dock's own refusal to empty a group notwithstanding.
+    pub fn close_editor(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editors(cx).into_iter().find(|e| e.entity_id().as_u64() == id) else { return };
+        let dock = self.dock.clone();
+        let e = editor.clone();
+        crate::editor::confirm_close(Some(editor), window, cx, move |window, cx| {
+            dock.update(cx, |d, cx| d.remove_panel(e, window, cx));
+        });
+    }
+
+    /// New File: make `path` (and its folders) on the host, empty, unless it is there, and
+    /// open it.
+    pub fn create_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let host = crate::host::host(cx);
+        let made = cx.background_executor().spawn({
+            let path = path.clone();
+            async move {
+                if host.exists(&path) {
+                    return Ok(());
+                }
+                if let Some(dir) = path.parent() {
+                    host.create_dir_all(dir)?;
+                }
+                host.write(&path, b"")
+            }
+        });
+        cx.spawn_in(window, async move |ws, cx| {
+            let made = made.await;
+            let _ = ws.update_in(cx, |ws, window, cx| match made {
+                Ok(()) => {
+                    ws.open_file(path, None, true, window, cx);
+                    ws.model.update(cx, |m, cx| m.refresh(cx));
+                }
+                Err(e) => ws.model.update(cx, |m, cx| {
+                    m.message = format!("Could not make {}: {e}", path.display());
+                    cx.notify();
+                }),
+            });
+        })
+        .detach();
+    }
+
     /// Ask about the tabs with unsaved changes, if any, and go on with `then` once they are
     /// saved or dropped; Cancel (or a save that fails) stops there. True when nothing had
     /// to be asked and `then` ran at once.
@@ -922,6 +965,10 @@ impl Workspace {
         self.status.update(cx, |s, cx| s.set_editor(editor, cx));
         self.structure.update(cx, |s, cx| s.follow(editor, cx));
         let path = editor.map(|e| e.read(cx).path.clone());
+        if let Some(e) = editor.filter(|e| e.read(cx).class_file.is_none()) {
+            let p = e.read(cx).path.clone();
+            self.model.update(cx, |m, _| m.note_recent_file(&p));
+        }
         let files = self.side.read(cx).files.clone();
         files.update(cx, |f, cx| f.reveal(path.clone(), cx));
         if let Some(path) = path {
@@ -1154,6 +1201,11 @@ impl Workspace {
             SearchEvent::OpenLocation(root, uri, at) => {
                 this.search = None;
                 this.open_location(root.clone(), uri.clone(), *at, window, cx);
+                cx.notify();
+            }
+            SearchEvent::NewFile(path) => {
+                this.search = None;
+                this.create_file(path.clone(), window, cx);
                 cx.notify();
             }
             SearchEvent::Run(_) => {}
@@ -1840,6 +1892,11 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
+            .on_action(
+                cx.listener(|this, _: &crate::menus::RecentFiles, w, cx| this.open_search(Mode::RecentFiles, w, cx)),
+            )
+            .on_action(cx.listener(|this, _: &crate::menus::NewFile, w, cx| this.open_search(Mode::NewFile, w, cx)))
+            .on_action(cx.listener(|this, a: &crate::menus::CloseEditorTab, w, cx| this.close_editor(a.0, w, cx)))
             .on_action(cx.listener(|this, _: &GoToClass, w, cx| this.open_classes(w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))

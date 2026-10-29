@@ -177,6 +177,11 @@ impl Render for TabDrag {
 fn close(group: &TabGroupContext, panel: &Arc<dyn BasePanelView>, window: &mut Window, cx: &mut App) {
     let id = panel.panel_id(cx);
     if !group.is_panel_closable(id, cx) {
+        // The dock keeps its last panel: the workspace closes an editor tab itself.
+        if let Some(editor) = editor_of(panel) {
+            let id = editor.entity_id().as_u64();
+            window.dispatch_action(Box::new(crate::menus::CloseEditorTab(id)), cx);
+        }
         return;
     }
     let group = group.clone();
@@ -310,7 +315,8 @@ fn tab(
             None,
         ),
     };
-    let closable = group.is_panel_closable(panel.panel_id(cx), cx);
+    // Every editor tab closes, the last one too (the dock would keep its last panel).
+    let closable = editor.is_some() || group.is_panel_closable(panel.panel_id(cx), cx);
     let hover_bg = p.button_hover;
     let group_name = SharedString::from(format!("tab-{ix}"));
     let drag = group.is_draggable().then(|| group.drag_panel(ix, cx)).flatten();

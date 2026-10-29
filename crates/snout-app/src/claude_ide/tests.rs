@@ -1156,3 +1156,26 @@ fn the_console_says_its_agent_and_state_and_stays_ended(cx: &mut TestAppContext)
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }
+
+/// The last editor tab closes like any other, and the empty editor shows in its place:
+/// the ways to a file, and the file just closed among the recent ones.
+#[gpui::test]
+fn the_last_tab_closes_and_the_empty_editor_shows(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("last-tab", cx);
+    let hello = repo.join("src/demo/Hello.java");
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(hello.clone(), None, false, w, cx)));
+    let editor = editor_of(&ws, &hello, cx).unwrap();
+    pump_until(cx, "the file", |cx| text_of(&editor, cx) == HELLO);
+    assert_eq!(cx.update(|_, cx| ws.read(cx).editors(cx).len()), 1);
+    assert!(cx.debug_bounds("close-tab-0").is_some(), "the only tab has its close button");
+    let id = editor.entity_id().as_u64();
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::CloseEditorTab(id)), cx));
+    pump(cx, 300);
+    assert!(cx.update(|_, cx| ws.read(cx).editors(cx).is_empty()), "the last tab closed");
+    assert!(cx.debug_bounds("empty-editor").is_some(), "the empty editor in its place");
+    assert!(cx.debug_bounds("empty-go-to-file").is_some() && cx.debug_bounds("empty-new-file").is_some());
+    assert!(cx.debug_bounds("empty-recent-0").is_some(), "the file closed is a recent one");
+    cx.update(|_, cx| assert_eq!(model.read(cx).recent_files.first(), Some(&hello)));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
