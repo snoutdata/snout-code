@@ -24,6 +24,10 @@ import java.util.List;
  *   <li>{@code snout.spring.properties {action, uri, text, line?, character?}}: {@code complete},
  *       {@code hover}, {@code definition} or {@code validate} in an application properties or YAML file.</li>
  *   <li>{@code snout.spring.inlayHints {uri, range}}: the values of {@code @Value} placeholders.</li>
+ *   <li>{@code snout.spring.profiles {module?}}: the profiles each module knows and the active ones;
+ *       {@code snout.spring.setProfiles {mode, profiles?}} sets how they are evaluated and answers the
+ *       {@code diagnostics} that changed with them; {@code snout.spring.refreshProfiles {}} evaluates
+ *       them again after an application file changed.</li>
  * </ul>
  */
 public final class SpringCommands implements IDelegateCommandHandler {
@@ -40,6 +44,10 @@ public final class SpringCommands implements IDelegateCommandHandler {
             case "snout.spring.endpoints" -> w.endpoints(string(params, "module"), monitor);
             case "snout.spring.injections" -> w.injections(string(params, "uri"), monitor);
             case "snout.spring.properties" -> properties(params, monitor);
+            case "snout.spring.profiles" -> w.profiles(string(params, "module"), monitor);
+            case "snout.spring.setProfiles" -> w.setProfiles(string(params, "mode"),
+                params.has("profiles") && params.get("profiles").isJsonArray() ? strings(params, "profiles") : null, monitor);
+            case "snout.spring.refreshProfiles" -> w.refreshProfiles(monitor);
             case "snout.spring.inlayHints" -> {
                 JsonObject range = params.has("range") ? params.getAsJsonObject("range") : null;
                 int from = range == null ? 0 : range.getAsJsonObject("start").get("line").getAsInt();

@@ -169,6 +169,14 @@ final class Engine implements GradleRuns.Client {
             case "snout/readiness" -> readiness == null ? new JsonObject() : readiness.snapshot();
             case "snout/springBeans" -> spring("snout.spring.beans", params);
             case "snout/springEndpoints" -> spring("snout.spring.endpoints", params);
+            case "snout/springProfiles" -> spring("snout.spring.profiles", params);
+            case "snout/springSetProfiles" -> {
+                SpringSupport s = spring;
+                if (s == null) {
+                    throw new RequestError(-32603, "Spring support is off");
+                }
+                yield s.setProfiles(params);
+            }
             case "snout/springInjections" -> {
                 JsonObject p = params.deepCopy();
                 String file = string(params, "uri") != null ? string(params, "uri") : string(params, "path");

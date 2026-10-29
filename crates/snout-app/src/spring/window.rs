@@ -242,6 +242,8 @@ enum Menu {
     Stereotype(Point<Pixels>),
     Profile(Point<Pixels>),
     Source(Point<Pixels>),
+    /// The active profiles the beans are evaluated under.
+    Active(Point<Pixels>),
 }
 
 pub struct SpringWindow {
@@ -424,6 +426,34 @@ impl SpringWindow {
             ProfileFilter::Unprofiled => "No profile".to_owned(),
             ProfileFilter::Named(p) => format!("Profile {p}"),
         };
+        let mode = spring.profile_mode.clone();
+        let info = spring.profile_info.clone();
+        let inactive = info.inactive_beans();
+        let switch = div()
+            .flex_none()
+            .px(px(8.))
+            .pb(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(icon(Icon::Leaf, 13., green(&p)))
+            .child(div().text_size(px(12.)).text_color(p.fg_dim).child("Active profiles"))
+            .child(self.chip(
+                "spring-active-profiles",
+                crate::spring::mode_label(&mode, &info),
+                mode != crate::spring::ProfileMode::Any,
+                Menu::Active,
+                cx,
+            ))
+            .when(inactive > 0, |d| {
+                d.child(
+                    div()
+                        .debug_selector(|| "spring-inactive-count".into())
+                        .text_size(px(11.5))
+                        .text_color(p.fg_dim)
+                        .child(format!("{} inactive", thousands(inactive))),
+                )
+            });
         let rows: Rc<Vec<BeanRow>> = Rc::new(self.bean_rows(cx));
         let shown: usize = rows
             .iter()
@@ -549,12 +579,16 @@ impl SpringWindow {
                                         String::new()
                                     } else {
                                         format!("\nProfiles: {}", b.profiles.join(", "))
-                                    }
+                                    } + if b.active { "" } else { "\nNot active: the active profiles leave it out" }
                                 )
                                 .into();
+                                let off = !b.active;
                                 base.pl(px(56.))
-                                    .child(icon(Icon::Leaf, 13., leaf))
-                                    .child(div().child(b.name.clone()))
+                                    .when(off, |d| {
+                                        d.opacity(0.5).debug_selector(move || format!("spring-bean-inactive-{i}"))
+                                    })
+                                    .child(icon(Icon::Leaf, 13., if off { p.fg_dim } else { leaf }))
+                                    .child(div().when(off, |d| d.text_color(p.fg_dim)).child(b.name.clone()))
                                     .child(div().text_color(p.fg_dim).child(simple(&b.ty).to_owned()))
                                     .when(b.primary, |d| d.child(crate::look::chip("Primary", p.accent, &p)))
                                     .when(b.language == "scala", |d| d.child(crate::look::chip("Scala", p.warn, &p)))
@@ -580,6 +614,7 @@ impl SpringWindow {
             .flex()
             .flex_col()
             .child(div().flex_none().px(px(8.)).pb(px(6.)).child(crate::look::field(&self.bean_search, true, None, &p)))
+            .child(switch)
             .child(filters)
             .child(
                 div()
@@ -788,18 +823,24 @@ impl SpringWindow {
         let p = palette(cx);
         let hover = p.button_hover;
         let spring = self.spring.read(cx);
-        type Pick = Rc<dyn Fn(&mut SpringWindow)>;
+        type Pick = Rc<dyn Fn(&mut SpringWindow, &mut Context<SpringWindow>)>;
         let (at, items): (Point<Pixels>, Vec<(String, bool, Pick)>) = match menu {
             Menu::Stereotype(at) => {
                 let mut items: Vec<(String, bool, Pick)> = vec![(
                     "All stereotypes".into(),
                     self.beans.stereotype.is_none(),
-                    Rc::new(|w: &mut SpringWindow| w.beans.stereotype = None),
+                    Rc::new(|w: &mut SpringWindow, _: &mut Context<SpringWindow>| w.beans.stereotype = None),
                 )];
                 for s in spring.stereotypes() {
                     let on = self.beans.stereotype.as_ref() == Some(&s);
                     let v = s.clone();
-                    items.push((s, on, Rc::new(move |w: &mut SpringWindow| w.beans.stereotype = Some(v.clone()))));
+                    items.push((
+                        s,
+                        on,
+                        Rc::new(move |w: &mut SpringWindow, _: &mut Context<SpringWindow>| {
+                            w.beans.stereotype = Some(v.clone())
+                        }),
+                    ));
                 }
                 (at, items)
             }
@@ -808,12 +849,16 @@ impl SpringWindow {
                     (
                         "Any profile".into(),
                         self.beans.profile == ProfileFilter::Any,
-                        Rc::new(|w: &mut SpringWindow| w.beans.profile = ProfileFilter::Any),
+                        Rc::new(|w: &mut SpringWindow, _: &mut Context<SpringWindow>| {
+                            w.beans.profile = ProfileFilter::Any
+                        }),
                     ),
                     (
                         "No profile".into(),
                         self.beans.profile == ProfileFilter::Unprofiled,
-                        Rc::new(|w: &mut SpringWindow| w.beans.profile = ProfileFilter::Unprofiled),
+                        Rc::new(|w: &mut SpringWindow, _: &mut Context<SpringWindow>| {
+                            w.beans.profile = ProfileFilter::Unprofiled
+                        }),
                     ),
                 ];
                 for s in spring.profiles() {
@@ -822,8 +867,57 @@ impl SpringWindow {
                     items.push((
                         s,
                         on,
-                        Rc::new(move |w: &mut SpringWindow| w.beans.profile = ProfileFilter::Named(v.clone())),
+                        Rc::new(move |w: &mut SpringWindow, _: &mut Context<SpringWindow>| {
+                            w.beans.profile = ProfileFilter::Named(v.clone())
+                        }),
                     ));
+                }
+                (at, items)
+            }
+            Menu::Active(at) => {
+                use crate::spring::ProfileMode;
+                let mode = spring.profile_mode.clone();
+                let info = spring.profile_info.clone();
+                let set = |m: ProfileMode| -> Pick {
+                    Rc::new(move |w: &mut SpringWindow, cx: &mut Context<SpringWindow>| {
+                        let m = m.clone();
+                        w.spring.update(cx, |s, cx| s.set_profile_mode(m, cx));
+                    })
+                };
+                let files = info.config_active();
+                let mut items: Vec<(String, bool, Pick)> = vec![
+                    ("Any profile: every bean may be there".into(), mode == ProfileMode::Any, set(ProfileMode::Any)),
+                    (
+                        format!(
+                            "As the application files say ({})",
+                            if files.is_empty() { "default".to_owned() } else { files.join(", ") }
+                        ),
+                        mode == ProfileMode::Config,
+                        set(ProfileMode::Config),
+                    ),
+                ];
+                // The selected run configuration's profiles.
+                if let Some(c) = crate::run::runs(cx).and_then(|r| r.read(cx).selected_config())
+                    && !c.profiles.trim().is_empty()
+                {
+                    let list: Vec<String> =
+                        c.profiles.split(',').map(|p| p.trim().to_owned()).filter(|p| !p.is_empty()).collect();
+                    let on = mode == ProfileMode::Chosen(list.clone());
+                    items.push((
+                        format!("As '{}' runs ({})", c.name, list.join(", ")),
+                        on,
+                        set(ProfileMode::Chosen(list)),
+                    ));
+                }
+                let chosen = match &mode {
+                    ProfileMode::Chosen(p) => p.clone(),
+                    ProfileMode::Config => info.active().unwrap_or_default(),
+                    ProfileMode::Any => Vec::new(),
+                };
+                for k in info.known() {
+                    let on = chosen.contains(&k.name);
+                    let next = mode.toggled(&k.name, &info);
+                    items.push((k.name.clone(), on, set(next)));
                 }
                 (at, items)
             }
@@ -831,7 +925,8 @@ impl SpringWindow {
                 let items = [Source::All, Source::Java, Source::Scala, Source::Xml]
                     .into_iter()
                     .map(|s| {
-                        let pick: Pick = Rc::new(move |w: &mut SpringWindow| w.beans.source = s);
+                        let pick: Pick =
+                            Rc::new(move |w: &mut SpringWindow, _: &mut Context<SpringWindow>| w.beans.source = s);
                         (s.label().to_owned(), self.beans.source == s, pick)
                     })
                     .collect();
@@ -854,7 +949,7 @@ impl SpringWindow {
                 .child(div().w(px(13.)).flex_none().when(on, |d| d.child(icon(Icon::Check, 13., p.accent))))
                 .child(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    pick(this);
+                    pick(this, cx);
                     this.menu = None;
                     cx.notify();
                 }))

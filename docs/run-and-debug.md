@@ -33,7 +33,7 @@ For the configuration you select, set:
 | Environment variables | As `NAME=value; OTHER=value` |
 | Active profiles | Spring profiles, as `dev, local` |
 
-Quotes keep an argument with spaces whole. Active profiles become `spring.profiles.active` for the program (for a Gradle task, through `--args`).
+Quotes keep an argument with spaces whole. Active profiles become `spring.profiles.active` for the program (for a Gradle task, through `--args`). The **Profiles** button beside the field lists the profiles the Spring model knows, with where each comes from; pick one to add it or take it out. To see the beans as such a configuration would run, pick **As '…' runs** in the Spring window's profile switch (see [Spring](spring.md#profiles)).
 
 - Click **+** (Add Configuration) to make a new one.
 - Click **−** to remove one of yours. On a configuration from the build, it puts the build's version back.

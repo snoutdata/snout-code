@@ -80,6 +80,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌥⇧F | Format Document | Editor |
 | ⌥⌘L | Format Selection (the whole file when nothing is selected) | Editor |
 | ⌥⇧O | Organize Imports | Editor |
+| ⌃⌥P | Spring Active Profiles… | |
 | ⇧⌘M | Show Problems | |
 
 See [Java](java.md) for what each one does.

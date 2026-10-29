@@ -212,6 +212,61 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Spring Active Profiles… (⌃⌥P): any profile, the files' ones, or each known profile
+    /// on or off, picked by name.
+    pub fn open_profile_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::menus::SetSpringProfiles;
+        use crate::spring::ProfileMode;
+        let spring = self.spring.read(cx);
+        let (mode, info) = (spring.profile_mode.clone(), spring.profile_info.clone());
+        let on = |name: &str| match &mode {
+            ProfileMode::Chosen(p) => p.iter().any(|x| x == name),
+            ProfileMode::Config => info.active().unwrap_or_default().iter().any(|x| x == name),
+            ProfileMode::Any => false,
+        };
+        let mark = |b: bool| b.then(|| "On".to_owned());
+        let files = info.config_active();
+        let mut commands = vec![
+            crate::search::Command {
+                name: "Any profile: every bean may be there".into(),
+                action: Box::new(SetSpringProfiles(ProfileMode::Any)),
+                keys: mark(mode == ProfileMode::Any),
+            },
+            crate::search::Command {
+                name: format!(
+                    "As the application files say ({})",
+                    if files.is_empty() { "default".to_owned() } else { files.join(", ") }
+                )
+                .into(),
+                action: Box::new(SetSpringProfiles(ProfileMode::Config)),
+                keys: mark(mode == ProfileMode::Config),
+            },
+        ];
+        for k in info.known() {
+            commands.push(crate::search::Command {
+                name: k.name.clone().into(),
+                action: Box::new(SetSpringProfiles(mode.toggled(&k.name, &info))),
+                keys: mark(on(&k.name)),
+            });
+        }
+        let model = self.model.clone();
+        let view = cx.new(|cx| SearchView::new(model, Default::default(), Mode::Profiles, window, cx));
+        view.update(cx, |v, cx| v.set_commands(commands, cx));
+        cx.subscribe_in(&view, window, move |this, _, e: &SearchEvent, window, cx| {
+            this.search = None;
+            window.focus(&this.focus, cx);
+            if let SearchEvent::Run(action) = e {
+                window.dispatch_action(action.boxed_clone(), cx);
+            }
+            cx.notify();
+        })
+        .detach();
+        let v = view.clone();
+        cx.defer_in(window, move |_, window, cx| v.update(cx, |v, cx| v.focus_input(window, cx)));
+        self.search = Some(view);
+        cx.notify();
+    }
+
     /// Run one Gradle task, in the Build window.
     pub fn run_task(&mut self, build: Option<String>, task: String, cx: &mut Context<Self>) {
         self.runs.update(cx, |r, cx| {

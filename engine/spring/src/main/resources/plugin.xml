@@ -11,6 +11,9 @@
          <command id="snout.spring.injections"/>
          <command id="snout.spring.properties"/>
          <command id="snout.spring.inlayHints"/>
+         <command id="snout.spring.profiles"/>
+         <command id="snout.spring.setProfiles"/>
+         <command id="snout.spring.refreshProfiles"/>
       </delegateCommandHandler>
    </extension>
 </plugin>

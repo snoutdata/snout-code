@@ -71,6 +71,8 @@ pub enum Mode {
     Commands,
     /// Run Gradle Task…: the project's tasks, run as a command.
     Tasks,
+    /// Spring Active Profiles…: how the Spring model is evaluated, picked as a command.
+    Profiles,
     /// Symbols, from a language server: the workspace's (⌘T) or the file's (⇧⌘O).
     Symbols,
     /// The file's symbols as a tree, the one the caret is in picked (File Structure, ⌘F12).
@@ -173,6 +175,7 @@ impl SearchView {
             Mode::GoToLine => "Line, or line:column",
             Mode::Commands => "Type a command",
             Mode::Tasks => "Run a Gradle task: its name or path",
+            Mode::Profiles => "Spring profiles: pick one to turn it on or off",
             Mode::Symbols => "Go to symbol",
             Mode::Structure => "Filter the file's symbols",
             Mode::Classes => "Go to class, in the project, its libraries and the JDK",
@@ -187,7 +190,13 @@ impl SearchView {
         let host = crate::host::host(cx);
         let listing = (!matches!(
             mode,
-            Mode::GoToLine | Mode::Commands | Mode::Tasks | Mode::Symbols | Mode::Structure | Mode::Classes
+            Mode::GoToLine
+                | Mode::Commands
+                | Mode::Tasks
+                | Mode::Profiles
+                | Mode::Symbols
+                | Mode::Structure
+                | Mode::Classes
         ))
         .then(|| {
             let list = cx.background_executor().spawn({
@@ -249,7 +258,7 @@ impl SearchView {
         self.selected = 0;
         match self.mode {
             Mode::GoToLine => cx.notify(),
-            Mode::Commands | Mode::Tasks => {
+            Mode::Commands | Mode::Tasks | Mode::Profiles => {
                 self.items = match_commands(&self.commands, &query)
                     .into_iter()
                     .map(|i| Item {
@@ -347,6 +356,7 @@ impl Render for SearchView {
             Mode::GoToLine => SharedString::default(),
             Mode::Commands => "No command matches".into(),
             Mode::Tasks => "No task matches".into(),
+            Mode::Profiles => "No profile matches".into(),
             Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),
             Mode::Symbols => "No symbol matches".into(),
             Mode::Structure => "No symbol matches".into(),

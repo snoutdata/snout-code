@@ -120,6 +120,44 @@ class ResolverTest {
     }
 
     @Test
+    void evaluatesProfilesWhenTheProjectSaysWhichAreActive() {
+        Facts f = new Facts();
+        f.scans.add(application("app.App", "app"));
+        f.beans.add(component("app.App"));
+        BeanDef dev = component("app.DevMail", "app.Mail");
+        dev.profiles.add("dev | local");
+        BeanDef prod = component("app.SmtpMail", "app.Mail");
+        prod.profiles.add("!dev & !local");
+        f.beans.add(dev);
+        f.beans.add(prod);
+        InjectionPoint mail = inject("app.App", "mail", "app.Mail");
+        f.injections.add(mail);
+        Map<String, Resolver.ProjectInput> projects = new LinkedHashMap<>();
+        projects.put("app", project("app", f));
+        // Not evaluated: both may be absent, so neither makes it ambiguous, and it resolves.
+        Resolver.Result r = new Resolver(projects, ORACLE).resolve();
+        assertEquals("resolved", mail.status);
+        assertEquals(2, mail.beans.size());
+        assertTrue(r.contexts.get("app").inactive.isEmpty());
+        // dev: the dev bean alone, the other listed as inactive.
+        projects.get("app").activeProfiles = java.util.Set.of("dev");
+        r = new Resolver(projects, ORACLE).resolve();
+        assertEquals("resolved", mail.status);
+        assertEquals(List.of("devMail"), mail.beans.stream().map(b -> b.name).toList());
+        Resolver.Context c = r.contexts.get("app");
+        assertTrue(c.inactive.contains(prod) && c.active(dev));
+        // default: the SMTP one.
+        projects.get("app").activeProfiles = java.util.Set.of("default");
+        new Resolver(projects, ORACLE).resolve();
+        assertEquals(List.of("smtpMail"), mail.beans.stream().map(b -> b.name).toList());
+        // Two that match the active profiles are ambiguous now, as Spring would find them.
+        prod.profiles.set(0, "dev");
+        projects.get("app").activeProfiles = java.util.Set.of("dev");
+        new Resolver(projects, ORACLE).resolve();
+        assertEquals("ambiguous", mail.status);
+    }
+
+    @Test
     void readsXmlAndQualifiers() {
         Facts f = new Facts();
         f.scans.add(application("app.App", "app"));

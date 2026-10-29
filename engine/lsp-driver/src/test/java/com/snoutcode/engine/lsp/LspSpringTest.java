@@ -252,6 +252,34 @@ class LspSpringTest {
     }
 
     @Test
+    @Order(Integer.MAX_VALUE - 1)
+    void evaluatesTheChosenProfiles() throws Exception {
+        JsonObject profiles = client.request("snout/springProfiles", new JsonObject(), LONG).getAsJsonObject();
+        assertEquals("any", profiles.get("mode").getAsString(), profiles.toString());
+        JsonObject module = profiles.getAsJsonArray("modules").get(0).getAsJsonObject();
+        assertFalse(module.has("active"), module.toString());
+        assertTrue(module.getAsJsonArray("known").toString().contains("{\"name\":\"dev\",\"sources\":[\"application-dev.yml\"]}"),
+            module.toString());
+
+        Path dev = project.resolve("src/main/resources/application-dev.yml");
+        open(dev, "yaml");
+        JsonObject set = client.request("snout/springSetProfiles", params("{\"mode\":\"chosen\",\"profiles\":[\"prod\"]}"), LONG)
+            .getAsJsonObject();
+        assertEquals("chosen", set.get("mode").getAsString(), set.toString());
+        assertEquals("[\"prod\"]", set.getAsJsonArray("modules").get(0).getAsJsonObject().get("active").toString(), set.toString());
+        JsonArray inactive = awaitDiagnostics(dev, d -> d.toString().contains("spring.inactiveProfile"));
+        assertTrue(inactive.toString().contains("profile 'dev' is not active (active: prod)"), inactive.toString());
+        // The beans: none has a profile here, so each stays active.
+        JsonObject beans = client.request("snout/springBeans", new JsonObject(), LONG).getAsJsonObject();
+        assertFalse(beans.toString().contains("\"active\":false"), beans.toString());
+        assertTrue(beans.toString().contains("\"activeProfiles\":[\"prod\"]"), beans.toString());
+
+        client.request("snout/springSetProfiles", params("{\"mode\":\"any\"}"), LONG);
+        JsonArray back = awaitDiagnostics(dev, d -> !d.toString().contains("spring.inactiveProfile"));
+        assertFalse(back.toString().contains("spring.inactiveProfile"), back.toString());
+    }
+
+    @Test
     @Order(Integer.MAX_VALUE)
     void followsEditsOfJavaFiles() throws Exception {
         client.didOpen(controller);

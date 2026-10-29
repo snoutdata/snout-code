@@ -111,6 +111,13 @@ final class SpringWorkspace {
     private Map<String, JsonArray> published = new HashMap<>();
     private boolean scanned;
     private final JsonObject stats = new JsonObject();
+    /**
+     * How profiles are evaluated: {@code any} (not at all: a bean with a profile may be absent),
+     * {@code config} (the application files' {@code spring.profiles.active}), or {@code chosen}
+     * ({@link #chosenProfiles}, as a command line would).
+     */
+    private String profileMode = "any";
+    private List<String> chosenProfiles = List.of();
 
     private SpringWorkspace() {
     }
@@ -521,6 +528,13 @@ final class SpringWorkspace {
             scanMapperPackages(monitor);
         }
         resolve();
+        JsonObject out = changedDiagnostics();
+        out.addProperty("millis", System.currentTimeMillis() - start);
+        return out;
+    }
+
+    /** The diagnostics that changed since they were last answered, as {@code {diagnostics}}. */
+    private JsonObject changedDiagnostics() {
         Map<String, JsonArray> changed = new LinkedHashMap<>();
         Set<String> all = new LinkedHashSet<>(published.keySet());
         all.addAll(result.diagnostics.keySet());
@@ -533,8 +547,112 @@ final class SpringWorkspace {
         published = new HashMap<>(result.diagnostics);
         JsonObject out = new JsonObject();
         out.add("diagnostics", toJson(changed));
-        out.addProperty("millis", System.currentTimeMillis() - start);
         return out;
+    }
+
+    // ---- profiles
+
+    /** The profile settings of a module's application files. */
+    private static Profiles.Config profileConfig(ProjectState p) {
+        return Profiles.read(resourceDirs(p, false));
+    }
+
+    /** The profiles active in a module, or null while they are not evaluated. */
+    private Set<String> activeProfiles(ProjectState p) {
+        return switch (profileMode) {
+            case "config" -> Profiles.active(profileConfig(p), null);
+            case "chosen" -> Profiles.active(profileConfig(p), chosenProfiles);
+            default -> null;
+        };
+    }
+
+    /**
+     * {@code {mode: "any" | "config" | "chosen", profiles?}}: how profiles are evaluated from now
+     * on. Resolves again; answers the diagnostics that changed and what {@link #profiles} answers.
+     */
+    synchronized JsonObject setProfiles(String mode, List<String> profiles, IProgressMonitor monitor) throws Exception {
+        ensureScanned(monitor);
+        profileMode = mode == null || !List.of("any", "config", "chosen").contains(mode) ? "any" : mode;
+        chosenProfiles = profiles == null ? List.of() : List.copyOf(profiles);
+        resolve();
+        JsonObject out = changedDiagnostics();
+        out.add("profiles", profiles(null, monitor));
+        return out;
+    }
+
+    /** An application file changed: evaluate the profiles again, as they are set. */
+    synchronized JsonObject refreshProfiles(IProgressMonitor monitor) throws Exception {
+        if ("any".equals(profileMode)) {
+            JsonObject out = new JsonObject();
+            out.add("diagnostics", new JsonObject());
+            return out;
+        }
+        return setProfiles(profileMode, chosenProfiles, monitor);
+    }
+
+    /**
+     * The profiles each Spring module knows (from its application files' names and documents,
+     * their settings and groups, and the {@code @Profile}s of its beans) and the ones active
+     * now: {@code {mode, chosen, modules: [{module, configActive, active?, known: [{name, sources}]}]}}.
+     */
+    synchronized JsonObject profiles(String module, IProgressMonitor monitor) throws Exception {
+        ensureScanned(monitor);
+        JsonArray modules = new JsonArray();
+        for (ProjectState p : modules(module)) {
+            Profiles.Config config = profileConfig(p);
+            Resolver.Context c = result.contexts.get(p.name);
+            for (BeanDef b : beansOf(p)) {
+                for (String expr : b.profiles) {
+                    for (String n : Profiles.names(expr)) {
+                        config.know(n, "@Profile on " + Names.display(b.method != null ? b.declaringType : b.type));
+                    }
+                }
+            }
+            JsonObject m = new JsonObject();
+            m.addProperty("module", moduleOf(p));
+            m.add("configActive", Facts.strings(config.list(Profiles.ACTIVE)));
+            Set<String> active = activeProfiles(p);
+            if (active != null) {
+                m.add("active", Facts.strings(new ArrayList<>(active)));
+            }
+            JsonArray known = new JsonArray();
+            config.known.forEach((name, sources) -> {
+                JsonObject k = new JsonObject();
+                k.addProperty("name", name);
+                k.add("sources", Facts.strings(new ArrayList<>(sources)));
+                known.add(k);
+            });
+            m.add("known", known);
+            if (c != null) {
+                m.addProperty("inactiveBeans", c.inactive.size());
+            }
+            modules.add(m);
+        }
+        JsonObject out = new JsonObject();
+        out.addProperty("mode", profileMode);
+        out.add("chosen", Facts.strings(chosenProfiles));
+        out.add("modules", modules);
+        return out;
+    }
+
+    /** The beans of a module's context. */
+    private List<BeanDef> beansOf(ProjectState p) {
+        Resolver.Context c = result == null ? null : result.contexts.get(p.name);
+        return c == null ? List.of() : c.beans;
+    }
+
+    /** Whether a bean is out of every context it is listed in for its profiles. */
+    private boolean inactiveEverywhere(BeanDef b) {
+        boolean listed = false;
+        for (Resolver.Context c : result.contexts.values()) {
+            if (c.beans.contains(b)) {
+                listed = true;
+                if (c.active(b)) {
+                    return false;
+                }
+            }
+        }
+        return listed;
     }
 
     /** Reads one compilation unit again; true when its mapper scans changed. */
@@ -628,6 +746,7 @@ final class SpringWorkspace {
             in.facts.addAll(facts(p));
             if (p.spring) {
                 in.library.addAll(library(p));
+                in.activeProfiles = activeProfiles(p);
             }
             inputs.put(p.name, in);
         }
@@ -1076,10 +1195,16 @@ final class SpringWorkspace {
             for (BeanDef b : sorted) {
                 JsonObject o = b.toJson();
                 o.addProperty("injectedInto", result.usages.getOrDefault(b.id(), List.of()).size());
+                if (!c.active(b)) {
+                    o.addProperty("active", false);
+                }
                 beans.add(o);
             }
             m.add("beans", beans);
             m.addProperty("libraryBeans", c.library.size());
+            if (c.activeProfiles != null) {
+                m.add("activeProfiles", Facts.strings(new ArrayList<>(c.activeProfiles)));
+            }
             modules.add(m);
         }
         JsonObject out = new JsonObject();
@@ -1125,6 +1250,9 @@ final class SpringWorkspace {
                     continue;
                 }
                 JsonObject o = b.toJson();
+                if (inactiveEverywhere(b)) {
+                    o.addProperty("active", false);
+                }
                 JsonArray into = new JsonArray();
                 for (InjectionPoint i : result.usages.getOrDefault(b.id(), List.of())) {
                     JsonObject site = new JsonObject();
@@ -1310,7 +1438,19 @@ final class SpringWorkspace {
             }
         }
         ProjectState owner = p;
-        return new PropertiesService(meta, used, type -> enumConstants(owner, type));
+        PropertiesService service = new PropertiesService(meta, used, type -> enumConstants(owner, type));
+        Profiles.Config config = profileConfig(p);
+        for (BeanDef b : beansOf(p)) {
+            for (String expr : b.profiles) {
+                for (String n : Profiles.names(expr)) {
+                    config.know(n, "@Profile on " + Names.display(b.method != null ? b.declaringType : b.type));
+                }
+            }
+        }
+        service.knownProfiles = config.known;
+        service.activeProfiles = activeProfiles(p);
+        service.fileProfile = Profiles.fileProfile(path(uri));
+        return service;
     }
 
     private static final Pattern SPRING_PROPERTY = Pattern.compile("<springProperty\\b[^>]*?\\bsource\\s*=\\s*\"([^\"]+)\"");
@@ -1490,6 +1630,10 @@ final class SpringWorkspace {
 
     /** The values of application.properties and .yml, with those of the active profiles over them. */
     private Map<String, String> propertyValues(ProjectState p) {
+        Set<String> evaluated = activeProfiles(p);
+        if (evaluated != null) {
+            return Profiles.values(profileConfig(p), evaluated);
+        }
         Map<String, String> values = new HashMap<>();
         List<File> dirs = resourceDirs(p, false);
         read(dirs, "application", values);

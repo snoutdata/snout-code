@@ -42,6 +42,7 @@ SPEC = {
     "spring-injections": ("spring-injections-light", None),
     "spring-beans": ("spring-beans-light", None),
     "spring-endpoints": ("spring-endpoints-light", None),
+    "spring-profiles": ("spring-profiles-light", None),
     "spring-yml-completion": ("spring-yml-completion-light", None),
     "processes-window": ("processes-light", None),
     "git-view": ("git-view-light", None),

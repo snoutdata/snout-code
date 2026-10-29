@@ -24,6 +24,23 @@ pub enum ConfigEvent {
     Close,
 }
 
+/// The profiles of an Active profiles field: `dev, local`.
+pub fn split_profiles(text: &str) -> Vec<String> {
+    text.split(',').map(|p| p.trim().to_owned()).filter(|p| !p.is_empty()).collect()
+}
+
+/// The field's text with `profile` added, or taken out when it is there.
+pub fn toggled_profiles(text: &str, profile: &str) -> String {
+    let mut list = split_profiles(text);
+    match list.iter().position(|p| p == profile) {
+        Some(i) => {
+            list.remove(i);
+        }
+        None => list.push(profile.to_owned()),
+    }
+    list.join(", ")
+}
+
 struct Fields {
     name: Entity<InputState>,
     main_class: Entity<InputState>,
@@ -198,6 +215,54 @@ impl ConfigDialog {
         self.runs.update(cx, |r, cx| r.set_user_configurations(user, selected, cx));
     }
 
+    /// Toggle `profile` in the Active profiles field.
+    fn toggle_profile(&mut self, profile: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.fields.profiles.read(cx).value().to_string();
+        let next = toggled_profiles(&text, profile);
+        self.fields.profiles.update(cx, |s, cx| s.set_value(next, window, cx));
+        self.store_fields(cx);
+        cx.notify();
+    }
+
+    /// The Active profiles field, and a menu of the profiles the Spring model knows.
+    fn profiles_field(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let known: Vec<(String, String)> = crate::spring::spring(cx)
+            .map(|s| s.read(cx).profile_info.known().into_iter().map(|k| (k.name, k.sources.join("; "))).collect())
+            .unwrap_or_default();
+        let current = self.fields.profiles.read(cx).value().to_string();
+        let this = cx.entity();
+        let field = look::field(&self.fields.profiles, false, None, &p);
+        if known.is_empty() {
+            return field.into_any_element();
+        }
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(div().flex_1().min_w_0().child(field))
+            .child(
+                Button::new("config-profiles")
+                    .debug_selector(|| "config-profiles".into())
+                    .outline()
+                    .label("Profiles")
+                    .dropdown_menu(move |mut menu, _, _| {
+                        for (name, from) in &known {
+                            let this = this.clone();
+                            let n = name.clone();
+                            let on = split_profiles(&current).iter().any(|c| c == name);
+                            menu = menu.item(
+                                PopupMenuItem::new(format!("{name}    {from}"))
+                                    .checked(on)
+                                    .on_click(move |_, w, cx| this.update(cx, |d, cx| d.toggle_profile(&n, w, cx))),
+                            );
+                        }
+                        menu
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn form(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let Some(c) = self.selected.and_then(|i| self.list.get(i)).cloned() else {
@@ -278,7 +343,7 @@ impl ConfigDialog {
             ))
             .child(row("VM options", input(&self.fields.jvm_args)))
             .child(row("Environment variables", input(&self.fields.env)))
-            .child(row("Active profiles", input(&self.fields.profiles)))
+            .child(row("Active profiles", self.profiles_field(cx)))
             .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(if from_build {
                 if c.user {
                     "From the build, with your changes. Remove puts it back as the build has it."

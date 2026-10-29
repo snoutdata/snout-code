@@ -112,8 +112,14 @@ actions!(
         RunGradleTask,
         SortStructure,
         SpringAtCaret,
+        SpringProfiles,
     ]
 );
+
+/// Spring Active Profiles…: evaluate the Spring model under these profiles.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct SetSpringProfiles(pub crate::spring::ProfileMode);
 
 /// Run Gradle Task…: run this task of this build, in the Build window.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
@@ -230,6 +236,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Spring Beans and Endpoints", Box::new(ShowSpring)),
         ("Read the Spring Model Again", Box::new(RefreshSpring)),
         ("Go to Spring Bean or Usages…", Box::new(SpringAtCaret)),
+        ("Spring Active Profiles…", Box::new(SpringProfiles)),
         ("Collapse the Spring Window", Box::new(CollapseSpring)),
         ("Select Opened File", Box::new(LocateFile)),
         ("Collapse the Project Tree", Box::new(CollapseAll)),
@@ -414,6 +421,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::separator(),
             MenuItem::action("Show Problems", ShowProblems),
             MenuItem::action("Go to Spring Bean or Usages…", SpringAtCaret),
+            MenuItem::action("Spring Active Profiles…", SpringProfiles),
             MenuItem::separator(),
             MenuItem::action("Send Selection to Claude", crate::editor::SendToClaude),
             MenuItem::action("Accept All Claude Changes", crate::claude_ide::AcceptAllClaude),

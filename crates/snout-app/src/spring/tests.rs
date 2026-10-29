@@ -199,3 +199,23 @@ fn reads_value_hints_and_knows_configuration_files() {
     assert_eq!(window::thousands(1_565_000), "1,565,000");
     assert_eq!(window::thousands(15), "15");
 }
+
+#[test]
+fn profile_modes_toggle_and_say_what_they_are() {
+    use crate::spring::{ProfileInfo, ProfileMode, mode_label};
+    let info = ProfileInfo::parse(&serde_json::json!({ "modules": [
+        { "module": "app", "configActive": ["dev"], "known": [ { "name": "dev" }, { "name": "prod" } ] }
+    ] }));
+    assert_eq!(mode_label(&ProfileMode::Any, &info), "Any profile");
+    assert_eq!(mode_label(&ProfileMode::Config, &info), "dev (from the files)");
+    // Turning one on from the files' set starts from it.
+    let next = ProfileMode::Config.toggled("prod", &info);
+    assert_eq!(next, ProfileMode::Chosen(vec!["dev".into(), "prod".into()]));
+    assert_eq!(next.toggled("dev", &info), ProfileMode::Chosen(vec!["prod".into()]));
+    assert_eq!(mode_label(&ProfileMode::Chosen(vec![]), &info), "default");
+    assert_eq!(next.params()["profiles"], serde_json::json!(["dev", "prod"]));
+    assert_eq!(ProfileMode::Any.params()["mode"], "any");
+    assert_eq!(info.known().iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), ["dev", "prod"]);
+    assert_eq!(crate::run::config_dialog::toggled_profiles("dev, local", "dev"), "local");
+    assert_eq!(crate::run::config_dialog::toggled_profiles("local", "dev"), "local, dev");
+}

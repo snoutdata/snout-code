@@ -1041,6 +1041,52 @@ fn shop(projects: &Path) {
     w.snap("spring-injections-light");
     w.cx.update(|cx| o4.update(cx, |e, _| e.gutter_menu = None));
 
+    // Profiles: sample data only in dev, and the model evaluated under prod.
+    let resources = shop.join("src/main/resources");
+    std::fs::write(resources.join("application-dev.yml"), "shop:\n  tax-rate: 0.00\n").unwrap();
+    std::fs::write(resources.join("application-prod.yml"), "server:\n  port: 80\n").unwrap();
+    let sample = pkg.join("service/SampleData.java");
+    std::fs::write(
+        &sample,
+        "package com.example.shop.service;\n\nimport org.springframework.context.annotation.Profile;\nimport org.springframework.stereotype.Component;\n\n/** Products to try the shop with, in development. */\n@Component\n@Profile(\"dev\")\nclass SampleData {\n}\n",
+    )
+    .unwrap();
+    let se = w.open(&sample, Some((8, 0)));
+    let s3 = se.clone();
+    w.pump(120, &mut |cx| s3.read(cx).spring.as_ref().is_some_and(|s| !s.lines.is_empty()));
+    let prod = snout_app::spring::ProfileMode::Chosen(vec!["prod".into()]);
+    w.cx.update(|cx| spring.update(cx, |s, cx| s.set_profile_mode(prod, cx)));
+    let s4 = spring.clone();
+    let ok = w.pump(60, &mut |cx| s4.read(cx).profile_info.inactive_beans() > 0);
+    println!("docs: profiles evaluated {ok}");
+    w.tool(Tool::Spring);
+    let keys: Vec<String> = w.cx.update(|cx| {
+        win.read(cx)
+            .bean_rows(cx)
+            .into_iter()
+            .filter_map(|r| match r {
+                snout_app::spring::window::BeanRow::Group { key, open: false, .. } => Some(key),
+                _ => None,
+            })
+            .collect()
+    });
+    for k in keys {
+        w.cx.update(|cx| win.update(cx, |w, cx| w.toggle(&k, cx)));
+    }
+    w.cx.update(|cx| win.update(cx, |w, cx| w.set_tab(snout_app::spring::window::Tab::Beans, cx)));
+    w.pump(3, &mut |_| false);
+    w.snap("spring-profiles-light");
+    w.cx.update(|cx| spring.update(cx, |s, cx| s.set_profile_mode(snout_app::spring::ProfileMode::Any, cx)));
+    w.tool(Tool::Spring);
+    let s5 = se.clone();
+    w.with(|ws, window, cx| {
+        let dock = ws.read(cx).dock.clone();
+        dock.update(cx, |d, cx| d.remove_panel(s5, window, cx));
+    });
+    for f in [resources.join("application-dev.yml"), resources.join("application-prod.yml"), sample.clone()] {
+        let _ = std::fs::remove_file(f);
+    }
+
     // application.yml: completion of Spring's keys.
     let yml = shop.join("src/main/resources/application.yml");
     let ye = w.open(&yml, Some((3, 0)));

@@ -202,6 +202,8 @@ Builds are named by their id in the model (`gradleBuilds[].id`); `build` may be 
 | `snout/springBeans` | `{ module? }` | The beans of each Spring module's application context, for a bean list: `{ modules: [ { module, project, applications, scanPackages, scansEverything, xmlFiles, libraryBeans, beans: [Bean] } ] }`. See [Spring](#spring). |
 | `snout/springEndpoints` | `{ module? }` | The request mappings of the controllers in each module's context, sorted by path: `{ endpoints: [Endpoint] }`. |
 | `snout/springInjections` | `{ uri \| path }` | For gutter icons and "go to bean" or "go to usages", per line of a Java or Scala file: `{ uri, lines: [ { line, injections: [Injection], beans: [Bean with injectedInto] } ] }`. |
+| `snout/springProfiles` | `{ module? }` | The profiles each Spring module knows, and the ones active now: `{ mode, chosen, modules: [ { module, configActive, active?, known: [ { name, sources } ], inactiveBeans } ] }`. See [Profiles](#profiles). |
+| `snout/springSetProfiles` | `{ mode: "any" \| "config" \| "chosen", profiles? }` | How the beans are evaluated from now on; resolves again, publishes the Spring diagnostics that change and checks the open application files again. Answers as `snout/springProfiles`. |
 
 ### Notifications to the app
 
@@ -250,14 +252,26 @@ The `com.snoutcode.engine.spring` bundle builds the Spring model inside jdtls fr
 
 What it reads, per JDT project (test source folders excluded):
 
-- **Beans**: classes annotated `@Component` or any annotation meta-annotated with it (`@Service`, `@Repository`, `@Controller`, `@RestController`, `@Configuration`, `@ControllerAdvice`, the project's own), and `@Named`; `@Bean` methods; `@ConfigurationProperties` classes; `<bean>` definitions of the XML files `@ImportResource` names; Spring Data repository interfaces; MyBatis mappers (`@Mapper`, or interfaces in `@MapperScan` packages). `@Primary`, `@Qualifier` (and custom qualifier annotations), `@Profile` and every `@Conditional...` are recorded and never evaluated.
+- **Beans**: classes annotated `@Component` or any annotation meta-annotated with it (`@Service`, `@Repository`, `@Controller`, `@RestController`, `@Configuration`, `@ControllerAdvice`, the project's own), and `@Named`; `@Bean` methods; `@ConfigurationProperties` classes; `<bean>` definitions of the XML files `@ImportResource` names; Spring Data repository interfaces; MyBatis mappers (`@Mapper`, or interfaces in `@MapperScan` packages). `@Primary`, `@Qualifier` (and custom qualifier annotations), `@Profile` and every `@Conditional...` are recorded; conditions are never evaluated, and profiles only when the app asks (see [Profiles](#profiles)).
 - **The application context** of each module: its project and everything on its classpath. Component scans start at its `@SpringBootApplication` (or `@EnableAutoConfiguration`) classes: their packages or `scanBasePackages`, `@ComponentScan`s of the classes in the context, `<context:component-scan>` in its XML files; `@Import`ed classes (through meta-annotations, so `@EnableWebSecurity` brings Spring Security's configurations), nested configuration classes. A module with no application class and no scan counts every component as scanned.
 - **Library beans**: the `@Bean` methods of the auto-configurations every jar lists (`AutoConfiguration.imports`, `spring.factories`), of the configuration classes in their packages (the ones conditions and import selectors choose among), and of the library configurations the sources import; plus what the container supplies itself (`ApplicationContext`, `Environment`, the servlet request and others).
 - **Injection points**: `@Autowired` and `@Inject` fields, setters and methods, constructor injection (the `@Autowired` constructor, or a bean's only constructor), `@Bean` method parameters, `@Resource` (by name, then type) and `@Value`. A collection, map, array, `Optional`, `ObjectProvider` or `Provider` takes the element type; `required = false` and `@Nullable` make it optional.
 - **Endpoints**: `@RequestMapping` and its variants (`@GetMapping` and the others, or any annotation meta-annotated with it) on the controllers' methods and those they inherit, with the class's mapping joined to each method's: paths, HTTP methods, `produces`, `consumes`, `params`, `headers`.
 - **The Scala bridge's classes** go through the same code: their annotations come from the class files, and their positions from the Scala file their `SourceFile` attribute names.
 
-Resolution follows Spring's: candidates by type (generic arguments compared when both sides have concrete ones), narrowed by qualifiers, then the `@Primary` one, then the bean named like the field or parameter. A bean with a profile or a condition, and every library bean, may be absent, so it never makes an injection ambiguous, and one unconditional candidate wins over conditional ones. Code shared by several applications (a source folder each service compiles) is checked in the context of each application that holds it, keeping to the applications that scan its class: a bean is missing when every one lacks it, and ambiguous when one has several.
+Resolution follows Spring's: candidates by type (generic arguments compared when both sides have concrete ones), narrowed by qualifiers, then the `@Primary` one, then the bean named like the field or parameter. A bean with a condition (or a profile, while profiles are not evaluated), and every library bean, may be absent, so it never makes an injection ambiguous, and one unconditional candidate wins over conditional ones. Code shared by several applications (a source folder each service compiles) is checked in the context of each application that holds it, keeping to the applications that scan its class: a bean is missing when every one lacks it, and ambiguous when one has several.
+
+#### Profiles
+
+`snout/springSetProfiles` sets how profiles are evaluated, for every module, until it is set again (the engine starts with `any`):
+
+- `any`: not at all. A bean with `@Profile` may be absent, like one with a condition.
+- `config`: the profiles the module's application files make active: `spring.profiles.active` of their documents for every profile.
+- `chosen`: `profiles`, as `--spring.profiles.active` would, whatever the files say.
+
+Either way the files' `spring.profiles.include` and the members of their groups (`spring.profiles.group.<name>`, recursively) are added, and when nothing is active, the profiles of `spring.profiles.default` (else `default`). The application files are `application.properties`, `.yml` and `.yaml` and `application-<profile>.*` in the module's resource folders; a file is split into documents at YAML's `---` and a properties file's `#---`, and a document with `spring.config.activate.on-profile` (or the older `spring.profiles`) is for that profile expression.
+
+While profiles are evaluated, a bean's `@Profile` is an expression (a name, `!`, `&`, `|`, parentheses; several values: any one of them) checked against the active profiles of the application's module. A bean it does not match is listed with `active: false` (in `springBeans`; in `springInjections` when no context takes it) and is no candidate for any injection, so the injections and the warnings follow; one it matches counts as unconditional. `springBeans` gives each module its `activeProfiles`. `@Value` hints take the general documents and those of the active profiles, in Spring's order. An application file validates with a hint (severity 4, `spring.inactiveProfile`) on a profile file or document the active profiles leave out, and completes the known profiles as values of `spring.profiles.active`, `include`, `default`, `group.*` and `spring.config.activate.on-profile`. Saving an application file evaluates the profiles again.
 
 It warns (severity 2, `source: "spring"`) when a required injection has no candidate (`spring.missingBean`, and says so when the only candidate is a component outside the scanned packages) or several (`spring.ambiguousBean`), and only in a context something starts. It does not warn about an interface with annotations and no implementation (Feign clients, mappers: a library registers a proxy), or a library class annotated as a component.
 
@@ -278,7 +292,7 @@ Completion offers keys (in YAML, relative to the keys above the line, inserting 
 Bean      { name, aliases?, type, kind: "component" | "service" | "repository" | "controller" | "restController"
                                      | "configuration" | "bean" | "xml" | "dataRepository" | "mapper" | "properties",
             stereotype?, declaringType?, method? (a @Bean method), uri, range, language: "java" | "scala" | "xml",
-            primary?, qualifiers?, profiles?, conditions?,
+            primary?, qualifiers?, profiles?, conditions?, active? (false: the active profiles leave it out),
             injectedInto: count (springBeans) | [ { uri, range, declaringType, kind, member?, name? } ] (springInjections) }
 Endpoint  { module, path, paths, methods: ["GET", ...] (empty: any), produces?, consumes?, params?, headers?,
             handler: { class, declaringClass? (when inherited), method }, uri, range, language }
@@ -295,7 +309,7 @@ Injection { kind: "field" | "constructor" | "setter" | "method" | "beanMethod",
 
 #### The bundle's commands
 
-The engine reaches the bundle through `workspace/executeCommand`, one JSON argument each: `snout.spring.scan {}`, `snout.spring.update { uris }` (answer: the diagnostics that changed), `snout.spring.beans { module? }`, `snout.spring.endpoints { module? }`, `snout.spring.injections { uri }`, `snout.spring.properties { action: "complete" | "hover" | "definition" | "validate", uri, text, line?, character? }` and `snout.spring.inlayHints { uri, range }`.
+The engine reaches the bundle through `workspace/executeCommand`, one JSON argument each: `snout.spring.scan {}`, `snout.spring.update { uris }` (answer: the diagnostics that changed), `snout.spring.beans { module? }`, `snout.spring.endpoints { module? }`, `snout.spring.injections { uri }`, `snout.spring.properties { action: "complete" | "hover" | "definition" | "validate", uri, text, line?, character? }`, `snout.spring.inlayHints { uri, range }`, `snout.spring.profiles { module? }`, `snout.spring.setProfiles { mode, profiles? }` (answer: `{ diagnostics, profiles }`) and `snout.spring.refreshProfiles {}` (after an application file is saved).
 
 ### Checking a real project
 

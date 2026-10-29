@@ -233,6 +233,39 @@ fn the_spring_window_lists_beans_and_endpoints(cx: &mut TestAppContext) {
     let opened = editor_of(&ws, &controller, cx);
     let line = cx.update(|_, cx| opened.read(cx).state.read(cx).cursor_position().line);
     assert_eq!(line, 44, "the caret is on the handler");
+    // Profiles: a bean the active ones leave out is dimmed, and counted; the switch shows them.
+    let spring_entity = cx.update(|_, cx| ws.read(cx).spring.clone());
+    cx.update(|_, cx| {
+        spring_entity.update(cx, |s, cx| {
+            let mut modules = s.modules.clone();
+            for b in modules.iter_mut().flat_map(|m| m.beans.iter_mut()) {
+                if b.name == "frenchGreeting" {
+                    b.active = false;
+                    b.profiles = vec!["fr".into()];
+                }
+            }
+            s.profile_mode = crate::spring::ProfileMode::Chosen(vec!["en".into()]);
+            s.profile_info = crate::spring::ProfileInfo::parse(&serde_json::json!({ "modules": [
+                { "module": "spring-app", "configActive": [], "active": ["en"], "inactiveBeans": 1,
+                  "known": [ { "name": "en", "sources": ["application-en.yml"] }, { "name": "fr", "sources": ["@Profile on FrenchGreeting"] } ] }
+            ] }));
+            let endpoints = s.endpoints.clone();
+            s.set_model(modules, endpoints, cx);
+        })
+    });
+    cx.update(|_, cx| win.update(cx, |w, cx| w.set_tab(Tab::Beans, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("spring-inactive-count").is_some(), "the inactive beans are counted");
+    assert!(
+        (0..12).any(|i| cx.debug_bounds(Box::leak(format!("spring-bean-inactive-{i}").into_boxed_str())).is_some()),
+        "frenchGreeting is dimmed"
+    );
+    let switch = cx.debug_bounds("spring-active-profiles").expect("the profile switch").center();
+    cx.simulate_click(switch, Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("spring-menu").is_some(), "its menu offers the profiles");
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| win.update(cx, |w, cx| w.set_tab(Tab::Endpoints, cx)));
     // Show in Endpoints, from a gutter menu, searches for the path.
     let model_entity = cx.update(|_, cx| ws.read(cx).spring.clone());
     cx.update(|_, cx| model_entity.update(cx, |s, cx| s.show_endpoint("/status".into(), cx)));
@@ -395,6 +428,18 @@ fn the_engine_feeds_the_gutter_the_window_hints_fixes_and_properties(cx: &mut Te
     });
     assert!(completed, "completion offers demo.timeout");
     cx.simulate_keystrokes("escape");
+    // Profiles: the engine knows dev from application-dev.yml, and evaluates the one chosen.
+    let known = pump_until(cx, 60, |cx| {
+        cx.update(|_, cx| spring_model.read(cx).profile_info.known().iter().any(|k| k.name == "dev"))
+    });
+    assert!(known, "the profiles are read with the model");
+    let dev = crate::spring::ProfileMode::Chosen(vec!["dev".into()]);
+    cx.update(|_, cx| spring_model.update(cx, |s, cx| s.set_profile_mode(dev.clone(), cx)));
+    let evaluated = pump_until(cx, 60, |cx| {
+        cx.update(|_, cx| spring_model.read(cx).profile_info.active() == Some(vec!["dev".to_owned()]))
+    });
+    assert!(evaluated, "the engine evaluates the beans under dev");
+    assert_eq!(cx.update(|_, cx| model.read(cx).settings.spring_profiles.get(&repo).cloned()), Some(dev));
     let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
     cx.update(|_, cx| hub.update(cx, |h, _| h.shutdown_all()));
     let _ = std::fs::remove_dir_all(repo.parent().unwrap());

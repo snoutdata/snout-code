@@ -6,6 +6,11 @@
 //! [`Spring`] keeps the project's model for the window. It reads it once the engine is
 //! ready, and again after a Java or Scala file is saved, and tells the editors (through
 //! its revision) that their files' marks may have changed.
+//!
+//! It also says which profiles the engine evaluates ([`ProfileMode`], kept per project):
+//! none (a bean with a `@Profile` may be absent), those the application files make active,
+//! or those chosen in the Spring window. Beans the active profiles leave out come back
+//! marked inactive; the window dims them, and injections no longer take them.
 
 pub mod window;
 
@@ -25,6 +30,143 @@ use crate::theme::Palette;
 /// The Spring accent: a soft leaf green.
 pub fn green(p: &Palette) -> Hsla {
     p.spring
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Which profiles the engine evaluates the beans under.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub enum ProfileMode {
+    /// None: a bean with a `@Profile` may be there or not.
+    #[default]
+    Any,
+    /// Those `spring.profiles.active` names in the application files (else the default ones).
+    Config,
+    /// These, as `--spring.profiles.active` would.
+    Chosen(Vec<String>),
+}
+
+impl ProfileMode {
+    /// What the engine's `snout/springSetProfiles` takes.
+    pub fn params(&self) -> Value {
+        match self {
+            ProfileMode::Any => json!({ "mode": "any" }),
+            ProfileMode::Config => json!({ "mode": "config" }),
+            ProfileMode::Chosen(p) => json!({ "mode": "chosen", "profiles": p }),
+        }
+    }
+
+    /// The mode with `profile` chosen or not (from the files' active ones when none were chosen).
+    pub fn toggled(&self, profile: &str, info: &ProfileInfo) -> Self {
+        let mut chosen = match self {
+            ProfileMode::Chosen(p) => p.clone(),
+            ProfileMode::Config => info.config_active(),
+            ProfileMode::Any => Vec::new(),
+        };
+        match chosen.iter().position(|p| p == profile) {
+            Some(i) => {
+                chosen.remove(i);
+            }
+            None => chosen.push(profile.to_owned()),
+        }
+        ProfileMode::Chosen(chosen)
+    }
+}
+
+/// A profile a module knows, and where it is mentioned.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct KnownProfile {
+    pub name: String,
+    #[serde(default)]
+    pub sources: Vec<String>,
+}
+
+/// What `snout/springProfiles` says of one module.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleProfiles {
+    pub module: String,
+    #[serde(default)]
+    pub config_active: Vec<String>,
+    /// The active profiles, while they are evaluated.
+    pub active: Option<Vec<String>>,
+    #[serde(default)]
+    pub known: Vec<KnownProfile>,
+    #[serde(default)]
+    pub inactive_beans: usize,
+}
+
+/// The profiles of the project's modules.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ProfileInfo {
+    pub modules: Vec<ModuleProfiles>,
+}
+
+impl ProfileInfo {
+    pub fn parse(v: &Value) -> Self {
+        Self { modules: v.get("modules").and_then(|m| serde_json::from_value(m.clone()).ok()).unwrap_or_default() }
+    }
+
+    /// Every profile any module knows, sorted, with where each is mentioned.
+    pub fn known(&self) -> Vec<KnownProfile> {
+        let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for m in &self.modules {
+            for k in &m.known {
+                let s = out.entry(k.name.clone()).or_default();
+                for src in &k.sources {
+                    if !s.contains(src) {
+                        s.push(src.clone());
+                    }
+                }
+            }
+        }
+        out.into_iter().map(|(name, sources)| KnownProfile { name, sources }).collect()
+    }
+
+    /// The profiles the application files make active, every module's.
+    pub fn config_active(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for p in self.modules.iter().flat_map(|m| m.config_active.iter()) {
+            if !out.contains(p) {
+                out.push(p.clone());
+            }
+        }
+        out
+    }
+
+    /// The profiles active now, every module's (none while they are not evaluated).
+    pub fn active(&self) -> Option<Vec<String>> {
+        let mut out: Vec<String> = Vec::new();
+        let mut any = false;
+        for p in self.modules.iter().filter_map(|m| m.active.as_ref()) {
+            any = true;
+            for x in p {
+                if !out.contains(x) {
+                    out.push(x.clone());
+                }
+            }
+        }
+        any.then_some(out)
+    }
+
+    /// How many beans the active profiles leave out.
+    pub fn inactive_beans(&self) -> usize {
+        self.modules.iter().map(|m| m.inactive_beans).sum()
+    }
+}
+
+/// What the profile switch says: "Any profile", "dev, local (from the files)", "dev".
+pub fn mode_label(mode: &ProfileMode, info: &ProfileInfo) -> String {
+    let list = |v: &[String]| if v.is_empty() { "default".to_owned() } else { v.join(", ") };
+    match mode {
+        ProfileMode::Any => "Any profile".into(),
+        ProfileMode::Config => {
+            format!("{} (from the files)", list(&info.active().unwrap_or_else(|| info.config_active())))
+        }
+        ProfileMode::Chosen(p) => list(p),
+    }
 }
 
 /// Where a bean, an injection site or an endpoint is.
@@ -109,6 +251,9 @@ pub struct Bean {
     pub profiles: Vec<String>,
     #[serde(default)]
     pub conditions: Vec<Value>,
+    /// The active profiles leave it out (only while they are evaluated).
+    #[serde(default = "yes")]
+    pub active: bool,
     /// A count (`springBeans`) or the sites (`springInjections`).
     #[serde(default)]
     injected_into: Value,
@@ -353,6 +498,14 @@ impl SpringLine {
             parts.push(e.summary());
         }
         for b in &self.beans {
+            if !b.active {
+                parts.push(format!(
+                    "Bean '{}' ({}): not active with the active profiles",
+                    b.name,
+                    b.stereotype_label()
+                ));
+                continue;
+            }
             let n = b.injected_count();
             let used = match n {
                 0 => "not injected anywhere".to_owned(),
@@ -469,6 +622,10 @@ pub enum Load {
 
 pub struct Spring {
     runs: Entity<Runs>,
+    model: Entity<crate::model::Model>,
+    /// Which profiles the engine evaluates, and what it says of them.
+    pub profile_mode: ProfileMode,
+    pub profile_info: ProfileInfo,
     pub modules: Vec<ModuleBeans>,
     pub endpoints: Vec<Endpoint>,
     pub load: Load,
@@ -493,14 +650,33 @@ pub fn spring(cx: &App) -> Option<Entity<Spring>> {
 }
 
 impl Spring {
-    pub fn new(runs: Entity<Runs>, hub: Entity<LangHub>, cx: &mut Context<Self>) -> Self {
-        let subscriptions = vec![cx.subscribe(&hub, |this, _, e: &HubEvent, cx| {
-            if matches!(e, HubEvent::Changed) {
-                this.engine_changed(cx);
-            }
-        })];
+    pub fn new(
+        runs: Entity<Runs>,
+        hub: Entity<LangHub>,
+        model: Entity<crate::model::Model>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let subscriptions = vec![
+            cx.subscribe(&hub, |this, _, e: &HubEvent, cx| {
+                if matches!(e, HubEvent::Changed) {
+                    this.engine_changed(cx);
+                }
+            }),
+            // Another project: its own profiles.
+            cx.observe(&model, |this, model, cx| {
+                let mode = Self::saved_mode(&model, cx);
+                if mode != this.profile_mode {
+                    this.profile_mode = mode;
+                    cx.notify();
+                }
+            }),
+        ];
+        let profile_mode = Self::saved_mode(&model, cx);
         Self {
             runs,
+            model,
+            profile_mode,
+            profile_info: ProfileInfo::default(),
             modules: Vec::new(),
             endpoints: Vec::new(),
             load: Load::Idle,
@@ -521,7 +697,30 @@ impl Spring {
         }
     }
 
-    /// Read the beans and the endpoints again.
+    /// The profile mode the open project keeps.
+    fn saved_mode(model: &Entity<crate::model::Model>, cx: &App) -> ProfileMode {
+        let m = model.read(cx);
+        m.project_root().and_then(|r| m.settings.spring_profiles.get(&r).cloned()).unwrap_or_default()
+    }
+
+    /// Evaluate the beans under `mode` from now on (kept with the project), and read the
+    /// model again.
+    pub fn set_profile_mode(&mut self, mode: ProfileMode, cx: &mut Context<Self>) {
+        self.profile_mode = mode.clone();
+        self.model.update(cx, |m, _| {
+            if let Some(root) = m.project_root() {
+                if mode == ProfileMode::Any {
+                    m.settings.spring_profiles.remove(&root);
+                } else {
+                    m.settings.spring_profiles.insert(root, mode);
+                }
+                m.persist();
+            }
+        });
+        self.reload(cx);
+    }
+
+    /// Read the beans and the endpoints again, the engine told the profiles first.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let Some((_, pid)) = self.runs.read(cx).engine(cx) else {
             self.load = Load::Failed("The Java engine is not ready yet".into());
@@ -529,12 +728,23 @@ impl Spring {
             return;
         };
         self.load = Load::Loading;
-        let beans = self.runs.read(cx).request("snout/springBeans", json!({}), cx);
-        let endpoints = self.runs.read(cx).request("snout/springEndpoints", json!({}), cx);
+        let set = self.runs.read(cx).request("snout/springSetProfiles", self.profile_mode.params(), cx);
+        let runs = self.runs.clone();
         cx.spawn(async move |this, cx| {
+            let profiles = set.await;
+            let Ok((beans, endpoints)) = this.update(cx, |_, cx| {
+                let r = runs.read(cx);
+                (r.request("snout/springBeans", json!({}), cx), r.request("snout/springEndpoints", json!({}), cx))
+            }) else {
+                return;
+            };
             let (beans, endpoints) = (beans.await, endpoints.await);
             let _ = this.update(cx, |this, cx| {
                 this.from = Some(pid);
+                match &profiles {
+                    Ok(v) => this.profile_info = ProfileInfo::parse(v),
+                    Err(e) => eprintln!("[spring] profiles: {e}"),
+                }
                 match (beans, endpoints) {
                     (Ok(b), Ok(e)) => this.set_model(parse_beans(&b), parse_endpoints(&e), cx),
                     (Err(e), _) | (_, Err(e)) => {

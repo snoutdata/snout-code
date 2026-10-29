@@ -22,8 +22,11 @@ import java.util.Set;
 
 /**
  * Builds the application contexts of a workspace from its facts and resolves every injection
- * point against them. It evaluates no condition and no profile: a bean that carries one is a
- * candidate that may be absent, so it never makes an injection ambiguous.
+ * point against them. It evaluates no condition: a bean that carries one is a candidate that may
+ * be absent, so it never makes an injection ambiguous. Profiles are evaluated when the project
+ * says which are active ({@link ProjectInput#activeProfiles}): a bean whose {@code @Profile} does
+ * not match is no candidate (it stays in the context's list, as inactive), and one that matches
+ * counts as unconditional; otherwise a profile is a condition like the others.
  *
  * <p>A context is a project with everything on its classpath. Injection points resolve in the
  * contexts of the projects at the top of the dependency graph that include them, so code shared
@@ -50,6 +53,8 @@ final class Resolver {
         final List<String> dependencies = new ArrayList<>();
         final List<Facts> facts = new ArrayList<>();
         final List<BeanDef> library = new ArrayList<>();
+        /** The profiles active when this project starts the application; null when they are not evaluated. */
+        Set<String> activeProfiles;
     }
 
     /** One application context: a project and its classpath. */
@@ -71,6 +76,19 @@ final class Resolver {
         final Map<String, List<BeanDef>> byName = new HashMap<>();
         /** Components in the projects that no scan reaches. */
         final List<BeanDef> unscanned = new ArrayList<>();
+        /** The active profiles, when they are evaluated. */
+        Set<String> activeProfiles;
+        /** Beans whose {@code @Profile} the active profiles do not match: listed, never injected. */
+        final Set<BeanDef> inactive = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+        boolean active(BeanDef b) {
+            return !inactive.contains(b);
+        }
+
+        /** Whether the bean may be absent: a condition, a library's, or a profile not evaluated. */
+        boolean conditional(BeanDef b) {
+            return !b.conditions.isEmpty() || "library".equals(b.kind) || (!b.profiles.isEmpty() && activeProfiles == null);
+        }
     }
 
     /** What the resolver found. */
@@ -314,7 +332,12 @@ final class Resolver {
         }
         ProjectInput rootProject = projects.get(root);
         c.library.addAll(rootProject.library);
+        c.activeProfiles = rootProject.activeProfiles;
         for (BeanDef b : c.beans) {
+            if (c.activeProfiles != null && !Profiles.matches(b.profiles, c.activeProfiles)) {
+                c.inactive.add(b);
+                continue;
+            }
             index(c, b);
         }
         for (BeanDef b : c.library) {
@@ -519,17 +542,17 @@ final class Resolver {
             o.beans.add(candidates.get(0));
             return o;
         }
-        List<BeanDef> narrowed = narrow(i, candidates);
+        List<BeanDef> narrowed = narrow(i, candidates, c);
         o.beans.addAll(narrowed.isEmpty() ? candidates : narrowed);
         o.status = narrowed.size() == 1 || "provider".equals(i.wrapper) ? "resolved" : "ambiguous";
-        if (narrowed.size() > 1 && narrowed.stream().filter(b -> !b.conditional()).count() < 2) {
+        if (narrowed.size() > 1 && narrowed.stream().filter(b -> !c.conditional(b)).count() < 2) {
             o.status = "resolved";
         }
         return o;
     }
 
     /** Spring's choice among several candidates: the primary one, else not the fallbacks, else the one named like the field. */
-    private static List<BeanDef> narrow(InjectionPoint i, List<BeanDef> candidates) {
+    private static List<BeanDef> narrow(InjectionPoint i, List<BeanDef> candidates, Context c) {
         List<BeanDef> primary = candidates.stream().filter(b -> b.primary).toList();
         if (primary.size() == 1) {
             return primary;
@@ -544,7 +567,7 @@ final class Resolver {
                 return named;
             }
         }
-        List<BeanDef> unconditional = candidates.stream().filter(b -> !b.conditional()).toList();
+        List<BeanDef> unconditional = candidates.stream().filter(b -> !c.conditional(b)).toList();
         if (unconditional.size() == 1) {
             return unconditional;
         }

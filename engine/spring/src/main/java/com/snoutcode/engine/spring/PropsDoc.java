@@ -22,12 +22,16 @@ final class PropsDoc {
         int valueEnd;
         /** A YAML block or flow value, which is not checked against the property's type. */
         boolean complex;
+        /** Which document of the file it is in, from 0: YAML's {@code ---}, or {@code #---} in a properties file. */
+        int document;
     }
 
     final boolean yaml;
     final String text;
     final LineIndex lines;
     final List<Entry> entries = new ArrayList<>();
+    /** The document the parser is in. */
+    private int document;
 
     private PropsDoc(boolean yaml, String text) {
         this.yaml = yaml;
@@ -80,6 +84,9 @@ final class PropsDoc {
                 p++;
             }
             if (p >= l.length() || l.charAt(p) == '#' || l.charAt(p) == '!') {
+                if (p == 0 && (l.strip().equals("#---") || l.strip().equals("!---"))) {
+                    document++;
+                }
                 continue;
             }
             int keyStart = p;
@@ -136,6 +143,7 @@ final class PropsDoc {
             }
             e.valueEnd = e.complex ? l.length() : l.length();
             e.value = unescape(value.toString()).strip();
+            e.document = document;
             entries.add(e);
             i = lineNo;
         }
@@ -216,6 +224,9 @@ final class PropsDoc {
             String trimmed = l.strip();
             if (trimmed.equals("---") || trimmed.startsWith("--- ") || trimmed.equals("...")) {
                 stack.clear();
+                if (!trimmed.equals("...") && !entries.isEmpty()) {
+                    document++;
+                }
                 continue;
             }
             boolean item = l.startsWith("-", indent) && (l.startsWith("- ", indent) || indent + 1 == l.length());
@@ -250,6 +261,7 @@ final class PropsDoc {
                     e.keyStart = indent;
                     e.keyEnd = indent + 1;
                     setValue(e, l, p, i);
+                    e.document = document;
                     entries.add(e);
                     if (isBlockScalar(e.value)) {
                         blockIndent = indent;
@@ -286,6 +298,7 @@ final class PropsDoc {
                 e.valueStart = l.length();
                 e.valueEnd = l.length();
             }
+            e.document = document;
             entries.add(e);
             Level level = new Level(p, full);
             level.holdsBlock = e.value == null;

@@ -133,7 +133,10 @@ impl EditorPanel {
                     for m in &marks.lines {
                         let (Some(kind), Some(top)) = (m.mark(), top_of(m.line)) else { continue };
                         let b = gpui::Bounds::new(point(sl, top + px(1.)), size(sr - sl, line_height - px(2.)));
+                        // A bean the active profiles leave out: its leaf faded.
+                        let off = !m.beans.is_empty() && m.beans.iter().all(|b| !b.active);
                         let (g, ink) = match kind {
+                            MarkKind::Bean if off => (Icon::Leaf, p.fg_dim.opacity(0.6)),
                             MarkKind::Bean => (Icon::Leaf, green),
                             MarkKind::Endpoint => (Icon::Endpoint, green),
                             MarkKind::Injection { problem: false } => (Icon::Inject, green),

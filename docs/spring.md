@@ -44,7 +44,7 @@ From the keyboard, **Go to Spring Bean or Usages…** (Code menu, or the command
 
 ### @Value placeholders
 
-A `@Value("${key}")` shows the value it gets at the end of its line, in quiet italics: the value from the module's `application.properties` or `application.yml` and from the files of the profiles that `spring.profiles.active` names, or the placeholder's default.
+A `@Value("${key}")` shows the value it gets at the end of its line, in quiet italics: the value from the module's `application.properties` or `application.yml` and from the files of the profiles that `spring.profiles.active` names (or of the active profiles you chose, see [Profiles](#profiles)), or the placeholder's default.
 
 ## Missing and ambiguous beans
 
@@ -108,9 +108,27 @@ What a file knows comes from the module whose resource folder holds it: the conf
 
 ## Profiles
 
-- Profile files such as `application-dev.yml` get the same completion, hover and validation as `application.yml`.
-- The `@Value` hints take values from the files of the profiles `spring.profiles.active` names.
-- In the Spring window, the profile chip shows only the beans of one profile, or only the beans with no `@Profile`.
+SnoutCode can evaluate the beans under the profiles you choose, as Spring would when the application starts with them. Pick them with the **Active profiles** switch at the top of the Spring window's Beans tab, or with **Spring Active Profiles…** (⌃⌥P, Code menu, or the command palette):
+
+- **Any profile** (the default): profiles are not evaluated. A bean with a `@Profile` may be there or not, so it never makes an injection ambiguous.
+- **As the application files say**: the profiles `spring.profiles.active` names in `application.properties` or `application.yml`, or the default profile when none is named.
+- **A profile by name** turns it on or off: the beans are evaluated under the profiles ticked, as `--spring.profiles.active` would make them, whatever the files say. **As '…' runs** takes the profiles of the configuration selected in the title bar.
+
+![Beans under the prod profile](images/spring-profiles.png)
+
+*The shop under `prod`: `sampleData`, a `@Profile("dev")` bean, is dimmed.*
+
+The profiles offered come from the names of the profile files (`application-dev.yml`), the documents of a file (`spring.config.activate.on-profile`), `spring.profiles.active`, `include`, `default` and `group`, and the `@Profile` of every bean. To the profiles chosen, SnoutCode adds those `spring.profiles.include` names and the members of their groups (`spring.profiles.group.<name>`).
+
+While profiles are evaluated:
+
+- `@Profile` takes Spring's expressions: a name, `!name`, `a & b`, `a | b` and parentheses, and a bean with several values needs any one of them.
+- A bean the active profiles leave out is **dimmed** in the Spring window, and its leaf in the gutter is faded. The switch says how many beans are left out. No injection takes such a bean, so the injection marks and the warnings follow: two beans for different profiles are no longer ambiguous, and a bean only for another profile is missing.
+- The `@Value` hints take their values from `application.yml` and the documents and files of the active profiles.
+- A profile file or document the active profiles leave out gets a quiet note on its first key, **Not read now**, naming the active profiles.
+- Completion offers the known profiles as values of `spring.profiles.active`, `include`, `default`, `group` and `spring.config.activate.on-profile`.
+
+Your choice is kept with the project. The Spring window's **profile** filter chip is something else: it shows only the beans of one profile, or only those with no `@Profile`, whatever is active.
 
 ## See also
 

@@ -127,6 +127,39 @@ final class SpringSupport {
         return proxy.request("workspace/executeCommand", p).get(timeoutSeconds, TimeUnit.SECONDS);
     }
 
+    /**
+     * {@code snout/springSetProfiles}: how profiles are evaluated. Publishes the diagnostics that
+     * change with them, and checks the open application files again.
+     */
+    JsonElement setProfiles(JsonObject params) throws Exception {
+        JsonElement result = request("snout.spring.setProfiles", params);
+        apply(result.getAsJsonObject().getAsJsonObject("diagnostics"));
+        revalidateDocuments();
+        JsonObject out = result.getAsJsonObject().deepCopy();
+        out.remove("diagnostics");
+        return out.has("profiles") ? out.get("profiles") : out;
+    }
+
+    /** An application file was saved: the profiles are evaluated again, as they are set. */
+    private void refreshProfiles() {
+        try {
+            if (!scanned.isDone() || !available) {
+                return;
+            }
+            JsonElement result = command("snout.spring.refreshProfiles", new JsonObject(), 600);
+            apply(result.getAsJsonObject().getAsJsonObject("diagnostics"));
+            revalidateDocuments();
+        } catch (Exception e) {
+            log.println("snout-engine: Spring profiles failed: " + SnoutEngine.describe(e));
+        }
+    }
+
+    private void revalidateDocuments() {
+        for (String path : documents.keySet()) {
+            validate(uris.getOrDefault(path, path), 0);
+        }
+    }
+
     /** A request for the engine's own methods ({@code snout/springBeans} and the others). */
     JsonElement request(String command, JsonObject params) throws Exception {
         proxy.ready().get(30, TimeUnit.MINUTES);
@@ -404,7 +437,8 @@ final class SpringSupport {
                 publish(path);
             }
             case "textDocument/didSave" -> {
-                // nothing to do: the text is the one the app sent
+                // The text is the one the app sent; the profiles it sets may have changed.
+                pool.submit(this::refreshProfiles);
             }
             case "textDocument/completion", "textDocument/hover", "textDocument/definition" -> {
                 if (id == null) {

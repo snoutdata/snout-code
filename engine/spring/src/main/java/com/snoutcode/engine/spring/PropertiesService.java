@@ -33,10 +33,28 @@ final class PropertiesService {
     /** A type's enum constants, or null when it is not an enum. */
     private final Function<String, List<String>> enums;
 
+    /** The profiles the module knows (name to where), for completion. */
+    Map<String, java.util.Set<String>> knownProfiles = Map.of();
+    /** The profiles active now; null while they are not evaluated. */
+    java.util.Set<String> activeProfiles;
+    /** The profile of the file's name ({@code application-dev.yml}), or null. */
+    String fileProfile;
+
     PropertiesService(ConfigMetadata meta, Map<String, List<KeyUse>> used, Function<String, List<String>> enums) {
         this.meta = meta;
         this.used = used;
         this.enums = enums;
+    }
+
+    /** A match for a key that names profiles, known or not to the metadata. */
+    private Match profileMatch(String key, Match m) {
+        if (m != null || !Profiles.namesProfiles(key)) {
+            return m;
+        }
+        Match p = new Match();
+        p.kind = "exact";
+        p.valueType = "java.lang.String";
+        return p;
     }
 
     /** How a key in a file matches what is known. */
@@ -130,6 +148,7 @@ final class PropertiesService {
 
     JsonArray validate(PropsDoc doc) {
         JsonArray out = new JsonArray();
+        inactiveDocuments(doc, out);
         for (PropsDoc.Entry e : doc.entries) {
             if (e.key.isEmpty()) {
                 continue;
@@ -240,6 +259,37 @@ final class PropertiesService {
         return out;
     }
 
+    /**
+     * While profiles are evaluated: a hint on a document (or a whole {@code application-<profile>}
+     * file) the active profiles leave out, as Spring will not read it.
+     */
+    private void inactiveDocuments(PropsDoc doc, JsonArray out) {
+        if (activeProfiles == null) {
+            return;
+        }
+        String active = activeProfiles.isEmpty() ? "none" : String.join(", ", activeProfiles);
+        if (fileProfile != null && !activeProfiles.contains(fileProfile) && !doc.entries.isEmpty()) {
+            PropsDoc.Entry first = doc.entries.get(0);
+            JsonObject d = diagnostic(first.line, first.keyStart, first.keyEnd, "spring.inactiveProfile",
+                "Not read now: profile '" + fileProfile + "' is not active (active: " + active + ")");
+            d.addProperty("severity", 4);
+            out.add(d);
+        }
+        String on = Names.relaxed(Profiles.ON_PROFILE);
+        for (PropsDoc.Entry e : doc.entries) {
+            String k = Names.relaxed(e.key);
+            if ((k.equals(on) || k.equals(Profiles.LEGACY_ON_PROFILE)) && e.value != null && !e.value.isBlank()) {
+                String expr = PropsDoc.unquote(e.value.strip()).replace(",", "|");
+                if (!Profiles.evaluate(expr, activeProfiles)) {
+                    JsonObject d = diagnostic(e.valueLine, e.valueStart, e.valueEnd, "spring.inactiveProfile",
+                        "Not read now: this document is for '" + expr + "', which the active profiles (" + active + ") do not match");
+                    d.addProperty("severity", 4);
+                    out.add(d);
+                }
+            }
+        }
+    }
+
     private static JsonObject diagnostic(int line, int start, int end, String code, String message) {
         JsonObject d = new JsonObject();
         d.add("range", Loc.range(line, start, line, end));
@@ -301,7 +351,7 @@ final class PropertiesService {
         while (valueStart < l.length() && valueStart < ch && Character.isWhitespace(l.charAt(valueStart))) {
             valueStart++;
         }
-        Match m = find(key);
+        Match m = profileMatch(key, find(key));
         if (m != null) {
             int from = valueStart;
             String type = m.valueType;
@@ -312,7 +362,7 @@ final class PropertiesService {
                 }
                 type = typeArgument(type, 0);
             }
-            valueItems(m, type, line, from, l.length(), items);
+            valueItems(key, m, type, line, from, l.length(), items);
         }
     }
 
@@ -347,13 +397,13 @@ final class PropertiesService {
             String parent = doc.yamlParent(line, indent);
             String key = PropsDoc.unquote(content.substring(keyStart, colon).strip());
             String full = parent.isEmpty() ? key : parent + "." + key;
-            Match m = find(full);
+            Match m = profileMatch(full, find(full));
             if (m != null) {
                 int from = colon + 1;
                 while (from < l.length() && from < ch && l.charAt(from) == ' ') {
                     from++;
                 }
-                valueItems(m, m.valueType, line, from, content.stripTrailing().length(), items);
+                valueItems(full, m, m.valueType, line, from, content.stripTrailing().length(), items);
             }
             return;
         }
@@ -442,9 +492,15 @@ final class PropertiesService {
         return item;
     }
 
-    private void valueItems(Match m, String type, int line, int start, int end, JsonArray items) {
+    private void valueItems(String key, Match m, String type, int line, int start, int end, JsonArray items) {
         Map<String, String> values = new LinkedHashMap<>();
         int kind = 12;
+        if (Profiles.namesProfiles(key)) {
+            for (Map.Entry<String, java.util.Set<String>> p : knownProfiles.entrySet()) {
+                boolean on = activeProfiles != null && activeProfiles.contains(p.getKey());
+                values.putIfAbsent(p.getKey(), (on ? "Active now. " : "") + "From " + String.join("; ", p.getValue()) + ".");
+            }
+        }
         if (m.property != null) {
             String r = Names.relaxed(m.property.name);
             for (String name : List.of(r, r + ".values")) {

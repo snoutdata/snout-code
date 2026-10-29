@@ -272,7 +272,7 @@ impl Workspace {
         cx.set_global(crate::run::MarksHandle(marks));
         let processes = cx.new(|cx| crate::processes::Processes::new(model.clone(), hub.clone(), runs.clone(), cx));
         cx.set_global(crate::processes::ProcessesHandle(processes.clone()));
-        let spring = cx.new(|cx| crate::spring::Spring::new(runs.clone(), hub.clone(), cx));
+        let spring = cx.new(|cx| crate::spring::Spring::new(runs.clone(), hub.clone(), model.clone(), cx));
         cx.set_global(crate::spring::SpringHandle(spring.clone()));
         let problems = cx.new(|cx| crate::lang::panels::ProblemsPanel::new(hub.clone(), cx));
         let references = cx.new(|cx| crate::lang::panels::ReferencesPanel::new(hub.clone(), cx));
@@ -1588,6 +1588,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &EditBreakpointCondition, w, cx| this.edit_breakpoint_condition(w, cx)))
             .on_action(cx.listener(|this, _: &ViewBreakpoints, w, cx| this.open_breakpoints(w, cx)))
             .on_action(cx.listener(|this, _: &SpringAtCaret, w, cx| this.spring_at_caret(w, cx)))
+            .on_action(cx.listener(|this, _: &SpringProfiles, w, cx| this.open_profile_picker(w, cx)))
+            .on_action(cx.listener(|this, a: &SetSpringProfiles, _, cx| {
+                let mode = a.0.clone();
+                this.spring.update(cx, |s, cx| s.set_profile_mode(mode, cx));
+            }))
             .on_action(cx.listener(|this, _: &Rerun, _, cx| this.rerun_last(cx)))
             .on_action(cx.listener(|this, _: &RerunFailedTests, _, cx| this.rerun_failed_tests(cx)))
             .on_action(cx.listener(|this, _: &RunGradleTask, w, cx| this.open_task_picker(w, cx)))

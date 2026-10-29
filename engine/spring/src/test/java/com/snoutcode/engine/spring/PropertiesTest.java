@@ -155,6 +155,28 @@ class PropertiesTest {
     }
 
     @Test
+    void offersTheKnownProfilesAndMarksTheDocumentsTheActiveOnesLeaveOut() {
+        PropertiesService s = service();
+        s.knownProfiles = new java.util.TreeMap<>(Map.of("dev", java.util.Set.of("application-dev.yml"),
+            "prod", java.util.Set.of("@Profile on demo.Smtp")));
+        s.activeProfiles = java.util.Set.of("dev");
+        PropsDoc doc = PropsDoc.parse("spring.profiles.active=d\n#---\nspring.config.activate.on-profile=prod\nserver.port=1\n", false);
+        assertEquals(List.of("dev", "prod"), labels(s.complete(doc, 0, 23)));
+        assertTrue(s.complete(doc, 0, 23).toString().contains("Active now."), s.complete(doc, 0, 23).toString());
+        List<String> hints = messages(s.validate(doc));
+        assertTrue(hints.contains("Not read now: this document is for 'prod', which the active profiles (dev) do not match"),
+            hints.toString());
+        // A YAML group's members, and the file of a profile that is not active.
+        PropsDoc yaml = PropsDoc.parse("spring:\n  profiles:\n    group:\n      dev: \n", true);
+        assertEquals(List.of("dev", "prod"), labels(s.complete(yaml, 3, 11)));
+        s.fileProfile = "prod";
+        assertTrue(messages(s.validate(PropsDoc.parse("server.port=1\n", false)))
+            .contains("Not read now: profile 'prod' is not active (active: dev)"));
+        s.activeProfiles = null;
+        assertTrue(messages(s.validate(doc)).stream().noneMatch(m -> m.startsWith("Not read now")));
+    }
+
+    @Test
     void readsPlaceholders() {
         List<Placeholders.Key> keys = Placeholders.keys("${a.b:${c:d}} and ${e}");
         List<String> names = new ArrayList<>();
