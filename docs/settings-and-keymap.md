@@ -59,9 +59,12 @@ A project can set these, by their names in the file:
 | Gradle ▸ JDK, every build | `jdk` | the JDK's home folder |
 | Gradle ▸ Stop idle daemons after | `daemon_idle_minutes` | 1 to 240 |
 | Spring ▸ Active profiles | `spring_profiles` | `"any"`, `"config"`, or a list of names |
+| Terminal ▸ Shell ▸ Program | `terminal_shell` | a program; `""` is the login shell |
+| Terminal ▸ Shell ▸ Arguments | `terminal_shell_args` | a list, such as `["-l"]` |
+| Terminal ▸ Shell ▸ Environment | `terminal_env` | `{ "NAME": "value" }`, in place of yours |
 
-The other pages (Appearance, Keymap, Terminal, Claude Code) hold settings that are yours alone; in the
-**Project** scope they say so. Run configurations are kept per project already: see
+The other pages (Appearance, Keymap, Claude Code), and the rest of the Terminal page, hold
+settings that are yours alone; in the **Project** scope they say so. Run configurations are kept per project already: see
 [Run and debug](run-and-debug.md).
 
 A project's file looks like this:
@@ -196,7 +199,7 @@ removes and downloads JDKs on its SDKs page (see [Project Structure](project-str
 
 ![The Terminal page](images/settings-and-keymap-terminal.png)
 
-*The terminal engine: Built-in or Ghostty, and a preview of a terminal drawn by the one chosen.*
+*How the terminals look, and a preview drawn by the engine chosen with that look.*
 
 **Terminal engine**
 
@@ -207,14 +210,56 @@ removes and downloads JDKs on its SDKs page (see [Project Structure](project-str
   hyperlinks, and draws more text styles. In `settings.json` it is `terminal_engine`, with
   `"Builtin"` or `"Ghostty"`. See [Terminal](terminal.md#terminal-engine).
 
-**Preview** shows a short session (a Gradle test run and `git status`) as the chosen engine
-draws it, in the colours of the theme in use. Its last line but one has a strikethrough, a
-curly underline and a link, which only Ghostty draws.
-
 A new choice holds for the terminals started after it. A terminal already open keeps the
-engine it started with until you click **New** in its header; **Running now** lists the open
-terminals and the engine each runs. In a build without Ghostty, its card is dimmed and the
-page says why (see [Troubleshooting](troubleshooting.md#ghostty-unavailable)).
+engine it started with until you click **New** in its header; **Running now**, at the foot of
+the page, lists the open terminals and the engine each runs. In a build without Ghostty, its
+card is dimmed and the page says why (see [Troubleshooting](troubleshooting.md#ghostty-unavailable)).
+
+**Look** (applies to the open terminals at once)
+
+- **Font**: the terminals' typeface; **Editor's** follows the editor's (`terminal_font`, unset).
+- **Size**: from 8 to 32; **Use the editor's** goes back to the editor's size
+  (`terminal_font_size`, unset).
+- **Line height**: a row's height as a multiple of the text size, 1 to 2 in steps of 0.1
+  (`terminal_line_height`, 1.3).
+- **Cursor**: **Block**, **Bar** or **Underline** (`terminal_cursor`), and **Blink** while the
+  terminal has the keyboard (`terminal_cursor_blink`). A program can still ask for a bar or an
+  underline.
+
+**Preview** shows a Gradle build as the chosen engine draws it, in the theme's terminal colours
+and with the look above: a deprecated call struck through under a curly warning line, and the
+test report's link, which only Ghostty draws. Its title names the shell.
+
+![The Terminal page's shell, behaviour and external terminal](images/settings-and-keymap-terminal-shell.png)
+
+*Further down: the shell, the scrollback, the keys, and the external terminal.*
+
+**Shell** (a project may set these for itself; for the terminals started after a change)
+
+- **Program**: what the Terminal tab runs (`terminal_shell`). Empty, your login shell; on a
+  project of a remote machine, the shell of your account there.
+- **Arguments**: separated by spaces (`terminal_shell_args`, `["-l"]`: a login shell).
+- **Environment**: type `NAME=value` and press Return, or click **Add**; × removes a variable.
+  The variables are added to the terminals and the Claude Code console (`terminal_env`).
+
+**Behaviour**
+
+- **Scrollback**: how many lines each terminal keeps, from 1,000 to 1,000,000
+  (`terminal_scrollback`, 10,000). It holds for the terminals started after a change.
+- **Copy text as soon as it is selected** (`terminal_copy_on_select`).
+- **Use Option as Meta** (`terminal_option_as_meta`, on): ⌥ and a key send Esc and the key, as
+  shells and editors expect. Off, Option types the characters of your keyboard layout.
+
+**External terminal**
+
+- **Open in**: the terminal app **Open in External Terminal** opens (`external_terminal`). The
+  list holds those installed on this Mac among Terminal, iTerm, Ghostty, WezTerm, Alacritty,
+  kitty and Warp, and **Custom command**.
+- **Command**, for a custom one (`external_terminal_command`): run with `/bin/sh`; `{dir}` is
+  the folder, quoted, and on a remote project `{ssh}` is the ssh command that opens a shell
+  there, for example `open -na MyTerm --args -e {ssh}`.
+
+See [Terminal](terminal.md#open-in-external-terminal).
 
 ## Tools ▸ Claude Code
 

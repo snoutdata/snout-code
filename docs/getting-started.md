@@ -66,6 +66,13 @@ You can also drag a folder from Finder onto the window to open it.
 After that, SnoutCode opens the project you had open last, with its editor tabs as you left
 them. See [Projects](projects.md) for opening, switching and closing projects.
 
+### The menus
+
+The Mac's menu bar holds every command: File, Edit, View, Code, Navigate, Refactor, Run,
+Repository (Git), Window and Help. Each item shows an icon, an SF Symbol as macOS's own menus
+use, so commands are quick to spot; its shortcut, when it has one, is at the right. Items that
+cannot act now (Save with no editor open, Stage with nothing selected) are greyed out.
+
 ### Open a project from the command line
 
 The app's program takes one argument: a folder to open as the project, or a file to open in

@@ -166,5 +166,7 @@ In both views:
 - What `.gitignore` leaves out is dimmed.
 - One click shows a file in the preview tab, which the next preview replaces. A double click
   keeps it open in a tab of its own.
-- Right click a file for **Open**, **Reveal in Finder** and **Copy path**; a folder has the
-  last two.
+- Right click a file for **Open**, **Reveal in Finder**, **Open in External Terminal** and
+  **Copy path**; a folder has the last three. Open in External Terminal opens the terminal app
+  of your choice at the folder (a file's own folder); see
+  [Terminal](terminal.md#open-in-external-terminal).

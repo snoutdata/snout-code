@@ -63,6 +63,7 @@ SPEC = {
     "settings-and-keymap-appearance-dark": ("settings-appearance-dark", (580, 240, 2300, 1560)),
     "settings-and-keymap-keymap": ("settings-keymap-light", (580, 240, 2300, 1560)),
     "settings-and-keymap-terminal": ("settings-terminal-light", (580, 240, 2300, 1560)),
+    "settings-and-keymap-terminal-shell": ("settings-terminal-shell-light", (580, 240, 2300, 1560)),
     "settings-and-keymap-project": ("settings-project-light", (580, 240, 2300, 1560)),
     "settings-and-keymap-overridden": ("settings-overridden-light", (580, 240, 2300, 1560)),
     "settings-and-keymap-json-problems": ("settings-json-problems-light", None),

@@ -384,12 +384,14 @@ fn wizard() {
 
 fn settings_pages(projects: &Path) {
     use snout_app::settings_view::Page;
-    for (page, theme, name) in [
-        (Page::Appearance, ThemeChoice::Light, "settings-appearance-light"),
-        (Page::Appearance, ThemeChoice::Dark, "settings-appearance-dark"),
-        (Page::Keymap, ThemeChoice::Light, "settings-keymap-light"),
-        (Page::Editor, ThemeChoice::Light, "settings-editor-light"),
-        (Page::Terminal, ThemeChoice::Light, "settings-terminal-light"),
+    // The Terminal page is long: its look and preview, then its shell and external terminal.
+    for (page, theme, name, scroll) in [
+        (Page::Appearance, ThemeChoice::Light, "settings-appearance-light", 0.),
+        (Page::Appearance, ThemeChoice::Dark, "settings-appearance-dark", 0.),
+        (Page::Keymap, ThemeChoice::Light, "settings-keymap-light", 0.),
+        (Page::Editor, ThemeChoice::Light, "settings-editor-light", 0.),
+        (Page::Terminal, ThemeChoice::Light, "settings-terminal-light", 235.),
+        (Page::Terminal, ThemeChoice::Light, "settings-terminal-shell-light", 2000.),
     ] {
         let shop = copy(projects, "settings", "shop");
         let mut w = Win::new(settings(theme, vec![shop.clone()], Some(shop)), false);
@@ -409,6 +411,32 @@ fn settings_pages(projects: &Path) {
             });
         });
         w.pump(2, &mut |_| false);
+        if scroll > 0. {
+            // The wheel over the page.
+            w.with(|_, window, cx| {
+                let at = gpui::point(gpui::px(900.), gpui::px(500.));
+                let modifiers = gpui::Modifiers::default();
+                window.dispatch_event(
+                    gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                        position: at,
+                        pressed_button: None,
+                        modifiers,
+                    }),
+                    cx,
+                );
+                window.dispatch_event(
+                    gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                        position: at,
+                        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-scroll))),
+                        modifiers,
+                        touch_phase: gpui::TouchPhase::Moved,
+                        source: Default::default(),
+                    }),
+                    cx,
+                );
+            });
+            w.pump(2, &mut |_| false);
+        }
         w.snap(name);
     }
     // The project's own settings: the Editor page in the Project scope, then in the User's.

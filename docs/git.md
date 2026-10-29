@@ -29,7 +29,7 @@ The Repositories list holds the repositories you have opened, and lets you file 
 - **See its state:** the open repository shows its branch with ↑ and ↓ counts and its number of changed files. Others show what there is to pull, once the background fetch has counted it. A repository that is no longer on disk is marked **missing**.
 - **Narrow the files to a folder:** the open repository expands into its folders, each with its number of changed files. Click a folder to show only the changes under it; click the repository, or the `in folder/ ✕` chip in Files, to show them all again.
 - **Filter** the list: the field appears once you have more than 6 repositories. It matches repository and group names.
-- **Right-click** a repository for **Open**, **Move to group** (a group, **No group**, or **New group…**), **Reveal in Finder**, **Copy path** and **Remove from list**. Removing the open repository closes the project.
+- **Right-click** a repository for **Open**, **Move to group** (a group, **No group**, or **New group…**), **Reveal in Finder**, **Open in External Terminal**, **Copy path** and **Remove from list**. Removing the open repository closes the project.
 
 ### Groups
 
@@ -77,7 +77,7 @@ Files lists the changed files of the working tree: name (with the file type's ic
 - **Resize** a column: point at the header and drag the handle that shows between two titles.
 - **Filter** by name with the field in the header.
 - **Select** a file to see its diff in Changes. The selection shows in the accent colour while the table has the keyboard, and in grey once you click elsewhere. ⌘-click adds or removes a file, ⇧-click selects a range, and ⌘A selects every file shown (when no text field has the keyboard).
-- **Right-click** for **Stage**, **Unstage**, **Discard…**, **Delete…**, **Reveal in Finder** and **Copy path**. A right-click on a file that is not selected selects it first.
+- **Right-click** for **Stage**, **Unstage**, **Discard…**, **Delete…**, **Reveal in Finder**, **Open in External Terminal** and **Copy path**. A right-click on a file that is not selected selects it first.
 
 When nothing has changed, Files says the working tree is clean.
 

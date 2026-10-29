@@ -168,6 +168,10 @@ the program running there.
 | Esc | Close the find bar | The terminal's find bar |
 | ⌘-click | Open the link under the pointer | Terminal, console |
 | ⌘C / ⌘V | Copy the selection / paste | Terminal, console |
+| ⌥ and a key | Meta and the key (Esc, then the key), unless Use Option as Meta is off | Terminal, console |
+
+**Open in External Terminal** (File menu, command palette) has no shortcut out of the box: give
+it one on the Keymap page.
 
 See [Terminal](terminal.md).
 

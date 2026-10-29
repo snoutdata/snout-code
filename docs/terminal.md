@@ -10,6 +10,8 @@ run on the remote machine; the terminal itself is drawn on your Mac.
 
 Click **Terminal** in the bottom dock. The shell starts in the project's folder, as a login
 shell (`$SHELL -l`). There is one shell per project, kept running while you switch projects.
+Another program, other arguments and variables of your own are settings (see
+[Settings](#settings) below); a project can set its own.
 
 | Control | What it does |
 |---|---|
@@ -19,12 +21,15 @@ shell (`$SHELL -l`). There is one shell per project, kept running while you swit
 ## Keys, selection and scrolling
 
 - Keys go to the program running, as in a terminal app: Ctrl combinations, the arrows,
-  Option as Meta, ⇧↩ and ⌥↩ for a new line in Claude Code's prompt.
+  ⇧↩ and ⌥↩ for a new line in Claude Code's prompt.
+- Option is Meta: ⌥F sends Esc F, which moves a word forward in a shell. Turn **Use Option as
+  Meta** off in the settings to type the characters of your keyboard layout instead (⌥E é).
 - ⌘V pastes. A program that asks for it gets the paste bracketed, so a shell does not run
   pasted lines one by one.
-- Drag to select text, then ⌘C to copy it.
-- Scroll to see earlier output. The terminal keeps 10,000 lines. Typing goes back to the
-  live screen. In a full-screen program the wheel scrolls the program (it gets the wheel as
+- Drag to select text, then ⌘C to copy it. With **Copy text as soon as it is selected** on,
+  the selection is copied when you let go of the mouse.
+- Scroll to see earlier output. The terminal keeps 10,000 lines unless you set another
+  scrollback. Typing goes back to the live screen. In a full-screen program the wheel scrolls the program (it gets the wheel as
   mouse events, or as arrow keys).
 
 ## Find
@@ -38,6 +43,15 @@ the field, and every match on the screen is lit, the current one more strongly.
 - Text selected when you press ⌘F is what it looks for.
 
 The search ignores case.
+
+## Colours
+
+Each colour theme gives the terminals its own sixteen colours: its red, green, yellow, blue,
+magenta and cyan, their bright twins, and a black and a white that suit it. In every theme,
+light and dark, each of them reads on the terminal's ground (WCAG AA contrast). Text a program
+colours from these is also kept readable on the ground it puts it on: bold green on cream, white
+on a light ground, black on a dark one. The 256-colour palette and true colour are drawn as the
+program asks.
 
 ## Links
 
@@ -79,8 +93,52 @@ programs and mouse wheel reporting. Ghostty adds:
 
 ![The same colourful output in the Built-in engine and in Ghostty](images/terminal-engines.png)
 
-*The same output in each engine: Built-in above, Ghostty below with its strikethrough, curly
-underline and underlined link.*
+*The same output in each engine, in the Studio theme's terminal colours: Built-in above,
+Ghostty below with its strikethrough, curly underline and underlined link.*
 
 When the Ghostty choice cannot run (a build without it), terminals start with the built-in
 engine instead. See [Troubleshooting](troubleshooting.md#ghostty-unavailable).
+
+## Open in External Terminal
+
+**Open in External Terminal** opens a terminal app of your Mac at a folder: a file opens at
+the folder it is in. It is
+
+- on the right-click menu of a file or folder in the Project view, of an editor tab, of a
+  changed file in the Git view, and of a repository in the list;
+- in the File menu and the command palette, where it opens at the folder of the file in front,
+  or at the project's folder. It has no shortcut out of the box; give it one on the Keymap
+  page (Settings ▸ Keymap).
+
+Which app opens is a setting: Settings ▸ Tools ▸ Terminal ▸ **External terminal** lists the
+ones installed (Terminal, iTerm, Ghostty, WezTerm, Alacritty, kitty, Warp), found wherever they
+are installed, and a **Custom command** with `{dir}` for the folder. The default is Terminal.
+
+On a project of a remote machine (see [Remote SSH](remote-ssh.md)), the terminal opens an ssh
+session in the folder on that machine, `ssh -t <host> 'cd <folder>; exec $SHELL -l'`. It goes
+through the same ssh config and shares the window's connection, so it opens without asking for
+a password again. In a custom command, `{ssh}` stands for that ssh command.
+
+## Settings
+
+Settings (⌘,) ▸ Tools ▸ Terminal, or the keys in your settings file (see
+[Settings and keymap](settings-and-keymap.md#tools--terminal)):
+
+| Setting | Key | What it does |
+|---|---|---|
+| Font | `terminal_font` | The typeface. Unset, the editor's. |
+| Size | `terminal_font_size` | The text size, 8 to 32. Unset, the editor's. |
+| Line height | `terminal_line_height` | A row's height as a multiple of the text size, 1 to 2 (1.3). |
+| Cursor | `terminal_cursor`, `terminal_cursor_blink` | `Block`, `Bar` or `Underline`, and whether it blinks while the terminal has the keyboard. A program can still ask for another shape. |
+| Scrollback | `terminal_scrollback` | Lines of history each terminal keeps, 1,000 to 1,000,000 (10,000). |
+| Program | `terminal_shell` | What the Terminal tab runs. Empty: your login shell, and on a remote machine the shell of your account there. |
+| Arguments | `terminal_shell_args` | Its arguments (`["-l"]`, a login shell). |
+| Environment | `terminal_env` | Variables added to the terminals and the Claude Code console, as `{ "NAME": "value" }`. |
+| Copy on select | `terminal_copy_on_select` | Copy the selection as soon as it is made. |
+| Option as Meta | `terminal_option_as_meta` | Option sends Esc and the key (on), or types the layout's characters (off). |
+| External terminal | `external_terminal`, `external_terminal_command` | The app Open in External Terminal opens, or a command of your own (see above). |
+
+The look and the keys apply to the open terminals at once; the engine, the scrollback, the
+program, its arguments and the variables to the terminals started after a change (click
+**New** in a terminal's header to start it again). The program, its arguments and the
+variables can be set for a project in its `.snout/settings.json`: there they replace yours.
