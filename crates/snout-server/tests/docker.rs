@@ -78,15 +78,16 @@ fn output(c: &Client, program: &str, args: &[&str], cwd: Option<&str>) -> String
     out
 }
 
-#[test]
-fn remote_ssh_against_a_linux_container() {
-    if std::env::var_os("SNOUT_REMOTE_DOCKER_TEST").is_none() {
-        eprintln!("skipped: set SNOUT_REMOTE_DOCKER_TEST=1 to run it (needs Docker)");
-        return;
-    }
-    let dist = binaries();
+/// The container and how to reach it: a scratch key and ssh config, the folder name short
+/// for ssh's control socket.
+struct Machine {
+    dir: tempfile::TempDir,
+    container: Container,
+    target: SshTarget,
+    name: String,
+}
 
-    // A scratch key and ssh config. The folder name stays short for ssh's control socket.
+fn machine(prefix: &str) -> Machine {
     let scratch = tempfile::Builder::new().prefix("snt").tempdir().unwrap();
     let dir = scratch.path();
     let key = dir.join("key");
@@ -96,7 +97,7 @@ fn remote_ssh_against_a_linux_container() {
     run(Command::new("docker")
         .args(["build", "-q", "-t", IMAGE])
         .arg(workspace().join("crates/snout-server/tests/docker")));
-    let name = format!("snout-remote-test-{}", std::process::id());
+    let name = format!("{prefix}-{}", std::process::id());
     let container = Container(name.clone());
     run(Command::new("docker")
         .args(["run", "-d", "--rm", "--name", &name, "-p", "127.0.0.1::22", "-e"])
@@ -126,6 +127,17 @@ fn remote_ssh_against_a_linux_container() {
         assert!(start.elapsed() < Duration::from_secs(30), "sshd did not come up");
         std::thread::sleep(Duration::from_millis(200));
     }
+    Machine { dir: scratch, container, target, name }
+}
+
+#[test]
+fn remote_ssh_against_a_linux_container() {
+    if std::env::var_os("SNOUT_REMOTE_DOCKER_TEST").is_none() {
+        eprintln!("skipped: set SNOUT_REMOTE_DOCKER_TEST=1 to run it (needs Docker)");
+        return;
+    }
+    let dist = binaries();
+    let Machine { dir: _dir, container, target, name } = machine("snout-remote-test");
 
     // Install: uploaded the first time, found by its checksum the second.
     let session = RemoteSession::open(target.clone(), &dist).unwrap();
@@ -273,4 +285,66 @@ fn remote_ssh_against_a_linux_container() {
     assert!(left.is_empty(), "left running: {left}");
     target.close_master();
     drop(container);
+}
+
+/// The ssh processes on this side die (the shared connection, its session, or both, by
+/// SIGTERM or SIGKILL), the remote machine none the wiser: the app's host notices and
+/// connects again.
+#[test]
+fn a_link_killed_on_this_side_comes_back() {
+    if std::env::var_os("SNOUT_REMOTE_DOCKER_TEST").is_none() {
+        eprintln!("skipped: set SNOUT_REMOTE_DOCKER_TEST=1 to run it (needs Docker)");
+        return;
+    }
+    let dist = binaries();
+    // As in the app, whose background threads (where it starts ssh) block signals: the ssh
+    // it starts must not keep them blocked, or a `kill` of it does nothing. Threads started
+    // from here (the reconnects) inherit the mask.
+    // SAFETY: changes this thread's signal mask only.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+            libc::sigaddset(&mut set, sig);
+        }
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+    let m = machine("snout-remote-kill");
+    let session = std::sync::Arc::new(RemoteSession::open(m.target.clone(), &dist).unwrap());
+    let host = snout_remote::RemoteHost::connect_with(session, Default::default(), Duration::from_secs(5)).unwrap();
+    use snout_host::Host as _;
+    assert_eq!(host.read_to_string(Path::new("/etc/hostname")).map(|t| !t.is_empty()).ok(), Some(true));
+    let control = m.target.control_dir.clone().unwrap();
+    let ssh_here = || {
+        let out = Command::new("pgrep").arg("-fl").arg(control.to_string_lossy().as_ref()).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    let c = control.to_string_lossy().into_owned();
+    let kills: Vec<(&str, Vec<String>)> = vec![
+        ("all of them (SIGTERM)", vec!["-f".into(), c.clone()]),
+        ("the shared connection alone (SIGKILL)", vec!["-9".into(), "-f".into(), format!("{c}.* \\[mux\\]")]),
+        ("the session alone (SIGKILL)", vec!["-9".into(), "-f".into(), format!("ControlPath={c}.*--stdio")]),
+        ("all of them (SIGKILL)", vec!["-9".into(), "-f".into(), c.clone()]),
+    ];
+    for (round, args) in kills {
+        let before = host.connections();
+        eprintln!("{round}: ssh here: {}", ssh_here().replace('\n', " | "));
+        let st = Command::new("pkill").args(&args).status();
+        eprintln!("{round}: pkill {args:?}: {st:?}; left: {}", ssh_here().replace('\n', " | "));
+        let start = Instant::now();
+        while host.connections() == before || host.status() != snout_remote::Status::Connected {
+            assert!(
+                start.elapsed() < Duration::from_secs(60),
+                "no reconnect after killing the ssh processes here: {:?}; ssh here: {}",
+                host.status(),
+                ssh_here()
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        eprintln!("round {round}: connected again in {:.1} s", start.elapsed().as_secs_f32());
+        assert!(host.read_to_string(Path::new("/etc/hostname")).is_ok());
+    }
+    host.close();
+    m.target.close_master();
+    drop(m.container);
 }

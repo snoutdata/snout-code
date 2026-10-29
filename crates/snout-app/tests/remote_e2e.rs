@@ -6,8 +6,8 @@
 //! its main class and its tests run, the debugger stops at a breakpoint, a terminal runs there;
 //! Claude Code there finds the window (the lock file in that machine's `~/.claude/ide`, the IDE
 //! server reached through a port of that machine) and its hooks report an edit, which the
-//! window plays out and reverts; then the ssh connection is killed and the app reconnects,
-//! the engine still the same process and the hooks' port still leading back;
+//! window plays out and reverts; then the ssh processes on this Mac are killed and the app
+//! reconnects, the engine still the same process and the hooks' port still leading back;
 //! Close Remote Connection brings the window back to this Mac.
 //!
 //! It opens windows and needs Docker and the network, so it runs only when asked:
@@ -455,7 +455,8 @@ mod e2e {
 
         let _ = claude_code_on_the_remote(cx, "Greeter.java").await;
 
-        // The ssh connection dies: the app reconnects, the engine and the terminal live on.
+        // The ssh processes on this Mac die (the remote machine none the wiser): the app
+        // reconnects, the engine and the terminal live on.
         let before = cx.update(|cx| engine_pids(cx));
         say(&format!("the engine's pid there: {before:?}"));
         if before.is_empty() {
@@ -465,15 +466,12 @@ mod e2e {
             cx.global::<snout_app::remote::Remote>().connection.as_ref().and_then(|c| c.host.clone()).unwrap()
         });
         let connections = remote.connections();
-        // Both ends: the ssh processes here (the shared connection and its sessions), and the
-        // sshd sessions on the remote machine.
+        // The ssh processes here: the shared connection and its sessions.
         let pattern = control.to_string_lossy().into_owned();
         let here = Command::new("pgrep").arg("-fl").arg(&pattern).output().map(|o| o.stdout).unwrap_or_default();
         say(&format!("ssh here: {}", String::from_utf8_lossy(&here).trim().replace('\n', " | ")));
         let _ = Command::new("pkill").arg("-f").arg(&pattern).status();
-        let name = CONTAINER.get().cloned().unwrap_or_default();
-        let there = Command::new("docker").args(["exec", &name, "pkill", "-f", "sshd: dev"]).status();
-        say(&format!("killed the ssh connection (sshd there: {there:?})"));
+        say("killed the ssh processes on this Mac");
         let r = remote.clone();
         until(cx, 150, "the app reconnects", move |cx| {
             r.connections() > connections
