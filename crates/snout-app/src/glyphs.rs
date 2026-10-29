@@ -95,6 +95,8 @@ pub enum Icon {
     Sort,
     /// The Structure window: an outline, a bar and the bars it holds.
     Structure,
+    /// The Hierarchy window: a box above two it branches to.
+    Hierarchy,
 }
 
 /// One stroke of an icon, in grid units (16 across).
@@ -389,6 +391,13 @@ impl Icon {
                 Line(&[(4.5, 8.), (13., 8.)], false),
                 Line(&[(4.5, 12.5), (13., 12.5)], false),
                 Circle(2.5, 3.5, 0.9, true),
+            ],
+            Icon::Hierarchy => &[
+                Line(&[(5.5, 1.5), (10.5, 1.5), (10.5, 5.), (5.5, 5.)], true),
+                Line(&[(1.5, 11.), (6., 11.), (6., 14.5), (1.5, 14.5)], true),
+                Line(&[(10., 11.), (14.5, 11.), (14.5, 14.5), (10., 14.5)], true),
+                Line(&[(8., 5.), (8., 8.)], false),
+                Line(&[(3.75, 11.), (3.75, 8.), (12.25, 8.), (12.25, 11.)], false),
             ],
             Icon::Copy => &[
                 Line(&[(5.5, 5.5), (13.5, 5.5), (13.5, 14.), (5.5, 14.)], true),

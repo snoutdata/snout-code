@@ -94,6 +94,9 @@ actions!(
         ToggleParamHints,
         ShowStructure,
         FileStructure,
+        TypeHierarchy,
+        CallHierarchy,
+        ShowHierarchy,
     ]
 );
 
@@ -170,6 +173,9 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Go to Symbol in File…", Box::new(GoToSymbolInFile)),
         ("File Structure…", Box::new(FileStructure)),
         ("Structure", Box::new(ShowStructure)),
+        ("Type Hierarchy", Box::new(TypeHierarchy)),
+        ("Call Hierarchy", Box::new(CallHierarchy)),
+        ("Hierarchy", Box::new(ShowHierarchy)),
         ("Show Problems", Box::new(ShowProblems)),
         ("Run", Box::new(RunSelected)),
         ("Debug", Box::new(DebugSelected)),
@@ -314,6 +320,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Project", ShowProject),
             MenuItem::action("Git", ShowGit),
             MenuItem::action("Structure", ShowStructure),
+            MenuItem::action("Hierarchy", ShowHierarchy),
             check(MenuItem::action("Claude Code Console", ToggleConsole), s.console_open),
             MenuItem::separator(),
             check(MenuItem::action("Side by Side Diff", SideBySide), s.side_by_side),
@@ -360,6 +367,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Go to Line…", GoToLine),
             MenuItem::separator(),
             MenuItem::action("File Structure…", FileStructure),
+            MenuItem::action("Type Hierarchy", TypeHierarchy),
+            MenuItem::action("Call Hierarchy", CallHierarchy),
         ]),
         Menu::new("Refactor").items([
             MenuItem::action("Rename Symbol…", crate::editor::RenameSymbol),

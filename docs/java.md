@@ -66,6 +66,17 @@ The **Structure** window shows the symbols of the Java file in front as a tree: 
 
 ![The Structure window beside a Java file](images/structure.png)
 
+## Type and call hierarchy
+
+The **Hierarchy** window, on the right stripe below Structure, shows how types and methods are related. Its tree opens one level at a time, asking the engine as it goes: click the arrow beside a row, or double-click the row.
+
+- **Type Hierarchy** (⌃H, Navigate ▸ Type Hierarchy): put the caret on a class or an interface, where it is declared or where it is used. The window shows its **Subtypes**, the classes that extend or implement it, and theirs below them. Click **Supertypes** at the top of the window for what it extends and implements instead.
+- **Call Hierarchy** (⌃⌥H, Navigate ▸ Call Hierarchy): put the caret on a method. The window shows its **Callers**, the methods that call it, and theirs below them. Click **Callees** for the methods it calls instead.
+
+Click a row to go there: a type or a method opens at its declaration, and a caller at the call. Types and methods of libraries and the JDK open read only, as with Go to Definition. The stripe icon, or View ▸ Hierarchy, shows the window again with the last hierarchy.
+
+![The call hierarchy of a method, two levels open](images/call-hierarchy.png)
+
 ## Find references
 
 Put the caret on a name and press ⇧F12 (Code ▸ Find References). Every use of it is listed in the **References** window, in the bottom dock, titled `References to <name>: <n> results`. Each row shows the file, the line and column, and the line of code. Click a row to go there.

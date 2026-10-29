@@ -1654,6 +1654,36 @@ mod shots {
             })
         });
 
+        // Type Hierarchy of `Shape` (from `List<Shape>`), then Call Hierarchy of `area()`
+        // (from `s.area()`) with `total()` opened to its callers.
+        use snout_app::lang::hierarchy::Mode;
+        let hierarchy = cx.update(|cx| ws.read(cx).hierarchy.clone());
+        caret_on(&mut cx, 8, 24);
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.show_hierarchy(Mode::Subtypes, window, cx))
+        })
+        .unwrap();
+        pump(&mut cx, 30, &|cx| cx.update(|cx| hierarchy.read(cx).visible().len() >= 3));
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-type-hierarchy");
+        caret_on(&mut cx, 25, 23);
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.show_hierarchy(Mode::Callers, window, cx))
+        })
+        .unwrap();
+        pump(&mut cx, 30, &|cx| cx.update(|cx| hierarchy.read(cx).nodes.iter().filter(|n| n.depth == 1).count() >= 2));
+        let total = cx.update(|cx| hierarchy.read(cx).nodes.iter().position(|n| n.name.starts_with("total")));
+        if let Some(total) = total {
+            cx.update(|cx| hierarchy.update(cx, |h, cx| h.expand(total, cx)));
+            pump(&mut cx, 20, &|cx| cx.update(|cx| hierarchy.read(cx).nodes.iter().any(|n| n.depth == 2)));
+        }
+        pump(&mut cx, 1, &|_| false);
+        save(&mut cx, "java-call-hierarchy");
+        cx.update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |w, cx| w.toggle_tool(snout_app::workspace::Tool::Hierarchy, window, cx));
+        })
+        .unwrap();
+
         // Extract Method on the loop of `total()`: the new method, its name in the field.
         // Right after the start the engine may still be indexing: ask until it answers.
         for _ in 0..10 {

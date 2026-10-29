@@ -51,6 +51,7 @@ pub struct Tabs {
     pub notifications: PanelId,
     pub claude_changes: PanelId,
     pub structure: PanelId,
+    pub hierarchy: PanelId,
     pub run: PanelId,
     pub debug: PanelId,
     pub build: PanelId,
@@ -115,6 +116,8 @@ pub struct Workspace {
     pub claude: Option<crate::claude_ide::bridge::Bridge>,
     /// The Structure tool window: the symbols of the file in front.
     pub structure: Entity<crate::lang::structure::StructureWindow>,
+    /// The Hierarchy tool window: a type's supertypes or subtypes, a method's calls.
+    pub hierarchy: Entity<crate::lang::hierarchy::HierarchyWindow>,
     /// The Claude Changes tool window, and the session's changes it shows.
     pub claude_changes: Entity<crate::claude_ide::panel::ChangesPanel>,
     /// Every panel the window made, and where it goes when a layout does not place it.
@@ -293,6 +296,7 @@ impl Workspace {
         let processes_window = cx.new(|cx| crate::processes::window::ProcessesWindow::new(processes.clone(), cx));
         let spring_window = cx.new(|cx| crate::spring::window::SpringWindow::new(spring.clone(), window, cx));
         let structure = cx.new(|cx| crate::lang::structure::StructureWindow::new(window, cx));
+        let hierarchy = cx.new(|cx| crate::lang::hierarchy::HierarchyWindow::new(hub.clone(), cx));
         let mut tabs = Tabs {
             welcome: PanelId::from(welcome.entity_id()),
             console: None,
@@ -304,6 +308,7 @@ impl Workspace {
             notifications: PanelId::from(notifications.entity_id()),
             claude_changes: PanelId::from(claude_changes.entity_id()),
             structure: PanelId::from(structure.entity_id()),
+            hierarchy: PanelId::from(hierarchy.entity_id()),
             run: PanelId::from(run_window.entity_id()),
             debug: PanelId::from(debug_window.entity_id()),
             build: PanelId::from(build_window.entity_id()),
@@ -322,6 +327,7 @@ impl Workspace {
         panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(processes_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(structure.clone()), DockPlacement::Right));
+        panels.push((panel_handle(hierarchy.clone()), DockPlacement::Right));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
         panels.push((panel_handle(spring_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
@@ -457,6 +463,7 @@ impl Workspace {
             remote_picker: None,
             claude: None,
             structure,
+            hierarchy,
             claude_changes,
             panels,
             shown: root.clone(),
@@ -1488,6 +1495,13 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ShowProblems, w, cx| this.show_problems(w, cx)))
             .on_action(cx.listener(|this, _: &ShowStructure, w, cx| this.toggle_tool(Tool::Structure, w, cx)))
             .on_action(cx.listener(|this, _: &FileStructure, w, cx| this.open_file_structure(w, cx)))
+            .on_action(cx.listener(|this, _: &ShowHierarchy, w, cx| this.toggle_tool(Tool::Hierarchy, w, cx)))
+            .on_action(cx.listener(|this, _: &TypeHierarchy, w, cx| {
+                this.show_hierarchy(crate::lang::hierarchy::Mode::Subtypes, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &CallHierarchy, w, cx| {
+                this.show_hierarchy(crate::lang::hierarchy::Mode::Callers, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &ToggleParamHints, w, cx| {
                 let mut next = this.model.read(cx).settings.clone();
                 next.param_hints = !next.param_hints;

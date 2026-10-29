@@ -75,6 +75,8 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("escape", Box::new(e::CancelRename), Some("RenameBox > Input")),
         ("cmd-t", Box::new(GoToSymbol), None),
         ("cmd-f12", Box::new(FileStructure), Some("EditorPanel")),
+        ("ctrl-h", Box::new(TypeHierarchy), Some("EditorPanel")),
+        ("ctrl-alt-h", Box::new(CallHierarchy), Some("EditorPanel")),
         // In an editor ⇧⌘O lists the file's symbols; elsewhere it stays Check Out.
         ("cmd-shift-o", Box::new(GoToSymbolInFile), Some("EditorPanel > Input")),
         ("cmd-shift-m", Box::new(ShowProblems), None),

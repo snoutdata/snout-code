@@ -407,3 +407,110 @@ fn the_structure_window_and_popup_show_the_files_symbols(cx: &mut TestAppContext
     assert_eq!(line, 35, "on main");
     t.stop();
 }
+
+#[gpui::test]
+fn type_and_call_hierarchies_open_level_by_level(cx: &mut TestAppContext) {
+    use crate::lang::hierarchy::Mode;
+    let _engine = crate::tests::engine_lock();
+    let Some(t) = start(cx, "java-hierarchy", "Shape.java") else { return };
+    let (ws, editor, repo, cx) = (t.ws.clone(), t.editor.clone(), t.repo.clone(), &mut *t.cx);
+    let hierarchy = cx.update(|_, cx| ws.read(cx).hierarchy.clone());
+    let shown = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let h = hierarchy.read(cx);
+            h.visible().into_iter().map(|i| (h.nodes[i].depth, h.nodes[i].name.clone())).collect::<Vec<_>>()
+        })
+    };
+
+    // ⌃H on the interface: its subtypes, in the Hierarchy window. Right after the start the
+    // index may still be filling: ask again until it answers.
+    let mut subtypes = false;
+    for _ in 0..10 {
+        caret_at(&editor, "interface Shape", 0, 11, cx);
+        cx.simulate_keystrokes("ctrl-h");
+        let h = hierarchy.clone();
+        if pump_until(cx, 6, |cx| cx.update(|_, cx| h.read(cx).visible().len() >= 3)) {
+            subtypes = true;
+            break;
+        }
+    }
+    assert!(subtypes, "Circle and Square: {:?}", shown(cx));
+    assert!(cx.update(|_, cx| ws.read(cx).tool_open(crate::workspace::Tool::Hierarchy, cx)));
+    let mut names: Vec<(usize, String)> = shown(cx);
+    names.sort();
+    assert_eq!(
+        names,
+        [(0, "Shape".to_owned()), (1, "Circle".to_owned()), (1, "Square".to_owned())],
+        "the interface, then its subtypes"
+    );
+    // An interface extending none has no supertypes.
+    cx.update(|_, cx| hierarchy.update(cx, |h, cx| h.set_mode(Mode::Supertypes, cx)));
+    let h = hierarchy.clone();
+    assert!(pump_until(cx, 20, |cx| cx.update(|_, cx| h.read(cx).nodes[0].children.is_some())));
+    assert_eq!(shown(cx).len(), 1, "{:?}", shown(cx));
+    // A click on Circle (as a subtype) goes to its file.
+    cx.update(|_, cx| hierarchy.update(cx, |h, cx| h.set_mode(Mode::Subtypes, cx)));
+    let h = hierarchy.clone();
+    pump_until(cx, 20, |cx| cx.update(|_, cx| h.read(cx).visible().len() >= 3));
+    let circle = cx.update(|_, cx| {
+        let h = hierarchy.read(cx);
+        h.visible().iter().position(|&i| h.nodes[i].name == "Circle").unwrap()
+    });
+    let row: &'static str = Box::leak(format!("hierarchy-row-{circle}").into_boxed_str());
+    let at = cx.debug_bounds(row).expect("the row shows").center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    let circle_file = repo.join("src/main/java/demo/shop/Circle.java");
+    assert!(pump_until(cx, 20, |cx| editor_of(&ws, &circle_file, cx).is_some()), "Circle.java opens");
+    // There, Circle's supertypes: the interface.
+    let circle_editor = editor_of(&ws, &circle_file, cx).unwrap();
+    let e = circle_editor.clone();
+    pump_until(cx, 10, |cx| !text(&e, cx).is_empty());
+    caret_at(&circle_editor, "class Circle", 0, 7, cx);
+    cx.simulate_keystrokes("ctrl-h");
+    let h = hierarchy.clone();
+    pump_until(cx, 20, |cx| cx.update(|_, cx| h.read(cx).nodes.first().is_some_and(|n| n.name == "Circle")));
+    cx.update(|_, cx| hierarchy.update(cx, |h, cx| h.set_mode(Mode::Supertypes, cx)));
+    let h = hierarchy.clone();
+    assert!(
+        pump_until(cx, 20, |cx| cx.update(|_, cx| h.read(cx).nodes.iter().any(|n| n.depth == 1 && n.name == "Shape"))),
+        "{:?}",
+        shown(cx)
+    );
+
+    // ⌃⌥H on area(): its callers, a level at a time: total() calls it, and describe().
+    caret_at(&editor, "double area()", 0, 8, cx);
+    cx.simulate_keystrokes("ctrl-alt-h");
+    let h = hierarchy.clone();
+    let callers = pump_until(cx, 30, |cx| {
+        cx.update(|_, cx| {
+            let h = h.read(cx);
+            h.mode == Mode::Callers && h.nodes.iter().filter(|n| n.depth == 1).count() >= 2
+        })
+    });
+    assert!(callers, "{:?}", shown(cx));
+    let mut level: Vec<String> =
+        cx.update(|_, cx| hierarchy.read(cx).nodes.iter().filter(|n| n.depth == 1).map(|n| n.name.clone()).collect());
+    level.sort();
+    assert!(level[0].starts_with("describe") && level[1].starts_with("total"), "{level:?}");
+    // total() opens to its own callers: main.
+    let total = cx.update(|_, cx| hierarchy.read(cx).nodes.iter().position(|n| n.name.starts_with("total")).unwrap());
+    cx.update(|_, cx| hierarchy.update(cx, |h, cx| h.expand(total, cx)));
+    let h = hierarchy.clone();
+    assert!(
+        pump_until(cx, 20, |cx| cx.update(|_, cx| h
+            .read(cx)
+            .nodes
+            .iter()
+            .any(|n| n.depth == 2 && n.name.starts_with("main")))),
+        "{:?}",
+        shown(cx)
+    );
+    // Callees of area(): none in Shape (it is abstract), so the other way says nothing more.
+    cx.update(|_, cx| hierarchy.update(cx, |h, cx| h.set_mode(Mode::Callees, cx)));
+    let h = hierarchy.clone();
+    pump_until(cx, 10, |cx| cx.update(|_, cx| h.read(cx).nodes[0].children.is_some()));
+    assert_eq!(cx.update(|_, cx| hierarchy.read(cx).mode), Mode::Callees);
+    let names: Vec<String> = crate::menus::commands(&[]).into_iter().map(|(n, _)| n.to_string()).collect();
+    assert!(names.iter().any(|n| n == "Type Hierarchy") && names.iter().any(|n| n == "Call Hierarchy"));
+    t.stop();
+}

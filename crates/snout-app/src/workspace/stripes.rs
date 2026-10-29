@@ -1,6 +1,6 @@
 //! The tool window stripes: thin icon strips down both edges of the window. Left, at the
 //! top: the Project and Git activities; at the bottom: Run, Debug, Build, Output,
-//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Structure, Gradle,
+//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Structure, Hierarchy, Gradle,
 //! Spring, Notifications and Claude Changes, in the right dock. The item showing is a filled accent square with a white glyph.
 
 use gpui::prelude::FluentBuilder as _;
@@ -40,6 +40,7 @@ pub enum Tool {
     Notifications,
     ClaudeChanges,
     Structure,
+    Hierarchy,
     /// Not on a stripe: the status bar and View ▸ Processes open it.
     Processes,
 }
@@ -47,9 +48,12 @@ pub enum Tool {
 impl Tool {
     pub fn placement(self) -> DockPlacement {
         match self {
-            Tool::Gradle | Tool::Spring | Tool::Notifications | Tool::ClaudeChanges | Tool::Structure => {
-                DockPlacement::Right
-            }
+            Tool::Gradle
+            | Tool::Spring
+            | Tool::Notifications
+            | Tool::ClaudeChanges
+            | Tool::Structure
+            | Tool::Hierarchy => DockPlacement::Right,
             _ => DockPlacement::Bottom,
         }
     }
@@ -87,6 +91,7 @@ impl Tool {
             Tool::Notifications => Icon::Bell,
             Tool::ClaudeChanges => Icon::ClaudeChanges,
             Tool::Structure => Icon::Structure,
+            Tool::Hierarchy => Icon::Hierarchy,
             Tool::Processes => Icon::Gear,
         }
     }
@@ -107,6 +112,7 @@ impl Tool {
             Tool::Processes => 0,
             Tool::ClaudeChanges => 2,
             Tool::Structure => 4,
+            Tool::Hierarchy => 0,
         }
     }
 
@@ -124,6 +130,7 @@ impl Tool {
             Tool::Notifications => "Notifications",
             Tool::ClaudeChanges => "Claude Changes",
             Tool::Structure => "Structure (⌘7)",
+            Tool::Hierarchy => "Hierarchy (⌃H, ⌃⌥H)",
             Tool::Processes => "Processes",
         }
     }
@@ -142,6 +149,7 @@ impl Tool {
             Tool::Notifications => "stripe-notifications",
             Tool::ClaudeChanges => "stripe-claude-changes",
             Tool::Structure => "stripe-structure",
+            Tool::Hierarchy => "stripe-hierarchy",
             Tool::Processes => "stripe-processes",
         }
     }
@@ -230,6 +238,7 @@ impl Workspace {
             Tool::Notifications => Some(self.tabs.notifications),
             Tool::ClaudeChanges => Some(self.tabs.claude_changes),
             Tool::Structure => Some(self.tabs.structure),
+            Tool::Hierarchy => Some(self.tabs.hierarchy),
             Tool::Processes => Some(self.tabs.processes),
         }
     }
@@ -274,6 +283,13 @@ impl Workspace {
             }
         });
         cx.notify();
+    }
+
+    /// Show `tool`'s window (it stays when it already shows).
+    pub fn show_tool(&mut self, tool: Tool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.tool_open(tool, cx) {
+            self.toggle_tool(tool, window, cx);
+        }
     }
 
     /// Hide the dock at `place` (a tool window header's hide button).
@@ -363,6 +379,7 @@ impl Workspace {
             .border_l_1()
             .border_color(p.border)
             .child(self.tool_item(Tool::Structure, None, cx))
+            .child(self.tool_item(Tool::Hierarchy, None, cx))
             .child(self.tool_item(Tool::Gradle, None, cx))
             .child(self.tool_item(Tool::Spring, None, cx))
             .child(self.tool_item(Tool::Notifications, Some((notes, p.accent)), cx))

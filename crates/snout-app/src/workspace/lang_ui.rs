@@ -382,6 +382,25 @@ impl Workspace {
         cx.notify();
     }
 
+    /// ⌃H and ⌃⌥H: the type hierarchy or the call hierarchy of the symbol at the caret, in
+    /// the Hierarchy window.
+    pub fn show_hierarchy(&mut self, mode: crate::lang::hierarchy::Mode, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor(window, cx) else { return };
+        let Some(link) = editor.read(cx).lang.clone().filter(|l| !l.config) else {
+            self.model.update(cx, |m, cx| {
+                m.message = "Hierarchies come from the Java engine, in a Java file".into();
+                cx.notify();
+            });
+            return;
+        };
+        let (rope, caret) = {
+            let s = editor.read(cx).state.read(cx);
+            (s.text().clone(), s.cursor())
+        };
+        self.hierarchy.update(cx, |h, cx| h.start(mode, &link, &rope, caret, cx));
+        self.show_tool(super::Tool::Hierarchy, window, cx);
+    }
+
     /// The workspace's symbols, from the Java server of the open project, if one runs.
     pub fn workspace_symbols(&self, cx: &App) -> Option<crate::search::SymbolSource> {
         let repo = self.model.read(cx).project_root()?;

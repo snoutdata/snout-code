@@ -3,6 +3,7 @@
 //! the panels list problems and references.
 
 pub mod edits;
+pub mod hierarchy;
 pub mod hub;
 pub mod java;
 pub mod panels;

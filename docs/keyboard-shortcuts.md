@@ -32,6 +32,8 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘T | Go to Symbol in Workspace… | |
 | ⇧⌘O | Go to Symbol in File… | Editor |
 | ⌘F12 | File Structure… | Editor |
+| ⌃H | Type Hierarchy | Editor |
+| ⌃⌥H | Call Hierarchy | Editor |
 | ↑ ↓ | Pick the previous or next result | In a search box |
 | Esc | Close the search box | In a search box |
 

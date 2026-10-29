@@ -55,6 +55,8 @@ pub fn client_capabilities() -> Value {
             "definition": { "linkSupport": true },
             "references": {},
             "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
+            "typeHierarchy": {},
+            "callHierarchy": {},
             "formatting": {},
             "rangeFormatting": {},
             "rename": { "prepareSupport": true },
