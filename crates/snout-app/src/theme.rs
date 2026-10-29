@@ -335,6 +335,53 @@ impl Palette {
         mix(self.ground, 0.45, self.card)
     }
 
+    /// The terminals' sixteen colours in this theme: black, red, green, yellow, blue,
+    /// magenta, cyan and white, then their bright twins. The six hues are the theme's own
+    /// (its error, success and warning colours, its blue, purple and teal), each deepened
+    /// (light) or lightened (dark) until it reads on the panel (WCAG AA), the bright ones too,
+    /// so bold green stays legible on cream. Black and white swap roles with the theme: in
+    /// light, black is the text and white a pale grey, as a ground for programs that set one.
+    pub fn ansi(&self) -> [Hsla; 16] {
+        let (white, black) = (hex(0xffffff), hex(0x000000));
+        let toward = if self.dark { white } else { black };
+        let read = |c: Hsla| {
+            let mut c = c;
+            for _ in 0..60 {
+                if contrast(c, self.panel) >= ANSI_MIN_CONTRAST {
+                    break;
+                }
+                c = mix(c, 0.94, toward);
+            }
+            c
+        };
+        let fixed = |h: f32, s: f32, l: f32| gpui::hsla(h / 360., s, l, 1.);
+        let (blue, magenta, cyan) = if self.tinted {
+            (self.hues[0], self.hues[4], self.hues[5])
+        } else if self.dark {
+            (fixed(212., 0.62, 0.66), fixed(292., 0.45, 0.70), fixed(185., 0.50, 0.58))
+        } else {
+            (fixed(212., 0.70, 0.40), fixed(292., 0.45, 0.42), fixed(185., 0.75, 0.30))
+        };
+        let hues = [self.error, self.ok, self.warn, blue, magenta, cyan];
+        let normal = hues.map(read);
+        // Bright: lighter in dark; in light, more saturated and as deep as it must be.
+        let bright = normal.map(|c| {
+            if self.dark {
+                read(mix(c, 0.72, white))
+            } else {
+                read(gpui::hsla(c.h, (c.s * 1.25).min(1.), c.l * 0.9, 1.))
+            }
+        });
+        let (black0, grey, white0, white1) = if self.dark {
+            (mix(self.fg, 0.16, self.panel), read(mix(self.fg, 0.55, self.panel)), self.fg, mix(self.fg, 0.4, white))
+        } else {
+            (self.fg, read(self.fg_dim), mix(self.fg, 0.16, self.panel), mix(self.fg, 0.05, white))
+        };
+        let [r, g, y, b, m, c] = normal;
+        let [br, bg, by, bb, bm, bc] = bright;
+        [black0, r, g, y, b, m, c, white0, grey, br, bg, by, bb, bm, bc, white1]
+    }
+
     /// Lane colours of the commit graph: the drawings' tones, then two quiet extras.
     pub fn lanes(&self) -> [Hsla; 6] {
         if self.tinted {
@@ -354,6 +401,23 @@ pub struct Pressable {
     pub hover: Hsla,
     pub pressed: Hsla,
     pub ink: Hsla,
+}
+
+/// The least contrast a terminal's coloured text keeps with the ground it is on (WCAG AA).
+pub const ANSI_MIN_CONTRAST: f32 = 4.5;
+
+/// `ink` deepened (on a light ground) or lightened (on a dark one) until it keeps
+/// [`ANSI_MIN_CONTRAST`] with `ground`: a terminal's coloured text, wherever a program puts it.
+pub fn readable_on(ink: Hsla, ground: Hsla) -> Hsla {
+    let toward = if luminance(ground) > 0.18 { hex(0x000000) } else { hex(0xffffff) };
+    let mut c = ink;
+    for _ in 0..60 {
+        if contrast(c, ground) >= ANSI_MIN_CONTRAST {
+            break;
+        }
+        c = mix(c, 0.92, toward);
+    }
+    c
 }
 
 /// Claude Code's own hue, for what it changed: a warm clay that no Git state uses.
@@ -745,6 +809,30 @@ mod tests {
             need("removed text while it goes", claude.removed_text, p.panel, AA, &p);
         }
         assert!(bad.is_empty(), "below WCAG AA:\n{}", bad.join("\n"));
+    }
+
+    /// The terminals' colours read on the panel in every theme, light and dark: the six hues
+    /// and their bright twins, the text-like black (light) or white (dark), and the grey.
+    #[test]
+    fn terminal_colours_read_in_every_theme() {
+        let mut bad = Vec::new();
+        for p in all() {
+            let ansi = p.ansi();
+            let text = if p.dark { 7 } else { 0 };
+            for i in (1..=6).chain(9..=14).chain([8, text, text + 8]) {
+                let c = contrast(ansi[i], p.panel);
+                if c < ANSI_MIN_CONTRAST {
+                    bad.push(format!("{}: colour {i} {c:.2}", name(&p)));
+                }
+            }
+            // Any ink a program picks is made to read on the ground it picks.
+            for i in 0..16 {
+                for ground in [p.panel, ansi[0], ansi[7], ansi[15]] {
+                    assert!(contrast(readable_on(ansi[i], ground), ground) >= ANSI_MIN_CONTRAST - 0.01);
+                }
+            }
+        }
+        assert!(bad.is_empty(), "terminal colours below AA:\n{}", bad.join("\n"));
     }
 
     /// Added and removed are a blue and an orange: they stay apart along the blue/yellow axis

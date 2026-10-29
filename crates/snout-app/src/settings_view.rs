@@ -1462,7 +1462,7 @@ impl SettingsView {
         body = body.child(section("Preview", &p)).child(terminal_preview(chosen, &p));
         if chosen.or_available() == EngineKind::Builtin {
             body = body.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                "Ghostty also draws the strikethrough, the curly underline and the link of the last line but one.",
+                "Ghostty also draws the deprecated call struck through, its curly warning line, and the test report's link.",
             ));
         }
         if !open.is_empty() {

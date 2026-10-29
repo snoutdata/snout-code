@@ -829,7 +829,7 @@ impl ConsolePanel {
         let query = self.find.as_ref().map(|f| f.input.read(cx).value().to_string()).unwrap_or_default();
         let current = self.find.as_ref().and_then(|f| f.current.and_then(|i| f.matches.get(i)).copied());
         let top = frame.history - frame.scrollback.min(frame.history);
-        let (fg0, bg0) = (rgb(p.fg), rgb(p.panel));
+        let colors = Colors::of(p);
         let sel = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
         let selected = |r: u16, c: u16| sel.is_some_and(|(s, e)| (r, c) >= s && (r, c) <= e && s != e);
         let (found, found_now) = (p.accent.opacity(0.28), p.accent.opacity(0.6));
@@ -849,7 +849,7 @@ impl ConsolePanel {
                 if c.width == Width::Continuation {
                     continue;
                 }
-                let run = cell_run(&frame, c, &font, (fg0, bg0), p);
+                let run = cell_run(&frame, c, &font, &colors, p);
                 let bg = if selected(row, col) { Some(p.selection()) } else { hit(col).or(run.1) };
                 let glyph = run.0;
                 runs.push(TextRun { len: glyph.len(), background_color: bg, ..run.2 });
@@ -876,21 +876,23 @@ impl ConsolePanel {
     }
 }
 
-/// What the Terminal settings page's preview shows: a short session in the shop, in colour,
-/// with the text styles only some engines draw.
-const PREVIEW: &str = concat!(
-    "\x1b[35mshop\x1b[0m \x1b[1;32m$\x1b[0m ./gradlew test\r\n",
-    "\x1b[32m\u{2713}\x1b[0m OrderServiceTest \x1b[2m(12 tests)\x1b[0m\r\n",
+/// What the Terminal settings page's preview shows: a build of the shop, in colour, with the
+/// text styles only some engines draw: the deprecated call struck through under a curly
+/// warning line, and the test report's link.
+pub const PREVIEW: &str = concat!(
+    "\x1b[35mshop\x1b[0m \x1b[1;32m$\x1b[0m ./gradlew build\r\n",
+    "\x1b[2m> Task :compileJava\x1b[0m\r\n",
+    "OrderService.java:42: \x1b[1;33mwarning:\x1b[0m getAmount() in Money is deprecated\r\n",
+    "        return order.total().\x1b[9;4:3;58;5;3mgetAmount\x1b[0m();\r\n",
+    "\x1b[32m\u{2713}\x1b[0m OrderServiceTest \x1b[2m(12 tests, 0.8 s)\x1b[0m\r\n",
     "\x1b[1;32mBUILD SUCCESSFUL\x1b[0m in 4s\r\n",
-    "\x1b[35mshop\x1b[0m \x1b[1;32m$\x1b[0m git status --short\r\n",
-    "\x1b[33m M\x1b[0m src/main/java/shop/OrderService.java\r\n",
-    "\x1b[31m??\x1b[0m NOTES.md   \x1b[9mstrike\x1b[0m \x1b[4:3mcurly\x1b[0m ",
-    "\x1b]8;;https://example.com/docs\x1b\\a link\x1b]8;;\x1b\\\r\n",
+    "Test report: \x1b]8;;file:///Users/alex/projects/shop/build/reports/tests/test/index.html\x1b\\",
+    "\x1b[34mbuild/reports/tests/test/index.html\x1b[0m\x1b]8;;\x1b\\\r\n",
     "\x1b[35mshop\x1b[0m \x1b[1;32m$\x1b[0m ",
 );
 
 /// The preview's rows.
-pub const PREVIEW_ROWS: u16 = 7;
+pub const PREVIEW_ROWS: u16 = 8;
 
 thread_local! {
     /// The previews made: by engine, colours and width. Engines stay on the thread that
@@ -929,8 +931,8 @@ pub fn preview(engine: EngineKind) -> impl IntoElement {
             let id = ts.resolve_font(&font);
             let cell_w = ts.advance(id, font_size, 'M').map(|s| s.width).unwrap_or(px(8.));
             let cols = ((bounds.size.width / cell_w).floor() as u16).clamp(20, 200);
-            let (fg0, bg0) = (rgb(p.fg), rgb(p.panel));
-            let Some(frame) = preview_frame(engine, cols, fg0, bg0) else { return };
+            let colors = Colors::of(&p);
+            let Some(frame) = preview_frame(engine, cols, colors.fg0, colors.bg0) else { return };
             let (rows, cols) = frame.size();
             for row in 0..rows {
                 let mut text = String::new();
@@ -940,7 +942,7 @@ pub fn preview(engine: EngineKind) -> impl IntoElement {
                     if c.width == Width::Continuation {
                         continue;
                     }
-                    let (glyph, bg, run) = cell_run(&frame, c, &font, (fg0, bg0), &p);
+                    let (glyph, bg, run) = cell_run(&frame, c, &font, &colors, &p);
                     runs.push(TextRun { len: glyph.len(), background_color: bg, ..run });
                     text.push_str(&glyph);
                 }
@@ -959,20 +961,72 @@ pub fn preview(engine: EngineKind) -> impl IntoElement {
     .h(cell_h * f32::from(PREVIEW_ROWS))
 }
 
+/// The colours a terminal paints with: the theme's text on its panel, and the theme's
+/// sixteen terminal colours (see [`Palette::ansi`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Colors {
+    pub fg0: Rgb,
+    pub bg0: Rgb,
+    pub ansi: [Rgb; 16],
+}
+
+impl Colors {
+    pub fn of(p: &Palette) -> Self {
+        Self { fg0: rgb(p.fg), bg0: rgb(p.panel), ansi: p.ansi().map(rgb) }
+    }
+
+    /// The ink and ground of a cell, swapped when it is inverse. Ink a program picked from
+    /// the palette is made to read on the ground it ends up on (as a terminal's minimum
+    /// contrast does): bright green on cream, white on a light ground, black on a dark one.
+    pub fn of_cell(&self, c: &snout_core::term::Cell) -> (Rgb, Rgb) {
+        use snout_core::term::Color;
+        let base = Some(&self.ansi);
+        let mut fg = pty::color_in(c.fg, self.fg0, c.bold(), base);
+        let mut bg = pty::color_in(c.bg, self.bg0, false, base);
+        let mut ink_from = c.fg;
+        if c.attrs.contains(Attrs::INVERSE) {
+            std::mem::swap(&mut fg, &mut bg);
+            ink_from = c.bg;
+        }
+        if matches!(ink_from, Color::Idx(_)) {
+            fg = readable(fg, bg);
+        }
+        (fg, bg)
+    }
+}
+
+thread_local! {
+    /// Inks made readable, by ink and ground: a screen asks for the same few many times.
+    static READABLE: std::cell::RefCell<HashMap<(Rgb, Rgb), Rgb>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// `ink` as [`crate::theme::readable_on`] makes it on `ground`.
+fn readable(ink: Rgb, ground: Rgb) -> Rgb {
+    if let Some(c) = READABLE.with(|m| m.borrow().get(&(ink, ground)).copied()) {
+        return c;
+    }
+    let c = rgb(crate::theme::readable_on(hsla(ink), hsla(ground)));
+    READABLE.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() > 4096 {
+            m.clear();
+        }
+        m.insert((ink, ground), c);
+    });
+    c
+}
+
 /// A cell as text to shape: its glyph (a wide one kept to one cell so the grid stays
 /// aligned, a space filling the other), its own background when it has one, and its look.
 fn cell_run(
     frame: &Frame,
     c: &snout_core::term::Cell,
     font: &Font,
-    (fg0, bg0): (Rgb, Rgb),
+    colors: &Colors,
     p: &Palette,
 ) -> (String, Option<Hsla>, TextRun) {
-    let mut fg = pty::color(c.fg, fg0, c.bold());
-    let mut bg = pty::color(c.bg, bg0, false);
-    if c.attrs.contains(Attrs::INVERSE) {
-        std::mem::swap(&mut fg, &mut bg);
-    }
+    let (fg0, bg0) = (colors.fg0, colors.bg0);
+    let (fg, bg) = colors.of_cell(c);
     let mut ink = hsla(fg);
     if c.attrs.contains(Attrs::DIM) {
         ink = mix(ink, 0.55, hsla(bg));
@@ -994,7 +1048,7 @@ fn cell_run(
     }
     let line_color = match c.underline_color {
         snout_core::term::Color::Default => ink,
-        other => hsla(pty::color(other, fg0, false)),
+        other => hsla(pty::color_in(other, fg0, false, Some(&colors.ansi))),
     };
     let underline = match c.underline {
         Underline::None if c.has_link() => {

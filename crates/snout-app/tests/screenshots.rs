@@ -2515,6 +2515,17 @@ sleep 30
                 shot(&format!("settings-page-{slug}-{mode}"), theme, Activity::Project, Some(Select::Settings(page)));
             }
         }
+        // The Terminal page's preview in every colour theme, light and dark: its colours read
+        // on each (`SNOUT_SHOT_ONLY=terminal-palette-` takes these alone).
+        ENGINE.set(snout_core::term::EngineKind::preferred());
+        for colors in ColorTheme::ALL {
+            let c = colors.label().to_lowercase();
+            for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
+                let name = format!("terminal-palette-{c}-{mode}");
+                themed_shot(colors, &name, theme, Activity::Project, Some(Select::Settings(Page::Terminal)));
+            }
+        }
+        ENGINE.set(snout_core::term::EngineKind::Builtin);
         real_spring_shot(ThemeChoice::Dark);
         shot("spring-gutter-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));
         shot("spring-gutter-light", ThemeChoice::Light, Activity::Project, Some(Select::Spring(SpringShot::Gutter)));

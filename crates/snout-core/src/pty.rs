@@ -577,10 +577,20 @@ pub fn indexed(i: u8) -> Rgb {
 
 /// A cell colour, `default` for the default; bold brightens the eight base colours.
 pub fn color(c: Color, default: Rgb, bold: bool) -> Rgb {
+    color_in(c, default, bold, None)
+}
+
+/// [`color`] with the sixteen base colours of a theme (`base`), when given, in place of
+/// xterm's; the 256-colour cube and the greys stay xterm's.
+pub fn color_in(c: Color, default: Rgb, bold: bool, base: Option<&[Rgb; 16]>) -> Rgb {
+    let pick = |i: u8| match base {
+        Some(b) if i < 16 => b[usize::from(i)],
+        _ => indexed(i),
+    };
     match c {
         Color::Default => default,
-        Color::Idx(i) if bold && i < 8 => indexed(i + 8),
-        Color::Idx(i) => indexed(i),
+        Color::Idx(i) if bold && i < 8 => pick(i + 8),
+        Color::Idx(i) => pick(i),
         Color::Rgb(r, g, b) => (r, g, b),
     }
 }
@@ -615,6 +625,10 @@ mod tests {
         assert_eq!(indexed(231), (255, 255, 255));
         assert_eq!(indexed(255), (238, 238, 238));
         assert_eq!(color(Color::Idx(1), (255, 255, 255), true), indexed(9));
+        let mut base = [(0, 0, 0); 16];
+        base[10] = (1, 2, 3);
+        assert_eq!(color_in(Color::Idx(2), (9, 9, 9), true, Some(&base)), (1, 2, 3), "bold green is the theme's");
+        assert_eq!(color_in(Color::Idx(200), (9, 9, 9), false, Some(&base)), indexed(200));
     }
 
     fn wait_for(term: &Pty, what: &str) -> String {
