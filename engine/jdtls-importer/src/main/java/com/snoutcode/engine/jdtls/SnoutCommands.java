@@ -6,6 +6,7 @@ import org.eclipse.core.resources.IWorkspace;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.Path;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.internal.core.ExternalFoldersManager;
 import org.eclipse.jdt.ls.core.internal.IDelegateCommandHandler;
@@ -82,6 +83,10 @@ public final class SnoutCommands implements IDelegateCommandHandler {
         }
         ImportPlan plan = ImportPlan.read(java.nio.file.Path.of(property));
         IWorkspace workspace = ResourcesPlugin.getWorkspace();
+        // The import holds the whole workspace, so it waits for a running build, which on a large
+        // project (the first, full one) takes minutes. Its classpath changes start a new build
+        // anyway: stop this one rather than wait for it.
+        Job.getJobManager().cancel(ResourcesPlugin.FAMILY_AUTO_BUILD);
         workspace.run(m -> WorkspaceLayout.apply(plan, m), workspace.getRoot(), IWorkspace.AVOID_UPDATE, monitor);
         JavaLanguageServerPlugin.logInfo("SnoutCode: imported " + plan.projects.size() + " project(s) again in "
             + (System.currentTimeMillis() - start) + " ms");
