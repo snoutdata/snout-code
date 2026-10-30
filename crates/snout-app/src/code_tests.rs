@@ -516,41 +516,52 @@ fn typing_and_scrolling_a_large_java_file_stay_quick(cx: &mut TestAppContext) {
     act(&model, cx, Action::OpenFile(repo.join("Big.java"), Some((2500, 8))));
     let editor = editor_for(&ws, &repo.join("Big.java"), cx);
     cx.update(|w, cx| w.draw(cx).clear(cx));
-    // A frame with nothing new, for comparison.
-    let started = Instant::now();
-    for _ in 0..40 {
+    // Each step is timed against a frame with nothing new, drawn right next to it: the
+    // machine's speed and load (a debug build, a small CI runner, other tests running) then
+    // cancel out, and what is left is the work the step adds.
+    let mut idle = std::time::Duration::ZERO;
+    let mut idle_frame = |cx: &mut VisualTestContext| {
+        let started = Instant::now();
         cx.update(|w, cx| {
             w.refresh();
             w.draw(cx).clear(cx)
         });
-    }
-    let idle = started.elapsed() / 40;
+        idle += started.elapsed();
+    };
     // Typing: each keystroke and the frame after it.
-    let started = Instant::now();
+    let mut typing = std::time::Duration::ZERO;
     for _ in 0..40 {
+        idle_frame(cx);
+        let started = Instant::now();
         cx.simulate_keystrokes("a");
         cx.update(|w, cx| w.draw(cx).clear(cx));
+        typing += started.elapsed();
     }
-    let typing = started.elapsed() / 40;
+    let typing = typing / 40;
     cx.executor().advance_clock(std::time::Duration::from_millis(500));
     cx.run_until_parked();
     cx.update(|_, cx| assert_eq!(editor.read(cx).changes.len(), 1, "the gutter marks the typed line"));
     // Scrolling: a page at a time through the file, a frame each.
     let state = cx.update(|_, cx| editor.read(cx).state.clone());
-    let started = Instant::now();
+    let mut scrolling = std::time::Duration::ZERO;
     for i in 0..40 {
+        idle_frame(cx);
+        let started = Instant::now();
         cx.update(|_, cx| {
             state.update(cx, |s, cx| s.set_scroll_offset(gpui::point(gpui::px(0.), gpui::px(-600. * i as f32)), cx))
         });
         cx.update(|w, cx| w.draw(cx).clear(cx));
+        scrolling += started.elapsed();
     }
-    let scrolling = started.elapsed() / 40;
+    let scrolling = scrolling / 40;
+    let idle = idle / 80;
     println!("Big.java: {idle:?} a frame, {typing:?} a keystroke, {scrolling:?} a scrolled frame");
-    // Debug builds are several times slower than release; these bounds catch a regression
-    // that does whole-file work on every keystroke or frame, not the last millisecond.
-    let limit = std::time::Duration::from_millis(if cfg!(debug_assertions) { 120 } else { 16 });
-    assert!(typing < limit, "typing takes {typing:?} a keystroke");
-    assert!(scrolling < limit, "scrolling takes {scrolling:?} a frame");
+    // Both take about 2.5 idle frames in a debug build, on a laptop and on a 2 vCPU runner
+    // alike. The bound catches a regression that does whole-file work on every keystroke or
+    // frame, not the last millisecond.
+    let limit = idle * 6;
+    assert!(typing < limit, "typing takes {typing:?} a keystroke, over 6 idle frames ({idle:?} each)");
+    assert!(scrolling < limit, "scrolling takes {scrolling:?} a frame, over 6 idle frames ({idle:?} each)");
     assert_eq!(text_of(&editor, cx).len(), text.len() + 40);
     let _ = std::fs::remove_dir_all(repo);
 }
@@ -1031,4 +1042,22 @@ fn the_navigation_modifier_underlines_a_link_and_the_popup_lists_places(cx: &mut
     cx.simulate_keystrokes("escape");
     assert!(cx.update(|_, cx| editor.read(cx).nav.popup.is_none()), "Esc closes it");
     let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Every test's workspace lives in the one test process, so that process's children are the
+/// other tests' too (their `git` commands, terminals and engines): quitting in one test stops
+/// what its workspace started, never those.
+#[gpui::test]
+fn quitting_in_a_test_leaves_the_other_tests_processes_be(cx: &mut TestAppContext) {
+    let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let (repo, model, ws, _, cx) = open_text("Spare.java", "class Spare {}\n", (0, 0), cx);
+    act(&model, cx, Action::Quit(crate::model::QuitChoice { save: None, dont_ask: true }));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(ws.read(cx).quitting));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let status = other.try_wait().unwrap();
+    let _ = other.kill();
+    let _ = other.wait();
+    let _ = std::fs::remove_dir_all(repo);
+    assert_eq!(status, None, "another test's process was stopped");
 }

@@ -26,18 +26,18 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Clippy, tests, and the app under X11 and Wayland
         run: scripts/test-linux.sh ${{ matrix.arch }}
       - name: Screenshots and logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-check-${{ matrix.arch }}
           path: target/linux-check/
@@ -50,24 +50,24 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The Arch Linux package is made in the archlinux image, which exists for x86_64 only.
       - name: x86_64 containers on an arm runner
         if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: amd64
       - name: Build the .deb and the Arch Linux package
         run: scripts/package-linux.sh ${{ matrix.arch }}
       - name: Install them in clean containers and start the app
         run: scripts/linux/install-test.sh ${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: snout-code-linux-${{ matrix.arch }}
           path: |

@@ -7,6 +7,7 @@
 //! the window, and the app never lingers: a watchdog ends it after [`EXIT_CAP`]. A relaunch
 //! starts a new app at once, as the old one is gone; the reaper is not an app.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -183,10 +184,12 @@ impl Workspace {
         let remote = crate::remote::is_remote(cx);
         let job = cx.background_executor().spawn(async move {
             let snap = crate::processes::scan::Scanner::new(host.clone()).quick_snapshot(&known.cache);
+            let own = (!real).then(|| started_here(&snap, &known));
             let targets: Vec<(u32, u64)> = crate::processes::rows(&*host, &snap, &known)
                 .into_iter()
                 .filter(|r| r.kind != Kind::App && r.kind != Kind::Leftover)
                 .filter_map(|r| r.pid.map(|p| (p, r.start)))
+                .filter(|(pid, _)| own.as_ref().is_none_or(|own| own.contains(pid)))
                 .collect();
             if let Some(gone) = lock_gone {
                 let _ = gone.recv_timeout(Duration::from_millis(300));
@@ -211,6 +214,22 @@ impl Workspace {
         })
         .detach();
     }
+}
+
+/// What this workspace started itself: its engines and its runs, and what they started (but
+/// not the Gradle daemons, which other engines share). In the tests, where every workspace
+/// lives in the one test process and that process's children are the other tests' too (their
+/// `git` commands, terminals and engines), only these may go.
+fn started_here(snap: &crate::processes::scan::Snapshot, known: &crate::processes::Known) -> HashSet<u32> {
+    let mut stack: Vec<u32> =
+        known.engines.iter().filter_map(|e| e.pid).chain(known.sessions.iter().filter_map(|s| s.pid)).collect();
+    let mut own = HashSet::new();
+    while let Some(pid) = stack.pop() {
+        if own.insert(pid) {
+            stack.extend(snap.children(pid).into_iter().filter(|c| !c.is_daemon()).map(|c| c.pid));
+        }
+    }
+    own
 }
 
 /// Start the reaper: this program again, without a window, stopping `targets` (pid and

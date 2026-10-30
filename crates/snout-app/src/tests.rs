@@ -14,8 +14,15 @@ use crate::workspace::Workspace;
 use snout_core::term::EngineKind;
 
 pub fn git(dir: &Path, args: &[&str]) {
-    let ok = Command::new("git").arg("-C").arg(dir).args(args).status().unwrap().success();
-    assert!(ok, "git {args:?}");
+    let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?} in {}: {}\n{}{}",
+        dir.display(),
+        out.status,
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// The modifier of ⌘-click and the like: ⌘ on a Mac, Ctrl elsewhere.
