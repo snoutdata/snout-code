@@ -366,7 +366,8 @@ For the default shortcuts, see [Keyboard shortcuts](keyboard-shortcuts.md).
 
 ## Where settings are kept
 
-SnoutCode keeps your settings in `~/Library/Application Support/SnoutCode/settings.json`, and
+SnoutCode keeps your settings in `~/Library/Application Support/SnoutCode/settings.json` on a
+Mac and in `~/.config/SnoutCode/settings.json` on Linux (see [SnoutCode on Linux](linux.md#where-snoutcode-keeps-its-files)), and
 a project's own in `.snout/settings.json` in the project (see
 [Your settings and the project's](#your-settings-and-the-projects)). It
 writes the file as you work: your recent projects, each project's tabs, the window's layout,

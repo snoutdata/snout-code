@@ -2,6 +2,9 @@
 
 Every shortcut SnoutCode has out of the box, by area. You can change any of them in Settings, under Keymap (see [Settings and keymap](settings-and-keymap.md)).
 
+The keys here are the Mac's. On Linux, Ctrl takes the place of ⌘, and a few commands take
+IntelliJ IDEA's Linux keys instead: see [Keys](linux.md#keys) in SnoutCode on Linux.
+
 Some keys mean different things in different places. Where a shortcut only works in one place, the **Where** column says so: "Editor" means a code editor has the focus, and "Outside text fields" means the focus is not in a text field, which takes the key first.
 
 ## Application and windows

@@ -4,7 +4,9 @@ Install SnoutCode, open your first project, and get Java support running.
 
 ## What you need
 
-- A Mac. SnoutCode is a native macOS app.
+- A Mac, or a Linux PC (x86_64 or aarch64, X11 or Wayland). On Linux, install the .deb or
+  the Arch Linux package as [SnoutCode on Linux](linux.md) describes; the rest of this page is
+  the same there, with Ctrl for ⌘.
 - Git on your `PATH`. A project is a folder inside a Git repository.
 - Nothing else to start. The app carries its Java engine with a Java runtime of its own, so
   you do not need to install Java to open the app or to get Java support in the editor.
@@ -13,6 +15,8 @@ Your Gradle build runs on a JDK of its own, chosen to suit the build. When no in
 fits, SnoutCode offers to download one (see [Java for your builds](#java-for-your-builds)).
 
 ## Install the app
+
+On Linux, see [Install](linux.md#install) in SnoutCode on Linux. On a Mac:
 
 1. Open the SnoutCode disk image (`.dmg`).
 2. Drag SnoutCode into Applications.
@@ -75,7 +79,8 @@ them. See [Projects](projects.md) for opening, switching and closing projects.
 
 ### The menus
 
-The Mac's menu bar holds every command: File, Edit, View, Code, Navigate, Refactor, Run,
+On Linux the menus are in the window's title bar (see [The window](linux.md#the-window)). On a
+Mac, the menu bar holds every command: File, Edit, View, Code, Navigate, Refactor, Run,
 Repository (Git), Window and Help. Each item shows an icon, an SF Symbol as macOS's own menus
 use, so commands are quick to spot; its shortcut, when it has one, is at the right. Items that
 cannot act now (Save with no editor open, Stage with nothing selected) are greyed out.
@@ -133,10 +138,13 @@ for, within what its Gradle version can run on. It looks for JDKs in these place
 - `~/.gradle/jdks`
 - `~/Library/Application Support/SnoutCode/jdks`, where SnoutCode puts the JDKs it downloads
 
+On Linux it looks in `JAVA_HOME`, the `java` on your `PATH` and `/usr/lib/jvm` instead of the
+first two, and keeps its downloads in `~/.local/share/SnoutCode/jdks` (see
+[SnoutCode on Linux](linux.md#where-snoutcode-keeps-its-files)).
+
 When none fits, a bar above the editor says so: "This project needs JDK 17. Download it?"
 
-- Click **Download** to download Eclipse Temurin of that version into
-  `~/Library/Application Support/SnoutCode/jdks`. The bar shows the progress. The Java engine
+- Click **Download** to download Eclipse Temurin of that version into SnoutCode's JDK folder. The bar shows the progress. The Java engine
   starts once the download is done, as does any other build waiting for the same JDK.
 - Click **Not now** to hide the bar. It does not offer that version again until SnoutCode
   starts again.

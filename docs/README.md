@@ -1,10 +1,11 @@
 # SnoutCode user guide
 
-SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot on macOS, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
+SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot on macOS and Linux, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
 
 ## Start here
 
 - [Getting started](getting-started.md): install SnoutCode, the first launch, and the Java it needs (none, to start).
+- [SnoutCode on Linux](linux.md): the .deb and the Arch Linux package, the menus in the window, the Linux keys, and where settings live.
 - [Projects](projects.md): open, close and reopen projects, the Project view, and the New Project wizard.
 - [Settings and keymap](settings-and-keymap.md): every setting, a project's own settings (`.snout/settings.json`), settings as JSON with completion and checks, changing shortcuts, and what SnoutCode restores when it starts.
 - [Keyboard shortcuts](keyboard-shortcuts.md): every shortcut, by area.
@@ -22,7 +23,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot on macOS, with
 - [Maven](maven.md): Maven builds without a Maven install: reactors, parents, BOMs and profiles, the Maven window, goals, tests, and POM editing.
 - [Project Structure](project-structure.md): the project's JDK, modules, source sets, dependencies and their conflicts, the JDKs on your machine, and the facets SnoutCode found.
 - [Run and debug](run-and-debug.md): run configurations, the Run window, tests, and the debugger.
-- [Processes](processes.md): what SnoutCode runs on your Mac, and how to stop it.
+- [Processes](processes.md): what SnoutCode runs on your machine, and how to stop it.
 
 ## Working with others and with agents
 

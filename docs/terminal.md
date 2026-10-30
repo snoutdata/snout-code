@@ -58,7 +58,10 @@ program asks.
 
 ## Links
 
-⌘-click a web address in a terminal (`https://`, `http://` or `file://`) to open it. A
+On Linux, Ctrl takes ⌘'s place here too, and the Ctrl keys go to the shell: copy, paste and
+find are Ctrl+Shift+C, Ctrl+Shift+V and Ctrl+Shift+F (see [SnoutCode on Linux](linux.md#in-the-terminal)).
+
+⌘-click (Ctrl+click on Linux) a web address in a terminal (`https://`, `http://` or `file://`) to open it. A
 program can also print a link under other text (an OSC 8 hyperlink); with the Ghostty engine
 such text is underlined in the accent colour, and ⌘-click opens its link.
 
