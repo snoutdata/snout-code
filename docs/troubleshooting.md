@@ -135,13 +135,18 @@ SnoutCode writes its log to standard error. To read it:
   /Applications/SnoutCode.app/Contents/MacOS/snout-code
   ```
 
+  On Linux, run `snout-code` from a terminal.
+
 - A build from source started with `./snout.sh` writes its log to `$TMPDIR/snout-code.log`.
   With `./snout.sh --fg` the log shows in the terminal. When it builds the engine, that
   build's output goes to `$TMPDIR/snout-engine-build.<number>.log`.
 
-Lines about the Java engine start with `[java]`.
+Lines about the Java engine start with `[java]`. `SNOUT_LOG=info` adds the messages of the
+libraries the window is drawn with, such as which GPU draws it (`warn` and `debug` give fewer
+or more; errors only by default).
 
-The Java engine keeps its files under `~/Library/Caches/SnoutCode`, one folder per project:
+The Java engine keeps its files under `~/Library/Caches/SnoutCode` (`~/.cache/SnoutCode` on
+Linux), one folder per project:
 
 | Path | What |
 |---|---|
@@ -152,10 +157,12 @@ The Java engine keeps its files under `~/Library/Caches/SnoutCode`, one folder p
 
 ## Start from a clean state
 
-- **The engine's caches.** Quit SnoutCode and delete `~/Library/Caches/SnoutCode`. The next
+- **The engine's caches.** Quit SnoutCode and delete `~/Library/Caches/SnoutCode`
+  (`~/.cache/SnoutCode` on Linux). The next
   start reads the Gradle builds again.
 - **Settings.** Your settings, recent projects and tabs are in
-  `~/Library/Application Support/SnoutCode/settings.json`. A file SnoutCode cannot read is
+  `~/Library/Application Support/SnoutCode/settings.json` (`~/.config/SnoutCode/settings.json`
+  on Linux). A file SnoutCode cannot read is
   copied to `settings.json.unreadable`, and SnoutCode starts from the defaults. See
   [Settings](settings-and-keymap.md#where-settings-are-kept).
 

@@ -177,7 +177,11 @@ a Mac. It finds a JDK 21 in `JAVA_HOME` or `/usr/lib/jvm`, or downloads Temurin 
 ## When something goes wrong
 
 - **The window does not open**, and the log says no adapter was found: install Vulkan drivers
-  for your GPU, or Mesa's software renderer (see [What you need](#what-you-need)).
+  for your GPU, or Mesa's software renderer (see [What you need](#what-you-need)). Start it
+  from a terminal with `SNOUT_LOG=info snout-code` to see which GPU it tried.
+- **The window stays black** on a machine without a GPU, under X11: Mesa's software Vulkan
+  draws nothing into some X servers' windows (Xvfb's, for one). Draw with OpenGL instead:
+  `VK_ICD_FILENAMES=/nonexistent snout-code`.
 - **No icon in the dock or the app list**: log out and in again, so the desktop reads the new
   desktop entry.
 - See [Troubleshooting](troubleshooting.md) for the logs and the Java engine's status.
