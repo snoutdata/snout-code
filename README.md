@@ -82,7 +82,6 @@ crates/
   snout-remote/        the app's side of Remote SSH
   snout-remote-proto/  the wire protocol between the app and snout-server
   snout-server/        the remote side of Remote SSH
-  snout-gui/           the earlier Git-only app (binary: snout)
 engine/                the Java engine: Gradle and Maven sync, Eclipse JDT LS, debugging, Spring
 ```
 

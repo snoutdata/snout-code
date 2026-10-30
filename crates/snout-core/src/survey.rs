@@ -1,11 +1,8 @@
-//! Ahead and behind counts for every repository in the list, so the list can show which
-//! ones have commits to pull. A pass runs on a thread over the whole list; every so often
-//! it fetches first, so the counts say what is on the remote now and not only what was
-//! there at the last fetch.
+//! Ahead and behind counts for the repositories in the list, so the list can show which
+//! ones have commits to pull. The app's pass over the list counts one repository at a time;
+//! every so often it fetches first, so the counts say what is on the remote now and not only
+//! what was there at the last fetch.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use snout_host::HostRef;
@@ -14,51 +11,6 @@ use crate::{Repo, Tracking};
 
 /// How often a pass fetches the repositories in the list.
 pub const FETCH_EVERY: Duration = Duration::from_secs(10 * 60);
-
-/// One pass over the repositories. Dropping it stops the thread after the repository it is on.
-pub struct Survey {
-    rx: mpsc::Receiver<(PathBuf, Option<Tracking>)>,
-    /// Set while one of the user's jobs runs: the pass fetches nothing then, so the two do
-    /// not race for the same refs.
-    hold: Arc<AtomicBool>,
-    pub fetches: bool,
-}
-
-impl Survey {
-    /// Start a pass; `wake` runs on the pass's thread after each repository, to have the
-    /// front end come and [`Survey::poll`].
-    pub fn start(host: HostRef, repos: Vec<PathBuf>, fetch: bool, wake: impl Fn() + Send + 'static) -> Self {
-        let (tx, rx) = mpsc::channel();
-        let hold = Arc::new(AtomicBool::new(false));
-        let held = hold.clone();
-        std::thread::spawn(move || {
-            for path in repos {
-                let tracking = count(&host, &path, fetch && !held.load(Ordering::Relaxed));
-                if tx.send((path, tracking)).is_err() {
-                    return; // the app let go of the pass
-                }
-                wake();
-            }
-        });
-        Self { rx, hold, fetches: fetch }
-    }
-
-    pub fn hold(&self, on: bool) {
-        self.hold.store(on, Ordering::Relaxed);
-    }
-
-    /// The repositories done since the last call, and whether the pass is over.
-    pub fn poll(&self) -> (Vec<(PathBuf, Option<Tracking>)>, bool) {
-        let mut done = Vec::new();
-        loop {
-            match self.rx.try_recv() {
-                Ok(r) => done.push(r),
-                Err(mpsc::TryRecvError::Empty) => return (done, false),
-                Err(mpsc::TryRecvError::Disconnected) => return (done, true),
-            }
-        }
-    }
-}
 
 /// How one repository on `host` stands against its upstream, fetching first when `fetch`.
 /// Blocks; `None` when it cannot be opened or has no upstream.

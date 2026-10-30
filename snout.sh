@@ -5,7 +5,6 @@
 #   ./snout.sh <path>          open a folder as the project (Git finds its repository above it)
 #   ./snout.sh --pick          choose an existing repository with a folder dialog
 #   ./snout.sh --fg [...]      stay in the foreground (logs go to the terminal)
-#   ./snout.sh --old [...]     start the earlier Git-only app instead
 #
 # The Java engine (engine/build/dist) is built when it is missing or older than its sources,
 # beside the app, which starts first and shows the build's progress; with JDK 21:
@@ -19,7 +18,7 @@ PKG="snout-app"
 BIN="$ROOT/target/release/snout-code"
 LOG="${TMPDIR:-/tmp}"; LOG="${LOG%/}/snout-code.log"
 
-usage() { sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 foreground=false
 repo=""
@@ -27,7 +26,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --fg) foreground=true ;;
-    --old) PKG="snout-gui"; BIN="$ROOT/target/release/snout"; LOG="${LOG%/*}/snout.log" ;;
     -p|--pick)
       repo="$(osascript -e 'POSIX path of (choose folder with prompt "Open Git repository")' 2>/dev/null)" \
         || { echo "No folder chosen." >&2; exit 1; }

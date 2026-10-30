@@ -26,8 +26,6 @@
 //! - The engine distribution is looked for next to the program serving the host
 //!   ([`HostInfo::exe`]), and in development in the source tree the app was built from; a
 //!   remote host gets its jars copied from the Mac's (`snout-app`'s `remote_engine`).
-//! - The legacy egui app (`snout-gui`) works on this Mac only: it passes a [`LocalHost`]
-//!   and keeps its own `std::fs` and `std::process` calls.
 //! - The start.spring.io catalog New Project offers is fetched on the Mac (`curl`) and kept
 //!   in the app's folder (`new_project::initializr`); the project itself is made on the host.
 //! - The token in the IDE lock file comes from the Mac's `/dev/urandom`.

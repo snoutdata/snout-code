@@ -777,59 +777,11 @@ pub fn building() -> &'static Drawing {
     &D
 }
 
-/// The house spark on its own, `0 0 24 24`, for ornaments.
-pub fn sparkle() -> &'static Drawing {
-    static D: LazyLock<Drawing> = LazyLock::new(|| {
-        let mut d = Drawing::new(24.0, 24.0, 1.8);
-        d.spark(12.0, 12.0, 1.5);
-        d
-    });
-    &D
-}
-
 /// snout's mark on its own, `0 0 120 100`.
 pub fn mark() -> &'static Drawing {
     static D: LazyLock<Drawing> = LazyLock::new(|| {
         let mut d = Drawing::new(120.0, 100.0, 3.2);
         d.git_butterfly();
-        d
-    });
-    &D
-}
-
-/// The About banner, a wide `0 0 440 124` box: the mark over what snout holds, each on its
-/// own thread: your repositories, the diff, the history (the green, it is what snout draws
-/// best) and the agent beside it.
-pub fn about() -> &'static Drawing {
-    static D: LazyLock<Drawing> = LazyLock::new(|| {
-        let mut d = Drawing::new(440.0, 124.0, 2.5);
-        d.shape(
-            "M22 86C16 54 80 32 160 36C240 40 330 26 398 44C436 54 434 98 404 108C340 122 120 122 54 114C32 110 24 100 22 86Z",
-            Fill::Blob,
-        );
-        d.ground("M40 116C140 112 300 112 400 116");
-        d.ground("M204 40C160 46 104 54 76 68").ground("M212 48C196 54 178 58 164 64");
-        d.ground("M228 48C246 54 270 60 290 70").ground("M236 40C290 46 352 54 380 66");
-        // Your repositories.
-        d.path("M46 78Q46 72 52 72H62L68 78H88Q94 78 94 84V102Q94 108 88 108H52Q46 108 46 102Z", Fill::Tint);
-        d.path("M46 88Q46 84 50 84H90Q94 84 94 88V102Q94 108 88 108H52Q46 108 46 102Z", Fill::Paper);
-        // The diff.
-        d.rotated(-4.0, 160.0, 88.0, |d| {
-            d.rect(142.0, 64.0, 36.0, 46.0, 3.0, Fill::Paper);
-            d.shape("M146 80H174V88H146Z", Fill::Tint);
-            d.line("M150 74H170").line("M150 84H166").line("M150 94H170").line("M150 103H162");
-        });
-        // The history.
-        d.line("M258 102H324");
-        d.line("M272 102C282 102 280 82 292 82H304C314 82 312 102 322 102");
-        d.circle(262.0, 102.0, 4.5, Fill::Paper).circle(292.0, 82.0, 4.5, Fill::Paper);
-        d.circle(304.0, 82.0, 5.5, Fill::Accent).circle(322.0, 102.0, 4.5, Fill::Paper);
-        // The agent.
-        d.rect(352.0, 68.0, 58.0, 42.0, 6.0, Fill::Paper);
-        d.path("M352 78V74Q352 68 358 68H404Q410 68 410 74V78Z", Fill::Tint);
-        d.line("M361 87L369 93L361 99").line("M374 99H390");
-        d.placed(190.0, 0.0, 0.5, Drawing::git_butterfly);
-        d.spark(118.0, 24.0, 0.7).spark(322.0, 22.0, 0.8).spark(30.0, 52.0, 0.5).spark(420.0, 34.0, 0.5);
         d
     });
     &D
@@ -926,7 +878,7 @@ mod tests {
         for g in Glyph::ALL {
             assert!(!g.drawing().parts.is_empty(), "{g:?}");
         }
-        for d in [welcome(), mark(), about(), clean(), pick(), seed(), sparkle(), building()] {
+        for d in [welcome(), mark(), clean(), pick(), seed(), building()] {
             assert!(d.parts.iter().any(|p| !p.tris.is_empty()));
         }
     }

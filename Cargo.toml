@@ -2,7 +2,6 @@
 resolver = "3"
 members = [
     "crates/snout-core",
-    "crates/snout-gui",
     "crates/snout-app",
     "crates/snout-lang",
     "crates/snout-remote-proto",
@@ -30,10 +29,6 @@ serde_json = "1"
 schemars = { version = "1", default-features = false, features = ["std", "derive"] }
 thiserror = "2"
 similar = "3"
-eframe = { version = "0.37", features = ["persistence"] }
-# The emoji fonts provide the toolbar icons (⬇ ⬆ ⟳ …).
-egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
-egui_extras = "0.37"
 portable-pty = "0.9"
 vt100 = "0.16"
 # The Ghostty terminal engine (snout-core's `ghostty` feature): safe bindings, and the -sys
@@ -47,16 +42,6 @@ notify = "8"
 libc = "0.2"
 sha2 = "0.10"
 tempfile = "3"
-rfd = "0.17"
-# The native macOS menu bar.
-muda = { version = "0.21", default-features = false }
-# eframe's windowing; snout only switches off its default macOS menu.
-winit = { version = "0.30", default-features = false }
-# One AppKit setting: no window tabs (macOS would add their items to the View menu).
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow"] }
-# Paste from the Edit menu (egui-winit already links it).
-arboard = { version = "3", default-features = false }
 # The GPUI app. GPUI is pinned to exactly the release GPUI Kit (gpui-component) pins.
 gpui = { package = "gpui-pre", version = "=0.3.10" }
 # GPUI Kit's styled components, and the platform layer of the same GPUI release. (The
