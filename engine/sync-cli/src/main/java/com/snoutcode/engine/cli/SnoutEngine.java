@@ -35,6 +35,7 @@ public final class SnoutEngine {
         "  --no-sources                do not look up source jars",
         "  --offline                   run Gradle offline",
         "  --verbose                   show Gradle's output on stderr",
+        "  --maven-profiles <list>     Maven profiles to activate, and with ! to deactivate: a,!b",
         "  --daemon-idle-minutes <n>   stop the Gradle daemons after n minutes without a build (default: "
             + Daemons.IDLE_MINUTES + ")",
         "",
@@ -45,7 +46,7 @@ public final class SnoutEngine {
         "Nothing is written into the project directory.",
         "",
         "options: --java-home, --jdk, --parallel, --gradle-user-home, --gradle-version, --no-sources,",
-        "--offline, --verbose and --daemon-idle-minutes as for sync, and:",
+        "--offline, --verbose, --maven-profiles and --daemon-idle-minutes as for sync, and:",
         "  --cache-dir <dir>           caches, models and jdtls workspaces (default: the user cache dir)",
         "  --jdtls-java-home <dir>     Java 21+ for jdtls (default: this JVM)",
         "  --jdtls <dir>               jdtls installation (default: the bundled one)",
@@ -95,6 +96,7 @@ public final class SnoutEngine {
                     case "--offline" -> options.offline = true;
                     case "--verbose" -> verbose = true;
                     case "--daemon-idle-minutes" -> Daemons.idleMinutes(Integer.parseInt(args[++i]));
+                    case "--maven-profiles" -> project.mavenProfiles.addAll(profiles(args[++i]));
                     default -> {
                         stderr.println("unknown option: " + args[i] + "\n\n" + USAGE);
                         return 2;
@@ -112,6 +114,7 @@ public final class SnoutEngine {
             stderr.println("not a directory: " + options.projectDir);
             return 2;
         }
+        MavenHome.cacheDir(project.cacheDir);
         options.gradleOutput = verbose ? stderr : OutputStream.nullOutputStream();
         project.log = verbose ? stderr : null;
         // The engine's own daemons, which the lsp command of the same folder then takes warm; they
@@ -170,6 +173,7 @@ public final class SnoutEngine {
                     case "--no-scala-bridge" -> options.scalaBridge = false;
                     case "--max-heap" -> options.maxHeap = args[++i];
                     case "--jvm-arg" -> options.jvmArgs.add(args[++i]);
+                    case "--maven-profiles" -> options.mavenProfiles.addAll(profiles(args[++i]));
                     default -> {
                         stderr.println("unknown option: " + args[i] + "\n\n" + USAGE);
                         return 2;
@@ -195,6 +199,17 @@ public final class SnoutEngine {
         }
     }
 
+    /** A {@code -P}-style list: {@code a,!b}. */
+    static java.util.List<String> profiles(String list) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String p : list.split(",")) {
+            if (!p.isBlank()) {
+                out.add(p.trim());
+            }
+        }
+        return out;
+    }
+
     static String summary(JsonObject model) {
         int synced = 0;
         int projects = 0;
@@ -218,7 +233,7 @@ public final class SnoutEngine {
                 }
             }
         }
-        return String.format("synced %d of %d Gradle build(s), %d project(s) in %d ms; %d error(s)%s",
+        return String.format("synced %d of %d build(s), %d project(s) in %d ms; %d error(s)%s",
             synced, synced + failed.size(), projects, model.get("syncMillis").getAsLong(), errors,
             failed.isEmpty() ? "" : "; failed: " + String.join(", ", failed));
     }

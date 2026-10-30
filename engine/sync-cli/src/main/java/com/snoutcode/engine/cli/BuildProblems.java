@@ -9,7 +9,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Reads compiler problems out of Gradle's output, line by line, for {@code snout/buildProblems}:
+ * Reads compiler problems out of Gradle's and Maven's output, line by line, for {@code snout/buildProblems}:
  *
  * <ul>
  *   <li>javac: {@code /src/App.java:12: error: cannot find symbol}, then the source line, a caret
@@ -17,7 +17,9 @@ import java.util.regex.Pattern;
  *   <li>scalac through Gradle's Zinc: {@code [Error] /src/Foo.scala:12:5: not found: value x}
  *       (also {@code [Warn]}, {@code [Info]}), then the source line and a caret;</li>
  *   <li>older scalac: {@code /src/Foo.scala:12: error: not found: value x}, as javac;</li>
- *   <li>kotlinc: {@code e: file:///src/Foo.kt:12:5 message} and {@code e: /src/Foo.kt: (12, 5): message}.</li>
+ *   <li>kotlinc: {@code e: file:///src/Foo.kt:12:5 message} and {@code e: /src/Foo.kt: (12, 5): message};</li>
+ *   <li>javac through Maven's compiler plugin: {@code [ERROR] /src/App.java:[12,5] cannot find symbol}, then
+ *       indented details.</li>
  * </ul>
  *
  * Lines and columns are 1-based, as the compilers print them; column 0 means unknown.
@@ -41,10 +43,11 @@ final class BuildProblems {
     private static final Pattern ZINC = Pattern.compile("^\\[(Error|Warn|Warning|Info)\\] " + SOURCE + ":(\\d+):(?:(\\d+):)? ?(.*)$");
     private static final Pattern KOTLIN = Pattern.compile("^([ewi]): (?:file://)?" + SOURCE + ":(\\d+):(\\d+) (.*)$");
     private static final Pattern KOTLIN_OLD = Pattern.compile("^([ewi]): " + SOURCE + ": \\((\\d+), (\\d+)\\): (.*)$");
+    private static final Pattern MAVEN = Pattern.compile("^\\[(ERROR|WARNING|WARN|INFO)\\] " + SOURCE + ":\\[(\\d+),(\\d+)\\] ?(.*)$");
     private static final Pattern CARET = Pattern.compile("^(\\s*)\\^\\s*$");
     /** Lines that end a problem's continuation: Gradle's own output and compiler summaries. */
     private static final Pattern END = Pattern.compile(
-        "^(> |FAILURE|BUILD |\\* |\\d+ (errors?|warnings?)$|(one|two|three|four) (errors?|warnings?) found|\\[(Error|Warn|Warning|Info)\\] |Note: |e: |w: )");
+        "^(\\[(ERROR|WARNING|INFO)\\]|> |FAILURE|BUILD |\\* |\\d+ (errors?|warnings?)$|(one|two|three|four) (errors?|warnings?) found|\\[(Error|Warn|Warning|Info)\\] |Note: |e: |w: )");
 
     private final List<Problem> problems = new ArrayList<>();
     private Pending pending;
@@ -65,7 +68,9 @@ final class BuildProblems {
     void accept(String text) {
         String line = stripAnsi(text);
         Matcher m;
-        if ((m = ZINC.matcher(line)).matches()) {
+        if ((m = MAVEN.matcher(line)).matches()) {
+            start(m.group(2), m.group(3), m.group(4), severity(m.group(1)), m.group(5));
+        } else if ((m = ZINC.matcher(line)).matches()) {
             start(m.group(2), m.group(3), m.group(4), severity(m.group(1)), m.group(5));
         } else if ((m = JAVAC.matcher(line)).matches()) {
             start(m.group(1), m.group(2), null, severity(m.group(3)), m.group(4));

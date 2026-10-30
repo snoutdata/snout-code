@@ -27,7 +27,8 @@ import java.util.stream.Stream;
  *   <li>an {@code application} plugin: its main class, and its {@code run} task;</li>
  *   <li>every other class with a {@code main} method in a main (not test) source set, Java or
  *       Scala ({@code object} with {@code def main(args: Array[String])}, or {@code extends App});</li>
- *   <li>each test task ({@code kind: tests}).</li>
+ *   <li>each test task ({@code kind: tests});</li>
+ *   <li>in a Maven module with Spring Boot's plugin, {@code spring-boot:run} ({@code kind: maven}).</li>
  * </ul>
  */
 final class RunConfigurations {
@@ -78,6 +79,14 @@ final class RunConfigurations {
                 }
                 out.add(c);
                 mains.add(mainClass);
+            }
+            JsonObject mavenRun = object(boot, "run");
+            if (mavenRun != null && Engine.string(mavenRun, "goal") != null) {
+                JsonObject g = base(module, "maven", "maven:" + module.id() + ":" + Engine.string(mavenRun, "goal"));
+                g.addProperty("name", module.project().get("name").getAsString() + ": " + Engine.string(mavenRun, "goal"));
+                g.addProperty("goals", Engine.string(mavenRun, "goal"));
+                g.addProperty("springBoot", true);
+                out.add(g);
             }
             JsonObject run = object(boot, "bootRun");
             if (run != null && Engine.string(run, "task") != null) {

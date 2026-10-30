@@ -74,6 +74,8 @@ final class Lsp {
         final List<String> jvmArgs = new ArrayList<>();
         final List<File> jdks = new ArrayList<>();
         int parallel;
+        /** Maven profiles to activate ({@code a}) or deactivate ({@code !a}). */
+        final List<String> mavenProfiles = new ArrayList<>();
     }
 
     private Lsp() {
@@ -144,7 +146,9 @@ final class Lsp {
         sync.daemonRegistry = daemonRegistry;
         sync.gradleOutput = options.verbose ? log : OutputStream.nullOutputStream();
         project.jdks.addAll(options.jdks);
+        project.mavenProfiles.addAll(options.mavenProfiles);
         project.cacheDir = cache;
+        MavenHome.cacheDir(cache);
         project.log = log;
         if (options.parallel > 0) {
             project.parallel = options.parallel;
@@ -352,7 +356,8 @@ final class Lsp {
         s.append(plugin.getAbsolutePath()).append(' ').append(plugin.length()).append(' ').append(plugin.lastModified()).append('\n');
         s.append(sync.javaHome).append('\n').append(options.jdks).append('\n').append(sync.gradleUserHome).append('\n')
             .append(sync.gradleVersion).append('\n').append(sync.sources).append(' ').append(sync.offline).append('\n')
-            .append(sync.buildRoot).append('\n');
+            .append(sync.buildRoot).append('\n').append("maven ").append(MavenHome.VERSION).append(' ')
+            .append(options.mavenProfiles).append('\n');
         return Sync.sha256(s.toString().getBytes(StandardCharsets.UTF_8));
     }
 

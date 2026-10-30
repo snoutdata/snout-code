@@ -139,7 +139,8 @@ final class ModelCache {
         }
         for (String root : roots) {
             for (String name : List.of("settings.gradle", "settings.gradle.kts", "build.gradle", "build.gradle.kts",
-                "gradle.properties", "gradle/wrapper/gradle-wrapper.properties", "gradle/libs.versions.toml")) {
+                "gradle.properties", "gradle/wrapper/gradle-wrapper.properties", "gradle/libs.versions.toml", "pom.xml",
+                ".mvn/maven.config", ".mvn/wrapper/maven-wrapper.properties")) {
                 out.add(new File(root, name).getAbsolutePath());
             }
             out.add(new File(root, "buildSrc").getAbsolutePath() + "/**");

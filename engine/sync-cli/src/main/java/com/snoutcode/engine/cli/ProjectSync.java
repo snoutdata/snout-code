@@ -46,11 +46,20 @@ public final class ProjectSync {
         public int parallel = defaultParallelism();
         /** Progress lines, or null. */
         public PrintStream log;
+        /** Maven profiles to activate ({@code a}) or deactivate ({@code !a}) in every Maven build. */
+        public final List<String> mavenProfiles = new ArrayList<>();
     }
 
-    /** One build to sync, with the choices made for it. */
-    /** One build to sync; {@code needsJdk} is the Java major it needs when no installed JDK runs its Gradle. */
-    public record Plan(String id, File rootDir, String gradleVersion, JavaHomes.Jdk jdk, Sync.Options options, Integer needsJdk) {
+    /**
+     * One build to sync; {@code needsJdk} is the Java major it needs when no installed JDK runs its
+     * Gradle (or compiles its Maven build). A Maven build ({@code maven}) has its Maven version
+     * in {@code gradleVersion}, as {@code maven-<version>}.
+     */
+    public record Plan(String id, File rootDir, String gradleVersion, JavaHomes.Jdk jdk, Sync.Options options, Integer needsJdk,
+                       boolean maven, MavenSync.Options mavenOptions) {
+        public Plan(String id, File rootDir, String gradleVersion, JavaHomes.Jdk jdk, Sync.Options options, Integer needsJdk) {
+            this(id, rootDir, gradleVersion, jdk, options, needsJdk, false, null);
+        }
     }
 
     private ProjectSync() {
@@ -91,6 +100,10 @@ public final class ProjectSync {
         List<Plan> plans = new ArrayList<>();
         for (File root : Discovery.builds(folder)) {
             String id = buildId(folder, root);
+            if (Discovery.isMaven(root)) {
+                plans.add(mavenPlan(id, root, options, preferred, installed));
+                continue;
+            }
             String version = options.sync.gradleVersion != null ? options.sync.gradleVersion : JavaHomes.wrapperVersion(root);
             Integer level = JavaHomes.scriptLevel(root);
             JavaHomes.Jdk jdk = JavaHomes.choose(version, level, preferred, installed);
@@ -107,10 +120,67 @@ public final class ProjectSync {
         return plans;
     }
 
+    /**
+     * A Maven build's plan: the JDK it compiles with is one of its Java level (the newest
+     * {@code release}, or {@code source}, of its POMs), else the preferred JDK when it is at least
+     * that, else the nearest newer one installed; with none, it needs the LTS at or above it.
+     */
+    static Plan mavenPlan(String id, File root, Options options, JavaHomes.Jdk preferred, List<JavaHomes.Jdk> installed) {
+        int level = MavenLevels.level(root);
+        JavaHomes.Jdk jdk = MavenLevels.choose(level, preferred, installed);
+        Sync.Options o = copy(options.sync);
+        o.projectDir = root;
+        o.javaHome = jdk == null ? null : jdk.home();
+        MavenSync.Options m = new MavenSync.Options();
+        m.rootDir = root;
+        m.javaHome = o.javaHome;
+        m.jdks = installed;
+        m.offline = options.sync.offline;
+        m.sources = options.sync.sources;
+        m.profiles = List.copyOf(options.mavenProfiles);
+        Integer needs = jdk == null ? MavenLevels.lts(level) : null;
+        return new Plan(id, root, "maven-" + MavenHome.wrapperVersion(root), jdk, o, needs, true, m);
+    }
+
     /** One build's entry: its sync model, or what went wrong. Never throws. */
     static JsonObject syncOne(Plan plan, PrintStream log) {
         long start = System.nanoTime();
         JsonObject entry;
+        if (plan.maven()) {
+            try {
+                if (plan.needsJdk() != null) {
+                    throw new IOException("Needs JDK " + plan.needsJdk() + ", which isn't installed");
+                }
+                entry = MavenSync.run(plan.mavenOptions());
+                entry.addProperty("status", "synced");
+            } catch (Exception | LinkageError e) {
+                entry = new JsonObject();
+                entry.addProperty("tool", "maven");
+                entry.addProperty("rootDir", plan.rootDir().getAbsolutePath());
+                entry.addProperty("mavenVersion", MavenHome.wrapperVersion(plan.rootDir()));
+                entry.addProperty("gradleJavaHome", plan.options().javaHome == null ? null : plan.options().javaHome.getAbsolutePath());
+                entry.add("builds", new JsonArray());
+                String error = SnoutEngine.describe(e);
+                entry.addProperty("status", "failed");
+                entry.addProperty("error", error);
+                entry.addProperty("reason", MavenLevels.reason(error));
+                if (plan.needsJdk() != null) {
+                    entry.addProperty("needsJdk", plan.needsJdk());
+                }
+            }
+            JsonObject out = new JsonObject();
+            out.addProperty("id", plan.id());
+            out.addProperty("javaVersion", plan.jdk() == null ? null : plan.jdk().version());
+            entry.entrySet().forEach(e -> out.add(e.getKey(), e.getValue()));
+            out.addProperty("syncMillis", (System.nanoTime() - start) / 1_000_000);
+            if (log != null) {
+                String what = "synced".equals(out.get("status").getAsString())
+                    ? "synced " + plan.id() : "could not sync " + plan.id() + ": " + out.get("reason").getAsString();
+                log.println("snout-engine: " + what + " (Maven, Java " + (plan.jdk() == null ? "?" : plan.jdk().feature()) + ") in "
+                    + out.get("syncMillis").getAsLong() + " ms");
+            }
+            return out;
+        }
         try {
             if (plan.needsJdk() != null) {
                 // No installed JDK runs this Gradle version: say which one to install, rather than

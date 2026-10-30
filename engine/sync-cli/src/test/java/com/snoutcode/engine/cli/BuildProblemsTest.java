@@ -68,4 +68,22 @@ class BuildProblemsTest {
         assertEquals(new BuildProblems.Problem("/src/Bar.kt", 3, 9, "error", "Unresolved reference: z"), problems.get(1));
         assertEquals(new BuildProblems.Problem("/src/Baz.kt", 8, 2, "warning", "Parameter 'a' is never used"), problems.get(2));
     }
+
+    @Test
+    void readsMavensCompilerProblems() {
+        List<BuildProblems.Problem> problems = parse("""
+            [INFO] --- compiler:3.13.0:compile (default-compile) @ app ---
+            [ERROR] COMPILATION ERROR :
+            [ERROR] /src/app/App.java:[12,16] cannot find symbol
+              symbol:   method missing()
+              location: class App
+            [WARNING] /src/app/Old.java:[3,8] [deprecation] Lib in demo has been deprecated
+            [INFO] 1 error
+            """);
+        assertEquals(2, problems.size(), problems.toString());
+        assertEquals(new BuildProblems.Problem("/src/app/App.java", 12, 16, "error",
+            "cannot find symbol\nsymbol:   method missing()\nlocation: class App"), problems.get(0));
+        assertEquals(new BuildProblems.Problem("/src/app/Old.java", 3, 8, "warning",
+            "[deprecation] Lib in demo has been deprecated"), problems.get(1));
+    }
 }

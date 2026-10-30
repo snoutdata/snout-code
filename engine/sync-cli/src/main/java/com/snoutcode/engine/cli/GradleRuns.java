@@ -225,7 +225,7 @@ final class GradleRuns {
         client.notify("snout/taskOutput", p);
     }
 
-    private static void testEvent(Run run, Client client, String json) {
+    static void testEvent(Run run, Client client, String json) {
         JsonObject event;
         try {
             event = JsonParser.parseString(json).getAsJsonObject();

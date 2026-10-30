@@ -1,0 +1,21 @@
+// A JUnit Platform listener that Maven test runs load (surefire's additional classpath): it
+// sends each test event to the engine over a local socket, the way the Gradle run init script
+// prints them, so a Maven test run fills the same test tree. Java 8 bytecode, and only the
+// launcher API that JUnit Platform 1.0 has, so it works with any JUnit 5 the project uses.
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    compileOnly 'org.junit.platform:junit-platform-launcher:1.0.3'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 8
+    options.compilerArgs += ['-Xlint:-options']
+}
+
+jar {
+    archiveFileName = 'snout-junit-listener.jar'
+}

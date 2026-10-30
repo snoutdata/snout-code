@@ -38,6 +38,12 @@ tasks.named('test') {
     systemProperty 'snout.test.fixtures', file('src/test/fixtures').absolutePath
     systemProperty 'snout.test.engineFixtures', project(':sync-cli').file('src/test/fixtures').absolutePath
     systemProperty 'snout.test.scratch', layout.buildDirectory.dir('test-scratch').get().asFile.absolutePath
+    // Maven: the local repository (MAVEN_OPTS's -Dmaven.repo.local, else one in the build folder,
+    // never ~/.m2) and where the engine's downloaded Maven is shared (SNOUT_TEST_CACHE).
+    def m2 = (System.getenv('MAVEN_OPTS') =~ /-Dmaven\.repo\.local=(\S+)/).with { it.find() ? it.group(1) : null }
+        ?: layout.buildDirectory.dir('test-m2').get().asFile.absolutePath
+    systemProperty 'snout.test.m2', m2
+    systemProperty 'snout.test.mavenCache', System.getenv('SNOUT_TEST_CACHE') ?: layout.buildDirectory.dir('test-cache').get().asFile.absolutePath
     inputs.files(engine)
     inputs.dir('src/test/fixtures')
     inputs.dir(project(':sync-cli').file('src/test/fixtures'))

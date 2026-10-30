@@ -10,6 +10,10 @@
 ext {
     toolingApiVersion = '8.10.2'
     junitVersion = '5.11.3'
+    // The Maven libraries the engine imports Maven builds with, and the Maven distribution it
+    // downloads to run goals in a build that has no wrapper (see MavenHome).
+    mavenVersion = '3.9.16'
+    mavenResolverVersion = '1.9.27'
 }
 
 subprojects {

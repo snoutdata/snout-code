@@ -6,6 +6,7 @@
 //   jdtls/                the pinned jdtls release, as downloaded
 //   jdtls-plugins/        com.snoutcode.engine.jdtls_<version>.jar, com.snoutcode.engine.spring_<version>.jar
 //                         and java-debug's com.microsoft.java.debug.plugin-<version>.jar
+//   maven/                snout-junit-listener.jar, which Maven test runs load to report their tests
 
 plugins {
     id 'application'
@@ -13,13 +14,22 @@ plugins {
 
 evaluationDependsOn(':jdtls-importer')
 evaluationDependsOn(':spring')
+evaluationDependsOn(':junit-listener')
 def importer = project(':jdtls-importer')
 def spring = project(':spring')
+def junitListener = project(':junit-listener')
 
 dependencies {
     implementation project(':sync-plugin')
     implementation "org.gradle:gradle-tooling-api:${rootProject.toolingApiVersion}"
     implementation 'com.google.code.gson:gson:2.11.0'
+    // Maven builds: the effective POM (parents, BOM imports, profiles) and the dependency
+    // graphs, read in this process with Maven's own model builder and resolver (Apache 2.0),
+    // so importing a Maven build needs no Maven installation.
+    implementation "org.apache.maven:maven-model-builder:${rootProject.mavenVersion}"
+    implementation "org.apache.maven:maven-resolver-provider:${rootProject.mavenVersion}"
+    implementation "org.apache.maven:maven-settings-builder:${rootProject.mavenVersion}"
+    implementation "org.apache.maven.resolver:maven-resolver-supplier:${rootProject.mavenResolverVersion}"
     runtimeOnly 'org.slf4j:slf4j-nop:1.7.36'
     // StopTestDaemons listens to the test run's end.
     testImplementation 'org.junit.platform:junit-platform-launcher'
@@ -49,6 +59,9 @@ distributions {
             from(spring.tasks.named('jar')) {
                 into 'jdtls-plugins'
             }
+            from(junitListener.tasks.named('jar')) {
+                into 'maven'
+            }
         }
     }
 }
@@ -61,6 +74,18 @@ tasks.named('test') {
     // The builds the tests run get a daemon registry of their own, never ~/.gradle/daemon, with
     // the engine's short idle time; StopTestDaemons stops them when the tests end.
     systemProperty 'snout.engine.daemonRegistry', layout.buildDirectory.dir('test-daemons').get().asFile.absolutePath
+    // Maven tests resolve into a local repository of their own: MAVEN_OPTS's -Dmaven.repo.local
+    // when it names one, else one in the build folder, never the user's ~/.m2.
+    def m2 = (System.getenv('MAVEN_OPTS') =~ /-Dmaven\.repo\.local=(\S+)/).with { it.find() ? it.group(1) : null }
+        ?: layout.buildDirectory.dir('test-m2').get().asFile.absolutePath
+    systemProperty 'maven.repo.local', m2
+    systemProperty 'snout.test.m2', m2
+    // Where the tests' engine downloads Maven: SNOUT_TEST_CACHE, else the build folder.
+    systemProperty 'snout.test.cache', System.getenv('SNOUT_TEST_CACHE') ?: layout.buildDirectory.dir('test-cache').get().asFile.absolutePath
+    systemProperty 'snout.test.jdtlsPlugins', importer.layout.buildDirectory.dir('jdtls/plugins').get().asFile.absolutePath
+    dependsOn importer.jdtlsHome
+    systemProperty 'snout.test.junitListener', junitListener.tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+    dependsOn junitListener.tasks.named('jar')
 }
 
 // The self-contained distribution the app runs: the installed CLI with jdtls and the importer

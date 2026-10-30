@@ -159,6 +159,7 @@ final class Engine implements GradleRuns.Client {
     JsonElement dispatch(String method, JsonObject params, boolean notification) throws Exception {
         return switch (method) {
             case "snout/gradleTasks" -> gradleTasks(params);
+            case "snout/mavenGoals" -> mavenGoals(params);
             case "snout/runTask" -> runTask(params);
             case "snout/cancelTask" -> cancel(params);
             case "snout/runTests" -> runTests(params);
@@ -223,7 +224,7 @@ final class Engine implements GradleRuns.Client {
         JsonArray builds = new JsonArray();
         List<ProjectSync.Plan> wanted = new ArrayList<>();
         for (ProjectSync.Plan plan : plans.values()) {
-            if (only == null || only.equals(plan.id())) {
+            if (!plan.maven() && (only == null || only.equals(plan.id()))) {
                 wanted.add(plan);
             }
         }
@@ -331,6 +332,13 @@ final class Engine implements GradleRuns.Client {
         if (task == null || task.isBlank()) {
             throw RequestError.invalid("runTask needs a task");
         }
+        if (plan.maven()) {
+            MavenRuns.Invocation inv = maven(plan, string(params, "project"), params);
+            for (String goal : task.trim().split("\\s+")) {
+                inv.goals.add(goal);
+            }
+            return startMaven(inv, null, newRun());
+        }
         String project = string(params, "project");
         if (!task.startsWith(":") && project != null) {
             task = (project.equals(":") ? "" : project) + ":" + task;
@@ -392,6 +400,9 @@ final class Engine implements GradleRuns.Client {
      */
     private JsonElement runTests(JsonObject params) throws Exception {
         Modules.Ref module = module(string(params, "module"));
+        if (plan(module.buildId()).maven()) {
+            return mavenTests(module, params);
+        }
         List<String> testTasks = module.testTasks();
         String task = string(params, "task");
         if (task != null) {
@@ -484,6 +495,31 @@ final class Engine implements GradleRuns.Client {
             case "main" -> {
                 return Launches.main(this, config, debug, dryRun);
             }
+            case "maven" -> {
+                ProjectSync.Plan plan = plan(string(config, "build"));
+                Modules.Ref module = string(config, "module") == null ? null : module(string(config, "module"));
+                MavenRuns.Invocation inv = maven(plan, module == null ? null : module.gradlePath(), config);
+                for (String goal : String.valueOf(string(config, "goals")).trim().split("\\s+")) {
+                    inv.goals.add(goal);
+                }
+                if (dryRun) {
+                    JsonObject result = new JsonObject();
+                    JsonArray commands = new JsonArray();
+                    for (List<String> c : MavenRuns.commands(inv, null)) {
+                        JsonArray a = new JsonArray();
+                        c.forEach(a::add);
+                        commands.add(a);
+                    }
+                    result.add("commands", commands);
+                    result.addProperty("javaHome", plan.options().javaHome == null ? null : plan.options().javaHome.getAbsolutePath());
+                    return result;
+                }
+                if (debug) {
+                    inv.debugKind = inv.goals.stream().anyMatch(g -> g.endsWith(":run") && g.contains("spring-boot")) ? "boot" : "tests";
+                    return debugMaven(inv, null);
+                }
+                return startMaven(inv, null, newRun());
+            }
             case "gradle" -> {
                 GradleRuns.Invocation inv = new GradleRuns.Invocation();
                 inv.options = plan(string(config, "build")).options();
@@ -556,7 +592,7 @@ final class Engine implements GradleRuns.Client {
         inv.debugTasks.addAll(tasks);
         inv.debugPort = port;
         int dapPort = Launches.startDebugSession(this);
-        JsonObject attach = Launches.attachArguments(port, null);
+        JsonObject attach = Launches.attachArguments(port, testModule == null ? null : Launches.jdtProject(model, testModule));
         GradleRuns.Run run = newRun();
         AtomicBoolean ready = new AtomicBoolean();
         inv.lineHook = line -> {
@@ -569,6 +605,145 @@ final class Engine implements GradleRuns.Client {
             }
         };
         JsonObject result = start(inv, testModule, run);
+        JsonObject debug = new JsonObject();
+        debug.addProperty("dapPort", dapPort);
+        debug.add("attach", attach);
+        result.add("debug", debug);
+        return result;
+    }
+
+    // ---- Maven
+
+    /** {@code {build?, refresh?}}: each Maven build's modules with their lifecycle, plugins and goals, and profiles. */
+    private JsonElement mavenGoals(JsonObject params) throws Exception {
+        String only = string(params, "build");
+        boolean refresh = params.has("refresh") && params.get("refresh").getAsBoolean();
+        JsonArray builds = new JsonArray();
+        for (ProjectSync.Plan plan : plans.values()) {
+            if (!plan.maven() || only != null && !only.equals(plan.id())) {
+                continue;
+            }
+            if (refresh) {
+                tasksCache.remove("maven:" + plan.id());
+            }
+            builds.add(tasksCache.computeIfAbsent("maven:" + plan.id(), k -> MavenGoals.of(plan, Modules.all(model))));
+        }
+        JsonObject result = new JsonObject();
+        result.add("builds", builds);
+        return result;
+    }
+
+    /**
+     * A Maven invocation in a module (a module path, {@code :app}; null or {@code :} for the whole
+     * build) with the options a request may carry: {@code args}, {@code env}, {@code profiles},
+     * {@code offline}, {@code skipTests}.
+     */
+    private MavenRuns.Invocation maven(ProjectSync.Plan plan, String modulePath, JsonObject params) {
+        MavenRuns.Invocation inv = new MavenRuns.Invocation();
+        inv.plan = plan;
+        List<Modules.Ref> reactor = new ArrayList<>();
+        for (Modules.Ref m : Modules.all(model)) {
+            if (m.buildId().equals(plan.id())) {
+                reactor.add(m);
+                if (modulePath != null && modulePath.equals(m.gradlePath())) {
+                    inv.module = m;
+                }
+            }
+        }
+        inv.reactor = reactor;
+        inv.args.addAll(GradleRuns.strings(array(params, "args")));
+        inv.env.putAll(GradleRuns.env(params));
+        inv.profiles.addAll(GradleRuns.strings(array(params, "profiles")));
+        inv.offline = params.has("offline") && params.get("offline").getAsBoolean();
+        inv.skipTests = params.has("skipTests") && params.get("skipTests").getAsBoolean();
+        inv.runDir = runDir;
+        return inv;
+    }
+
+    private JsonObject startMaven(MavenRuns.Invocation inv, String testModule, GradleRuns.Run run) {
+        pool.submit(() -> {
+            try {
+                MavenRuns.execute(inv, run, this);
+                if (testModule != null) {
+                    lastFailedTests.put(testModule, new ArrayList<>(run.failedTests));
+                }
+            } finally {
+                runs.remove(run.id);
+            }
+        });
+        JsonObject result = new JsonObject();
+        result.addProperty("runId", run.id);
+        result.addProperty("tool", "maven");
+        JsonArray tasks = new JsonArray();
+        inv.goals.forEach(tasks::add);
+        result.add("tasks", tasks);
+        return result;
+    }
+
+    /** A module's tests through Maven (surefire), filtered, rerun or debugged as for Gradle. */
+    private JsonElement mavenTests(Modules.Ref module, JsonObject params) throws Exception {
+        MavenRuns.Invocation inv = maven(plan(module.buildId()), module.gradlePath(), params);
+        inv.goals.add("test");
+        inv.tests = true;
+        boolean rerunFailed = params.has("rerunFailed") && params.get("rerunFailed").getAsBoolean();
+        if (rerunFailed) {
+            List<String[]> failed = lastFailedTests.getOrDefault(module.id(), List.of());
+            if (failed.isEmpty()) {
+                throw RequestError.invalid("no failed tests to rerun in " + module.id());
+            }
+            inv.testFilter = MavenRuns.rerunFilter(failed);
+        } else {
+            inv.testFilter = MavenRuns.testFilter(params.has("filter") && params.get("filter").isJsonObject()
+                ? params.getAsJsonObject("filter") : new JsonObject());
+        }
+        if (params.has("debug") && params.get("debug").getAsBoolean()) {
+            inv.debugKind = "tests";
+            return debugMaven(inv, module.id());
+        }
+        return startMaven(inv, module.id(), newRun());
+    }
+
+    /** A Maven run whose test JVM (or {@code spring-boot:run}'s) waits for a debugger; as {@link #debugGradle}. */
+    private JsonElement debugMaven(MavenRuns.Invocation inv, String testModule) throws Exception {
+        int port = Launches.freePort();
+        inv.debugPort = port;
+        int dapPort = Launches.startDebugSession(this);
+        // java-debug finds the sources of breakpoints through the module's JDT project.
+        JsonObject attach = Launches.attachArguments(port, inv.module == null ? null : Launches.jdtProject(model, inv.module.id()));
+        GradleRuns.Run run = newRun();
+        AtomicBoolean ready = new AtomicBoolean();
+        Runnable announce = () -> {
+            if (ready.compareAndSet(false, true)) {
+                JsonObject p = new JsonObject();
+                p.addProperty("runId", run.id);
+                p.addProperty("dapPort", dapPort);
+                p.add("attach", attach);
+                notify("snout/debugReady", p);
+            }
+        };
+        inv.lineHook = line -> {
+            if (GradleRuns.jdwpPort(line) > 0) {
+                announce.run();
+            }
+        };
+        // Surefire keeps its forked JVM's "Listening for transport" line to itself: the JVM
+        // listens once the port it was given cannot be taken (connecting would end its wait).
+        pool.submit(() -> {
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(30);
+            while (!ready.get() && runs.containsKey(run.id) && System.nanoTime() < deadline) {
+                try {
+                    new java.net.ServerSocket(port, 1, java.net.InetAddress.getLoopbackAddress()).close();
+                } catch (IOException e) {
+                    announce.run();
+                }
+                try {
+                    Thread.sleep(250);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        });
+        JsonObject result = startMaven(inv, testModule, run);
         JsonObject debug = new JsonObject();
         debug.addProperty("dapPort", dapPort);
         debug.add("attach", attach);

@@ -269,4 +269,26 @@ class ImportPlanTest {
         assertTrue(SnoutProjectImporter.related(new File(a, "app"), a));
         assertFalse(SnoutProjectImporter.related(tools.toFile(), a));
     }
+
+    @Test
+    void aTestJarLetsTheTestsSeeTheOtherProjectsTests() {
+        String json = """
+            { "rootDir": "%1$s", "gradleBuilds": [ { "id": "demo", "tool": "maven", "rootDir": "%1$s", "builds": [
+              { "name": "demo", "kind": "root", "rootDir": "%1$s", "projects": [
+                { "path": ":lib", "name": "lib", "projectDir": "%2$s", "sourceSets": [
+                  { "name": "main", "javaSourceDirs": ["%3$s"], "roots": [], "output": { "classesDirs": ["%1$s/lib/main"] } },
+                  { "name": "test", "javaSourceDirs": ["%3$s"], "roots": [], "output": { "classesDirs": ["%1$s/lib/test"] } } ] },
+                { "path": ":app", "name": "app", "projectDir": "%4$s", "sourceSets": [
+                  { "name": "main", "javaSourceDirs": ["%5$s"], "roots": [], "output": { "classesDirs": [] },
+                    "compileClasspath": [ { "kind": "project", "build": ":", "path": ":lib", "files": ["%1$s/lib/main"] } ] },
+                  { "name": "test", "javaSourceDirs": ["%6$s"], "roots": [], "output": { "classesDirs": [] },
+                    "compileClasspath": [ { "kind": "project", "build": ":", "path": ":lib", "files": ["%1$s/lib/test"] } ] } ] }
+              ] } ] } ] }""".formatted(p("demo"), p("demo/lib"), p("demo/lib/src/main/java"), p("demo/app"),
+            p("demo/app/src/main/java"), p("demo/app/src/test/java"));
+        ImportPlan plan = ImportPlan.from(JsonParser.parseString(json).getAsJsonObject());
+        ImportPlan.Dependency lib = project(plan, "app").dependencies.get(0);
+        assertEquals("lib", lib.project);
+        assertTrue(lib.testCode, "the tests use the library's test jar");
+        assertFalse(lib.test, "the main code uses the library too");
+    }
 }

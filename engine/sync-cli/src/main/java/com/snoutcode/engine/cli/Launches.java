@@ -384,6 +384,62 @@ final class Launches {
         }
     }
 
+    /**
+     * The JDT project the importer makes of a module, named as {@code ImportPlan} names them:
+     * the project's name, or its build and path when another project took the name first.
+     * Null when the module compiles no Java.
+     */
+    static String jdtProject(JsonObject model, String moduleId) {
+        java.util.Set<String> taken = new java.util.HashSet<>();
+        JsonArray builds = Engine.array(model, "gradleBuilds");
+        if (builds == null || moduleId == null) {
+            return null;
+        }
+        for (JsonElement g : builds) {
+            JsonObject gradleBuild = g.getAsJsonObject();
+            String buildId = Engine.string(gradleBuild, "id");
+            JsonArray inner = Engine.array(gradleBuild, "builds");
+            for (JsonElement b : inner == null ? new JsonArray() : inner) {
+                JsonObject build = b.getAsJsonObject();
+                String buildName = Engine.string(build, "name");
+                for (JsonElement p : Engine.array(build, "projects")) {
+                    JsonObject project = p.getAsJsonObject();
+                    boolean hasJava = false;
+                    JsonArray sets = Engine.array(project, "sourceSets");
+                    for (JsonElement s : sets == null ? new JsonArray() : sets) {
+                        JsonArray dirs = Engine.array(s.getAsJsonObject(), "javaSourceDirs");
+                        hasJava |= dirs != null && !dirs.isEmpty();
+                    }
+                    if (!hasJava) {
+                        continue;
+                    }
+                    String path = Engine.string(project, "path");
+                    String name = Engine.string(project, "name");
+                    String candidate = sanitize(name == null || name.isEmpty() ? "project" : name);
+                    if (taken.contains(candidate.toLowerCase(java.util.Locale.ROOT)) && buildName != null) {
+                        candidate = sanitize(buildName + (":".equals(path) ? "" : path.replace(':', '-')));
+                    }
+                    String base = candidate;
+                    for (int i = 2; taken.contains(candidate.toLowerCase(java.util.Locale.ROOT)); i++) {
+                        candidate = base + "-" + i;
+                    }
+                    taken.add(candidate.toLowerCase(java.util.Locale.ROOT));
+                    String prefix = "root".equals(Engine.string(build, "kind")) ? buildId : buildId + "/" + buildName;
+                    String id = ":".equals(path) || path == null ? prefix : prefix + path;
+                    if (moduleId.equals(id)) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String sanitize(String name) {
+        String s = name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        return s.startsWith(".") ? "_" + s.substring(1) : s;
+    }
+
     /** Opens a java-debug DAP session in jdtls and returns the port its server listens on. */
     static int startDebugSession(Engine engine) throws Exception {
         JsonElement port = engine.executeCommand("vscode.java.startDebugSession", new JsonArray(), 600);

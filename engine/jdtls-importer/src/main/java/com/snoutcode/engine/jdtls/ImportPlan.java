@@ -84,6 +84,11 @@ public final class ImportPlan {
         public boolean test;
         /** Re-exported to projects that depend on this one (the Scala class folders). */
         public boolean exported;
+        /**
+         * For a project reference: the tests see the other project's test code too (a Maven
+         * test jar, Gradle's test output on the classpath).
+         */
+        public boolean testCode;
         /** {@code group:name} of a module dependency, to merge classpaths by; null for a file. */
         public String coordinates;
         public String version;
@@ -124,6 +129,7 @@ public final class ImportPlan {
         // Name every project first, so classpath entries can refer to any of them.
         Map<String, Project> byBuildAndPath = new HashMap<>();
         Map<String, Project> byOutputDir = new HashMap<>();
+        Set<String> testOutputDirs = new LinkedHashSet<>();
         Map<JsonObject, Project> byModel = new LinkedHashMap<>();
         Map<JsonObject, String> gradleBuildOf = new HashMap<>();
         Map<JsonObject, String> javaHomeOf = new HashMap<>();
@@ -163,10 +169,14 @@ public final class ImportPlan {
                     for (String key : buildKeys(build, buildName)) {
                         byBuildAndPath.putIfAbsent(g + "|" + key + "|" + out.gradlePath, out);
                     }
+                    Set<String> tests = testSourceSets(project);
                     for (JsonElement s : array(project, "sourceSets")) {
                         JsonObject output = object(s.getAsJsonObject(), "output");
                         for (String dir : strings(output, "classesDirs")) {
                             byOutputDir.put(dir, out);
+                            if (tests.contains(string(s.getAsJsonObject(), "name"))) {
+                                testOutputDirs.add(dir);
+                            }
                         }
                         String resources = string(output, "resourcesDir");
                         if (resources != null) {
@@ -184,7 +194,7 @@ public final class ImportPlan {
             Set<String> testSets = testSourceSets(project);
             addSources(out, sourceSets, testSets);
             addResources(out, sourceSets, testSets);
-            addDependencies(out, sourceSets, testSets, gradleBuildOf.get(project), byBuildAndPath, byOutputDir);
+            addDependencies(out, sourceSets, testSets, gradleBuildOf.get(project), byBuildAndPath, byOutputDir, testOutputDirs);
             readJavaSettings(out, project, sourceSets, javaHomeOf.get(project));
             plan.projects.add(out);
         }
@@ -411,6 +421,7 @@ public final class ImportPlan {
         c.project = d.project;
         c.test = d.test;
         c.exported = d.exported;
+        c.testCode = d.testCode;
         c.coordinates = d.coordinates;
         c.version = d.version;
         return c;
@@ -590,7 +601,8 @@ public final class ImportPlan {
     // ---- classpath
 
     private static void addDependencies(Project out, List<JsonObject> sourceSets, Set<String> testSets, String gradleBuild,
-                                        Map<String, Project> byBuildAndPath, Map<String, Project> byOutputDir) {
+                                        Map<String, Project> byBuildAndPath, Map<String, Project> byOutputDir,
+                                        Set<String> testOutputDirs) {
         Map<String, Dependency> byKey = new LinkedHashMap<>();
         Set<String> usedByMain = new LinkedHashSet<>();
         for (JsonObject sourceSet : sourceSets) {
@@ -629,6 +641,9 @@ public final class ImportPlan {
                             Dependency d = new Dependency();
                             d.project = target.name;
                             add(byKey, usedByMain, "project:" + target.name, d, test);
+                            if (strings(entry, "files").stream().anyMatch(testOutputDirs::contains)) {
+                                byKey.get("project:" + target.name).testCode = true;
+                            }
                         }
                     } else {
                         for (String f : strings(entry, "files")) {
@@ -647,6 +662,9 @@ public final class ImportPlan {
                         Dependency d = new Dependency();
                         d.project = owner.name;
                         add(byKey, usedByMain, "project:" + owner.name, d, test);
+                        if (testOutputDirs.contains(file)) {
+                            byKey.get("project:" + owner.name).testCode = true;
+                        }
                     }
                     continue;
                 }

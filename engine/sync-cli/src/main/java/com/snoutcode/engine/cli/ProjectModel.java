@@ -61,7 +61,9 @@ final class ProjectModel {
                 JsonObject f = new JsonObject();
                 f.addProperty("build", buildId);
                 f.addProperty("rootDir", string(gradleBuild, "rootDir"));
-                f.addProperty("gradleVersion", string(gradleBuild, "gradleVersion"));
+                f.addProperty("gradleVersion", maven(gradleBuild) ? "maven-" + string(gradleBuild, "mavenVersion")
+                    : string(gradleBuild, "gradleVersion"));
+                f.addProperty("tool", maven(gradleBuild) ? "maven" : "gradle");
                 f.addProperty("javaHome", string(gradleBuild, "gradleJavaHome"));
                 f.addProperty("reason", string(gradleBuild, "reason"));
                 if (gradleBuild.has("needsJdk")) {
@@ -110,6 +112,7 @@ final class ProjectModel {
             mod.out.addProperty("id", mod.id);
             mod.out.addProperty("name", string(mod.project, "name"));
             mod.out.addProperty("build", string(mod.gradleBuild, "id"));
+            mod.out.addProperty("tool", maven(mod.gradleBuild) ? "maven" : "gradle");
             mod.out.addProperty("buildKind", string(mod.build, "kind"));
             mod.out.addProperty("includedBuild", "root".equals(string(mod.build, "kind")) ? null : string(mod.build, "name"));
             mod.out.addProperty("gradlePath", string(mod.project, "path"));
@@ -280,6 +283,14 @@ final class ProjectModel {
 
     private static JsonArray excluded(Mod mod) {
         Set<String> dirs = new LinkedHashSet<>();
+        if (maven(mod.gradleBuild)) {
+            // Maven's output folder, wherever the POM puts it.
+            String buildDir = string(mod.project, "buildDir");
+            dirs.add(buildDir != null ? Path.of(buildDir).normalize().toString() : mod.contentRoot.resolve("target").toString());
+            JsonArray out = new JsonArray();
+            dirs.forEach(out::add);
+            return out;
+        }
         dirs.add(mod.contentRoot.resolve("build").toString());
         if (":".equals(string(mod.project, "path"))) {
             dirs.add(mod.contentRoot.resolve(".gradle").toString());
@@ -473,6 +484,40 @@ final class ProjectModel {
     private static JsonObject scripts(JsonObject gradleBuild) {
         Map<String, String> files = new LinkedHashMap<>();
         Path root = Path.of(string(gradleBuild, "rootDir"));
+        if (maven(gradleBuild)) {
+            // A Maven build is defined by its POMs, .mvn/maven.config and the wrapper.
+            addFile(files, root.resolve("pom.xml"), "build");
+            for (JsonElement b : array(gradleBuild, "builds")) {
+                for (JsonElement p : array(b.getAsJsonObject(), "projects")) {
+                    JsonObject project = p.getAsJsonObject();
+                    if (string(project, "buildFile") != null) {
+                        addFile(files, Path.of(string(project, "buildFile")), "build");
+                    }
+                    for (String t : strings(object(project, "build"), "resyncTriggers")) {
+                        Path f = Path.of(t);
+                        if (f.getFileName().toString().endsWith(".xml") && f.startsWith(root) && !f.toString().contains("/.mvn/")) {
+                            addFile(files, f, "build");
+                        }
+                    }
+                }
+            }
+            addFile(files, root.resolve(".mvn/maven.config"), "properties");
+            addFile(files, root.resolve(".mvn/jvm.config"), "properties");
+            addFile(files, root.resolve(".mvn/extensions.xml"), "applied");
+            addFile(files, root.resolve(".mvn/wrapper/maven-wrapper.properties"), "wrapper");
+            JsonObject out = new JsonObject();
+            out.addProperty("build", string(gradleBuild, "id"));
+            out.addProperty("tool", "maven");
+            JsonArray list = new JsonArray();
+            files.forEach((path, kind) -> {
+                JsonObject f = new JsonObject();
+                f.addProperty("path", path);
+                f.addProperty("kind", kind);
+                list.add(f);
+            });
+            out.add("files", list);
+            return out;
+        }
         for (String name : Discovery.SETTINGS) {
             addFile(files, root.resolve(name), "settings");
         }
@@ -518,6 +563,11 @@ final class ProjectModel {
     }
 
     // ---- helpers
+
+    /** Whether a build entry is a Maven build's. */
+    static boolean maven(JsonObject build) {
+        return "maven".equals(string(build, "tool"));
+    }
 
     /** Source sets that a test task runs, plus {@code test} and names ending in Test or Tests. */
     static Set<String> testSourceSets(JsonObject project) {

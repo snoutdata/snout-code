@@ -151,8 +151,11 @@ final class WorkspaceLayout {
                 : new IClasspathAttribute[0];
             if (dependency.project != null) {
                 List<IClasspathAttribute> projectAttributes = new ArrayList<>(Arrays.asList(attributes));
-                // Main code of a dependent project must not see this project's test code.
-                projectAttributes.add(JavaCore.newClasspathAttribute(IClasspathAttribute.WITHOUT_TEST_CODE, "true"));
+                // Main code of a dependent project must not see this project's test code, nor
+                // its tests unless they use it (a Maven test jar).
+                if (!dependency.testCode) {
+                    projectAttributes.add(JavaCore.newClasspathAttribute(IClasspathAttribute.WITHOUT_TEST_CODE, "true"));
+                }
                 classpath.add(JavaCore.newProjectEntry(IPath.fromOSString("/" + dependency.project), null, false,
                     projectAttributes.toArray(new IClasspathAttribute[0]), false));
             } else {
