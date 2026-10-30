@@ -75,7 +75,7 @@ fn icon_button(id: &'static str, g: Icon, tip: &'static str, enabled: bool, p: &
         .justify_center()
         .rounded(px(5.))
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
-        .tooltip(move |w, cx| Tooltip::new(tip).build(w, cx))
+        .tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(tip)).build(w, cx))
         .child(icon(g, 16., ink))
 }
 
@@ -100,7 +100,7 @@ fn tip_button(
         .justify_center()
         .rounded(px(5.))
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
-        .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
+        .tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(&tip)).build(w, cx))
         .child(icon(g, 16., ink))
 }
 
@@ -348,7 +348,14 @@ impl Workspace {
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::OpenSettings), cx)),
             );
 
+        let weak = cx.weak_entity();
         gpui_component::TitleBar::new()
+            // The window's own close button (drawn on Linux) closes it as the system's would.
+            .on_close_window(move |_, window, cx| {
+                if weak.update(cx, |this, cx| this.window_should_close(window, cx)).unwrap_or(true) {
+                    window.remove_window();
+                }
+            })
             .h(px(TITLE_H))
             .bg(p.title_bg)
             .when_some(p.title_wash(), |d, tint| {
@@ -372,6 +379,7 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .gap(px(2.))
+                    .children(self.menu_bar.clone().map(|bar| div().flex_none().mr(px(6.)).child(bar)))
                     .children(remote_widget)
                     .child(project)
                     .children(branch_widget)

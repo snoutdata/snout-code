@@ -425,11 +425,7 @@ pub fn jar_index(host: &dyn Host, file: &Path) -> Option<JarIndex> {
 /// data: `~/Library/Caches/SnoutCode` on a Mac, the XDG cache elsewhere (as the engine has
 /// it by default).
 pub fn cache_dir(info: &snout_host::HostInfo) -> PathBuf {
-    if info.is_mac() {
-        return info.home.join("Library/Caches/SnoutCode");
-    }
-    let xdg = info.var("XDG_CACHE_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
-    xdg.unwrap_or_else(|| info.home.join(".cache")).join("SnoutCode")
+    snout_host::dirs::AppDirs::of(info).cache
 }
 
 /// A short, stable name for a folder (FNV-1a of its path).

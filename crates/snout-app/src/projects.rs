@@ -261,7 +261,11 @@ impl Render for ProjectsView {
                     .flex_col()
                     .gap(px(1.))
                     .overflow_y_scrollbar()
-                    .when(empty, |d| d.child(div().text_color(p.fg_dim).child("No repositories yet. Use + or ⌘O.")))
+                    .when(empty, |d| {
+                        d.child(
+                            div().text_color(p.fg_dim).child(crate::keymap::shown("No repositories yet. Use + or ⌘O.")),
+                        )
+                    })
                     .children(rows)
                     // The space below the list takes a repository out of its group.
                     .child(
@@ -446,7 +450,7 @@ fn dir_tree(m: &Model) -> (BTreeMap<String, Vec<String>>, HashMap<String, usize>
 
 pub fn reveal_items(menu: PopupMenu, model: &Entity<Model>, path: &Path) -> PopupMenu {
     menu.item(
-        PopupMenuItem::new("Reveal in Finder")
+        PopupMenuItem::new(crate::platform::REVEAL)
             .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
             .on_click(send(model, Action::Reveal(path.to_owned()))),
     )

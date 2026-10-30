@@ -18,6 +18,11 @@ pub fn git(dir: &Path, args: &[&str]) {
     assert!(ok, "git {args:?}");
 }
 
+/// The modifier of ⌘-click and the like: ⌘ on a Mac, Ctrl elsewhere.
+pub fn primary() -> gpui::Modifiers {
+    if cfg!(target_os = "macos") { gpui::Modifiers::command() } else { gpui::Modifiers::control() }
+}
+
 pub fn scratch_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("snout-app-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -471,12 +476,12 @@ fn claude_console_on(engine: EngineKind, cx: &mut TestAppContext) {
 fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
     let repo = demo_repo("keys");
     let (model, ws, cx) = open(cx, with_repo(&repo));
-    cx.simulate_keystrokes("cmd-2");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-2"));
     cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Git, "⌘2 is Git"));
-    cx.simulate_keystrokes("cmd-1");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-1"));
     cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, Activity::Project, "⌘1 is the project"));
-    cx.simulate_keystrokes("cmd-2");
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-2"));
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-a"));
     cx.update(|_, cx| assert_eq!(model.read(cx).selected.len(), 3, "⌘A selects every listed file"));
     let first = cx.update(|_, cx| model.read(cx).log[1].id.clone());
     act(&model, cx, Action::ShowCommit(first));
@@ -491,7 +496,7 @@ fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
     });
     cx.simulate_keystrokes("escape");
     cx.update(|_, cx| assert!(model.read(cx).commit_view.is_none(), "Esc leaves the commit view"));
-    cx.simulate_keystrokes("cmd-backspace");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-backspace"));
     cx.update(|_, cx| {
         let dialog = &model.read(cx).dialog;
         assert!(matches!(dialog, Some(crate::model::Dialog::ConfirmDeleteFiles(f)) if f.len() == 3), "{dialog:?}");
@@ -522,7 +527,7 @@ fn discarding_takes_a_click_or_cmd_backspace_never_enter(cx: &mut TestAppContext
     cx.run_until_parked();
     cx.update(|_, cx| assert!(model.read(cx).dialog.is_some(), "⏎ does not discard"));
     assert!(status(cx).is_some(), "and the change is still there");
-    cx.simulate_keystrokes("cmd-backspace");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-backspace" } else { "ctrl-backspace" });
     cx.run_until_parked();
     cx.update(|_, cx| assert!(model.read(cx).dialog.is_none(), "⌘⌫ discards and closes it"));
     assert!(status(cx).is_none(), "the change is gone");
@@ -711,7 +716,7 @@ fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext
     let editor = cx.update(|_, cx| ws.read(cx).editors(cx)[0].clone());
     cx.simulate_keystrokes("x");
     cx.update(|_, cx| assert!(editor.read(cx).dirty, "typing marks the tab"));
-    cx.simulate_keystrokes("cmd-s");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-s"));
     assert_eq!(std::fs::read_to_string(repo.join("src/App.java")).unwrap(), "xclass App {}\n");
     cx.update(|_, cx| assert!(!editor.read(cx).dirty));
     // The tabs are part of the saved layout and come back with their files.
@@ -798,7 +803,7 @@ fn search_lists_matches_fuzzily_and_finds_text() {
 fn go_to_file_and_find_in_files_open_the_file(cx: &mut TestAppContext) {
     let repo = demo_repo("search-ui");
     let (_, ws, cx) = open(cx, with_repo(&repo));
-    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-p"));
     cx.update(|_, cx| assert!(ws.read(cx).search.is_some(), "⌘P puts up the box"));
     let search = cx.update(|_, cx| ws.read(cx).search.clone().unwrap());
     cx.simulate_input("mainrs");
@@ -809,7 +814,7 @@ fn go_to_file_and_find_in_files_open_the_file(cx: &mut TestAppContext) {
         assert!(ws.search.is_none(), "↩ closes it");
         assert!(ws.editors(cx).iter().any(|e| e.read(cx).path == repo.join("src/main.rs")));
     });
-    cx.simulate_keystrokes("cmd-shift-f");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-shift-f"));
     let find = cx.update(|_, cx| ws.read(cx).find_in_files.clone()).expect("⇧⌘F puts up Find in Files");
     cx.simulate_input("e");
     let settle = |cx: &mut VisualTestContext| {
@@ -916,6 +921,8 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     settings.terminal_shell = "/bin/sh".into();
     settings.terminal_shell_args = Vec::new();
     settings.terminal_env.insert("SNOUT_TERM_VAR".into(), "from-the-settings".into());
+    // The prompt the test waits for, as root too.
+    settings.terminal_env.insert("PS1".into(), "$ ".into());
     settings.terminal_copy_on_select = true;
     let (_, ws, cx) = open(cx, settings);
     let terminal = cx.update(|_, cx| {
@@ -975,7 +982,7 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
         "printf '\\033[32mgreen\\033[0m https://example.com\\n'; for i in $(seq 1 60); do echo filler $i; done\r";
     cx.update(|_, cx| terminal.read(cx).type_keys(&repo, typed.as_bytes()));
     wait(cx, "filler 60");
-    cx.simulate_keystrokes("cmd-f");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-shift-f" });
     assert!(cx.debug_bounds("terminal-find").is_some(), "⌘F opens the find bar");
     cx.simulate_input("green");
     cx.run_until_parked();
@@ -1198,22 +1205,24 @@ fn the_keymap_page_rebinds_a_command_by_its_keys(cx: &mut TestAppContext) {
     // + waits for keys; ⌘K is taken for Go to File, not run.
     click(cx, &format!("keymap-add-{ix}"));
     assert!(cx.debug_bounds("keymap-recording").is_some(), "the row waits for the keys");
-    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-k"));
     cx.update(|_, cx| {
         let s = sheet.read(cx);
         assert!(s.recording.is_none());
-        assert_eq!(s.draft.keymap.get("snout::GoToFile"), Some(&vec!["cmd-p".to_owned(), "cmd-k".to_owned()]));
+        let k = crate::keymap::platform_keys;
+        assert_eq!(s.draft.keymap.get("snout::GoToFile"), Some(&vec![k("cmd-p"), k("cmd-k")]));
     });
     // × takes ⌘P away; OK puts it in force at once and saves it.
     click(cx, &format!("keymap-remove-{ix}-0"));
     click(cx, "settings-ok");
     cx.update(|_, cx| {
-        assert_eq!(model.read(cx).settings.keymap.get("snout::GoToFile"), Some(&vec!["cmd-k".to_owned()]));
+        let k = crate::keymap::platform_keys("cmd-k");
+        assert_eq!(model.read(cx).settings.keymap.get("snout::GoToFile"), Some(&vec![k]));
         assert!(ws.read(cx).search.is_none());
     });
-    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-p"));
     cx.update(|_, cx| assert!(ws.read(cx).search.is_none(), "⌘P no longer goes to a file"));
-    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-k"));
     cx.update(|_, cx| assert!(ws.read(cx).search.is_some(), "⌘K does"));
     let _ = std::fs::remove_dir_all(repo);
 }

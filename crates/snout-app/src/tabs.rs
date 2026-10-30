@@ -232,7 +232,7 @@ fn tab_menu(
             .item(menu_item("Copy Path", I::Copy, move |_, _, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.display().to_string()));
             }))
-            .item(menu_item("Reveal in Finder", I::FolderOpen, move |_, _, cx| cx.reveal_path(&reveal)))
+            .item(menu_item(crate::platform::REVEAL, I::FolderOpen, move |_, _, cx| cx.reveal_path(&reveal)))
             .item(menu_item("Open in External Terminal", I::SquareTerminal, move |_, window, cx| {
                 window.dispatch_action(Box::new(crate::menus::OpenInTerminalAt(terminal.clone())), cx)
             }));

@@ -16,25 +16,8 @@ fn trace() -> Option<SystemTime> {
 }
 
 /// When this process started, by the kernel's record of it.
-#[cfg(target_os = "macos")]
 fn process_start() -> Option<SystemTime> {
-    // SAFETY: `proc_bsdinfo` is plain data, valid all zeros.
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    // SAFETY: `info` is a `proc_bsdinfo` of the size given.
-    let got = unsafe {
-        libc::proc_pidinfo(std::process::id() as libc::c_int, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
-    };
-    (got == size).then(|| {
-        SystemTime::UNIX_EPOCH
-            + Duration::from_secs(info.pbi_start_tvsec)
-            + Duration::from_micros(info.pbi_start_tvusec)
-    })
-}
-
-#[cfg(not(target_os = "macos"))]
-fn process_start() -> Option<SystemTime> {
-    None
+    crate::platform::process_start()
 }
 
 /// Note that startup reached `step` (when the trace is on).
@@ -64,4 +47,27 @@ pub fn watch_ui_thread(cx: &mut gpui::App) {
         }
     })
     .detach();
+}
+
+/// Print the messages of GPUI, wgpu and the other libraries on stderr (so in the log), at the
+/// level `SNOUT_LOG` names (`error`, `warn`, `info`, `debug` or `trace`); errors only without
+/// it. `SNOUT_LOG=info` says which GPU the window draws with, and why one was passed over.
+pub fn init_log() {
+    struct Stderr;
+    impl log::Log for Stderr {
+        fn enabled(&self, m: &log::Metadata) -> bool {
+            m.level() <= log::max_level()
+        }
+        fn log(&self, r: &log::Record) {
+            if self.enabled(r.metadata()) {
+                eprintln!("[{}] {}: {}", r.level().as_str().to_lowercase(), r.target(), r.args());
+            }
+        }
+        fn flush(&self) {}
+    }
+    static LOGGER: Stderr = Stderr;
+    let level = std::env::var("SNOUT_LOG").ok().and_then(|v| v.parse().ok()).unwrap_or(log::LevelFilter::Error);
+    if log::set_logger(&LOGGER).is_ok() {
+        log::set_max_level(level);
+    }
 }

@@ -385,7 +385,7 @@ fn the_engine_feeds_the_gutter_the_window_hints_fixes_and_properties(cx: &mut Te
         })
     });
     cx.run_until_parked();
-    cx.simulate_keystrokes("cmd-.");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-."));
     let offered = pump_until(cx, 60, |cx| {
         cx.update(|_, cx| {
             editor

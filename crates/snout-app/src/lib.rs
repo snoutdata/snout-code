@@ -20,11 +20,13 @@ pub mod icons;
 pub mod keymap;
 pub mod lang;
 pub mod look;
+pub mod menu_bar;
 pub mod menu_icons;
 pub mod menus;
 pub mod model;
 pub mod new_project;
 pub mod panels;
+pub mod platform;
 pub mod processes;
 pub mod project_model;
 pub mod project_settings;
@@ -155,6 +157,7 @@ fn model_with(
 /// Start the app: one window on the saved repositories.
 pub fn run() {
     startup::mark("main");
+    startup::init_log();
     // ssh runs this program to ask for a password or a passphrase (see `remote::askpass`).
     if std::env::var_os(snout_remote::ASKPASS_ENV).is_some() {
         remote::askpass::run();
@@ -271,6 +274,8 @@ pub fn open_window(
                 traffic_light_position: Some(gpui::point(px(13.), px(13.))),
                 ..gpui_component::TitleBar::title_bar_options()
             }),
+            window_decorations: platform::window_decorations(),
+            app_id: Some(platform::APP_ID.to_owned()),
             ..gpui_component::TitleBar::window_options()
         },
         |window, cx| {

@@ -169,7 +169,7 @@ pub fn icon_button(
         .p(px(3.))
         .rounded(px(5.))
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover_bg)))
-        .tooltip(tip(tooltip.into()))
+        .tooltip(tip(crate::keymap::shown(tooltip).into()))
         .child(outline_glyph(g, 16., ink))
 }
 

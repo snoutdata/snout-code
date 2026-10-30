@@ -254,7 +254,7 @@ fn the_window_shows_the_pages_and_keeps_what_snoutcode_owns(cx: &mut TestAppCont
         (model, ws.unwrap(), vcx)
     };
     // ⌘; puts it up.
-    cx.simulate_keystrokes("cmd-;");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-;"));
     let view = cx.update(|_, cx| ws.read(cx).project_structure.clone()).expect("the window is up");
     assert!(cx.debug_bounds("project-structure").is_some());
     cx.update(|_, cx| {

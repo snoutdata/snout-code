@@ -340,7 +340,7 @@ impl ProblemsPanel {
         }
         let at = self.selected.and_then(|s| self.rows.iter().position(|r| *r == s));
         let n = self.rows.len();
-        if n == 0 || e.keystroke.modifiers.alt || e.keystroke.modifiers.platform {
+        if n == 0 || e.keystroke.modifiers.alt || e.keystroke.modifiers.secondary(cx) {
             return;
         }
         match e.keystroke.key.as_str() {

@@ -257,7 +257,7 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     let squiggles = cx.update(|_, cx| editor.read(cx).state.read(cx).diagnostics().map_or(0, |d| d.len()));
     assert!(squiggles >= 1);
     caret_at(&editor, "\"text\"", 0, 1, cx);
-    cx.simulate_keystrokes("cmd-.");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-."));
     let fixes =
         pump_until(cx, 30, |cx| {
             cx.update(|_, cx| {
@@ -300,7 +300,7 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     caret_at(&editor, "greet(String", 0, 1, cx);
     cx.simulate_keystrokes("f2");
     assert!(cx.update(|_, cx| editor.read(cx).rename.is_some()), "F2 asks for the new name");
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-a"));
     cx.simulate_input("welcome");
     cx.simulate_keystrokes("enter");
     let renamed = pump_until(cx, 30, |cx| {
@@ -314,15 +314,15 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     cx.simulate_input("     ");
     caret_at(&editor, "import demo.lib.Lib;", 0, 0, cx);
     cx.simulate_input("import java.util.List;\n");
-    cx.simulate_keystrokes("shift-alt-o");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("shift-alt-o"));
     let organized = pump_until(cx, 30, |cx| !text(&editor, cx).contains("java.util.List"));
     assert!(organized, "the unused import goes");
-    cx.simulate_keystrokes("shift-alt-f");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("shift-alt-f"));
     let formatted = pump_until(cx, 30, |cx| text(&editor, cx).contains("\n    private App()"));
     assert!(formatted, "{}", text(&editor, cx));
 
     // Symbols: the workspace's (⌘T) and the file's (⇧⌘O).
-    cx.simulate_keystrokes("cmd-t");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-t"));
     cx.simulate_input("Greeting");
     let listed = pump_until(cx, 30, |cx| {
         cx.update(|_, cx| {
@@ -332,7 +332,7 @@ fn java_files_get_the_language_features_of_the_engine(cx: &mut TestAppContext) {
     assert!(listed, "⌘T finds the class");
     cx.simulate_keystrokes("escape");
     caret_at(&editor, "class App", 0, 0, cx);
-    cx.simulate_keystrokes("cmd-shift-o");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-shift-o"));
     let file_symbols = pump_until(cx, 30, |cx| {
         cx.update(|_, cx| {
             ws.read(cx).search.as_ref().is_some_and(|s| s.read(cx).items.iter().any(|i| i.path.starts_with("main")))

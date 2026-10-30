@@ -959,7 +959,11 @@ impl Render for FindInFiles {
                 IconButton::new(
                     "fif-replace-mode",
                     IconName::Replace,
-                    if replacing { "Hide Replace" } else { "Replace in Files (⇧⌘R)" },
+                    if replacing {
+                        "Hide Replace".to_owned()
+                    } else {
+                        crate::keymap::shown("Replace in Files (⇧⌘R)")
+                    },
                 )
                 .size(26.)
                 .selected(replacing)
@@ -1251,7 +1255,7 @@ impl Render for FindInFiles {
                     .into_any_element(),
                 Button::new("fif-replace-all", IconName::ReplaceAll)
                     .label("Replace All")
-                    .kbd("⌘⏎")
+                    .kbd(crate::keymap::shown("⌘⏎"))
                     .primary()
                     .disabled(ticked == 0)
                     .on_click(cx.listener(|this, _, _, cx| this.replace_all(cx)))

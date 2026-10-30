@@ -349,7 +349,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Theme: Dark", Box::new(ThemeDark)),
         ("Theme: Light", Box::new(ThemeLight)),
         ("Open on GitHub", Box::new(Github)),
-        ("Reveal in Finder", Box::new(Reveal)),
+        (crate::platform::REVEAL, Box::new(Reveal)),
         ("Open in External Terminal", Box::new(OpenInTerminal)),
         ("About SnoutCode", Box::new(About)),
         ("Quit SnoutCode", Box::new(Quit)),
@@ -384,46 +384,78 @@ fn recent_items(recent: &[std::path::PathBuf], remote: &[crate::remote::RemotePr
 /// machines' projects) fill File ▸ Open Recent.
 pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> Vec<Menu> {
     let check = |item: MenuItem, on: bool| item.checked(on);
-    vec![
-        Menu::new("SnoutCode").items([
-            MenuItem::action("About SnoutCode", About),
-            MenuItem::separator(),
+    // Without a global menu bar (Linux) there is no app menu: its items go where IntelliJ IDEA
+    // has them there, Settings and Quit at the end of File, About at the end of Help.
+    let app_menu = !crate::platform::IN_WINDOW_MENUS;
+    let settings_items = || {
+        [
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::action("Open Settings (JSON)", OpenSettingsJson),
             MenuItem::action("Open Project Settings (JSON)", OpenProjectSettingsJson),
-            MenuItem::separator(),
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
-            MenuItem::separator(),
-            MenuItem::action("Quit SnoutCode", Quit),
-        ]),
-        Menu::new("File").items([
-            MenuItem::action("New File…", NewFile),
-            MenuItem::action("New Project…", NewProject),
-            MenuItem::action("Open Project…", Open),
-            MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent, remote))),
-            MenuItem::action("Close Project", CloseProject),
-            MenuItem::separator(),
-            MenuItem::action("Project Structure…", ProjectStructure),
-            MenuItem::action("Open in External Terminal", OpenInTerminal),
-            MenuItem::separator(),
-            MenuItem::action("Connect to SSH Host…", ConnectSsh),
-            MenuItem::action("Close Remote Connection", CloseRemote),
-            MenuItem::separator(),
-            MenuItem::action("Find Repositories in Folder…", FindRepos),
-            MenuItem::action("Clone from GitHub…", CloneRepo),
-            MenuItem::separator(),
-            MenuItem::action("New Group…", NewGroup),
-            MenuItem::separator(),
-            MenuItem::action("Search Everywhere…", SearchEverywhere),
-            MenuItem::action("Go to File…", GoToFile),
-            MenuItem::action("Recent Files…", RecentFiles),
-            MenuItem::action("Find in Files…", FindInFiles),
-            MenuItem::action("Replace in Files…", ReplaceInFiles),
-            MenuItem::action("Command Palette…", CommandPalette),
-            MenuItem::separator(),
-            MenuItem::action("Save", crate::editor::Save),
-            MenuItem::action("Close Tab", CloseTab),
-        ]),
+        ]
+    };
+    let file_end: Vec<MenuItem> = if app_menu {
+        Vec::new()
+    } else {
+        [
+            vec![MenuItem::separator()],
+            settings_items().into(),
+            vec![MenuItem::separator(), MenuItem::action("Quit", Quit)],
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    };
+    let help_end: Vec<MenuItem> =
+        if app_menu { Vec::new() } else { vec![MenuItem::separator(), MenuItem::action("About SnoutCode", About)] };
+    let app = Menu::new("SnoutCode").items(
+        [
+            vec![MenuItem::action("About SnoutCode", About), MenuItem::separator()],
+            settings_items().into(),
+            vec![
+                MenuItem::separator(),
+                MenuItem::os_submenu("Services", SystemMenuType::Services),
+                MenuItem::separator(),
+                MenuItem::action("Quit SnoutCode", Quit),
+            ],
+        ]
+        .into_iter()
+        .flatten(),
+    );
+    let zoom = if app_menu { "Zoom" } else { "Maximize" };
+    let mut bar = vec![
+        Menu::new("File").items(
+            [
+                MenuItem::action("New File…", NewFile),
+                MenuItem::action("New Project…", NewProject),
+                MenuItem::action("Open Project…", Open),
+                MenuItem::submenu(Menu::new("Open Recent").items(recent_items(recent, remote))),
+                MenuItem::action("Close Project", CloseProject),
+                MenuItem::separator(),
+                MenuItem::action("Project Structure…", ProjectStructure),
+                MenuItem::action("Open in External Terminal", OpenInTerminal),
+                MenuItem::separator(),
+                MenuItem::action("Connect to SSH Host…", ConnectSsh),
+                MenuItem::action("Close Remote Connection", CloseRemote),
+                MenuItem::separator(),
+                MenuItem::action("Find Repositories in Folder…", FindRepos),
+                MenuItem::action("Clone from GitHub…", CloneRepo),
+                MenuItem::separator(),
+                MenuItem::action("New Group…", NewGroup),
+                MenuItem::separator(),
+                MenuItem::action("Search Everywhere…", SearchEverywhere),
+                MenuItem::action("Go to File…", GoToFile),
+                MenuItem::action("Recent Files…", RecentFiles),
+                MenuItem::action("Find in Files…", FindInFiles),
+                MenuItem::action("Replace in Files…", ReplaceInFiles),
+                MenuItem::action("Command Palette…", CommandPalette),
+                MenuItem::separator(),
+                MenuItem::action("Save", crate::editor::Save),
+                MenuItem::action("Close Tab", CloseTab),
+            ]
+            .into_iter()
+            .chain(file_end),
+        ),
         Menu::new("Edit").items([
             MenuItem::os_action("Undo", Undo, OsAction::Undo),
             MenuItem::os_action("Redo", Redo, OsAction::Redo),
@@ -592,7 +624,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Annotate with Agents", crate::claude_ide::AnnotateWithAgents),
             MenuItem::separator(),
             MenuItem::action("Open on GitHub", Github),
-            MenuItem::action("Reveal in Finder", Reveal),
+            MenuItem::action(crate::platform::REVEAL, Reveal),
         ]),
         Menu::new("Tools").items([
             MenuItem::action("Terminal", ShowTerminal),
@@ -614,13 +646,21 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             ])),
             MenuItem::action("Settings…", OpenSettings),
         ]),
-        Menu::new("Window").items([MenuItem::action("Minimize", Minimize), MenuItem::action("Zoom", Zoom)]),
-        Menu::new("Help").items([
-            MenuItem::action("SnoutCode on GitHub", Source),
-            MenuItem::action("Report an Issue", Issues),
-            MenuItem::action("SnoutData Website", Website),
-        ]),
-    ]
+        Menu::new("Window").items([MenuItem::action("Minimize", Minimize), MenuItem::action(zoom, Zoom)]),
+        Menu::new("Help").items(
+            [
+                MenuItem::action("SnoutCode on GitHub", Source),
+                MenuItem::action("Report an Issue", Issues),
+                MenuItem::action("SnoutData Website", Website),
+            ]
+            .into_iter()
+            .chain(help_end),
+        ),
+    ];
+    if app_menu {
+        bar.insert(0, app);
+    }
+    bar
 }
 
 /// What the bar shows that can change, to rebuild it only then.

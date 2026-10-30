@@ -1562,7 +1562,12 @@ impl SettingsView {
                     ));
                 }
                 if self.jdks.is_empty() {
-                    body = body.child(div().pt(px(8.)).text_color(p.fg_dim).child("No JDK was found on this Mac."));
+                    body = body.child(
+                        div()
+                            .pt(px(8.))
+                            .text_color(p.fg_dim)
+                            .child(format!("No JDK was found on {}.", crate::platform::THIS_MACHINE)),
+                    );
                 }
                 let idle_mark = self.mark(Key::DaemonIdleMinutes, cx);
                 let view = cx.entity();
@@ -2124,7 +2129,7 @@ impl SettingsView {
         apps.push((name(ExternalTerminal::Custom), ExternalTerminal::Custom.label().to_owned()));
         let view = cx.entity();
         let pick = move |v: String, cx: &mut App| {
-            let all = ExternalTerminal::APPS.into_iter().chain([ExternalTerminal::Custom]);
+            let all = ExternalTerminal::APPS.iter().copied().chain([ExternalTerminal::Custom]);
             if let Some(t) = all.into_iter().find(|t| format!("{t:?}") == v) {
                 view.update(cx, |this, cx| this.set(cx, |s| s.external_terminal = t));
             }

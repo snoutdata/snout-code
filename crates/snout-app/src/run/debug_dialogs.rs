@@ -186,7 +186,9 @@ impl Render for BreakpointsDialog {
                 .flex_1()
                 .child(
                     components::EmptyState::new(snout_core::art::spots::no_results(), "No breakpoints")
-                        .hint("Click left of a line number, or press ⌘F8 in an editor, to set one.")
+                        .hint(crate::keymap::shown(
+                            "Click left of a line number, or press ⌘F8 in an editor, to set one.",
+                        ))
                         .on(p.card)
                         .compact(),
                 )
@@ -356,7 +358,9 @@ impl Render for EvaluateDialog {
         let result: AnyElement = match (&paused, evaluated) {
             (None, _) => components::callout(
                 Tone::Info,
-                "Evaluate works while the program is stopped at a breakpoint: debug it (⌃D) and set one (⌘F8).",
+                crate::keymap::shown(
+                    "Evaluate works while the program is stopped at a breakpoint: debug it (⌃D) and set one (⌘F8).",
+                ),
                 &p,
             )
             .into_any_element(),
@@ -393,12 +397,9 @@ impl Render for EvaluateDialog {
                         .when_some(v.ty.clone(), |d, ty| d.child(components::badge(ty, Tone::Neutral, &p))),
                 )
                 .when(v.reference > 0, |d| {
-                    d.child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(p.fg_dim)
-                            .child("Add it to the watches (⌘⏎) to open its fields in the Debug window."),
-                    )
+                    d.child(div().text_size(px(12.)).text_color(p.fg_dim).child(crate::keymap::shown(
+                        "Add it to the watches (⌘⏎) to open its fields in the Debug window.",
+                    )))
                 })
                 .into_any_element(),
         };
@@ -439,7 +440,7 @@ impl Render for EvaluateDialog {
                 vec![
                     Button::new("evaluate-watch", IconName::Eye)
                         .label("Add to Watches")
-                        .kbd("⌘⏎")
+                        .kbd(crate::keymap::shown("⌘⏎"))
                         .disabled(!live)
                         .on_click(cx.listener(|this, _, _, cx| this.add_watch(cx)))
                         .into_any_element(),

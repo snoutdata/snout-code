@@ -449,7 +449,7 @@ impl Render for FileTree {
                             menu
                         };
                         menu.item(
-                            PopupMenuItem::new("Reveal in Finder")
+                            PopupMenuItem::new(crate::platform::REVEAL)
                                 .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
                                 .on_click(send(Action::Reveal(path.clone()))),
                         )

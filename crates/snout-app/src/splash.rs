@@ -84,6 +84,7 @@ pub fn open(cx: &mut App) -> Option<WindowHandle<Splash>> {
             focus: false,
             show: true,
             window_background: gpui::WindowBackgroundAppearance::Transparent,
+            app_id: Some(crate::platform::APP_ID.to_owned()),
             ..Default::default()
         },
         |_, cx| cx.new(|_| Splash),

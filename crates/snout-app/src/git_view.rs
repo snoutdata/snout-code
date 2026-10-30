@@ -341,7 +341,11 @@ impl GitView {
         let model = self.model.clone();
         let tool = |id: &'static str, g: Glyph, label: String, enabled: bool, tip: &'static str, action: Action| {
             let b = look::glyph_button(id, g, label, enabled, &p);
-            let b = if tip.is_empty() { b } else { b.tooltip(move |w, cx| Tooltip::new(tip).build(w, cx)) };
+            let b = if tip.is_empty() {
+                b
+            } else {
+                b.tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(tip)).build(w, cx))
+            };
             b.when(enabled, |b| b.on_click(self.on_click(action)))
         };
         div()
@@ -830,7 +834,7 @@ impl GitView {
                                 if let Some(root) = &root {
                                     menu = menu
                                         .item(
-                                            PopupMenuItem::new("Reveal in Finder")
+                                            PopupMenuItem::new(crate::platform::REVEAL)
                                                 .icon(crate::components::menu_icon(
                                                     crate::components::IconName::FolderOpen,
                                                 ))
@@ -882,7 +886,7 @@ impl GitView {
         } else {
             "Nothing to commit".into()
         };
-        let commit_tip: SharedString = format!("Commits {}  ⌘↩", scope.what()).into();
+        let commit_tip: SharedString = crate::keymap::shown(&format!("Commits {}  ⌘↩", scope.what())).into();
         let header = div()
             .flex_none()
             .h(px(22.))
@@ -1291,7 +1295,7 @@ impl GitView {
                                 let menu = match &root {
                                     Some(root) => menu
                                         .item(
-                                            PopupMenuItem::new("Reveal in Finder")
+                                            PopupMenuItem::new(crate::platform::REVEAL)
                                                 .icon(crate::components::menu_icon(
                                                     crate::components::IconName::FolderOpen,
                                                 ))
@@ -1497,7 +1501,10 @@ impl GitView {
     fn welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let button = |id: &'static str, g: Glyph, label: &'static str, action: Action| {
-            look::glyph_button(id, g, label, true, &p).w(px(240.)).h(px(34.)).on_click(self.on_click(action))
+            look::glyph_button(id, g, crate::keymap::shown(label), true, &p)
+                .w(px(240.))
+                .h(px(34.))
+                .on_click(self.on_click(action))
         };
         pane(&p)
             .child(

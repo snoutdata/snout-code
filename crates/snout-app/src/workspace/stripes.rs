@@ -207,7 +207,7 @@ fn item(
         .cursor_pointer()
         .when(on, |d| d.bg(p.accent).shadow(glow))
         .when(!on, |d| d.hover(move |s| s.bg(hover)))
-        .tooltip(move |w, cx| Tooltip::new(tip).build(w, cx))
+        .tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(tip)).build(w, cx))
         .child(icon(g, 18., ink))
         .when_some(badge.filter(|(n, _)| *n > 0), |d, (n, color)| {
             d.child(

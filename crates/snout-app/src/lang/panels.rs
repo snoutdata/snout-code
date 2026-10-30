@@ -120,7 +120,10 @@ pub struct ReferencesPanel {
 impl ReferencesPanel {
     pub fn new(hub: Entity<LangHub>, cx: &mut Context<Self>) -> Self {
         Self {
-            hub, title: "Find References (⇧F12) lists them here".into(), rows: Vec::new(), focus: cx.focus_handle()
+            hub,
+            title: crate::keymap::shown("Find References (⇧F12) lists them here").into(),
+            rows: Vec::new(),
+            focus: cx.focus_handle(),
         }
     }
 

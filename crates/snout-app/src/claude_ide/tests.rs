@@ -355,7 +355,7 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     let marks = cx.update(|_, cx| editor.read(cx).review.as_ref().unwrap().marks.clone());
     assert_eq!(crate::claude_ide::review::counts(&marks), (3, 1), "{marks:?}");
     focus(&editor, cx);
-    cx.simulate_keystrokes("cmd-enter");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-enter"));
     let answer = c.wait(cx, id1);
     assert_eq!(texts(&answer), ["FILE_SAVED", HELLO_V2]);
     assert_eq!(std::fs::read_to_string(&hello).unwrap(), HELLO, "Claude Code writes the file, not the IDE");
@@ -386,7 +386,7 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     pump_until(cx, "the stream", |cx| !streaming(&editor, cx));
     assert_eq!(text_of(&editor, cx), format!("// typed\n{v3}"), "the typing is kept, the change put in");
     focus(&editor, cx);
-    cx.simulate_keystrokes("cmd-enter");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-enter"));
     assert_eq!(texts(&c.wait(cx, id3)), ["FILE_SAVED".to_owned(), format!("// typed\n{v3}")]);
     // Claude Code writes what the answer says: the text as edited.
     std::fs::write(&hello, format!("// typed\n{v3}")).unwrap();
@@ -441,7 +441,7 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
             s.focus(w, cx);
         });
     });
-    cx.simulate_keystrokes("cmd-alt-k");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-k"));
     cx.update(|_, cx| assert!(model.read(cx).settings.console_open, "the console comes forward"));
     pump_until(cx, "at_mentioned", |_| !c.notes("at_mentioned").is_empty());
     let mention = c.notes("at_mentioned")[0].clone();
@@ -469,7 +469,7 @@ fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
             s.focus(w, cx);
         });
     });
-    cx.simulate_keystrokes("cmd-alt-k");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-k"));
     pump_until(cx, "the whole file's mention", |_| c.notes("at_mentioned").len() >= 2);
     let whole = c.notes("at_mentioned")[1].clone();
     assert_eq!(whole, json!({ "filePath": hello.to_string_lossy() }), "no null lines");
@@ -705,14 +705,14 @@ fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut Test
         state.update(cx, |s, cx| s.focus(w, cx));
     });
     pump(cx, 200);
-    cx.simulate_keystrokes("cmd-alt-y");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-y"));
     pump_until(cx, "Hello reviewed", |cx| settled(&ws, cx) && listed(&ws, cx).len() == 1);
     pump(cx, 200);
     cx.update(|_, cx| assert!(editor.read(cx).claude_base.is_none(), "no marks left in the gutter"));
     assert_eq!(std::fs::read_to_string(&hello).unwrap(), reverted, "keeping writes nothing");
 
     // Revert All, by its keys: the file Claude made goes, its tab too.
-    cx.simulate_keystrokes("cmd-alt-shift-z");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-shift-z"));
     pump_until(cx, "the created file gone", |_| !fresh.exists());
     assert!(!fresh.exists(), "a created file reverts to nothing");
     assert!(editor_of(&ws, &fresh, cx).is_none());

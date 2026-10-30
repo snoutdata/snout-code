@@ -1161,7 +1161,12 @@ impl gpui::Render for Gallery {
                 row()
                     .child(Button::new("g-primary", IconName::Check).primary().label("Commit").kbd("⏎"))
                     .child(Button::new("g-secondary", CANCEL_ICON).label("Cancel").kbd("Esc"))
-                    .child(Button::new("g-danger", IconName::Trash).danger().label("Discard").kbd("⌘⌫"))
+                    .child(
+                        Button::new("g-danger", IconName::Trash)
+                            .danger()
+                            .label("Discard")
+                            .kbd(crate::keymap::shown_keys("⌘⌫")),
+                    )
                     .child(Button::new("g-ghost", IconName::RefreshCw).ghost().label("Refresh"))
                     .child(Button::new("g-disabled", IconName::Plus).primary().label("Create").disabled(true))
                     .child(Button::new("g-compact", IconName::Copy).compact().label("Copy"))

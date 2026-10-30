@@ -115,12 +115,8 @@ impl WelcomePanel {
         use crate::components::IconName;
         let p = palette(cx);
         let hover = p.row_hover();
-        let keys = |a: &dyn gpui::Action| {
-            window.bindings_for_action(a).last().map(|b| {
-                let os = cx.platform_info().os;
-                b.keystrokes().iter().map(|k| k.display(os).to_string()).collect::<Vec<_>>().join(" ")
-            })
-        };
+        let keys =
+            |a: &dyn gpui::Action| window.bindings_for_action(a).last().map(|b| crate::keymap::binding_label(b, cx));
         let ways: [(&'static str, IconName, &'static str, Box<dyn gpui::Action>); 5] = [
             ("empty-go-to-file", IconName::FileSearch, "Go to File", Box::new(crate::menus::GoToFile)),
             ("empty-recent-files", IconName::FileClock, "Recent Files", Box::new(crate::menus::RecentFiles)),
@@ -346,7 +342,7 @@ impl Render for WelcomePanel {
                 "Open Project…",
                 match crate::remote::connection(cx) {
                     Some((host, _)) => format!("A folder on {host}"),
-                    None => "A folder on this Mac".into(),
+                    None => format!("A folder on {}", crate::platform::THIS_MACHINE),
                 },
                 Some(Action::PickFolder),
             ))

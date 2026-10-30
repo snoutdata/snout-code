@@ -157,21 +157,21 @@ fn breakpoints_have_named_actions_and_a_window_and_the_debugger_actions_say_when
     act(&model, cx, Action::OpenFile(file.clone(), Some((4, 8))));
     cx.run_until_parked();
     // ⌘F8 sets the caret line's breakpoint, ⌥⌘F8 disables it: drawn as such, not sent.
-    cx.simulate_keystrokes("cmd-f8");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-f8"));
     cx.update(|_, cx| assert_eq!(runs.read(cx).breakpoints_in(&file).len(), 1, "⌘F8 set one on line 5"));
-    cx.simulate_keystrokes("cmd-alt-f8");
+    press_or_dispatch(cx, "cmd-alt-f8", &crate::menus::ToggleBreakpointEnabled);
     cx.run_until_parked();
     cx.update(|_, cx| {
         let marks = crate::run::marks(cx).unwrap();
         assert_eq!(marks.read(cx).breakpoints[&file], [(4, None, false)]);
     });
     // ⌥⇧⌘F8 puts up its condition at the caret.
-    cx.simulate_keystrokes("cmd-alt-shift-f8");
+    press_or_dispatch(cx, "cmd-alt-shift-f8", &crate::menus::EditBreakpointCondition);
     cx.run_until_parked();
     assert!(cx.debug_bounds("gutter-menu").is_some(), "the condition box shows");
     cx.simulate_keystrokes("escape");
     // ⇧⌘F8: View Breakpoints lists it; its tick enables it again.
-    cx.simulate_keystrokes("cmd-shift-f8");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-shift-f8"));
     cx.run_until_parked();
     let dialog = cx.update(|_, cx| ws.read(cx).breakpoints_dialog.clone()).expect("View Breakpoints shows");
     cx.update(|_, cx| assert_eq!(dialog.read(cx).list(cx).len(), 1));
@@ -188,14 +188,14 @@ fn breakpoints_have_named_actions_and_a_window_and_the_debugger_actions_say_when
     cx.simulate_keystrokes("escape");
     cx.update(|_, cx| assert!(ws.read(cx).breakpoints_dialog.is_none(), "Esc closes it"));
     // With nothing debugged: Evaluate says how it works, Run to Cursor and Rerun say why not.
-    cx.simulate_keystrokes("alt-f8");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("alt-f8"));
     cx.run_until_parked();
     assert!(cx.update(|_, cx| ws.read(cx).evaluate_dialog.is_some()));
     cx.simulate_keystrokes("escape");
     cx.update(|_, cx| assert!(ws.read(cx).evaluate_dialog.is_none()));
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.run_to_cursor(w, cx)));
     cx.update(|_, cx| assert!(model.read(cx).message.contains("Run to Cursor"), "{}", model.read(cx).message));
-    cx.simulate_keystrokes("cmd-r");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-r"));
     cx.update(|_, cx| assert!(model.read(cx).message.contains("Nothing ran yet"), "{}", model.read(cx).message));
     // Run to Cursor's line goes with the program's next stop.
     cx.update(|_, cx| {
@@ -275,6 +275,18 @@ fn a_build_that_needs_a_jdk_offers_it_once(cx: &mut TestAppContext) {
     cx.update(|_, cx| hub.update(cx, |h, cx| h.offer_jdk(&repo, 8, cx)));
     cx.update(|_, cx| assert!(hub.read(cx).jdk_prompt.is_none(), "not again once turned down"));
     let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Press the keys `mac` stands for here, or, where this system leaves them unbound (Linux has
+/// no Ctrl+Alt with a function key), run `action` where the keyboard is.
+fn press_or_dispatch(cx: &mut VisualTestContext, mac: &str, action: &dyn gpui::Action) {
+    let keys = crate::keymap::platform_keys(mac);
+    if keys.is_empty() {
+        let action = action.boxed_clone();
+        cx.update(|w, cx| w.dispatch_action(action, cx));
+    } else {
+        cx.simulate_keystrokes(&keys);
+    }
 }
 
 // ----- The real engine -------------------------------------------------------------------------

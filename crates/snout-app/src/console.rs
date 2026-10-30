@@ -630,7 +630,13 @@ impl ConsolePanel {
     fn on_key(&mut self, e: &KeyDownEvent, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         let m = k.modifiers;
-        if m.platform && !m.control && !m.alt && k.key == "f" {
+        // Find: ⌘F on a Mac; Ctrl+Shift+F on Linux, where Ctrl+F belongs to the shell.
+        let find = if cfg!(target_os = "macos") {
+            m.platform && !m.control && !m.alt
+        } else {
+            m.control && m.shift && !m.alt && !m.platform
+        };
+        if find && k.key == "f" {
             self.open_find(window, cx);
             cx.stop_propagation();
             return;
@@ -1348,8 +1354,8 @@ impl ConsolePanel {
                     window.focus(&this.focus, cx);
                     this.wake_cursor();
                     let cell = this.cell_at(e.position);
-                    // ⌘-click opens the link under the pointer.
-                    if e.modifiers.platform
+                    // ⌘-click (Ctrl+click on Linux) opens the link under the pointer.
+                    if e.modifiers.secondary(cx)
                         && let Some((row, col)) = cell
                         && let Some(link) = this.sessions.get(&root).and_then(|s| s.pty.frame().link_at(row, col))
                     {

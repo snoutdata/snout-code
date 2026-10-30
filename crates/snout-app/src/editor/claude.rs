@@ -807,7 +807,7 @@ impl EditorPanel {
         } else {
             "Claude Code proposes a change"
         };
-        let hint = |text: &'static str| div().text_color(p.fg_dim).text_size(px(11.)).child(text);
+        let hint = |text: &'static str| div().text_color(p.fg_dim).text_size(px(11.)).child(crate::keymap::shown(text));
         Some(
             div()
                 .id("review-bar")
@@ -871,7 +871,7 @@ impl EditorPanel {
                         .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
                         .child(crate::components::icon(crate::components::IconName::Check, 13., p.on_accent))
                         .child("Accept")
-                        .child(div().text_size(px(11.)).opacity(0.8).child("⌘↩"))
+                        .child(div().text_size(px(11.)).opacity(0.8).child(crate::keymap::shown("⌘↩")))
                         .on_click(cx.listener(|this, _, w, cx| this.accept_review(w, cx))),
                 ),
         )
@@ -1302,7 +1302,7 @@ impl EditorPanel {
             1 => "Claude changed this file: 1 change to review".to_owned(),
             n => format!("Claude changed this file: {n} changes to review"),
         };
-        let hint = |text: &'static str| div().text_color(p.fg_dim).text_size(px(11.)).child(text);
+        let hint = |text: &'static str| div().text_color(p.fg_dim).text_size(px(11.)).child(crate::keymap::shown(text));
         Some(
             div()
                 .id("claude-bar")

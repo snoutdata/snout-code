@@ -482,7 +482,7 @@ pub fn spring_items(line: &SpringLine) -> Vec<SpringItem> {
             }
             (_, []) => {
                 let why = i.message.clone().unwrap_or_else(|| format!("No bean for '{name}'"));
-                out.push(SpringItem::Note(format!("{why}. Press ⌘. for quick fixes.")));
+                out.push(SpringItem::Note(crate::keymap::shown(&format!("{why}. Press ⌘. for quick fixes."))));
             }
             (status, beans) => {
                 let heading = if status == "ambiguous" {

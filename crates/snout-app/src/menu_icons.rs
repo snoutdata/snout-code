@@ -80,7 +80,7 @@ const fn sf(symbol: &'static str, lucide: IconName) -> Option<Icon> {
 }
 
 /// A submenu's icon, by its title.
-fn for_submenu(title: &str) -> Option<Icon> {
+pub fn for_submenu(title: &str) -> Option<Icon> {
     use IconName as L;
     match title {
         "Open Recent" => sf("clock.arrow.circlepath", L::Clock),

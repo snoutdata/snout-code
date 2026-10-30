@@ -220,25 +220,25 @@ fn find_replace_and_go_to_line_have_their_keys(cx: &mut TestAppContext) {
     let text = "one\ntwo\nthree\nfour\n";
     let (repo, _, ws, editor, cx) = open_text("notes.txt", text, (0, 0), cx);
     let state = cx.update(|_, cx| editor.read(cx).state.clone());
-    cx.simulate_keystrokes("cmd-f");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-f"));
     cx.update(|_, cx| assert!(state.read(cx).search_session().open, "⌘F finds in the file"));
     cx.simulate_keystrokes("escape");
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
-    cx.simulate_keystrokes("cmd-alt-f");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-f"));
     cx.update(|_, cx| {
         let s = state.read(cx).search_session();
         assert!(s.open && s.replace_mode, "⌥⌘F replaces");
     });
     cx.simulate_keystrokes("escape");
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
-    cx.simulate_keystrokes("cmd-shift-f");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-shift-f"));
     cx.update(|_, cx| {
         let find = ws.read(cx).find_in_files.clone().expect("⇧⌘F in the editor is still find in files");
         assert!(!find.read(cx).replace_mode);
     });
     cx.simulate_keystrokes("escape");
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
-    cx.simulate_keystrokes("cmd-l");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-l"));
     cx.update(|_, cx| assert_eq!(ws.read(cx).search.as_ref().unwrap().read(cx).mode, crate::search::Mode::GoToLine));
     cx.simulate_input("3:2");
     cx.simulate_keystrokes("enter");
@@ -257,23 +257,23 @@ fn find_replace_and_go_to_line_have_their_keys(cx: &mut TestAppContext) {
 fn line_commands_comment_duplicate_move_and_undo(cx: &mut TestAppContext) {
     let text = "class A {\n    int x;\n    int y;\n}\n";
     let (repo, _, _, editor, cx) = open_text("B.java", text, (1, 6), cx);
-    cx.simulate_keystrokes("cmd-/");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-/"));
     assert_eq!(text_of(&editor, cx), "class A {\n    // int x;\n    int y;\n}\n");
-    cx.simulate_keystrokes("cmd-/");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-/"));
     assert_eq!(text_of(&editor, cx), text, "⌘/ again uncomments");
-    cx.simulate_keystrokes("cmd-d");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-d"));
     assert_eq!(text_of(&editor, cx), "class A {\n    int x;\n    int x;\n    int y;\n}\n");
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-z"));
     assert_eq!(text_of(&editor, cx), text, "one undo takes the duplicate back");
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(2, 4, w, cx)));
-    cx.simulate_keystrokes("alt-up");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("alt-up"));
     assert_eq!(text_of(&editor, cx), "class A {\n    int y;\n    int x;\n}\n");
-    cx.simulate_keystrokes("alt-down alt-down");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("alt-down alt-down"));
     assert_eq!(text_of(&editor, cx), "class A {\n    int x;\n}\n    int y;\n");
     cx.update(|_, cx| assert_eq!(editor.read(cx).state.read(cx).cursor_position().line, 3, "the caret moves along"));
     // ⌥Z wraps long lines, and again does not.
     cx.update(|_, cx| assert!(!editor.read(cx).soft_wrap));
-    cx.simulate_keystrokes("alt-z");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("alt-z"));
     cx.update(|_, cx| assert!(editor.read(cx).soft_wrap));
     let _ = std::fs::remove_dir_all(repo);
 }
@@ -283,12 +283,12 @@ fn the_font_zooms_for_every_editor_and_is_remembered(cx: &mut TestAppContext) {
     let (repo, model, _, _, cx) = open_text("Z.java", "class Z {}\n", (0, 0), cx);
     let size = |cx: &mut VisualTestContext| cx.update(|_, cx| crate::editor::font_size(cx));
     assert_eq!(size(cx), crate::look::MONO_SIZE);
-    cx.simulate_keystrokes("cmd-= cmd-=");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-= cmd-="));
     assert_eq!(size(cx), crate::look::MONO_SIZE + 2.);
     cx.update(|_, cx| assert_eq!(model.read(cx).settings.editor_font_size, crate::look::MONO_SIZE + 2.));
-    cx.simulate_keystrokes("cmd--");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd--"));
     assert_eq!(size(cx), crate::look::MONO_SIZE + 1.);
-    cx.simulate_keystrokes("cmd-0");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-0"));
     assert_eq!(size(cx), crate::look::MONO_SIZE, "⌘0 resets it");
     let _ = std::fs::remove_dir_all(repo);
 }
@@ -297,13 +297,13 @@ fn the_font_zooms_for_every_editor_and_is_remembered(cx: &mut TestAppContext) {
 fn closing_a_tab_or_the_window_with_changes_asks_first(cx: &mut TestAppContext) {
     let (repo, model, ws, editor, cx) = open_text("C.java", "class C {}\n", (0, 0), cx);
     cx.simulate_keystrokes("x");
-    cx.simulate_keystrokes("cmd-w");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-w"));
     assert!(cx.has_pending_prompt(), "⌘W on a changed tab asks");
     cx.simulate_prompt_answer("Cancel");
     cx.run_until_parked();
     assert_eq!(tab_names(&ws, cx), ["C.java"], "Cancel keeps the tab");
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(0, 0, w, cx)));
-    cx.simulate_keystrokes("cmd-w");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-w"));
     cx.simulate_prompt_answer("Save");
     cx.run_until_parked();
     assert!(tab_names(&ws, cx).is_empty(), "Save closes it");
@@ -312,7 +312,7 @@ fn closing_a_tab_or_the_window_with_changes_asks_first(cx: &mut TestAppContext) 
     // A clean tab closes without asking; Don't Save drops the changes.
     act(&model, cx, Action::OpenFile(repo.join("README.md"), Some((0, 0))));
     cx.simulate_keystrokes("y");
-    cx.simulate_keystrokes("cmd-w");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-w"));
     cx.simulate_prompt_answer("Don't Save");
     cx.run_until_parked();
     assert!(tab_names(&ws, cx).is_empty());
@@ -413,7 +413,7 @@ fn the_gutter_marks_lines_changed_since_the_commit(cx: &mut TestAppContext) {
     let after = cx.update(|_, cx| editor.read(cx).painted.borrow().iter().find(|m| m.0 == Modified).map(|m| m.1.top()));
     assert!(after.is_some_and(|y| y < before), "{after:?} should be above {before:?}");
     // Once the change is committed, the gutter is clean.
-    cx.simulate_keystrokes("cmd-s");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-s"));
     crate::tests::git(&repo, &["commit", "-qam", "Edit the long file"]);
     act(&model, cx, Action::Refresh);
     settle(cx);
@@ -424,7 +424,7 @@ fn the_gutter_marks_lines_changed_since_the_commit(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_command_palette_lists_every_command_with_its_keys_and_runs_one(cx: &mut TestAppContext) {
     let (repo, _, ws, editor, cx) = open_text("P.java", "class P {}\n", (0, 0), cx);
-    cx.simulate_keystrokes("cmd-shift-p");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-shift-p"));
     let palette = cx.update(|_, cx| ws.read(cx).search.clone()).expect("⇧⌘P puts up the palette");
     cx.update(|_, cx| {
         let p = palette.read(cx);
@@ -432,8 +432,9 @@ fn the_command_palette_lists_every_command_with_its_keys_and_runs_one(cx: &mut T
         let recent = model_recent(&ws, cx);
         assert_eq!(p.items.len(), crate::menus::commands(&recent).len(), "every command is listed");
         let keys = |name: &str| p.items.iter().find(|i| i.path == name).and_then(|i| i.keys.clone());
-        assert_eq!(keys("Toggle Comment").as_deref(), Some("⌘/"), "with the keys it has in the editor");
-        assert_eq!(keys("Go to File…").as_deref(), Some("⌘P"));
+        let shown = |mac: &str| crate::keymap::display(&crate::keymap::platform_keys(mac), cx);
+        assert_eq!(keys("Toggle Comment"), Some(shown("cmd-/")), "with the keys it has in the editor");
+        assert_eq!(keys("Go to File…"), Some(shown("cmd-p")));
         assert!(keys("Pull").is_none(), "and none where it has none");
     });
     cx.simulate_input("duplicate");
@@ -447,7 +448,7 @@ fn the_command_palette_lists_every_command_with_its_keys_and_runs_one(cx: &mut T
 #[gpui::test]
 fn split_right_shows_the_file_twice_and_keeps_both_in_step(cx: &mut TestAppContext) {
     let (repo, _, ws, editor, cx) = open_text("S.java", "class S {}\n", (0, 0), cx);
-    cx.simulate_keystrokes("cmd-\\");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-\\"));
     let editors = cx.update(|_, cx| ws.read(cx).editors(cx));
     assert_eq!(editors.len(), 2);
     let twin = editors.into_iter().find(|e| e.entity_id() != editor.entity_id()).unwrap();
@@ -463,7 +464,7 @@ fn split_right_shows_the_file_twice_and_keeps_both_in_step(cx: &mut TestAppConte
     assert_eq!(text_of(&twin, cx), "xclass S {}\n");
     assert_eq!(text_of(&editor, cx), "xclass S {}\n");
     cx.update(|_, cx| assert!(editor.read(cx).dirty));
-    cx.simulate_keystrokes("cmd-s");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-s"));
     cx.update(|_, cx| assert!(!editor.read(cx).dirty && !twin.read(cx).dirty, "saving one saves both"));
     let _ = std::fs::remove_dir_all(repo);
 }
@@ -790,7 +791,7 @@ fn hover_and_command_click_answer_the_pointer(cx: &mut TestAppContext) {
     assert_eq!(hovers.get(), 1, "one request for the word, however often the pointer moved");
 
     // ⌘-click on the word while the hover shows: its definition opens.
-    cx.simulate_click(b, Modifiers::command());
+    cx.simulate_click(b, crate::tests::primary());
     cx.run_until_parked();
     assert_eq!(definitions.get(), 1);
     assert_eq!(*shown.borrow(), ["file:///elsewhere/Other.java"], "the definition's file is shown");
@@ -973,7 +974,7 @@ fn the_navigation_modifier_underlines_a_link_and_the_popup_lists_places(cx: &mut
     cx.simulate_mouse_move(at, None, Modifiers::none());
     cx.run_until_parked();
     assert_eq!(link(cx), None, "no link without the modifier");
-    cx.simulate_mouse_move(at, None, Modifiers::command());
+    cx.simulate_mouse_move(at, None, crate::tests::primary());
     cx.run_until_parked();
     assert_eq!(link(cx), Some(helper..helper + 6), "underlined at once");
     assert!(cx.debug_bounds("nav-link").is_some(), "drawn, with the hand");
@@ -984,7 +985,7 @@ fn the_navigation_modifier_underlines_a_link_and_the_popup_lists_places(cx: &mut
     cx.simulate_modifiers_change(Modifiers::none());
     cx.run_until_parked();
     assert_eq!(link(cx), None);
-    cx.simulate_mouse_move(at, None, Modifiers::command());
+    cx.simulate_mouse_move(at, None, crate::tests::primary());
     cx.run_until_parked();
     assert_eq!(link(cx), Some(helper..helper + 6));
     assert_eq!(definitions.get(), asked, "known: not asked again for the word");
@@ -995,7 +996,7 @@ fn the_navigation_modifier_underlines_a_link_and_the_popup_lists_places(cx: &mut
         cx.set_global(crate::editor::EditorDefaults::of(&s));
     });
     cx.simulate_mouse_move(at, None, Modifiers::none());
-    cx.simulate_mouse_move(at, None, Modifiers::command());
+    cx.simulate_mouse_move(at, None, crate::tests::primary());
     cx.run_until_parked();
     assert_eq!(link(cx), None, "⌘ is not the key any more");
     cx.simulate_mouse_move(at, None, Modifiers::alt());

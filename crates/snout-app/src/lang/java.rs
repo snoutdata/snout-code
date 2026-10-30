@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use snout_host::{Cmd, Host, Stdio};
 
-/// The engine distribution on `host`: `SNOUT_ENGINE_DIST`, else inside the app bundle
-/// (`Contents/Resources/engine`) or beside the program serving the host, else
-/// `engine/build/dist` of the workspace the binary was built in (development).
+/// The engine distribution on `host`: `SNOUT_ENGINE_DIST`, else among the app's resources
+/// (`Contents/Resources/engine` in the Mac's app bundle, `/usr/lib/snout-code/engine` in a
+/// Linux package, see [`crate::platform::resource_dirs`]), else `engine/build/dist` of the
+/// workspace the binary was built in (development).
 pub fn engine_dist(host: &dyn Host) -> Option<PathBuf> {
     let ok = |d: &Path| host.is_file(&d.join("runtime/bin/java")) && host.is_dir(&d.join("lib"));
     if let Some(d) = host.info().var("SNOUT_ENGINE_DIST").map(PathBuf::from) {
@@ -22,12 +23,8 @@ pub fn engine_dist(host: &dyn Host) -> Option<PathBuf> {
         return super::remote_engine::installed(host);
     }
     let exe = host.info().exe.clone()?;
-    for dir in exe.ancestors().skip(1) {
-        for candidate in [dir.join("Resources/engine"), dir.join("engine/build/dist")] {
-            if ok(&candidate) {
-                return Some(candidate);
-            }
-        }
+    if let Some(found) = crate::platform::find_resource(&exe, "engine", "engine/build/dist", ok) {
+        return Some(found);
     }
     let built = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../engine/build/dist");
     ok(&built).then(|| host.canonicalize(&built).unwrap_or(built))
@@ -209,14 +206,22 @@ pub fn jdks_in(host: &dyn Host, dir: &Path) -> Vec<Jdk> {
     out
 }
 
-/// Where SnoutCode keeps the JDKs it downloads on a host: in its folder of Application
-/// Support on a Mac, in `~/.snout-code/jdks` on a remote machine.
+/// Where SnoutCode keeps the JDKs it downloads on a host: in its data folder on the machine
+/// the app runs on (Application Support on a Mac, `~/.local/share/SnoutCode` on Linux), in
+/// `~/.snout-code/jdks` on a remote machine (beside the server and the engine SnoutCode
+/// installs there).
 pub fn downloads_dir(info: &snout_host::HostInfo) -> PathBuf {
-    downloads_under(info.is_mac(), &info.home)
+    downloads_under(info, &info.home)
 }
 
-fn downloads_under(mac: bool, home: &Path) -> PathBuf {
-    if mac { home.join("Library/Application Support/SnoutCode/jdks") } else { home.join(".snout-code/jdks") }
+/// [`downloads_dir`] for the home folder `home` on the host `info` describes.
+fn downloads_under(info: &snout_host::HostInfo, home: &Path) -> PathBuf {
+    if info.pid == std::process::id() {
+        let var = |name: &str| if home == info.home { info.var(name).map(str::to_owned) } else { None };
+        snout_host::dirs::AppDirs::for_os(&info.os, home, var).data.join("jdks")
+    } else {
+        home.join(".snout-code/jdks")
+    }
 }
 
 /// Every JDK `host` has where JDKs usually are. On a Mac: what `java_home` lists, the
@@ -252,7 +257,7 @@ pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
     for dir in mac_dirs.into_iter().filter(|_| mac).chain([
         home.join(".sdkman/candidates/java"),
         home.join(".gradle/jdks"),
-        downloads_under(mac, home),
+        downloads_under(host.info(), home),
     ]) {
         found.extend(jdks_in(host, &dir));
     }
@@ -537,7 +542,8 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
         // The remote machine cannot fetch it: this Mac does, and copies it over.
         let tmp = tempfile::Builder::new().prefix("snout-temurin").tempdir()?;
         let file = tmp.path().join("jdk.tar.gz");
-        fetch_file(&*local, link, &file, progress).context("download the JDK on this Mac")?;
+        fetch_file(&*local, link, &file, progress)
+            .with_context(|| format!("download the JDK on {}", crate::platform::THIS_MACHINE))?;
         if !sha.is_empty() && sha256_on(&*local, &file)? != sha {
             bail!("the download is damaged (its checksum does not match)");
         }

@@ -1025,7 +1025,7 @@ impl ProjectStructureView {
         let warm = p.lanes()[1];
         let machine = match &self.host_name {
             Some(h) => format!("on {h}"),
-            None => "on this Mac".to_owned(),
+            None => format!("on {}", crate::platform::THIS_MACHINE),
         };
         let downloading = self.download.clone();
         let view = cx.entity();

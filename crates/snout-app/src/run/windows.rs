@@ -200,7 +200,7 @@ fn tool(
         .justify_center()
         .rounded(px(5.))
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
-        .tooltip(move |w, cx| Tooltip::new(tip).build(w, cx))
+        .tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(tip)).build(w, cx))
         .child(icon(g, 15., ink))
 }
 

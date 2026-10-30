@@ -121,7 +121,7 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
 
     // Nothing selected: Extract Method says what it needs, at the caret.
     caret_at(&editor, "double sum", 0, 0, t.cx);
-    t.cx.simulate_keystrokes("cmd-alt-m");
+    t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-m"));
     let hint = t.cx.update(|_, cx| editor.read(cx).hint.clone());
     assert!(hint.as_deref().is_some_and(|h| h.contains("select")), "{hint:?}");
     assert!(t.cx.debug_bounds("editor-hint").is_some(), "the note shows at the caret");
@@ -131,7 +131,7 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
     let mut extracted = false;
     for _ in 0..10 {
         t.select("for (Shape s : shapes) {\n            sum += s.area();\n        }", 0);
-        t.cx.simulate_keystrokes("cmd-alt-m");
+        t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-m"));
         if pump_until(t.cx, 6, |cx| renaming(cx)) {
             extracted = true;
             break;
@@ -152,7 +152,7 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
 
     // Extract Variable (⌥⌘V) on an expression used once: no question, a local, its name.
     t.select("shop.total() * 1.25", 0);
-    t.cx.simulate_keystrokes("cmd-alt-v");
+    t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-v"));
     assert!(pump_until(t.cx, 30, |cx| renaming(cx)), "Extract Variable asks for the name");
     assert!(t.text().contains("double "), "{}", t.text());
     t.cx.simulate_keystrokes("escape");
@@ -162,7 +162,7 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
     let twice = original.replace("int tax = 7;", "int tax = 7 * 6;\n        int fee = 7 * 6;");
     t.put_back(&twice);
     t.select("7 * 6", 0);
-    t.cx.simulate_keystrokes("cmd-alt-v");
+    t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-v"));
     let asked = pump_until(t.cx, 30, |cx| cx.update(|_, cx| editor.read(cx).choices.is_some()));
     assert!(asked, "two ways: this occurrence or both");
     assert!(t.cx.debug_bounds("refactor-choices").is_some());
@@ -182,7 +182,7 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
 
     // Extract Constant (⌥⌘C) on a literal: a static final field.
     t.select("1.25", 0);
-    t.cx.simulate_keystrokes("cmd-alt-c");
+    t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-c"));
     assert!(pump_until(t.cx, 30, |cx| renaming(cx)), "Extract Constant asks for the name");
     assert!(t.text().contains("static final double"), "{}", t.text());
     t.cx.simulate_keystrokes("escape");
@@ -190,7 +190,7 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
 
     // Extract Field (⌥⇧⌘F) on an expression of a method: a field.
     t.select("name + \": \" + count", 0);
-    t.cx.simulate_keystrokes("cmd-alt-shift-f");
+    t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-shift-f"));
     let field = pump_until(t.cx, 30, |cx| renaming(cx));
     assert!(field, "Extract Field asks for the name: {}", t.text());
     assert!(t.text().contains("private static String"), "{}", t.text());
@@ -199,7 +199,7 @@ fn extracts_and_inlines_with_the_keyboard(cx: &mut TestAppContext) {
 
     // Inline (⌥⌘N) on a local variable: its value in its place.
     caret_at(&editor, "tax = 7", 0, 1, t.cx);
-    t.cx.simulate_keystrokes("cmd-alt-n");
+    t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-n"));
     assert!(t.wait_for_text(30, |s| !s.contains("int tax") && s.contains("* 1.25 + 7")), "{}", t.text());
     assert!(!renaming(t.cx), "inlining names nothing");
     t.put_back(&original);
@@ -227,7 +227,7 @@ fn formats_the_selection_or_else_the_file(cx: &mut TestAppContext) {
     let mut formatted = false;
     for _ in 0..10 {
         t.select("double   sum =  0;", 0);
-        t.cx.simulate_keystrokes("cmd-alt-l");
+        t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-l"));
         if t.wait_for_text(5, |s| s.contains("        double sum = 0;")) {
             formatted = true;
             break;
@@ -239,7 +239,7 @@ fn formats_the_selection_or_else_the_file(cx: &mut TestAppContext) {
     // Nothing selected: the whole file.
     let editor = t.editor.clone();
     caret_at(&editor, "package", 0, 0, t.cx);
-    t.cx.simulate_keystrokes("cmd-alt-l");
+    t.cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-l"));
     assert!(t.wait_for_text(30, |s| s.contains("        int tax = 7;")), "{}", t.text());
     let names: Vec<String> = crate::menus::commands(&[]).into_iter().map(|(n, _)| n.to_string()).collect();
     assert!(names.iter().any(|n| n == "Format Selection"));
@@ -324,7 +324,7 @@ fn the_structure_window_and_popup_show_the_files_symbols(cx: &mut TestAppContext
     let (ws, editor, cx) = (t.ws.clone(), t.editor.clone(), &mut *t.cx);
     let structure = cx.update(|_, cx| ws.read(cx).structure.clone());
     caret_at(&editor, "sum += s.area()", 0, 0, cx);
-    cx.simulate_keystrokes("cmd-7");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-7"));
     let open = cx.update(|_, cx| ws.read(cx).tool_open(crate::workspace::Tool::Structure, cx));
     assert!(open, "⌘7 opens the Structure window");
     let names = |cx: &mut VisualTestContext| {
@@ -379,7 +379,7 @@ fn the_structure_window_and_popup_show_the_files_symbols(cx: &mut TestAppContext
 
     // ⌘F12: the same tree over the editor, on the symbol the caret is in; ↩ goes there.
     caret_at(&editor, "String text", 0, 0, cx);
-    cx.simulate_keystrokes("cmd-f12");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-f12"));
     let popup = pump_until(cx, 30, |cx| {
         cx.update(|_, cx| {
             ws.read(cx).search.as_ref().is_some_and(|s| {
@@ -427,7 +427,7 @@ fn type_and_call_hierarchies_open_level_by_level(cx: &mut TestAppContext) {
     let mut subtypes = false;
     for _ in 0..10 {
         caret_at(&editor, "interface Shape", 0, 11, cx);
-        cx.simulate_keystrokes("ctrl-h");
+        cx.simulate_keystrokes(&crate::keymap::platform_keys("ctrl-h"));
         let h = hierarchy.clone();
         if pump_until(cx, 6, |cx| cx.update(|_, cx| h.read(cx).visible().len() >= 3)) {
             subtypes = true;
@@ -466,7 +466,7 @@ fn type_and_call_hierarchies_open_level_by_level(cx: &mut TestAppContext) {
     let e = circle_editor.clone();
     pump_until(cx, 10, |cx| !text(&e, cx).is_empty());
     caret_at(&circle_editor, "class Circle", 0, 7, cx);
-    cx.simulate_keystrokes("ctrl-h");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("ctrl-h"));
     let h = hierarchy.clone();
     pump_until(cx, 20, |cx| cx.update(|_, cx| h.read(cx).nodes.first().is_some_and(|n| n.name == "Circle")));
     cx.update(|_, cx| hierarchy.update(cx, |h, cx| h.set_mode(Mode::Supertypes, cx)));
@@ -479,7 +479,7 @@ fn type_and_call_hierarchies_open_level_by_level(cx: &mut TestAppContext) {
 
     // ⌃⌥H on area(): its callers, a level at a time: total() calls it, and describe().
     caret_at(&editor, "double area()", 0, 8, cx);
-    cx.simulate_keystrokes("ctrl-alt-h");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("ctrl-alt-h"));
     let h = hierarchy.clone();
     let callers = pump_until(cx, 30, |cx| {
         cx.update(|_, cx| {
@@ -536,7 +536,7 @@ fn go_to_class_finds_project_library_and_jdk_classes(cx: &mut TestAppContext) {
     let mut found = false;
     for _ in 0..10 {
         caret_at(&editor, "package", 0, 0, cx);
-        cx.simulate_keystrokes("cmd-alt-o");
+        cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-alt-o"));
         assert!(cx.update(|_, cx| {
             ws.read(cx).search.as_ref().is_some_and(|s| s.read(cx).mode == crate::search::Mode::Classes)
         }));
@@ -557,12 +557,12 @@ fn go_to_class_finds_project_library_and_jdk_classes(cx: &mut TestAppContext) {
     let first = rows(cx)[0].clone();
     assert_eq!(first, ("Circle".to_owned(), "demo.shop".to_owned()), "the project's class first");
     // Only types: a method named alike is no class.
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-a"));
     cx.simulate_input("total");
     pump_until(cx, 6, |_| false);
     assert!(!rows(cx).iter().any(|(n, _)| n.starts_with("total")), "{:?}", rows(cx));
     // A JDK class, by letters of its name in order, and its package and module beside it.
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-a"));
     cx.simulate_input("arrlist");
     let w = ws.clone();
     let jdk = pump_until(cx, 20, |cx| {

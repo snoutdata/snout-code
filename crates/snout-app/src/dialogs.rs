@@ -482,7 +482,7 @@ impl DialogBody {
                     .danger()
                     .focusable()
                     .label("Discard and Quit")
-                    .kbd("⌘⌫")
+                    .kbd(crate::keymap::shown_keys("⌘⌫"))
                     .on_click(cx.listener(move |this, _, w, cx| this.act(quit(Some(false), false), w, cx)))
                     .into_any_element(),
             );
@@ -540,8 +540,13 @@ impl Render for DialogBody {
         let mut body: Vec<AnyElement> = Vec::new();
         let mut buttons: Vec<AnyElement> = Vec::new();
         let ok = |label: &str| Button::new("ok", OK_ICON).primary().focusable().label(label.to_owned()).kbd("⏎");
-        let danger =
-            |label: &str| Button::new("danger", IconName::Trash).danger().focusable().label(label.to_owned()).kbd("⌘⌫");
+        let danger = |label: &str| {
+            Button::new("danger", IconName::Trash)
+                .danger()
+                .focusable()
+                .label(label.to_owned())
+                .kbd(crate::keymap::shown_keys("⌘⌫"))
+        };
         let cancel = Button::new("cancel", CANCEL_ICON)
             .focusable()
             .label("Cancel")

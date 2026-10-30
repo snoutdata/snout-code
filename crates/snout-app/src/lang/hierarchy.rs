@@ -134,7 +134,7 @@ impl HierarchyWindow {
             mode: Mode::Subtypes,
             nodes: Vec::new(),
             selected: None,
-            note: Some("Put the caret on a type or a method, then ⌃H or ⌃⌥H.".into()),
+            note: Some(crate::keymap::shown("Put the caret on a type or a method, then ⌃H or ⌃⌥H.")),
             _tasks: Vec::new(),
             focus: cx.focus_handle(),
         }

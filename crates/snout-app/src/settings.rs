@@ -1,4 +1,5 @@
-//! What the app remembers between runs, in `~/Library/Application Support/SnoutCode/`.
+//! What the app remembers between runs, in `~/Library/Application Support/SnoutCode/` on a
+//! Mac and `~/.config/SnoutCode/` (`$XDG_CONFIG_HOME/SnoutCode`) on Linux.
 //!
 //! On the first launch, with nothing saved there yet, the repository list comes from the
 //! earlier app's eframe storage in `~/Library/Application Support/snout/app.ron`. That file
@@ -357,8 +358,13 @@ pub struct Store {
 
 impl Store {
     pub fn in_home(home: &Path) -> Self {
-        let support = home.join("Library").join("Application Support");
-        Self { file: support.join("SnoutCode").join("settings.json"), legacy: support.join("snout").join("app.ron") }
+        Self::in_config(snout_host::dirs::AppDirs::for_os(std::env::consts::OS, home, |_| None).config, home)
+    }
+
+    /// The store in the folder `config`, for the user whose home is `home`.
+    fn in_config(config: PathBuf, home: &Path) -> Self {
+        // The earlier app only ever ran on a Mac: elsewhere the file is not there.
+        Self { file: config.join("settings.json"), legacy: home.join("Library/Application Support/snout/app.ron") }
     }
 
     /// A store of its own at `file`, with no earlier app's settings to start from.
@@ -385,7 +391,8 @@ impl Store {
 
     /// The store for this user, or none without a home folder (then nothing is saved).
     pub fn for_user() -> Option<Self> {
-        std::env::var_os("HOME").map(|h| Self::in_home(Path::new(&h)))
+        let home = PathBuf::from(std::env::var_os("HOME")?);
+        Some(Self::in_config(snout_host::dirs::AppDirs::local().config, &home))
     }
 
     /// The saved settings; on a first launch, those of the earlier app; else the defaults.

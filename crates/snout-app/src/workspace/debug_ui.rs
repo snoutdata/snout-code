@@ -39,7 +39,7 @@ impl Workspace {
             return self.say("Breakpoints go in a Java, Kotlin or Scala file", cx);
         };
         if !self.runs.update(cx, |r, cx| r.toggle_breakpoint_enabled(&path, line, cx)) {
-            self.say("There is no breakpoint on this line: ⌘F8 sets one", cx);
+            self.say(&crate::keymap::shown("There is no breakpoint on this line: ⌘F8 sets one"), cx);
         }
     }
 

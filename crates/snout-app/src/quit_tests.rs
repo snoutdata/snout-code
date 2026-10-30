@@ -63,7 +63,7 @@ fn command_q_asks_then_the_window_goes_at_once_and_dont_ask_again_is_kept(cx: &m
     let repo = demo_repo("quit-cmd-q");
     let file = settings_file("quit-cmd-q-store");
     let (model, ws, cx) = open_stored(cx, with_repo(&repo), Store::at(file.clone()));
-    cx.simulate_keystrokes("cmd-q");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-q"));
     cx.run_until_parked();
     assert_eq!(quit_dialog(&model, cx), Some(Default::default()), "nothing to lose: it asks, as Settings says");
     assert!(cx.debug_bounds("quit-discard").is_none() && cx.debug_bounds("quit-save-all").is_none());
@@ -133,7 +133,7 @@ fn command_q_with_unsaved_files_saves_them_all_then_goes(cx: &mut TestAppContext
     let file = settings_file("quit-save-all-store");
     let (model, ws, cx) = open_stored(cx, with_repo(&repo), Store::at(file.clone()));
     changed_tab("Q.java", &model, &ws, &repo, cx);
-    cx.simulate_keystrokes("cmd-q");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-q"));
     cx.run_until_parked();
     assert_eq!(quit_dialog(&model, cx).map(|i| i.unsaved), Some(vec!["Q.java".to_string()]));
     click(cx, "quit-save-all");

@@ -147,7 +147,8 @@ fn hovering_a_problem_shows_its_best_fix_after_the_delay_and_the_button_applies_
     });
     let button = cx.debug_bounds("hover-fix").expect("the best fix is a button");
     let more = cx.debug_bounds("hover-more").expect("More actions… follows it");
-    assert!(more.left() > button.right());
+    // Beside it, or below it when the keys' names are long (Linux writes Alt+Shift+Enter).
+    assert!(more.left() > button.right() || more.top() >= button.bottom());
     cx.simulate_mouse_move(button.center(), None, Modifiers::none());
     cx.simulate_click(button.center(), Modifiers::none());
     cx.run_until_parked();
@@ -203,7 +204,7 @@ fn with_hover_only_while_command_is_held_a_rest_shows_nothing_and_command_shows_
     cx.simulate_mouse_move(at, None, Modifiers::none());
     wait(cx, 1500);
     assert!(!card_shows(&editor, cx), "a rest alone shows no card");
-    cx.simulate_mouse_move(at, None, Modifiers::command());
+    cx.simulate_mouse_move(at, None, crate::tests::primary());
     wait(cx, 100);
     assert!(card_shows(&editor, cx), "⌘ shows it at once");
     // The delay of the other mode is a setting too.
@@ -245,7 +246,7 @@ fn alt_shift_enter_applies_the_best_fix_at_the_caret_and_the_bulb_shows_on_its_l
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
     assert!(cx.update(|_, cx| editor.read(cx).hover.actions.is_none()));
-    cx.simulate_keystrokes("alt-shift-enter");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("alt-shift-enter"));
     cx.run_until_parked();
     assert!(text(&editor, cx).contains("import java.time.LocalDate;\n"), "⌥⇧↩ imports it");
     let _ = std::fs::remove_dir_all(repo);
@@ -256,7 +257,7 @@ fn the_context_actions_offer_fix_all_in_file_and_apply_it(cx: &mut TestAppContex
     let (repo, _, editor, cx) = setup("fix-all", cx);
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(1, 10, w, cx)));
     cx.run_until_parked();
-    cx.simulate_keystrokes("alt-enter");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("alt-enter"));
     cx.run_until_parked();
     let labels: Vec<String> = cx.update(|_, cx| {
         let list = editor.read(cx).hover.actions.as_ref().expect("⌥↩ lists the actions");
@@ -279,7 +280,7 @@ fn the_context_actions_offer_fix_all_in_file_and_apply_it(cx: &mut TestAppContex
     assert!(after.contains("LocalDate when"), "the other problem stays");
     // ⌘. lists them too.
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(2, 8, w, cx)));
-    cx.simulate_keystrokes("cmd-.");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-."));
     cx.run_until_parked();
     assert!(cx.update(|_, cx| editor.read(cx).hover.actions.is_some()));
     let _ = std::fs::remove_dir_all(repo);
@@ -311,7 +312,7 @@ fn ask_to_fix_types_the_file_lines_and_problem_into_the_agents_prompt(cx: &mut T
     // The context actions' Ask Claude to fix on the error.
     cx.update(|w, cx| editor.update(cx, |e, cx| e.go_to(4, 6, w, cx)));
     cx.run_until_parked();
-    cx.simulate_keystrokes("alt-enter");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("alt-enter"));
     cx.run_until_parked();
     let ask = cx.update(|_, cx| {
         let list = editor.read(cx).hover.actions.as_ref().unwrap();

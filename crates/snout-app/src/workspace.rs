@@ -72,6 +72,8 @@ pub struct Workspace {
     menu_checks: Option<menus::MenuState>,
     /// The menu bar waits until the window has painted (see [`Workspace::hold_menus`]).
     menus_held: bool,
+    /// The menus drawn in the title bar, where the system has no menu bar (Linux).
+    pub(crate) menu_bar: Option<Entity<crate::menu_bar::MenuBar>>,
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
     focus: gpui::FocusHandle,
     title: String,
@@ -467,6 +469,7 @@ impl Workspace {
             tabs,
             menu_checks: None,
             menus_held: false,
+            menu_bar: crate::platform::IN_WINDOW_MENUS.then(|| crate::menu_bar::MenuBar::new(cx)),
             focus: cx.focus_handle(),
             title: String::new(),
             search: None,
@@ -561,20 +564,7 @@ impl Workspace {
         let weak = cx.weak_entity();
         cx.set_global(quit::CurrentWorkspace(weak.clone()));
         window.on_window_should_close(cx, move |window, cx| {
-            let last = cx.windows().len() <= 1;
-            weak.update(cx, |this, cx| {
-                if this.quitting {
-                    return true;
-                }
-                this.save_layout(cx);
-                if last {
-                    this.request_quit(window, cx);
-                    false
-                } else {
-                    this.confirm_unsaved(false, window, cx)
-                }
-            })
-            .unwrap_or(true)
+            weak.update(cx, |this, cx| this.window_should_close(window, cx)).unwrap_or(true)
         });
         window.focus(&this.focus, cx);
         // A file named on the command line.
@@ -942,7 +932,6 @@ impl Workspace {
     /// is now. The chosen one runs there.
     pub fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let before = window.focused(cx);
-        let os = cx.platform_info().os;
         let recent = self.model.read(cx).recent_projects();
         let commands: Vec<crate::search::Command> = menus::commands(&recent)
             .into_iter()
@@ -952,8 +941,7 @@ impl Workspace {
                     None => window.highest_precedence_binding_for_action(&*action),
                 }
                 .or_else(|| window.highest_precedence_binding_for_action(&*action));
-                let keys = binding
-                    .map(|b| b.keystrokes().iter().map(|k| k.display(os).to_string()).collect::<Vec<_>>().join(" "));
+                let keys = binding.map(|b| crate::keymap::binding_label(&b, cx));
                 crate::search::Command { name, action, keys }
             })
             .collect();
@@ -1616,7 +1604,14 @@ impl Workspace {
         match which {
             Which::User => {
                 if crate::remote::is_remote(cx) {
-                    say(self, "Your settings.json is on this Mac: open it from a window on this Mac", cx);
+                    say(
+                        self,
+                        &format!(
+                            "Your settings.json is on {0}: open it from a window on {0}",
+                            crate::platform::THIS_MACHINE
+                        ),
+                        cx,
+                    );
                     return;
                 }
                 let Some(file) = self.model.update(cx, |m, _| {
@@ -1835,6 +1830,24 @@ impl Workspace {
         if self.menu_checks.as_ref() != Some(&checks) {
             crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote), cx);
             self.menu_checks = Some(checks);
+            if let Some(bar) = &self.menu_bar {
+                bar.update(cx, |bar, cx| bar.reload(cx));
+            }
+        }
+    }
+
+    /// Whether the window may close now: the last one quits, as ⌘Q does, asking first if need
+    /// be; another asks about its unsaved changes.
+    pub(crate) fn window_should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.quitting {
+            return true;
+        }
+        self.save_layout(cx);
+        if cx.windows().len() <= 1 {
+            self.request_quit(window, cx);
+            false
+        } else {
+            self.confirm_unsaved(false, window, cx)
         }
     }
 
