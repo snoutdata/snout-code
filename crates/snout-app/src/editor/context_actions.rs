@@ -45,18 +45,13 @@ impl Entry {
 
 /// The lines for the actions the engine offered at a place, where `here` are the problems
 /// there (the first the one the list is about) and `problems` every problem of the file: the
-/// fixes, the best first; Fix all; Ask the agent; then the rest.
+/// best fix; Fix all; Ask the agent; the engine's other fixes; then the rest.
 pub fn entries(problems: &[Diagnostic], here: &[Diagnostic], actions: Vec<CodeAction>) -> Vec<Entry> {
     let actions = fixes::usable(actions);
     let best = fixes::best_fix(&actions).cloned();
     let mut out: Vec<Entry> = Vec::new();
     if let Some(b) = &best {
         out.push(Entry::Fix(b.clone()));
-    }
-    for a in &actions {
-        if fixes::sort_of(a) == Sort::Fix && Some(a) != best.as_ref() {
-            out.push(Entry::Fix(a.clone()));
-        }
     }
     for a in &actions {
         if fixes::sort_of(a) == Sort::FixAll {
@@ -76,6 +71,12 @@ pub fn entries(problems: &[Diagnostic], here: &[Diagnostic], actions: Vec<CodeAc
     }
     if let Some(problem) = here.first() {
         out.push(Entry::Ask(problem.clone()));
+    }
+    // The engine's other fixes (it may offer a dozen guesses for a name it cannot find).
+    for a in &actions {
+        if fixes::sort_of(a) == Sort::Fix && Some(a) != best.as_ref() {
+            out.push(Entry::Fix(a.clone()));
+        }
     }
     out.extend(actions.into_iter().filter(|a| fixes::sort_of(a) == Sort::Other).map(Entry::Other));
     out
@@ -211,13 +212,16 @@ pub fn view(
     };
     let mut rows: Vec<AnyElement> = Vec::new();
     let mut first_fix = true;
-    let mut others = false;
     for (i, e) in list.entries.iter().enumerate() {
-        if matches!(e, Entry::Other(_)) && !others {
-            others = true;
-            if i > 0 {
-                rows.push(div().mx(px(6.)).my(px(3.)).h(px(1.)).bg(p.border).into_any_element());
-            }
+        // A rule before the engine's other fixes, and before its other actions.
+        let prev = i.checked_sub(1).and_then(|j| list.entries.get(j));
+        let rule = match (prev, e) {
+            (Some(Entry::Ask(_)), Entry::Fix(_)) => true,
+            (Some(before), Entry::Other(_)) => !matches!(before, Entry::Other(_)),
+            _ => false,
+        };
+        if rule {
+            rows.push(div().mx(px(6.)).my(px(3.)).h(px(1.)).bg(p.border).into_any_element());
         }
         let (ico, ink) = match e {
             Entry::Fix(_) => {
@@ -346,9 +350,9 @@ mod tests {
             labels,
             [
                 "Remove unused import",
-                "Organize imports",
                 "Fix all \u{2018}Remove unused import\u{2019} in file",
                 "Ask Claude to fix",
+                "Organize imports",
                 "Generate toString()",
             ]
         );
