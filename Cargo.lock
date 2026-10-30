@@ -6342,6 +6342,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "dekobon-tree-sitter-groovy",
+ "embed-resource",
  "epaint_default_fonts",
  "futures",
  "fuzzy-matcher",
@@ -6376,6 +6377,7 @@ dependencies = [
  "tree-sitter-kotlin-sg",
  "tree-sitter-properties",
  "tungstenite",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6406,6 +6408,7 @@ dependencies = [
  "notify",
  "portable-pty",
  "sysinfo",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

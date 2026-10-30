@@ -6,16 +6,27 @@
 //! Gradle, a run or the engine stayed pending and did nothing. Every `std::process::Command`
 //! SnoutCode starts goes through [`default_signals`]. Terminals start through `portable-pty`,
 //! which clears the mask and resets the signals that end a process itself.
+//!
+//! Windows has no signals: there the same call starts the process without a console window
+//! of its own (the app has no console, so a console program would open one).
 
 use std::process::Command;
 
 /// The highest signal number of the system.
 #[cfg(target_os = "linux")]
 const LAST_SIGNAL: libc::c_int = 64;
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 const LAST_SIGNAL: libc::c_int = 31;
 
+/// Make `c` start its process with no signal blocked and every signal at its default action
+/// (on Windows: without a console window).
+#[cfg(windows)]
+pub fn default_signals(c: &mut Command) -> &mut Command {
+    crate::win::no_console(c)
+}
+
 /// Make `c` start its process with no signal blocked and every signal at its default action.
+#[cfg(unix)]
 pub fn default_signals(c: &mut Command) -> &mut Command {
     use std::os::unix::process::CommandExt as _;
     // SAFETY: the closure runs between fork and exec and makes only async-signal-safe calls
@@ -29,6 +40,7 @@ pub fn default_signals(c: &mut Command) -> &mut Command {
 }
 
 /// Every signal to its default action, then none blocked. Async-signal-safe.
+#[cfg(unix)]
 unsafe fn reset() {
     // SAFETY: plain system calls on this process; zeroed is a valid sigaction and sigset_t.
     unsafe {

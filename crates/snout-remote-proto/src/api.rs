@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub type ChannelId = u32;
@@ -33,44 +33,93 @@ pub enum Request {
     /// Reply [`HostInfo`].
     Info,
     /// Reply `()`, the contents as the blob.
-    Read { path: PathBuf },
+    Read {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+    },
     /// Up to `len` bytes from `offset` on. Reply `()`, the bytes as the blob.
-    ReadRange { path: PathBuf, offset: u64, len: u64 },
+    ReadRange {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+        offset: u64,
+        len: u64,
+    },
     /// Atomic: the contents (the blob) go to a temporary file in the same folder, which then
     /// replaces `path`, with the permission bits `mode`, else the ones it had. Reply `()`.
     Write {
+        #[serde(serialize_with = "unix_path")]
         path: PathBuf,
         #[serde(default)]
         mode: Option<u32>,
     },
     /// Add the blob to the end of `path`, made if missing (a large upload, in pieces).
     /// Reply `()`.
-    Append { path: PathBuf },
+    Append {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+    },
     /// Reply `()`. The folders it makes get the permission bits `mode`, when given.
     CreateDirAll {
+        #[serde(serialize_with = "unix_path")]
         path: PathBuf,
         #[serde(default)]
         mode: Option<u32>,
     },
     /// A file, a symlink, an empty folder, or with `recursive` any folder. Reply `()`.
-    Remove { path: PathBuf, recursive: bool },
+    Remove {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+        recursive: bool,
+    },
     /// Reply `()`.
-    Rename { from: PathBuf, to: PathBuf },
+    Rename {
+        #[serde(serialize_with = "unix_path")]
+        from: PathBuf,
+        #[serde(serialize_with = "unix_path")]
+        to: PathBuf,
+    },
     /// A file, or with `recursive` a folder and everything in it. Reply `()`.
-    Copy { from: PathBuf, to: PathBuf, recursive: bool },
+    Copy {
+        #[serde(serialize_with = "unix_path")]
+        from: PathBuf,
+        #[serde(serialize_with = "unix_path")]
+        to: PathBuf,
+        recursive: bool,
+    },
     /// Reply [`Metadata`].
-    Metadata { path: PathBuf, follow_symlinks: bool },
+    Metadata {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+        follow_symlinks: bool,
+    },
     /// Reply `Vec<DirEntry>`, in no particular order.
-    ReadDir { path: PathBuf },
+    ReadDir {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+    },
     /// Reply `PathBuf`.
-    Canonicalize { path: PathBuf },
+    Canonicalize {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+    },
     /// Reply `bool`.
-    Exists { path: PathBuf },
+    Exists {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+    },
     /// Moves `path` to the user's trash (the freedesktop.org trash on Linux). Reply `()`.
-    Trash { path: PathBuf },
+    Trash {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+    },
     /// Watch `path`; each change arrives on `channel` as a message with a `Vec<WatchEvent>`
     /// header. Close the channel to stop. Reply `()`.
-    Watch { path: PathBuf, recursive: bool, channel: ChannelId },
+    Watch {
+        #[serde(serialize_with = "unix_path")]
+        path: PathBuf,
+        recursive: bool,
+        channel: ChannelId,
+    },
     /// Reply [`Spawned`].
     Spawn(SpawnRequest),
     /// Reply [`Spawned`].
@@ -92,9 +141,19 @@ pub enum Request {
     /// Reply `Vec<ProcessInfo>`.
     ListProcesses,
     /// The entries under `root`. Reply `Vec<WalkEntry>`.
-    Walk { root: PathBuf, options: WalkOptions },
+    Walk {
+        #[serde(serialize_with = "unix_path")]
+        root: PathBuf,
+        options: WalkOptions,
+    },
     /// The lines of `files` (relative to `root`) holding `needle`. Reply `Vec<TextHit>`.
-    FindText { root: PathBuf, files: Vec<String>, needle: String, limit: usize },
+    FindText {
+        #[serde(serialize_with = "unix_path")]
+        root: PathBuf,
+        files: Vec<String>,
+        needle: String,
+        limit: usize,
+    },
     /// Every process of the machine (not only the server's). Reply `Vec<SystemProcess>`.
     SystemProcesses { cpu: bool },
     /// Stop the processes `(pid, start time)`, killing what is left after `grace_ms`.
@@ -141,13 +200,16 @@ pub struct SpawnRequest {
     pub env: Vec<(String, String)>,
     pub env_remove: Vec<String>,
     pub env_clear: bool,
+    #[serde(serialize_with = "unix_path_opt")]
     pub cwd: Option<PathBuf>,
     pub stdio: Stdio,
     /// stdout to this file (made empty first) instead of a channel.
     #[serde(default)]
+    #[serde(serialize_with = "unix_path_opt")]
     pub stdout_file: Option<PathBuf>,
     /// stderr to this file (made empty first) instead of a channel.
     #[serde(default)]
+    #[serde(serialize_with = "unix_path_opt")]
     pub stderr_file: Option<PathBuf>,
 }
 
@@ -158,6 +220,7 @@ pub struct PtyRequest {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub env_remove: Vec<String>,
+    #[serde(serialize_with = "unix_path_opt")]
     pub cwd: Option<PathBuf>,
     pub size: PtySize,
     /// Carries the terminal's output from the server and its input to it.
@@ -386,6 +449,24 @@ impl From<RemoteError> for io::Error {
     fn from(e: RemoteError) -> Self {
         io::Error::new(e.io_kind(), e.message)
     }
+}
+
+/// A path as the server (always a Unix system) reads it: from an app on Windows, whose paths
+/// join with `\\`, with `/` instead.
+pub fn wire_path(p: &Path) -> std::borrow::Cow<'_, Path> {
+    if cfg!(windows) && p.as_os_str().to_string_lossy().contains('\\') {
+        std::borrow::Cow::Owned(PathBuf::from(p.to_string_lossy().replace('\\', "/")))
+    } else {
+        std::borrow::Cow::Borrowed(p)
+    }
+}
+
+fn unix_path<S: serde::Serializer>(p: &Path, s: S) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(&*wire_path(p), s)
+}
+
+fn unix_path_opt<S: serde::Serializer>(p: &Option<PathBuf>, s: S) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(&p.as_deref().map(wire_path), s)
 }
 
 #[cfg(test)]

@@ -16,15 +16,29 @@
 //! `DIR` defaults to `$SNOUT_SERVER_DIR`, else `~/.snout-code/server/<version>`. The daemon
 //! stops after `SECS` (default 3 hours) without a client, and stops its processes when it
 //! goes.
+//!
+//! It serves Linux and macOS machines only: on Windows it builds (the workspace builds
+//! everywhere) but only says so.
 
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
+#[cfg(unix)]
 mod daemon;
+#[cfg(unix)]
 mod fsops;
+#[cfg(unix)]
 mod handler;
+#[cfg(unix)]
 mod loginenv;
+#[cfg(unix)]
 mod procs;
+#[cfg(unix)]
 mod proxy;
+#[cfg(unix)]
 mod tcp;
+#[cfg(unix)]
 mod trash;
+#[cfg(unix)]
 mod watch;
 
 use snout_remote_proto::{PROTOCOL, VERSION};
@@ -43,6 +57,13 @@ fn usage() -> ! {
     std::process::exit(2);
 }
 
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("snout-server runs on Linux and macOS machines, which SnoutCode reaches over SSH");
+    std::process::exit(2);
+}
+
+#[cfg(unix)]
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut mode = None;

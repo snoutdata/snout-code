@@ -28,12 +28,12 @@ impl Default for LocalHost {
 
 impl LocalHost {
     pub fn new() -> Self {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let home = crate::home_dir();
         let trash = crate::trash::method(&|name| std::env::var(name).ok(), &home);
         let info = HostInfo {
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
-            home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+            home,
             temp_dir: std::env::temp_dir(),
             env: std::env::vars_os()
                 .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
@@ -59,8 +59,21 @@ fn kind_of(t: std::fs::FileType) -> FileKind {
 }
 
 fn metadata_of(m: std::fs::Metadata) -> Metadata {
+    Metadata { kind: kind_of(m.file_type()), len: m.len(), modified: m.modified().ok(), mode: mode_of(&m) }
+}
+
+#[cfg(unix)]
+fn mode_of(m: &std::fs::Metadata) -> u32 {
     use std::os::unix::fs::PermissionsExt as _;
-    Metadata { kind: kind_of(m.file_type()), len: m.len(), modified: m.modified().ok(), mode: m.permissions().mode() }
+    m.permissions().mode()
+}
+
+/// Windows has no permission bits: those a Unix system would show, from the file's kind and
+/// whether it is read-only.
+#[cfg(not(unix))]
+fn mode_of(m: &std::fs::Metadata) -> u32 {
+    let base = if m.is_dir() { 0o040_755 } else { 0o100_644 };
+    if m.permissions().readonly() { base & !0o222 } else { base }
 }
 
 fn command(cmd: &Cmd) -> io::Result<std::process::Command> {
@@ -87,45 +100,79 @@ fn command(cmd: &Cmd) -> io::Result<std::process::Command> {
     Ok(c)
 }
 
-/// A process this Mac runs.
-struct LocalProcess(std::process::Child);
+/// A process this Mac runs. On Windows it is in a job object of its own, so stopping it
+/// stops the processes it started too.
+struct LocalProcess {
+    child: std::process::Child,
+    #[cfg(windows)]
+    job: Option<crate::win::Job>,
+}
+
+impl LocalProcess {
+    fn new(child: std::process::Child) -> Self {
+        #[cfg(windows)]
+        {
+            let job = crate::win::Job::new(false).ok().filter(|j| j.assign_child(&child).is_ok());
+            Self { child, job }
+        }
+        #[cfg(not(windows))]
+        Self { child }
+    }
+}
 
 impl Process for LocalProcess {
     fn pid(&self) -> Option<u32> {
-        Some(self.0.id())
+        Some(self.child.id())
     }
 
     fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
-        self.0.stdin.take().map(|s| Box::new(s) as _)
+        self.child.stdin.take().map(|s| Box::new(s) as _)
     }
 
     fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
-        self.0.stdout.take().map(|s| Box::new(s) as _)
+        self.child.stdout.take().map(|s| Box::new(s) as _)
     }
 
     fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
-        self.0.stderr.take().map(|s| Box::new(s) as _)
+        self.child.stderr.take().map(|s| Box::new(s) as _)
     }
 
+    #[cfg(unix)]
     fn terminate(&mut self) -> io::Result<()> {
-        if self.0.try_wait()?.is_some() {
+        if self.child.try_wait()?.is_some() {
             return Ok(());
         }
-        let pid = libc::pid_t::try_from(self.0.id()).map_err(io::Error::other)?;
+        let pid = libc::pid_t::try_from(self.child.id()).map_err(io::Error::other)?;
         // SAFETY: a plain system call on a child of ours that has not been waited for.
         if unsafe { libc::kill(pid, libc::SIGTERM) } == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
     }
 
+    /// Windows has no SIGTERM for a program without a window: it ends at once, with what it
+    /// started.
+    #[cfg(not(unix))]
+    fn terminate(&mut self) -> io::Result<()> {
+        if self.child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        self.kill()
+    }
+
     fn kill(&mut self) -> io::Result<()> {
-        self.0.kill()
+        #[cfg(windows)]
+        if let Some(job) = &self.job
+            && job.terminate(1).is_ok()
+        {
+            return Ok(());
+        }
+        self.child.kill()
     }
 
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        Ok(self.0.try_wait()?.map(Into::into))
+        Ok(self.child.try_wait()?.map(Into::into))
     }
 
     fn wait(&mut self) -> io::Result<ExitStatus> {
-        Ok(self.0.wait()?.into())
+        Ok(self.child.wait()?.into())
     }
 }
 
@@ -187,6 +234,15 @@ impl Stream for TcpStream {
     }
 }
 
+/// `path` with every link resolved; on Windows without the `\\?\` prefix a path that does
+/// not need it would carry (so it compares with the paths the rest of the app makes).
+pub fn canonical(path: &Path) -> io::Result<PathBuf> {
+    let p = std::fs::canonicalize(path)?;
+    #[cfg(windows)]
+    let p = crate::win::simplify(&p);
+    Ok(p)
+}
+
 /// A file beside `path` to write before renaming it into place.
 fn temp_beside(path: &Path) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -218,26 +274,31 @@ impl Host for LocalHost {
     }
 
     fn write_mode(&self, path: &Path, data: &[u8], mode: Option<u32>) -> io::Result<()> {
-        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
         // A link is written through: the file it points to changes, the link stays.
         let path = match std::fs::symlink_metadata(path) {
-            Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
+            Ok(m) if m.file_type().is_symlink() => canonical(path)?,
             _ => path.to_owned(),
         };
-        let mode = mode.or_else(|| std::fs::metadata(&path).ok().map(|m| m.permissions().mode() & 0o7777));
+        let mode = mode.or_else(|| std::fs::metadata(&path).ok().map(|m| mode_of(&m) & 0o7777));
         let tmp = temp_beside(&path);
         let written = (|| {
             let mut options = std::fs::OpenOptions::new();
             options.write(true).create_new(true);
+            #[cfg(unix)]
             if let Some(mode) = mode {
+                use std::os::unix::fs::OpenOptionsExt as _;
                 options.mode(mode);
             }
             let mut f = options.open(&tmp)?;
             f.write_all(data)?;
+            #[cfg(unix)]
             if let Some(mode) = mode {
+                use std::os::unix::fs::PermissionsExt as _;
                 // The umask had its say on creation; the file keeps what it had.
                 f.set_permissions(std::fs::Permissions::from_mode(mode))?;
             }
+            #[cfg(not(unix))]
+            let _ = mode;
             drop(f);
             std::fs::rename(&tmp, &path)
         })();
@@ -252,12 +313,15 @@ impl Host for LocalHost {
     }
 
     fn create_dir_all_mode(&self, path: &Path, mode: Option<u32>) -> io::Result<()> {
-        use std::os::unix::fs::DirBuilderExt as _;
         let mut b = std::fs::DirBuilder::new();
         b.recursive(true);
+        #[cfg(unix)]
         if let Some(mode) = mode {
+            use std::os::unix::fs::DirBuilderExt as _;
             b.mode(mode);
         }
+        #[cfg(not(unix))]
+        let _ = mode;
         b.create(path)
     }
 
@@ -302,7 +366,7 @@ impl Host for LocalHost {
     }
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        std::fs::canonicalize(path)
+        canonical(path)
     }
 
     fn trash(&self, paths: &[PathBuf]) -> io::Result<()> {
@@ -389,7 +453,7 @@ impl Host for LocalHost {
     }
 
     fn spawn(&self, cmd: &Cmd) -> io::Result<Box<dyn Process>> {
-        Ok(Box::new(LocalProcess(command(cmd)?.spawn()?)))
+        Ok(Box::new(LocalProcess::new(command(cmd)?.spawn()?)))
     }
 
     fn run(&self, cmd: &Cmd, input: Option<&[u8]>) -> io::Result<Output> {
@@ -504,6 +568,12 @@ impl Host for LocalHost {
         asked.len()
     }
 
+    #[cfg(windows)]
+    fn process_alive(&self, pid: u32) -> bool {
+        crate::win::process_alive(pid)
+    }
+
+    #[cfg(unix)]
     fn process_alive(&self, pid: u32) -> bool {
         let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
         if pid <= 0 {

@@ -2,6 +2,8 @@
 //! machine (as ssh would start it): the same calls the app makes, and what happens to them
 //! when the connection drops.
 
+#![cfg(unix)]
+
 use snout_host::{Cmd, Host, Stdio, WalkOptions, WatchKind};
 use snout_remote::{Backoff, Client, Connector, RemoteHost, Status};
 use std::io::{self, Read, Write};

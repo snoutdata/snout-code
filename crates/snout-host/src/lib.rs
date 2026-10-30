@@ -54,9 +54,11 @@ mod latency;
 mod local;
 mod signals;
 pub mod trash;
+#[cfg(windows)]
+pub mod win;
 
 pub use latency::LatencyHost;
-pub use local::LocalHost;
+pub use local::{LocalHost, canonical};
 pub use signals::default_signals;
 
 /// A host as the app holds it.
@@ -106,13 +108,37 @@ impl HostInfo {
         self.env.get(name).map(String::as_str)
     }
 
-    /// The folders of `PATH`.
+    /// The folders of `PATH`, split as the host's system splits it (`;` on Windows, `:`
+    /// elsewhere), whichever system the app runs on.
     pub fn path_dirs(&self) -> Vec<PathBuf> {
-        self.var("PATH").map(|p| std::env::split_paths(p).collect()).unwrap_or_default()
+        let sep = if self.is_windows() { ';' } else { ':' };
+        self.var("PATH")
+            .or_else(|| self.is_windows().then(|| self.var("Path")).flatten())
+            .map(|p| p.split(sep).filter(|d| !d.is_empty()).map(|d| PathBuf::from(d.trim_matches('"'))).collect())
+            .unwrap_or_default()
     }
 
     pub fn is_mac(&self) -> bool {
         self.os == "macos"
+    }
+
+    pub fn is_windows(&self) -> bool {
+        self.os == "windows"
+    }
+
+    /// The names a program `name` has on the host: on Windows `name` with each of the
+    /// extensions of `PATHEXT` (`git.exe`, `gradlew.bat`) unless it has one already, then
+    /// `name` itself; elsewhere just `name`.
+    pub fn program_names(&self, name: &str) -> Vec<String> {
+        if !self.is_windows() || Path::new(name).extension().is_some() {
+            return vec![name.to_owned()];
+        }
+        let exts = self.var("PATHEXT").unwrap_or(".COM;.EXE;.BAT;.CMD");
+        exts.split(';')
+            .filter(|e| !e.is_empty())
+            .map(|e| format!("{name}{}", e.to_ascii_lowercase()))
+            .chain(std::iter::once(name.to_owned()))
+            .collect()
     }
 }
 
@@ -333,9 +359,15 @@ impl ExitStatus {
 }
 
 impl From<std::process::ExitStatus> for ExitStatus {
+    #[cfg(unix)]
     fn from(s: std::process::ExitStatus) -> Self {
         use std::os::unix::process::ExitStatusExt as _;
         Self { code: s.code(), signal: s.signal() }
+    }
+
+    #[cfg(not(unix))]
+    fn from(s: std::process::ExitStatus) -> Self {
+        Self { code: s.code(), signal: None }
     }
 }
 
@@ -564,10 +596,37 @@ pub trait Host: Send + Sync {
     fn process_alive(&self, pid: u32) -> bool;
 }
 
-/// The first of `names` found in the folders of the host's `PATH`, then in `extra`.
+/// The first of `names` found in the folders of the host's `PATH`, then in `extra` (on a
+/// Windows host with the extensions of `PATHEXT`, see [`HostInfo::program_names`]).
 pub fn which(host: &dyn Host, names: &[&str], extra: &[PathBuf]) -> Option<PathBuf> {
-    let dirs = host.info().path_dirs();
+    let info = host.info();
+    let names: Vec<String> = names.iter().flat_map(|n| info.program_names(n)).collect();
+    let dirs = info.path_dirs();
     dirs.iter().chain(extra).flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| host.is_file(p))
+}
+
+/// The user's home folder on this machine: `HOME`, else (Windows) `USERPROFILE`.
+pub fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(std::env::home_dir)
+        .unwrap_or_default()
+}
+
+/// A time (seconds since 1970) in this machine's time zone: year, month (1 to 12), day, hour,
+/// minute, second.
+pub fn local_time(secs: i64) -> Option<[i32; 6]> {
+    // SAFETY: `tm` is plain data, valid all zeros.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let t = secs as libc::time_t;
+    #[cfg(unix)]
+    // SAFETY: both pointers are valid for the call.
+    let ok = !unsafe { libc::localtime_r(&t, &mut tm) }.is_null();
+    #[cfg(windows)]
+    // SAFETY: both pointers are valid for the call.
+    let ok = unsafe { libc::localtime_s(&mut tm, &t) } == 0;
+    ok.then_some([tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec])
 }
 
 #[cfg(test)]

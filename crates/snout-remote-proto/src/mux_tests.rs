@@ -1,6 +1,6 @@
 use super::*;
 use serde_json::{Value, json};
-use std::os::unix::net::UnixStream;
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
 
@@ -86,11 +86,21 @@ impl<W: Write> Write for Slow<W> {
 struct Pair {
     client: Mux,
     sent: Arc<AtomicUsize>,
-    socket: UnixStream,
+    socket: TcpStream,
+}
+
+/// Two connected sockets: a loopback TCP pair, which every system has.
+fn socket_pair() -> (TcpStream, TcpStream) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let a = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (b, _) = listener.accept().unwrap();
+    a.set_nodelay(true).unwrap();
+    b.set_nodelay(true).unwrap();
+    (a, b)
 }
 
 fn pair(server_delay: Duration) -> Pair {
-    let (a, b) = UnixStream::pair().unwrap();
+    let (a, b) = socket_pair();
     let sent = Arc::new(AtomicUsize::new(0));
     let handler: Arc<dyn Handler> = Arc::new(TestHandler { sent: sent.clone() });
     let b2 = b.try_clone().unwrap();

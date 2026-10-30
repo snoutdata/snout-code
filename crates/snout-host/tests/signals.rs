@@ -2,6 +2,8 @@
 //! starts with no signal blocked and every signal at its default action. Its own test binary,
 //! since it changes what the whole process does with SIGUSR1.
 
+#![cfg(unix)]
+
 use std::time::{Duration, Instant};
 
 use snout_host::{Cmd, Host as _, LocalHost};

@@ -1,6 +1,8 @@
 //! The whole stack on this machine, without ssh: the client talks to `snout-server --stdio`
 //! as ssh would start it, and that proxy to the daemon it starts.
 
+#![cfg(unix)]
+
 use snout_remote::Client;
 use snout_remote::proto::{FileKind, Pipes, PtyRequest, PtySize, Signal, SpawnRequest, WatchKind};
 use std::io::{Read, Write};

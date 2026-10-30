@@ -4,7 +4,9 @@
 //! `~/Library/Caches/SnoutCode` for the cache. On Linux, the XDG base directories:
 //! `$XDG_CONFIG_HOME/SnoutCode` (else `~/.config/SnoutCode`) for settings, the data, cache
 //! and state homes likewise (`~/.local/share`, `~/.cache`, `~/.local/state`). A variable that
-//! is empty or not an absolute path is ignored, as the specification says.
+//! is empty or not an absolute path is ignored, as the specification says. On Windows:
+//! `%APPDATA%\SnoutCode` for settings (it roams with the user), `%LOCALAPPDATA%\SnoutCode`
+//! for the data, with `cache` and `logs` folders in it.
 
 use std::path::{Path, PathBuf};
 
@@ -34,7 +36,7 @@ impl AppDirs {
 
     /// The folders of this process's user, on this machine.
     pub fn local() -> Self {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let home = crate::home_dir();
         Self::for_os(std::env::consts::OS, &home, |name| std::env::var(name).ok())
     }
 
@@ -48,6 +50,19 @@ impl AppDirs {
                 data: support,
                 cache: home.join("Library/Caches").join(APP),
                 state: home.join("Library/Logs").join(APP),
+            };
+        }
+        if os == "windows" {
+            let var_dir = |name: &str, fallback: &str| {
+                var(name).map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(fallback))
+            };
+            let roaming = var_dir("APPDATA", "AppData\\Roaming").join(APP);
+            let local = var_dir("LOCALAPPDATA", "AppData\\Local").join(APP);
+            return Self {
+                config: roaming,
+                data: local.clone(),
+                cache: local.join("cache"),
+                state: local.join("logs"),
             };
         }
         let base = |name: &str, fallback: &str| {
@@ -88,5 +103,21 @@ mod tests {
         assert_eq!(linux.config, Path::new("/cfg/SnoutCode"));
         assert_eq!(linux.cache, Path::new("/home/ann/.cache/SnoutCode"), "a relative path is ignored");
         assert_eq!(linux.data, Path::new("/home/ann/.local/share/SnoutCode"), "an empty one too");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_keeps_settings_in_roaming_and_the_rest_in_local_app_data() {
+        let set = |name: &str| match name {
+            "APPDATA" => Some(r"C:\Users\ann\AppData\Roaming".to_owned()),
+            "LOCALAPPDATA" => Some(r"C:\Users\ann\AppData\Local".to_owned()),
+            _ => None,
+        };
+        let win = AppDirs::for_os("windows", Path::new(r"C:\Users\ann"), set);
+        assert_eq!(win.config, Path::new(r"C:\Users\ann\AppData\Roaming\SnoutCode"));
+        assert_eq!(win.data, Path::new(r"C:\Users\ann\AppData\Local\SnoutCode"));
+        assert_eq!(win.cache, Path::new(r"C:\Users\ann\AppData\Local\SnoutCode\cache"));
+        let bare = AppDirs::for_os("windows", Path::new(r"C:\Users\ann"), |_| None);
+        assert_eq!(bare.state, Path::new(r"C:\Users\ann\AppData\Local\SnoutCode\logs"));
     }
 }

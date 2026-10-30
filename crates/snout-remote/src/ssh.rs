@@ -41,7 +41,8 @@ impl SshTarget {
             host: host.into(),
             config_file: None,
             extra_args: Vec::new(),
-            control_dir: Some(std::env::temp_dir().join("snout-ssh")),
+            // Windows's OpenSSH has no ControlMaster: each ssh connects on its own there.
+            control_dir: (!cfg!(windows)).then(|| std::env::temp_dir().join("snout-ssh")),
             batch_mode: true,
             ssh_program: "ssh".into(),
             askpass: None,

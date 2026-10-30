@@ -5,7 +5,8 @@
 //! session (it handles the Trash folders of other file systems too), else trash-cli's `trash`,
 //! else directly into the home Trash (`$XDG_DATA_HOME/Trash`) for files on the same file
 //! system as it. A machine with no desktop session and no trash command (a server reached over
-//! SSH) has no Trash: deleting there is for good, and the app says so before it does.
+//! SSH) has no Trash: deleting there is for good, and the app says so before it does. On
+//! Windows, the Recycle Bin (the shell's own file operation, as Explorer's Delete).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -20,10 +21,15 @@ pub enum Method {
     Command(Vec<String>),
     /// Into the home Trash, by the specification.
     HomeTrash(PathBuf),
+    /// Windows's Recycle Bin.
+    RecycleBin,
 }
 
 /// How this machine trashes files, if it can.
 pub fn method(env: &dyn Fn(&str) -> Option<String>, home: &Path) -> Option<Method> {
+    if cfg!(windows) {
+        return Some(Method::RecycleBin);
+    }
     if cfg!(target_os = "macos") {
         return Path::new(TRASH_COMMAND).exists().then(|| Method::Command(vec![TRASH_COMMAND.to_owned()]));
     }
@@ -57,6 +63,10 @@ pub fn trash(method: &Method, paths: &[PathBuf]) -> io::Result<()> {
             }
         }
         Method::HomeTrash(dir) => paths.iter().try_for_each(|p| into_home_trash(dir, p)),
+        #[cfg(windows)]
+        Method::RecycleBin => crate::win::recycle(paths),
+        #[cfg(not(windows))]
+        Method::RecycleBin => Err(io::Error::new(io::ErrorKind::Unsupported, "no Recycle Bin here")),
     }
 }
 
@@ -93,9 +103,8 @@ pub fn into_home_trash(trash: &Path, path: &Path) -> io::Result<()> {
 
 /// A path as the `.trashinfo` file writes it: percent-encoded, slashes kept.
 fn url_path(path: &Path) -> String {
-    use std::os::unix::ffi::OsStrExt as _;
     let mut out = String::new();
-    for &b in path.as_os_str().as_bytes() {
+    for &b in path.as_os_str().as_encoded_bytes() {
         if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
             out.push(b as char);
         } else {
@@ -108,26 +117,27 @@ fn url_path(path: &Path) -> String {
 /// The local time now, as `YYYY-MM-DDThh:mm:ss`.
 fn now_local() -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let t = now as libc::time_t;
-    // SAFETY: `tm` is plain data, valid all zeros; `localtime_r` fills it from `t`.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: both pointers are valid for the call.
-    unsafe { libc::localtime_r(&t, &mut tm) };
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec
-    )
+    let [y, mo, d, h, mi, s] = crate::local_time(now as i64).unwrap_or([1970, 1, 1, 0, 0, 0]);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn the_recycle_bin_takes_files_and_folders() {
+        let dir = std::env::temp_dir().join(format!("snout-recycle-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("a b.txt"), "x").unwrap();
+        let m = method(&|_| None, Path::new("")).unwrap();
+        trash(&m, &[dir.join("a b.txt"), dir.join("sub")]).unwrap();
+        assert!(!dir.join("a b.txt").exists() && !dir.join("sub").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
     #[test]
     fn the_home_trash_keeps_the_file_and_where_it_was() {
         let dir = std::env::temp_dir().join(format!("snout-trash-{}", std::process::id()));
@@ -148,7 +158,7 @@ mod tests {
 
     #[test]
     fn without_a_desktop_or_a_command_there_is_no_trash() {
-        if cfg!(target_os = "macos") || Path::new(TRASH_COMMAND).exists() {
+        if cfg!(any(target_os = "macos", windows)) || Path::new(TRASH_COMMAND).exists() {
             return;
         }
         assert_eq!(method(&|_| None, Path::new("/home/ann")), None);

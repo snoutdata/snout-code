@@ -8,7 +8,7 @@ fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("snout-host-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir.canonicalize().unwrap()
+    canonical(&dir).unwrap()
 }
 
 #[test]
@@ -26,17 +26,28 @@ fn files_round_trip() {
     assert!(host.is_dir(&dir.join("a")) && !host.is_file(&dir.join("a")) && !host.exists(&dir.join("nope")));
 
     // A write keeps the file's permission bits, and leaves nothing beside it.
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
-    host.write(&file, b"again").unwrap();
-    assert_eq!(host.metadata(&file).unwrap().mode & 0o777, 0o755);
-    host.write_mode(&dir.join("private"), b"x", Some(0o600)).unwrap();
-    assert_eq!(host.metadata(&dir.join("private")).unwrap().mode & 0o777, 0o600);
-    // Through a link, the file it points to changes.
-    std::os::unix::fs::symlink(&file, dir.join("link")).unwrap();
-    host.write(&dir.join("link"), b"linked").unwrap();
-    assert!(host.symlink_metadata(&dir.join("link")).unwrap().is_symlink());
-    assert_eq!(host.read_to_string(&file).unwrap(), "linked");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        host.write(&file, b"again").unwrap();
+        assert_eq!(host.metadata(&file).unwrap().mode & 0o777, 0o755);
+        host.write_mode(&dir.join("private"), b"x", Some(0o600)).unwrap();
+        assert_eq!(host.metadata(&dir.join("private")).unwrap().mode & 0o777, 0o600);
+        // Through a link, the file it points to changes.
+        std::os::unix::fs::symlink(&file, dir.join("link")).unwrap();
+        host.write(&dir.join("link"), b"linked").unwrap();
+        assert!(host.symlink_metadata(&dir.join("link")).unwrap().is_symlink());
+        assert_eq!(host.read_to_string(&file).unwrap(), "linked");
+    }
+    #[cfg(not(unix))]
+    {
+        // A read-only file shows as one; a write replaces the file and leaves nothing beside it.
+        host.write(&file, b"again").unwrap();
+        assert_eq!(host.metadata(&file).unwrap().mode & 0o777, 0o644);
+        host.write_mode(&dir.join("private"), b"x", Some(0o600)).unwrap();
+        std::fs::write(dir.join("link"), "not a link here").unwrap();
+    }
 
     let mut names: Vec<String> =
         host.read_dir(&dir).unwrap().iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
@@ -103,6 +114,7 @@ fn watches_a_tree() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn runs_processes() {
     let host = LocalHost::new();
@@ -213,6 +225,7 @@ fn runs_processes() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn lists_and_stops_processes() {
     let host = LocalHost::new();
@@ -229,6 +242,7 @@ fn lists_and_stops_processes() {
 
 /// A process its parent reaps as it ends (an engine's jdtls and Gradle daemon, which the
 /// engine waits for) is gone at once: the stop does not wait out its grace for it.
+#[cfg(unix)]
 #[test]
 fn a_stop_ends_when_the_processes_are_gone_not_after_the_grace() {
     let host = LocalHost::new();
@@ -246,6 +260,7 @@ fn a_stop_ends_when_the_processes_are_gone_not_after_the_grace() {
     assert_eq!(reaper.join().unwrap().signal, Some(15), "ended by SIGTERM, not killed");
 }
 
+#[cfg(unix)]
 #[test]
 fn runs_a_terminal() {
     let host = LocalHost::new();
@@ -297,7 +312,7 @@ fn info_and_which() {
     let info = host.info();
     assert_eq!(info.os, std::env::consts::OS);
     assert!(!info.home.as_os_str().is_empty() && info.exe.is_some());
-    assert!(which(&host, &["sh"], &[]).is_some());
+    assert!(which(&host, &[if cfg!(windows) { "cmd" } else { "sh" }], &[]).is_some());
     assert_eq!(which(&host, &["no-such-program-anywhere"], &[]), None);
 }
 
@@ -317,4 +332,116 @@ fn latency_slows_every_call_and_counts_the_ui_threads() {
     let started = Instant::now();
     assert!(!host.info().home.as_os_str().is_empty());
     assert!(started.elapsed() < Duration::from_millis(30));
+}
+
+/// Windows: a command line through `cmd.exe`, its output, its folder and environment; a
+/// process tree stopped as one; a terminal on ConPTY.
+#[cfg(windows)]
+mod windows {
+    use super::*;
+
+    fn cmd(line: &str) -> Cmd {
+        Cmd::new("cmd.exe").args(["/d", "/c", line])
+    }
+
+    #[test]
+    fn runs_processes() {
+        let host = LocalHost::new();
+        let out = host.run(&Cmd::new("findstr.exe").arg("^"), Some(b"in\r\n")).unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "in");
+        let out = host.run(&cmd("echo err 1>&2 & exit /b 3"), None).unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "err");
+        assert_eq!(out.status.code, Some(3));
+
+        let dir = scratch("proc");
+        let out = host.run(&cmd("cd").cwd(&dir), None).unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), dir.to_string_lossy());
+        let out = host.run(&cmd("set SNOUT_").env("SNOUT_X", "1"), None).unwrap();
+        assert!(String::from_utf8_lossy(&out.stdout).lines().any(|l| l.trim() == "SNOUT_X=1"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A process and what it started end together: `cmd.exe` running `ping` (as
+    /// `gradlew.bat` runs Java).
+    #[test]
+    fn stopping_a_process_stops_what_it_started() {
+        let host = LocalHost::new();
+        let mut child = host.spawn(&cmd("ping -n 60 127.0.0.1 >NUL")).unwrap();
+        let pid = child.pid().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let ping = loop {
+            let procs = host.processes(false).unwrap();
+            if let Some(p) = procs.iter().find(|p| p.parent == Some(pid)) {
+                break p.pid;
+            }
+            assert!(Instant::now() < deadline, "ping started");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(host.process_alive(ping));
+        child.terminate().unwrap();
+        child.wait().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while host.process_alive(ping) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!host.process_alive(ping), "the child's child ended too");
+    }
+
+    #[test]
+    fn lists_and_stops_processes() {
+        let host = LocalHost::new();
+        let mut child = host.spawn(&Cmd::new("ping.exe").args(["-n", "60", "127.0.0.1"])).unwrap();
+        let pid = child.pid().unwrap();
+        let procs = host.processes(false).unwrap();
+        let me = procs.iter().find(|p| p.pid == pid).expect("the child is listed");
+        assert_eq!(me.parent, Some(std::process::id()));
+        assert_eq!(
+            host.stop_processes(&[(pid, me.start + 1)], Duration::from_secs(1)),
+            0,
+            "another start is left alone"
+        );
+        assert_eq!(host.stop_processes(&[(pid, me.start)], Duration::from_secs(2)), 1);
+        child.wait().unwrap();
+        assert!(!host.process_alive(pid));
+    }
+
+    #[test]
+    fn runs_a_terminal() {
+        let host = LocalHost::new();
+        let mut pty = host.spawn_pty(&cmd("set /p x= & echo got %x%"), 24, 80).unwrap();
+        let mut reader = pty.take_reader().unwrap();
+        let mut writer = pty.take_writer().unwrap();
+        writer.write_all(b"it\r\n").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut all = Vec::new();
+            let mut buf = [0u8; 1024];
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                all.extend_from_slice(&buf[..n]);
+                if String::from_utf8_lossy(&all).contains("got it") {
+                    break;
+                }
+            }
+            let _ = tx.send(String::from_utf8_lossy(&all).into_owned());
+        });
+        let text = rx.recv_timeout(Duration::from_secs(20)).expect("the terminal answered");
+        assert!(text.contains("got it"), "{text}");
+        pty.resize(30, 100).unwrap();
+        assert!(pty.wait().unwrap().success());
+    }
+
+    #[test]
+    fn programs_are_found_with_their_extensions() {
+        let host = LocalHost::new();
+        let git_like = which(&host, &["cmd"], &[]).unwrap();
+        assert!(git_like.to_string_lossy().to_ascii_lowercase().ends_with("cmd.exe"), "{}", git_like.display());
+        let info = HostInfo { os: "windows".into(), ..Default::default() };
+        assert_eq!(info.program_names("gradlew")[..2], ["gradlew.com", "gradlew.exe"]);
+        assert_eq!(info.program_names("gradlew.bat"), ["gradlew.bat"]);
+        let linux = HostInfo { os: "linux".into(), ..Default::default() };
+        assert_eq!(linux.program_names("git"), ["git"]);
+    }
 }

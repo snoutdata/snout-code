@@ -9,6 +9,8 @@
 //! SNOUT_REMOTE_DOCKER_TEST=1 cargo test -p snout-server --test docker -- --nocapture
 //! ```
 
+#![cfg(unix)]
+
 use snout_remote::proto::{Pipes, PtyRequest, PtySize, Signal, SpawnRequest, WatchKind};
 use snout_remote::{Client, RemoteSession, SshTarget};
 use std::io::{Read, Write};
