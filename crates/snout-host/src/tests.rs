@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -9,6 +9,17 @@ fn scratch(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     canonical(&dir).unwrap()
+}
+
+#[test]
+fn paths_get_the_separators_of_their_host() {
+    // As text: on Windows, paths with either separator compare equal.
+    let native = |info: &HostInfo, p: &str| info.native_path(Path::new(p)).to_str().unwrap().to_owned();
+    let windows = HostInfo { os: "windows".into(), ..Default::default() };
+    assert_eq!(native(&windows, r"C:\repo/src/App.java"), r"C:\repo\src\App.java");
+    assert_eq!(native(&windows, r"\\?\C:\a/b"), r"\\?\C:\a/b");
+    let linux = HostInfo { os: "linux".into(), ..Default::default() };
+    assert_eq!(native(&linux, "/repo/src/App.java"), "/repo/src/App.java");
 }
 
 #[test]
@@ -409,25 +420,43 @@ mod windows {
         let mut reader = pty.take_reader().unwrap();
         let mut writer = pty.take_writer().unwrap();
         writer.write_all(b"it\r\n").unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let (tx, rx) = std::sync::mpsc::channel();
+        let all = seen.clone();
         std::thread::spawn(move || {
-            let mut all = Vec::new();
             let mut buf = [0u8; 1024];
             while let Ok(n) = reader.read(&mut buf) {
                 if n == 0 {
                     break;
                 }
+                let mut all = all.lock().unwrap();
                 all.extend_from_slice(&buf[..n]);
                 if String::from_utf8_lossy(&all).contains("got:it") {
                     break;
                 }
             }
-            let _ = tx.send(String::from_utf8_lossy(&all).into_owned());
+            let _ = tx.send(());
         });
-        let text = rx.recv_timeout(Duration::from_secs(20)).expect("the terminal answered");
-        assert!(text.contains("got:it"), "{text}");
+        let answered = rx.recv_timeout(Duration::from_secs(20));
+        let text = String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
+        assert!(answered.is_ok() && text.contains("got:it"), "the terminal showed {text:?}");
         pty.resize(30, 100).unwrap();
         assert!(pty.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_terminal_ends_when_its_program_does() {
+        let host = LocalHost::new();
+        let mut pty = host.spawn_pty(&cmd("exit /b 3"), 24, 80).unwrap();
+        let mut reader = pty.take_reader().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut sink = Vec::new();
+            let _ = tx.send(reader.read_to_end(&mut sink).is_ok());
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(20)), Ok(true), "the reader saw the end");
+        assert_eq!(pty.wait().unwrap().code, Some(3));
+        pty.resize(30, 100).unwrap();
     }
 
     #[test]

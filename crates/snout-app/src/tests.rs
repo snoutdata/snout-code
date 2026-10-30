@@ -1033,17 +1033,23 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     wait(cx, repo.file_name().unwrap().to_str().unwrap());
     cx.update(|_, cx| terminal.read(cx).type_keys(&repo, b"echo $SNOUT_TERM_VAR\r"));
     wait(cx, "\nfrom-the-settings");
-    // A drag over the first row selects it, and the selection is on the clipboard at once.
+    // A drag down the screen selects what it shows, and the selection is on the clipboard at
+    // once. (Not just the first row: a shell's prompt may begin with an empty line, as Git
+    // for Windows's does.)
     let grid = cx.debug_bounds("terminal-grid").expect("the terminal is drawn");
     let (from, to) = (
         grid.origin + gpui::point(gpui::px(8.), gpui::px(8.)),
-        grid.origin + gpui::point(gpui::px(200.), gpui::px(8.)),
+        grid.origin + gpui::point(gpui::px(200.), grid.size.height - gpui::px(8.)),
     );
     cx.simulate_mouse_down(from, gpui::MouseButton::Left, gpui::Modifiers::none());
     cx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
     cx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
     let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default();
-    assert!(!copied.trim().is_empty(), "copy on select put the selection on the clipboard");
+    assert!(
+        copied.contains("from-the-settings"),
+        "copy on select put the selection on the clipboard: {copied:?}, of {:?}",
+        cx.update(|_, cx| terminal.read(cx).session_text(&repo))
+    );
     // A click lets go of the selection (⌘F would look for it).
     cx.simulate_click(from, gpui::Modifiers::none());
     // A colourful line, a link, and ⌘F finding text in the scrollback.

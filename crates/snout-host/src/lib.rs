@@ -49,6 +49,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
+#[cfg(windows)]
+mod conpty;
 pub mod dirs;
 mod latency;
 mod local;
@@ -124,6 +126,18 @@ impl HostInfo {
 
     pub fn is_windows(&self) -> bool {
         self.os == "windows"
+    }
+
+    /// `path` with the host's own separators: on Windows, the slashes of a path put together
+    /// from Git's output (`C:\repo` joined with `src/App.java`) become backslashes. A
+    /// verbatim path (`\\?\`), where a slash is no separator, stays as it is.
+    pub fn native_path(&self, path: &Path) -> PathBuf {
+        match path.to_str() {
+            Some(s) if self.is_windows() && s.contains('/') && !s.starts_with(r"\\?\") => {
+                PathBuf::from(s.replace('/', "\\"))
+            }
+            _ => path.to_owned(),
+        }
     }
 
     /// The names a program `name` has on the host: on Windows `name` with each of the

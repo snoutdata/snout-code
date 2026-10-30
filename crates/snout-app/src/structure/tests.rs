@@ -223,10 +223,11 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
 }
 
-/// A JDK's folder as the app reads one: `bin/java` and a `release` file.
+/// A JDK's folder as the app reads one: `bin/java` (`bin\java.exe` on Windows) and a
+/// `release` file.
 fn fake_jdk(dir: &Path, version: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
-    std::fs::write(dir.join("bin/java"), "").unwrap();
+    std::fs::write(dir.join("bin").join(if cfg!(windows) { "java.exe" } else { "java" }), "").unwrap();
     std::fs::write(dir.join("release"), format!("JAVA_VERSION=\"{version}\"\n")).unwrap();
 }
 

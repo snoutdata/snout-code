@@ -1124,6 +1124,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<EditorPanel> {
+        // As the host writes paths: one put together from Git's output has slashes on Windows.
+        let path = crate::host::host(cx).info().native_path(&path);
         self.editors.retain(|e| e.upgrade().is_some());
         let open = self.editors(cx).into_iter().find(|e| e.read(cx).path == path);
         let reusable = if open.is_none() && preview {

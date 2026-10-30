@@ -1592,10 +1592,18 @@ impl Model {
                 cx.emit(ModelEvent::Quit(choice));
             }
             Action::Copy(text) => cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)),
-            Action::Reveal(path) => cx.reveal_path(&path),
-            Action::OpenInTerminal(path) => self.open_in_terminal(path, cx),
-            Action::OpenFile(path, at) => cx.emit(ModelEvent::OpenFile(path, at, false)),
-            Action::PreviewFile(path) => cx.emit(ModelEvent::OpenFile(path, None, true)),
+            // Paths as the host writes them (Git's slashes are backslashes on Windows).
+            Action::Reveal(path) => cx.reveal_path(&crate::host::host(cx).info().native_path(&path)),
+            Action::OpenInTerminal(path) => {
+                let path = crate::host::host(cx).info().native_path(&path);
+                self.open_in_terminal(path, cx)
+            }
+            Action::OpenFile(path, at) => {
+                cx.emit(ModelEvent::OpenFile(crate::host::host(cx).info().native_path(&path), at, false))
+            }
+            Action::PreviewFile(path) => {
+                cx.emit(ModelEvent::OpenFile(crate::host::host(cx).info().native_path(&path), None, true))
+            }
             Action::FilterDir(dir) => {
                 self.dir_filter = dir;
                 self.anchor = None;

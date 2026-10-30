@@ -1,4 +1,5 @@
-//! This machine as a [`Host`]: `std::fs`, `std::process`, `notify`, `portable-pty` and `sysinfo`.
+//! This machine as a [`Host`]: `std::fs`, `std::process`, `notify`, `portable-pty` (ConPTY on
+//! Windows) and `sysinfo`.
 
 use std::io::{self, Read, Seek as _, SeekFrom, Write};
 use std::net::{TcpStream, ToSocketAddrs as _};
@@ -188,48 +189,34 @@ impl Process for LocalProcess {
     }
 }
 
-/// A process on one of this Mac's pseudo-terminals.
-///
-/// On Windows the pseudo console keeps its output open after the process ends, so a reader
-/// would wait forever: once the process has ended, the console is closed (the master
-/// dropped), and the reader sees the end.
+/// A process on one of this Mac's pseudo-terminals (Windows has its own, [`crate::conpty`]).
+#[cfg(unix)]
 struct LocalPty {
-    master: std::sync::Arc<Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
+#[cfg(unix)]
 fn pty_status(s: portable_pty::ExitStatus) -> ExitStatus {
     ExitStatus { code: Some(s.exit_code() as i32), signal: None }
 }
 
+#[cfg(unix)]
 impl PtyProcess for LocalPty {
     fn pid(&self) -> Option<u32> {
         self.child.process_id()
     }
 
     fn take_reader(&mut self) -> io::Result<Box<dyn Read + Send>> {
-        let reader = self.with_master(|m| m.try_clone_reader().map_err(io::Error::other))?;
-        #[cfg(windows)]
-        if let Some(pid) = self.child.process_id() {
-            let master = self.master.clone();
-            std::thread::Builder::new().name("pty-exit".into()).spawn(move || {
-                crate::win::wait_for_exit(pid);
-                drop(master.lock().unwrap_or_else(|e| e.into_inner()).take());
-            })?;
-        }
-        Ok(reader)
+        self.master.try_clone_reader().map_err(io::Error::other)
     }
 
     fn take_writer(&mut self) -> io::Result<Box<dyn Write + Send>> {
-        self.with_master(|m| m.take_writer().map_err(io::Error::other))
+        self.master.take_writer().map_err(io::Error::other)
     }
 
     fn resize(&self, rows: u16, cols: u16) -> io::Result<()> {
-        match self.with_master(|m| m.resize(pty_size(rows, cols)).map_err(io::Error::other)) {
-            // The process has ended: nothing to resize.
-            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
-            r => r,
-        }
+        self.master.resize(pty_size(rows, cols)).map_err(io::Error::other)
     }
 
     fn kill(&mut self) -> io::Result<()> {
@@ -245,16 +232,7 @@ impl PtyProcess for LocalPty {
     }
 }
 
-impl LocalPty {
-    fn with_master<T>(&self, f: impl FnOnce(&dyn portable_pty::MasterPty) -> io::Result<T>) -> io::Result<T> {
-        let guard = self.master.lock().unwrap_or_else(|e| e.into_inner());
-        match guard.as_deref() {
-            Some(m) => f(m),
-            None => Err(io::Error::new(io::ErrorKind::BrokenPipe, "the terminal has ended")),
-        }
-    }
-}
-
+#[cfg(unix)]
 fn pty_size(rows: u16, cols: u16) -> portable_pty::PtySize {
     portable_pty::PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }
 }
@@ -515,6 +493,12 @@ impl Host for LocalHost {
         Ok(Output { status: out.status.into(), stdout: out.stdout, stderr: out.stderr })
     }
 
+    #[cfg(windows)]
+    fn spawn_pty(&self, cmd: &Cmd, rows: u16, cols: u16) -> io::Result<Box<dyn PtyProcess>> {
+        Ok(Box::new(crate::conpty::spawn(cmd, rows, cols)?))
+    }
+
+    #[cfg(unix)]
     fn spawn_pty(&self, cmd: &Cmd, rows: u16, cols: u16) -> io::Result<Box<dyn PtyProcess>> {
         let pair = portable_pty::native_pty_system().openpty(pty_size(rows, cols)).map_err(io::Error::other)?;
         let mut c = portable_pty::CommandBuilder::new(&cmd.program);
@@ -530,7 +514,7 @@ impl Host for LocalHost {
         }
         let child = pair.slave.spawn_command(c).map_err(io::Error::other)?;
         drop(pair.slave);
-        Ok(Box::new(LocalPty { master: std::sync::Arc::new(Mutex::new(Some(pair.master))), child }))
+        Ok(Box::new(LocalPty { master: pair.master, child }))
     }
 
     fn connect_tcp(&self, port: u16, timeout: Duration) -> io::Result<Box<dyn Stream>> {
