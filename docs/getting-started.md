@@ -4,9 +4,11 @@ Install SnoutCode, open your first project, and get Java support running.
 
 ## What you need
 
-- A Mac, or a Linux PC (x86_64 or aarch64, X11 or Wayland). On Linux, install the .deb or
-  the Arch Linux package as [SnoutCode on Linux](linux.md) describes; the rest of this page is
-  the same there, with Ctrl for ⌘.
+- A Mac, a Linux PC (x86_64 or aarch64, X11 or Wayland), or a Windows 10 or 11 PC (x64 or
+  arm64). On Linux, install the .deb or the Arch Linux package as
+  [SnoutCode on Linux](linux.md) describes; on Windows, run the installer as
+  [SnoutCode on Windows](windows.md) describes. The rest of this page is the same there, with
+  Ctrl for ⌘.
 - Git on your `PATH`. A project is a folder inside a Git repository.
 - Nothing else to start. The app carries its Java engine with a Java runtime of its own, so
   you do not need to install Java to open the app or to get Java support in the editor.
@@ -16,7 +18,8 @@ fits, SnoutCode offers to download one (see [Java for your builds](#java-for-you
 
 ## Install the app
 
-On Linux, see [Install](linux.md#install) in SnoutCode on Linux. On a Mac:
+On Linux, see [Install](linux.md#install) in SnoutCode on Linux; on Windows,
+[Install](windows.md#install) in SnoutCode on Windows. On a Mac:
 
 1. Open the SnoutCode disk image (`.dmg`).
 2. Drag SnoutCode into Applications.
@@ -79,7 +82,8 @@ them. See [Projects](projects.md) for opening, switching and closing projects.
 
 ### The menus
 
-On Linux the menus are in the window's title bar (see [The window](linux.md#the-window)). On a
+On Linux and Windows the menus are in the window's title bar (see [The window](linux.md#the-window)
+on Linux, [The window](windows.md#the-window) on Windows). On a
 Mac, the menu bar holds every command: File, Edit, View, Code, Navigate, Refactor, Run,
 Repository (Git), Window and Help. Each item shows an icon, an SF Symbol as macOS's own menus
 use, so commands are quick to spot; its shortcut, when it has one, is at the right. Items that
@@ -140,7 +144,10 @@ for, within what its Gradle version can run on. It looks for JDKs in these place
 
 On Linux it looks in `JAVA_HOME`, the `java` on your `PATH` and `/usr/lib/jvm` instead of the
 first two, and keeps its downloads in `~/.local/share/SnoutCode/jdks` (see
-[SnoutCode on Linux](linux.md#where-snoutcode-keeps-its-files)).
+[SnoutCode on Linux](linux.md#where-snoutcode-keeps-its-files)). On Windows it looks in
+`JAVA_HOME`, the `java` on your `PATH` and the JDK installers' folders under `Program Files`,
+and keeps its downloads in `%LOCALAPPDATA%\SnoutCode\jdks` (see
+[SnoutCode on Windows](windows.md#java-gradle-and-maven)).
 
 When none fits, a bar above the editor says so: "This project needs JDK 17. Download it?"
 

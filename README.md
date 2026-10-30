@@ -2,7 +2,7 @@
 
 **[Read the user guide](docs/README.md)**
 
-A native IDE for Java, Gradle, Maven and Spring Boot on macOS and Linux, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your desktop.
+A native IDE for Java, Gradle, Maven and Spring Boot on macOS, Linux and Windows, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your desktop.
 
 ![SnoutCode on a Spring Boot web shop: the Project view, the editor and the Spring window's beans](docs/images/spring-beans.png)
 
@@ -25,11 +25,15 @@ Each item links to its page in the user guide.
 - **[Remote SSH](docs/remote-ssh.md):** the project, Git, the Java engine, builds, runs and terminals on a Linux machine you reach with `ssh`.
 - **[Processes](docs/processes.md):** what SnoutCode runs on your machine, and stopping it.
 
-The Java features come from SnoutCode's Java engine (`engine/`, see [engine/README.md](engine/README.md)). The macOS app and the Linux packages carry the engine with its own Java runtime, so you need no Java installed to start.
+The Java features come from SnoutCode's Java engine (`engine/`, see [engine/README.md](engine/README.md)). The macOS app, the Linux packages and the Windows installer carry the engine with its own Java runtime, so you need no Java installed to start.
 
 ## Linux
 
 SnoutCode runs on Linux (x86_64 and aarch64, X11 and Wayland) and ships as a `.deb` for Debian and Ubuntu and as an Arch Linux package. The menus are drawn in the window's title bar, Ctrl takes the place of ⌘ (with IntelliJ IDEA's Linux keys where Ctrl was taken), and settings live in `~/.config/SnoutCode`. See [docs/linux.md](docs/linux.md).
+
+## Windows
+
+SnoutCode runs on Windows 10 and 11 (x64 and arm64) and ships as an installer that installs for the current user, with no administrator rights, and adds SnoutCode to the Start menu. The installer is not signed yet, so SmartScreen warns the first time. The menus and keys are the Linux ones, the Terminal tab runs PowerShell, and settings live in `%APPDATA%\SnoutCode`. See [docs/windows.md](docs/windows.md).
 
 ### Remote SSH
 
@@ -44,6 +48,7 @@ The window stays on your Mac while the project, Git, the Java engine, builds, ru
 - **JDK 21**, to build the Java engine. `snout.sh` and `scripts/package-mac.sh` look for one (`SNOUT_JDK21`, then `JAVA_HOME` if it is 21, then `/usr/libexec/java_home` on a Mac or `/usr/lib/jvm` on Linux) and otherwise `snout.sh` downloads Temurin 21 to `~/Library/Caches/SnoutCode` (`~/.cache/SnoutCode` on Linux).
 - **Docker**, to build the Linux server for Remote SSH (`scripts/build-server-linux.sh`) and the Linux packages (`scripts/package-linux.sh`).
 - **On Linux**, a C toolchain and the libraries GPUI builds against; see [Build it from source](docs/linux.md#build-it-from-source).
+- **On Windows**, the MSVC toolchain with the Windows SDK, and Inno Setup 6 for the installer; see [Build it from source](docs/windows.md#build-it-from-source).
 - **Zig 0.15**, only for the Ghostty terminal engine (`brew install zig@0.15`; it is keg-only, and the scripts find it there). `scripts/package-mac.sh` needs it; `snout.sh` uses it when it finds it and otherwise builds with the built-in engine only; plain `cargo build` leaves it out.
 - **Optional:** [Claude Code](https://docs.claude.com/en/docs/claude-code), for the console.
 
@@ -79,6 +84,10 @@ Without signing settings the app is signed ad hoc: it opens as is on the Mac tha
 ### Linux packages
 
 `scripts/package-linux.sh` builds, in Docker, a `.deb` and an Arch Linux package for this machine's architecture (`x86_64`, `aarch64` or `all` as arguments) in `target/linux-packages/`, with the Java engine and its own Java 21 runtime. `scripts/test-linux.sh` runs clippy, the tests and the app under X11 and Wayland in the same image, and `scripts/linux/install-test.sh` installs the packages in clean Debian, Ubuntu and Arch containers and starts the app. The [Linux workflow](.github/workflows/linux.yml) does all three on GitHub for both architectures.
+
+### Windows installer
+
+`scripts/package-windows.ps1`, run on Windows, builds the installer (`SnoutCode-<version>-windows-<x64|arm64>-setup.exe`, made with Inno Setup) in `target\windows-package\`, with the Java engine and its own Java 21 runtime. It is unsigned for now; `-Sign` signs it with Azure Trusted Signing once that is set up. The [Windows workflow](.github/workflows/windows.yml) runs clippy, the tests and the app on a demo project, and builds, installs, starts and uninstalls the installer, for x64 and arm64.
 
 ## How it is built
 
