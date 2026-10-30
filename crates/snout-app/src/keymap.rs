@@ -66,6 +66,9 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-shift-p", Box::new(CommandPalette), None),
         // Language features, in a Java editor.
         ("f12", Box::new(i::GoToDefinition), Some("EditorPanel > Input")),
+        // ⌘B and ⌥⌘B as in IntelliJ: on a declaration, ⌘B lists its usages.
+        ("cmd-b", Box::new(e::GoToDeclaration), Some("EditorPanel > Input")),
+        ("cmd-alt-b", Box::new(e::GoToImplementations), Some("EditorPanel > Input")),
         ("shift-f12", Box::new(e::FindReferences), Some("EditorPanel")),
         ("f2", Box::new(e::RenameSymbol), Some("EditorPanel")),
         ("shift-alt-f", Box::new(e::FormatDocument), Some("EditorPanel")),

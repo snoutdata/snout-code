@@ -1397,6 +1397,22 @@ fn java_tools(projects: &Path) {
     use snout_app::lang::hierarchy::Mode;
     let shop = copy(projects, "javatools", "shop");
     let pkg = shop.join("src/main/java/com/example/shop");
+    // A rule with two kinds, for Go to Implementations.
+    std::fs::write(
+        pkg.join("service/PriceRule.java"),
+        "package com.example.shop.service;\n\nimport java.math.BigDecimal;\n\n/** A change to a price. */\npublic interface PriceRule {\n    BigDecimal apply(BigDecimal price);\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("service/HalfPrice.java"),
+        "package com.example.shop.service;\n\nimport java.math.BigDecimal;\n\npublic class HalfPrice implements PriceRule {\n    @Override\n    public BigDecimal apply(BigDecimal price) {\n        return price.divide(BigDecimal.valueOf(2));\n    }\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("service/RoundUp.java"),
+        "package com.example.shop.service;\n\nimport java.math.BigDecimal;\nimport java.math.RoundingMode;\n\npublic class RoundUp implements PriceRule {\n    @Override\n    public BigDecimal apply(BigDecimal price) {\n        return price.setScale(0, RoundingMode.UP);\n    }\n}\n",
+    )
+    .unwrap();
     let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), true);
     w.activity(Activity::Project);
     let products = pkg.join("repository/ProductRepository.java");
@@ -1446,6 +1462,63 @@ fn java_tools(projects: &Path) {
     w.pump(2, &mut |_| false);
     w.snap("java-call-hierarchy-light");
     w.tool(Tool::Hierarchy);
+
+    // ⌘ held over a call: the name is a link. ⌘-click on the declaration: its usages.
+    let oe2 = w.open(&orders, Some((30, 0)));
+    let call = w.text(&oe2).find("prices.withTax").unwrap() + 9;
+    let o3 = oe2.clone();
+    let at =
+        w.cx.update(|cx| o3.read(cx).state.read(cx).range_to_bounds(&(call..call + 1)).map(|b| b.center())).unwrap();
+    for _ in 0..20 {
+        w.with(|_, window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position: at,
+                    pressed_button: None,
+                    modifiers: gpui::Modifiers::command(),
+                }),
+                cx,
+            );
+        });
+        let o4 = oe2.clone();
+        if w.pump(1, &mut |cx| o4.read(cx).nav.link.is_some()) {
+            break;
+        }
+    }
+    w.draw_and_snap("java-nav-link-light");
+    let ce = w.open(&calc, Some((25, 0)));
+    w.caret(&ce, "withTax(BigDecimal net)", 2);
+    let c2 = ce.clone();
+    w.with(|_, window, cx| c2.update(cx, |e, cx| e.go_to_declaration(None, window, cx)));
+    let c3 = ce.clone();
+    let ok = w.pump(60, &mut |cx| c3.read(cx).nav.popup.is_some());
+    println!("docs: usages popup {ok}");
+    w.pump(1, &mut |_| false);
+    w.snap("java-usages-light");
+    // ⌥⌘B on the rule: its two implementations (the new files opened once, so the engine
+    // has read them).
+    w.open(&pkg.join("service/HalfPrice.java"), Some((0, 0)));
+    w.open(&pkg.join("service/RoundUp.java"), Some((0, 0)));
+    w.pump(5, &mut |_| false);
+    let re = w.open(&pkg.join("service/PriceRule.java"), Some((5, 0)));
+    w.caret(&re, "PriceRule {", 2);
+    let r2 = re.clone();
+    w.with(|_, window, cx| r2.update(cx, |e, cx| e.go_to_implementations(None, window, cx)));
+    let r3 = re.clone();
+    w.pump(60, &mut |cx| r3.read(cx).nav.popup.is_some() || r3.read(cx).hint.is_some());
+    let ok = w.cx.update(|cx| re.read(cx).nav.popup.is_some());
+    println!("docs: implementations popup {ok}");
+    w.pump(1, &mut |_| false);
+    w.snap("java-implementations-light");
+    for e in [ce.clone(), re] {
+        w.cx.update(|cx| {
+            e.update(cx, |e, cx| {
+                e.nav.popup = None;
+                cx.notify();
+            })
+        });
+    }
+    w.pump(1, &mut |_| false);
 
     // Go to Class: the shop's classes and the libraries' by a part of the name.
     w.with(|ws, window, cx| ws.update(cx, |w, cx| w.open_classes(window, cx)));

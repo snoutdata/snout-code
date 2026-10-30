@@ -71,6 +71,10 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌃Space | Trigger Completion | Editor |
 | ⇧⌘Space | Show Parameter Hints | Editor |
 | F12 | Go to Definition | Editor |
+| ⌘B | Go to Declaration or Usages (on a declaration: its usages) | Editor |
+| ⌥⌘B | Go to Implementations | Editor |
+| ⌘-click | Go to the declaration (on a declaration: its usages) | Editor |
+| ⌥⌘-click | Go to the implementations | Editor |
 | ⇧F12 | Find References | Editor |
 | F2 | Rename Symbol… | Editor |
 | Esc | Cancel the rename | In the rename box |

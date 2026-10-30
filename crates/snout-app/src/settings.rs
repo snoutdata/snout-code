@@ -113,6 +113,9 @@ pub struct Settings {
     /// How long the pointer rests before the hover shows, in milliseconds (0 to 3000).
     #[schemars(range(min = 0, max = 3000))]
     pub hover_delay_ms: u64,
+    /// The key held to click through to a declaration: `primary` (⌘ on the Mac, Ctrl on Linux
+    /// and Windows) or `alt` (⌥). With either, ⌥⌘-click goes to the implementations.
+    pub click_nav_modifier: NavModifier,
     /// Who wrote each class and method shows after its line ("Ada Lovelace +2": the main
     /// author and how many others), from Git's blame of the file.
     pub blame_author_hints: bool,
@@ -224,6 +227,30 @@ impl ShowHover {
     }
 }
 
+/// The key held to click through to a declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavModifier {
+    /// ⌘ on the Mac, Ctrl on Linux and Windows.
+    #[default]
+    Primary,
+    /// ⌥ (Alt).
+    Alt,
+}
+
+impl NavModifier {
+    pub const ALL: [Self; 2] = [Self::Primary, Self::Alt];
+
+    pub fn label(self) -> &'static str {
+        match (self, cfg!(target_os = "macos")) {
+            (Self::Primary, true) => "\u{2318} Command",
+            (Self::Primary, false) => "Ctrl",
+            (Self::Alt, true) => "\u{2325} Option",
+            (Self::Alt, false) => "Alt",
+        }
+    }
+}
+
 /// How long the pointer rests before the hover shows, by default, and at most.
 pub const HOVER_DELAY_MS: u64 = 500;
 pub const HOVER_DELAY_MAX: u64 = 3000;
@@ -280,6 +307,7 @@ impl Default for Settings {
             param_hints: true,
             show_hover: ShowHover::default(),
             hover_delay_ms: HOVER_DELAY_MS,
+            click_nav_modifier: NavModifier::default(),
             blame_author_hints: true,
             blame_current_line: false,
             fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,

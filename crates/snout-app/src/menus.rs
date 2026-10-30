@@ -208,6 +208,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Toggle Soft Wrap", Box::new(e::ToggleSoftWrap)),
         ("Toggle Parameter Name Hints", Box::new(ToggleParamHints)),
         ("Go to Definition", Box::new(i::GoToDefinition)),
+        ("Go to Declaration or Usages", Box::new(e::GoToDeclaration)),
+        ("Go to Implementations", Box::new(e::GoToImplementations)),
         ("Find References", Box::new(e::FindReferences)),
         ("Rename Symbol…", Box::new(e::RenameSymbol)),
         ("Extract Method", Box::new(e::ExtractMethod)),
@@ -464,6 +466,9 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::action("Annotate with Agents", crate::claude_ide::AnnotateWithAgents),
         ]),
         Menu::new("Navigate").items([
+            MenuItem::action("Go to Declaration or Usages", crate::editor::GoToDeclaration),
+            MenuItem::action("Go to Implementations", crate::editor::GoToImplementations),
+            MenuItem::separator(),
             MenuItem::action("Go to Class…", GoToClass),
             MenuItem::action("Go to File…", GoToFile),
             MenuItem::action("Go to Symbol in Workspace…", GoToSymbol),

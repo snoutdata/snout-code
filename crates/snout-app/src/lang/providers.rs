@@ -85,7 +85,7 @@ impl DocLink {
         })
     }
 
-    fn emit(&self, event: HubEvent, cx: &mut App) {
+    pub(crate) fn emit(&self, event: HubEvent, cx: &mut App) {
         if let Some(hub) = self.hub.upgrade() {
             hub.update(cx, |_, cx| cx.emit(event));
         }

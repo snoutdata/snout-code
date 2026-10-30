@@ -184,36 +184,6 @@ impl EditorPanel {
         self.go_to(pos.line, pos.character, window, cx);
     }
 
-    /// ⌘-click: go to the definition of the symbol under the pointer. GPUI Kit does this
-    /// only for a symbol the pointer rested on with ⌘ held, and an open hover popover
-    /// forgets that symbol on any press outside it (in the capture phase, before the
-    /// editor sees the press). So the press is taken here, before either: the caret goes
-    /// under the pointer and the editor's own go to definition runs from there.
-    pub(super) fn command_click(
-        &mut self,
-        e: &gpui::MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if e.button != gpui::MouseButton::Left || !e.modifiers.secondary(cx) || e.modifiers.alt {
-            return false;
-        }
-        let state = self.state.clone();
-        if !state.update(cx, |s, _| s.lsp_mut().definition_provider.is_some()) {
-            return false;
-        }
-        let Some(at) = offset_at(state.read(cx), e.position) else {
-            return false;
-        };
-        state.update(cx, |s, cx| {
-            s.dismiss_lsp_overlays(cx);
-            s.set_selected_range(at..at, cx);
-            s.focus(window, cx);
-        });
-        window.dispatch_action(Box::new(gpui_component::input::GoToDefinition), cx);
-        true
-    }
-
     /// The errors and warnings the server reports for the file.
     pub fn problem_counts(&self) -> (usize, usize) {
         use lsp_types::DiagnosticSeverity as S;

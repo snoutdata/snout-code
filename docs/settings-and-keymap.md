@@ -157,7 +157,15 @@ and warnings differ in lightness as well as colour.
 - **Delay**: how long the pointer rests first, in milliseconds, from 0 to 3000. The default is
   500.
 
-Both can be set for a project too (`show_hover`, `hover_delay_ms`; see
+**Navigation**
+
+- **Click with**: the key you hold to click through to a declaration (and on the declaration,
+  to its usages): **⌘ Command** (the default; Ctrl on Linux and Windows) or **⌥ Option**.
+  Holding it underlines the name under the pointer as a link. ⌥⌘-click goes to the
+  implementations either way (`click_nav_modifier`: `primary` or `alt`). See
+  [Java](java.md#go-to-a-definition).
+
+Both hover settings can be set for a project too (`show_hover`, `hover_delay_ms`; see
 [Your settings and the project's](#your-settings-and-the-projects)).
 
 ![Settings ▸ Editor](images/settings-and-keymap-editor.png)

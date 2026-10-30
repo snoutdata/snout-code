@@ -34,6 +34,7 @@ mod claude;
 pub mod context_actions;
 mod inlay;
 mod lang_features;
+pub mod navigation;
 pub mod problem_hover;
 mod refactor;
 mod run_gutter;
@@ -79,6 +80,8 @@ actions!(
         ShowContextActions,
         ApplyTopFix,
         AnnotateWithGitBlame,
+        GoToDeclaration,
+        GoToImplementations,
     ]
 );
 
@@ -111,6 +114,8 @@ pub struct EditorDefaults {
     pub author_hints: bool,
     /// The caret line's blame after its end.
     pub line_blame: bool,
+    /// The key held to click through to a declaration.
+    pub nav_modifier: crate::settings::NavModifier,
 }
 
 impl Global for EditorDefaults {}
@@ -126,6 +131,7 @@ impl EditorDefaults {
             hover_delay: Duration::from_millis(s.hover_delay_ms.min(crate::settings::HOVER_DELAY_MAX)),
             author_hints: s.blame_author_hints,
             line_blame: s.blame_current_line,
+            nav_modifier: s.click_nav_modifier,
         }
     }
 
@@ -139,6 +145,7 @@ impl EditorDefaults {
             hover_delay: Duration::from_millis(crate::settings::HOVER_DELAY_MS),
             author_hints: true,
             line_blame: false,
+            nav_modifier: Default::default(),
         })
     }
 }
@@ -333,6 +340,8 @@ pub struct EditorPanel {
     /// Annotate with Git Blame (and with Agents): the column of who changed each line, the
     /// author hints and the caret line's blame.
     pub blame: blame::BlameView,
+    /// Click navigation: the link under the pointer, the usages or implementations popup.
+    pub nav: navigation::NavState,
     /// An agent changed the file while the editor did not follow: a dot on the tab.
     pub touched: bool,
     /// The agent behind the changes waiting for review here, for their colour.
@@ -438,6 +447,7 @@ impl EditorPanel {
                     this.revision += 1;
                     this.hide_card(cx);
                     this.blame_text_changed(cx);
+                    this.nav.link = None;
                     this.param_hints_changed(cx);
                     this.lang_changed(cx);
                     this.check_settings_text(cx);
@@ -552,6 +562,7 @@ impl EditorPanel {
             agent_card: None,
             card_hovered: false,
             blame: Default::default(),
+            nav: Default::default(),
             claude_agent: None,
             presence: None,
             fades: Vec::new(),
@@ -1502,6 +1513,8 @@ impl Render for EditorPanel {
             .on_action(cx.listener(|this, _: &ShowContextActions, w, cx| this.show_context_actions(w, cx)))
             .on_action(cx.listener(|this, _: &ApplyTopFix, w, cx| this.apply_top_fix(w, cx)))
             .on_action(cx.listener(|this, _: &AnnotateWithGitBlame, _, cx| this.toggle_blame(cx)))
+            .on_action(cx.listener(|this, _: &GoToDeclaration, w, cx| this.go_to_declaration(None, w, cx)))
+            .on_action(cx.listener(|this, _: &GoToImplementations, w, cx| this.go_to_implementations(None, w, cx)))
             .on_action(cx.listener(|this, a: &BreakpointConditionAt, w, cx| this.condition_at_line(a.0, w, cx)))
             // GPUI Kit's Quick Fix shows the context actions too.
             .on_action(
@@ -1544,16 +1557,18 @@ impl Render for EditorPanel {
                     .font_family(look::mono_font(cx))
                     .id("editor-body")
                     .debug_selector(|| "editor-body".into())
-                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
+                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, w, cx| {
+                        this.nav_hover(e.position, e.modifiers, w, cx);
                         this.gutter_hover(e.position, cx);
                         this.blame_hover(e.position, cx);
                         this.hover_move(e.position, e.modifiers, e.pressed_button.is_some(), cx);
                     }))
-                    .on_modifiers_changed(
-                        cx.listener(|this, e: &gpui::ModifiersChangedEvent, _, cx| {
-                            this.hover_modifiers(e.modifiers, cx)
-                        }),
-                    )
+                    .on_modifiers_changed(cx.listener(|this, e: &gpui::ModifiersChangedEvent, w, cx| {
+                        if let Some(at) = this.hover.last {
+                            this.nav_hover(at, e.modifiers, w, cx);
+                        }
+                        this.hover_modifiers(e.modifiers, cx)
+                    }))
                     .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                         if !*hovered && this.gutter_tip.take().is_some() {
                             cx.notify();
@@ -1566,7 +1581,7 @@ impl Render for EditorPanel {
                         if this.blame_press(e, window, cx)
                             || this.bulb_press(e, window, cx)
                             || this.gutter_press(e, window, cx)
-                            || this.command_click(e, window, cx)
+                            || this.nav_click(e, window, cx)
                         {
                             window.prevent_default();
                             cx.stop_propagation();
@@ -1636,6 +1651,8 @@ impl Render for EditorPanel {
                     .children(self.agent_card_view(cx))
                     .children(self.blame_card_view(cx))
                     .children(self.authors_view(cx))
+                    .children(self.nav_link_view(cx))
+                    .children(self.nav_popup_view(cx))
                     .children(self.context.render(cx)),
             )
     }

@@ -946,3 +946,88 @@ fn with_nothing_to_lose_and_the_question_off_quitting_goes_at_once(cx: &mut Test
     });
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// Click navigation: ⌘ held over a name the engine knows underlines it at once, with a hand;
+/// with the setting on ⌥, ⌥ does it and ⌘ does not; the usages popup lists places and closes
+/// on Esc.
+#[gpui::test]
+fn the_navigation_modifier_underlines_a_link_and_the_popup_lists_places(cx: &mut TestAppContext) {
+    use crate::editor::navigation::{NavItem, NavPopup};
+    let text = "class A {\n    void greet() { helper(1); }\n}\n";
+    let (repo, model, _ws, editor, cx) = open_text("Nav.txt", text, (0, 0), cx);
+    let definitions = std::rc::Rc::new(std::cell::Cell::new(0));
+    let probe = std::rc::Rc::new(Probe {
+        hovers: Default::default(),
+        definitions: definitions.clone(),
+        cache: Default::default(),
+    });
+    cx.update(|_, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, _| s.lsp_mut().definition_provider = Some(probe.clone()));
+    });
+    cx.run_until_parked();
+    let helper = text.find("helper").unwrap();
+    let at =
+        cx.update(|_, cx| editor.read(cx).state.read(cx).range_to_bounds(&(helper + 2..helper + 3)).unwrap().center());
+    let link = |cx: &mut VisualTestContext| cx.update(|_, cx| editor.read(cx).nav.link.clone());
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(link(cx), None, "no link without the modifier");
+    cx.simulate_mouse_move(at, None, Modifiers::command());
+    cx.run_until_parked();
+    assert_eq!(link(cx), Some(helper..helper + 6), "underlined at once");
+    assert!(cx.debug_bounds("nav-link").is_some(), "drawn, with the hand");
+    // (GPUI Kit asks too, for its own link.)
+    let asked = definitions.get();
+    assert!(asked >= 1);
+    // Let go: the link goes; held again over the same word: known, not asked again.
+    cx.simulate_modifiers_change(Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(link(cx), None);
+    cx.simulate_mouse_move(at, None, Modifiers::command());
+    cx.run_until_parked();
+    assert_eq!(link(cx), Some(helper..helper + 6));
+    assert_eq!(definitions.get(), asked, "known: not asked again for the word");
+    // ⌥ chosen in the settings: ⌘ no longer underlines, ⌥ does.
+    cx.update(|_, cx| {
+        let mut s = model.read(cx).settings.clone();
+        s.click_nav_modifier = crate::settings::NavModifier::Alt;
+        cx.set_global(crate::editor::EditorDefaults::of(&s));
+    });
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_mouse_move(at, None, Modifiers::command());
+    cx.run_until_parked();
+    assert_eq!(link(cx), None, "⌘ is not the key any more");
+    cx.simulate_mouse_move(at, None, Modifiers::alt());
+    cx.run_until_parked();
+    assert_eq!(link(cx), Some(helper..helper + 6));
+    // The popup of places: drawn, ↓ picks, Esc closes.
+    cx.update(|w, cx| {
+        editor.update(cx, |e, cx| {
+            let focus = cx.focus_handle();
+            focus.focus(w, cx);
+            let item = |line: u32, preview: &str| NavItem {
+                uri: "file:///p/src/A.java".parse().unwrap(),
+                at: lsp_types::Position::new(line, 4),
+                file: "A.java".into(),
+                dir: "src".into(),
+                preview: preview.into(),
+            };
+            e.nav.popup = Some(NavPopup {
+                title: "Usages of helper".into(),
+                at: gpui::point(gpui::px(200.), gpui::px(200.)),
+                items: vec![item(3, "helper(1);"), item(9, "helper(2);")],
+                selected: 0,
+                focus,
+            });
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("nav-popup").is_some() && cx.debug_bounds("nav-item-1").is_some());
+    cx.simulate_keystrokes("down");
+    assert_eq!(cx.update(|_, cx| editor.read(cx).nav.popup.as_ref().map(|p| p.selected)), Some(1));
+    cx.simulate_keystrokes("escape");
+    assert!(cx.update(|_, cx| editor.read(cx).nav.popup.is_none()), "Esc closes it");
+    let _ = std::fs::remove_dir_all(repo);
+}

@@ -105,7 +105,7 @@ pub struct HoverState {
     /// The spot a card is on its way for.
     pending: Option<Spot>,
     /// Where the pointer was last, for a change of modifiers without a move.
-    last: Option<Point<Pixels>>,
+    pub(super) last: Option<Point<Pixels>>,
     next_id: u64,
     _show: Option<Task<()>>,
     _hide: Option<Task<()>>,

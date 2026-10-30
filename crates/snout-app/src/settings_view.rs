@@ -147,7 +147,7 @@ impl Page {
                 "theme colors studio vivid deep classic dark light system font size interface quit quitting confirm"
             }
             Page::Keymap => "shortcuts keys bindings",
-            Page::Editor => "tab size indent soft wrap whitespace font",
+            Page::Editor => "tab size indent soft wrap whitespace font navigation click declaration modifier",
             Page::VersionControl => "git fetch interval background blame annotate annotations author hints line",
             Page::Gradle => "build tools jdk java daemon idle timeout",
             Page::Spring => "frameworks boot profiles active beans",
@@ -449,6 +449,7 @@ impl SettingsView {
         next.param_hints = d.param_hints;
         next.show_hover = d.show_hover;
         next.hover_delay_ms = d.hover_delay_ms;
+        next.click_nav_modifier = d.click_nav_modifier;
         next.fetch_minutes = d.fetch_minutes;
         next.blame_author_hints = d.blame_author_hints;
         next.blame_current_line = d.blame_current_line;
@@ -1367,6 +1368,24 @@ impl SettingsView {
                     .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
                         "For problems and their fixes, and what a symbol is. \u{2318} always shows it at once, \
                          with the link to the declaration.",
+                    ))
+                    .child(section("Navigation", &p))
+                    .child(row(
+                        "Click with",
+                        div().flex().items_center().gap(px(6.)).children(crate::settings::NavModifier::ALL.map(|m| {
+                            let (id, ico) = match m {
+                                crate::settings::NavModifier::Primary => ("settings-nav-primary", IconName::Command),
+                                crate::settings::NavModifier::Alt => ("settings-nav-alt", IconName::Option),
+                            };
+                            look::toggle(id, ico, m.label(), d.click_nav_modifier == m, &p)
+                                .debug_selector(move || id.to_owned())
+                                .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.click_nav_modifier = m)))
+                        })),
+                        &p,
+                    ))
+                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                        "Hold it to underline a name as a link, and click to go to its declaration (on the declaration, \
+                         its usages). \u{2325}\u{2318}-click goes to the implementations.",
                     ))
                     .child(section("Preview", &p))
                     .child(editor_preview(&d, &p))
