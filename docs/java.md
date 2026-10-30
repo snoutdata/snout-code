@@ -246,7 +246,7 @@ If the status bar says **Java support unavailable**, the Java engine is missing.
 The engine compiles your code as your build does, so correct code shows no errors:
 
 - **Java modules.** A module with a `module-info.java` in its main sources reads its dependencies as modules, as `javac` does, so what it `requires` resolves. A `module-info.java` in test sources, or beside sources of a Java level older than 9 (which the build compiles apart), is left out.
-- **Lombok.** When a module uses Lombok, the engine runs it, so the getters, constructors, builders and loggers it generates exist in the editor too.
+- **Lombok.** When a module uses Lombok, the engine runs it, so the getters, constructors, builders and loggers it generates exist in the editor too, with the settings of your `lombok.config` files (a logger named `LOGGER`, chained accessors and so on).
 - **Multi-release sources.** A folder of sources for a newer Java (`src/main/java21` beside `src/main/java`) keeps only the classes the base folder lacks, so a class is never there twice.
 
 ### Generated sources

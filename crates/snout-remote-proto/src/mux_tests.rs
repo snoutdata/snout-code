@@ -231,7 +231,8 @@ fn a_dropped_connection_fails_calls_and_streams() {
     p.client.on_close(move || {
         c.fetch_add(1, Ordering::SeqCst);
     });
-    p.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    // Already disconnected (ENOTCONN under load) is the state this test is after.
+    let _ = p.socket.shutdown(std::net::Shutdown::Both);
     let mut buf = vec![0; 1 << 20];
     let err = loop {
         match ch.recv(&mut buf) {

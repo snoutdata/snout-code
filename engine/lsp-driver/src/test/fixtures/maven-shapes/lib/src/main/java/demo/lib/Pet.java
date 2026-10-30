@@ -13,7 +13,7 @@ public class Pet {
 
     public String shout() {
         var loud = StringUtils.upperCase(name);
-        log.info("{} shouts", name);
+        LOGGER.info("{} shouts", name);
         return loud + "!" + (Version.VALUE.isEmpty() ? "?" : "");
     }
 }

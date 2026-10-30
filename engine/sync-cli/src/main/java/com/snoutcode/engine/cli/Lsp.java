@@ -29,6 +29,9 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
 import java.util.stream.Stream;
 
 /**
@@ -232,6 +235,7 @@ final class Lsp {
         if (springBundle != null) {
             bundles.add(springBundle.toPath());
         }
+        bundles.add(compilerResourcesFragment(home));
         Path config = prepareConfiguration(home.resolve("config"), jdtls.toPath(), bundles);
         List<String> command = new ArrayList<>();
         command.add(java.getAbsolutePath());
@@ -621,6 +625,41 @@ final class Lsp {
         }
         Files.writeString(stampFile, stamp.toString());
         return dir;
+    }
+
+    /** The fragment's symbolic name and version; a new version is a new file. */
+    static final String COMPILER_RESOURCES_FRAGMENT = "com.snoutcode.engine.compiler.resources";
+    static final String COMPILER_RESOURCES_VERSION = "1.0.0";
+
+    /**
+     * A fragment of jdtls's compiler bundle ({@code org.eclipse.jdt.core.compiler.batch}) that lets
+     * it import the workspace's packages, which it does not otherwise. Lombok runs inside the
+     * compiler's parser with that bundle's class loader, and finds {@code lombok.config} by asking
+     * the workspace where a source file is on disk; without the workspace it takes the file's
+     * workspace path ({@code /project/src/Foo.java}) for a path on disk, finds no
+     * {@code lombok.config} anywhere, and every setting in one (a logger's name, accessors) is lost.
+     * A manifest only; written once into {@code dir}.
+     */
+    static Path compilerResourcesFragment(Path dir) throws IOException {
+        Path jar = dir.resolve(COMPILER_RESOURCES_FRAGMENT + "_" + COMPILER_RESOURCES_VERSION + ".jar");
+        if (Files.isRegularFile(jar)) {
+            return jar;
+        }
+        Manifest manifest = new Manifest();
+        Attributes main = manifest.getMainAttributes();
+        main.put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        main.putValue("Bundle-ManifestVersion", "2");
+        main.putValue("Bundle-SymbolicName", COMPILER_RESOURCES_FRAGMENT);
+        main.putValue("Bundle-Version", COMPILER_RESOURCES_VERSION);
+        main.putValue("Fragment-Host", "org.eclipse.jdt.core.compiler.batch");
+        main.putValue("DynamicImport-Package", "org.eclipse.core.resources,org.eclipse.core.runtime");
+        Files.createDirectories(dir);
+        Path part = dir.resolve(jar.getFileName() + ".part");
+        try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(part), manifest)) {
+            out.flush();
+        }
+        Files.move(part, jar, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        return jar;
     }
 
     private static String platformConfigDir() {
