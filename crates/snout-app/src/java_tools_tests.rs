@@ -20,8 +20,7 @@ use crate::workspace::Workspace;
 fn shop(name: &str) -> PathBuf {
     let dir = scratch_dir(name);
     let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shop");
-    let ok = std::process::Command::new("cp").arg("-R").arg(&from).arg(&dir).status().unwrap().success();
-    assert!(ok, "copy the fixture");
+    crate::tests::copy_tree(&from, &dir);
     let repo = dir.join("shop");
     std::fs::write(repo.join("gradle.properties"), "org.gradle.daemon.idletimeout=60000\n").unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);

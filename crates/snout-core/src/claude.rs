@@ -31,6 +31,8 @@ pub fn find_claude(host: &dyn Host) -> Option<PathBuf> {
         .filter(|_| !home.as_os_str().is_empty())
         .map(|d| home.join(d))
         .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from))
+        // Windows: npm's global folder.
+        .chain(host.info().var("APPDATA").map(|d| PathBuf::from(d).join("npm")))
         .collect();
     snout_host::which(host, &["claude"], &extra)
 }

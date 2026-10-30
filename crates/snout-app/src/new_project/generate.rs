@@ -635,6 +635,10 @@ pub fn download_boot(host: &dyn Host, base: &str, dir: &Path, b: &Basics, boot: 
         let unpacked = stage.join("unpacked");
         let unzip = if host.info().is_mac() {
             Cmd::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(&unpacked)
+        } else if host.info().is_windows() {
+            // Windows's own tar (bsdtar) unpacks zip files; it wants the folder made.
+            host.create_dir_all(&unpacked)?;
+            Cmd::new("tar").arg("-xf").arg(&zip).arg("-C").arg(&unpacked)
         } else {
             Cmd::new("unzip").arg("-q").arg(&zip).arg("-d").arg(&unpacked)
         };

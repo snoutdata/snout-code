@@ -189,7 +189,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
                     env.push((hooks::PORT_ENV, forward.port.to_string()));
                     args = vec!["--settings".into(), file.to_string_lossy().into_owned()];
                     if let Some(dir) = file.parent() {
-                        codex = hooks::codex_args(&dir.join("hook-header"));
+                        codex = hooks::codex_args(&dir.join("hook-header"), forward.port);
                     }
                     let _ = ws.update(cx, |ws, _| {
                         if let Some(b) = ws.claude.as_mut() {

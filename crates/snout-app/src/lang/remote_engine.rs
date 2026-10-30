@@ -76,7 +76,8 @@ fn engines_dir(host: &dyn Host) -> PathBuf {
 pub fn installed(host: &dyn Host) -> Option<PathBuf> {
     let hash = local_dist().and_then(|d| dist_hash(&d).ok())?;
     let dir = engines_dir(host).join(hash);
-    (host.is_file(&dir.join(COMPLETE)) && host.is_file(&dir.join("runtime/bin/java"))).then_some(dir)
+    (host.is_file(&dir.join(COMPLETE)) && host.is_file(&java::java_bin(host.info(), &dir.join("runtime"))))
+        .then_some(dir)
 }
 
 /// Put the engine on `host` if it is not there: the Java it runs on (downloaded when the
@@ -89,7 +90,7 @@ pub fn install(host: &dyn Host, say: &dyn Fn(&str), progress: &DownloadProgress)
     let dist = local_dist().context("the Java engine is not built (run snout.sh)")?;
     let hash = dist_hash(&dist).context("read the engine")?;
     let dir = engines_dir(host).join(&hash);
-    let java_ok = host.is_file(&dir.join("runtime/bin/java"));
+    let java_ok = host.is_file(&java::java_bin(host.info(), &dir.join("runtime")));
     if host.is_file(&dir.join(COMPLETE)) && java_ok {
         return Ok(dir);
     }

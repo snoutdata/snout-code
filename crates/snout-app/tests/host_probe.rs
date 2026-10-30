@@ -65,7 +65,7 @@ mod probe {
         git(&dir, &["init", "-q", "-b", "main"]);
         git(&dir, &["-c", "user.name=Probe", "-c", "user.email=probe@example.com", "add", "-A"]);
         git(&dir, &["-c", "user.name=Probe", "-c", "user.email=probe@example.com", "commit", "-qm", "Start"]);
-        dir.canonicalize().unwrap()
+        snout_host::canonical(&dir).unwrap()
     }
 
     struct Probe {
@@ -128,7 +128,7 @@ mod probe {
     pub fn run() {
         let ms = std::env::var(snout_host::LATENCY_ENV).ok().and_then(|v| v.parse().ok()).unwrap_or(200);
         let scratch = tempfile::Builder::new().prefix("snout-probe").tempdir().unwrap();
-        let dir = project(&scratch.path().canonicalize().unwrap());
+        let dir = project(&snout_host::canonical(scratch.path()).unwrap());
         let store = Store::in_home(&scratch.path().join("home"));
         gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut gpui::App| {
             // This thread is the UI thread.

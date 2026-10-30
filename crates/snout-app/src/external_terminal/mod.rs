@@ -3,7 +3,8 @@
 //! Ghostty, WezTerm, Alacritty, kitty or Warp, found by their bundle ids through
 //! LaunchServices (`mac.rs`); on Linux the system's default terminal, GNOME Terminal, Konsole,
 //! Xfce Terminal, Ghostty, WezTerm, Alacritty, kitty, foot or xterm, found on `PATH`
-//! (`linux.rs`); or, on both, a command of the user's own with `{dir}` in it.
+//! (`linux.rs`); on Windows Windows Terminal, PowerShell, the Command Prompt, WezTerm or
+//! Alacritty (`windows.rs`); or, on each, a command of the user's own with `{dir}` in it.
 //!
 //! On a project of a remote machine the terminal opens an ssh session there instead,
 //! `ssh -t <host> 'cd <dir>; exec $SHELL -l'`, over the same ssh config and shared
@@ -18,10 +19,15 @@ mod mac;
 #[cfg(target_os = "macos")]
 use mac as imp;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 mod linux;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 use linux as imp;
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as imp;
 
 /// The terminal app Open in External Terminal opens. The settings name every app of every
 /// system; each system offers its own (see [`ExternalTerminal::APPS`]).
@@ -47,6 +53,9 @@ pub enum ExternalTerminal {
     Foot,
     #[serde(rename = "xterm")]
     XTerm,
+    PowerShell,
+    #[serde(rename = "Command Prompt")]
+    CommandPrompt,
     /// The command in `external_terminal_command`.
     Custom,
 }
@@ -69,6 +78,8 @@ impl ExternalTerminal {
             Self::XfceTerminal => "Xfce Terminal",
             Self::Foot => "foot",
             Self::XTerm => "xterm",
+            Self::PowerShell => "PowerShell",
+            Self::CommandPrompt => "Command Prompt",
             Self::Custom => "Custom command",
         }
     }
@@ -104,7 +115,8 @@ pub enum Where {
 }
 
 /// The command line that opens `term` at `at`, program first (see the platform's own
-/// `command`). A custom command runs through `sh`, with `{dir}` and `{ssh}` filled in.
+/// `command`). A custom command runs through `sh` (on Windows the Command Prompt), with
+/// `{dir}` and `{ssh}` filled in.
 pub fn command(term: ExternalTerminal, custom: &str, at: &Where, scripts: &Path) -> std::io::Result<Vec<String>> {
     if term == ExternalTerminal::Custom {
         let template = custom.trim();
@@ -115,17 +127,37 @@ pub fn command(term: ExternalTerminal, custom: &str, at: &Where, scripts: &Path)
         }
         let (dir, ssh) = match at {
             Where::Local(dir) => (dir, String::new()),
-            Where::Remote { dir, ssh } => (dir, ssh.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" ")),
+            Where::Remote { dir, ssh } => (dir, ssh.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")),
         };
-        let line = template.replace("{dir}", &sh_quote(&dir.display().to_string())).replace("{ssh}", &ssh);
+        let line = template.replace("{dir}", &shell_quote(&dir.display().to_string())).replace("{ssh}", &ssh);
+        #[cfg(windows)]
+        return Ok(imp::shell(line));
+        #[cfg(not(windows))]
         return Ok(vec!["/bin/sh".to_owned(), "-c".to_owned(), line]);
     }
     imp::command(term, at, scripts)
 }
 
+/// `s` quoted for the shell a custom command runs in: `sh`, or on Windows the Command Prompt.
+fn shell_quote(s: &str) -> String {
+    #[cfg(windows)]
+    return imp::quote(s);
+    #[cfg(not(windows))]
+    sh_quote(s)
+}
+
+/// Run `argv` (from [`command`]). On a Mac it waits for `open`, which returns once the app has
+/// the request; a terminal app started directly (Linux, Windows, or a custom command) keeps
+/// running, so it is not waited for. Why it failed, if it did.
+#[cfg(windows)]
+pub fn run(argv: &[String]) -> Result<(), String> {
+    imp::run(argv)
+}
+
 /// Run `argv` (from [`command`]). On a Mac it waits for `open`, which returns once the app has
 /// the request; a terminal app started directly (Linux, or a custom command) keeps running,
 /// so it is not waited for. Why it failed, if it did.
+#[cfg(unix)]
 pub fn run(argv: &[String]) -> Result<(), String> {
     let (program, args) = argv.split_first().ok_or_else(|| "nothing to run".to_owned())?;
     let mut c = std::process::Command::new(program);
@@ -166,6 +198,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_custom_command_runs_at_the_folder_or_over_ssh() {
         let dir = Where::Local(PathBuf::from("/w/shop app"));
@@ -189,8 +222,8 @@ mod tests {
         let dir = crate::tests::scratch_dir("external-terminal-custom");
         let spaced = dir.join("a folder");
         std::fs::create_dir_all(&spaced).unwrap();
-        let argv =
-            command(ExternalTerminal::Custom, "touch {dir}/opened", &Where::Local(spaced.clone()), &dir).unwrap();
+        let template = if cfg!(windows) { "cd /d {dir} && type nul > opened" } else { "touch {dir}/opened" };
+        let argv = command(ExternalTerminal::Custom, template, &Where::Local(spaced.clone()), &dir).unwrap();
         run(&argv).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !spaced.join("opened").exists() && std::time::Instant::now() < deadline {

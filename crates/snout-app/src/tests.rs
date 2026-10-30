@@ -34,7 +34,52 @@ pub fn scratch_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("snout-app-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir.canonicalize().unwrap()
+    snout_host::canonical(&dir).unwrap()
+}
+
+/// Copy the folder `from` into `into` (as `cp -R from into/`), on every system.
+pub fn copy_tree(from: &Path, into: &Path) {
+    let dest = into.join(from.file_name().expect("a folder name"));
+    let mut stack = vec![(from.to_path_buf(), dest)];
+    while let Some((src, dst)) = stack.pop() {
+        std::fs::create_dir_all(&dst).unwrap();
+        for e in std::fs::read_dir(&src).unwrap().flatten() {
+            let to = dst.join(e.file_name());
+            if e.file_type().unwrap().is_dir() {
+                stack.push((e.path(), to));
+            } else {
+                std::fs::copy(e.path(), &to).unwrap();
+            }
+        }
+    }
+}
+
+/// A stand-in program `name` in `dir`: the `sh` script on Unix (made executable), the batch
+/// file `cmd` (`name.cmd`) on Windows.
+pub fn fake_program(dir: &Path, name: &str, sh: &str, cmd: &str) -> PathBuf {
+    if cfg!(windows) {
+        let fake = dir.join(format!("{name}.cmd"));
+        std::fs::write(&fake, cmd.replace('\n', "\r\n")).unwrap();
+        fake
+    } else {
+        let fake = dir.join(name);
+        std::fs::write(&fake, sh).unwrap();
+        Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+        fake
+    }
+}
+
+/// A process that waits about 30 seconds and does nothing else, on every system.
+pub fn sleeper() -> std::process::Command {
+    if cfg!(windows) {
+        let mut c = std::process::Command::new("ping.exe");
+        c.args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null());
+        c
+    } else {
+        let mut c = std::process::Command::new("sleep");
+        c.arg("30");
+        c
+    }
 }
 
 /// A repository with a little history, a tag, a second branch, and one file in each
@@ -290,10 +335,12 @@ fn claude_drafts_the_commit_message_from_the_patch(cx: &mut TestAppContext) {
     let bin = scratch_dir("draft-bin");
     // A stand-in for `claude -p`: it reads the patch and answers with a message naming a
     // file in it.
-    let fake = bin.join("claude");
-    let script = "#!/bin/sh\nif grep -q 'src/main.rs' ; then echo 'Greet snout'; else echo 'Wrong patch'; fi\n";
-    std::fs::write(&fake, script).unwrap();
-    Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let fake = fake_program(
+        &bin,
+        "claude",
+        "#!/bin/sh\nif grep -q 'src/main.rs' ; then echo 'Greet snout'; else echo 'Wrong patch'; fi\n",
+        "@echo off\nfindstr /c:\"src/main.rs\" >nul && (echo Greet snout) || (echo Wrong patch)\n",
+    );
     let (model, _, cx) = open(cx, with_repo(&repo));
     cx.update(|_, cx| model.update(cx, |m, _| m.claude = Some(fake.clone())));
     act(&model, cx, Action::DraftMessage);
@@ -431,10 +478,12 @@ fn claude_console_on(engine: EngineKind, cx: &mut TestAppContext) {
     let repo = demo_repo(&name);
     let bin = scratch_dir(&format!("{name}-bin"));
     // A stand-in for `claude`: it says where it runs, then makes the file it is told to.
-    let fake = bin.join("claude");
-    let script = "#!/bin/sh\necho \"ready in $(pwd)\"\nread name\ntouch \"$name.txt\"\necho \"made $name\"\nsleep 30\n";
-    std::fs::write(&fake, script).unwrap();
-    Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let fake = fake_program(
+        &bin,
+        "claude",
+        "#!/bin/sh\necho \"ready in $(pwd)\"\nread name\ntouch \"$name.txt\"\necho \"made $name\"\nsleep 30\n",
+        "@echo off\necho ready in %CD%\nset /p name=\ntype nul > \"%name%.txt\"\necho made %name%\nping -n 30 127.0.0.1 >nul\n",
+    );
     let (model, ws, cx) = open(cx, Settings { terminal_engine: engine, ..with_repo(&repo) });
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).expect("the console is docked");
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));

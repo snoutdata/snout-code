@@ -860,9 +860,9 @@ pub fn run_sync(host: &dyn Host, dist: &Path, root: &Path, out: &Path, jdk: Opti
     let dir = out.parent().ok_or("no folder for the model")?;
     host.create_dir_all(dir).map_err(|e| e.to_string())?;
     let partial = dir.join("model.json.part");
-    let mut c = Cmd::new(dist.join("runtime/bin/java"))
+    let mut c = Cmd::new(crate::lang::java::java_bin(host.info(), &dist.join("runtime")))
         .arg("-cp")
-        .arg(format!("{}/*", dist.join("lib").display()))
+        .arg(crate::lang::java::engine_classpath(dist))
         .arg("com.snoutcode.engine.cli.SnoutEngine")
         .arg("sync")
         .arg(root)

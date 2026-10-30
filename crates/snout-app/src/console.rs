@@ -456,7 +456,9 @@ impl ConsolePanel {
         let settings = &self.model.read(cx).settings;
         let configured = match agent.as_ref().map(|a| a.id) {
             Some(crate::agents::CODEX) => settings.codex_path.clone(),
-            Some(crate::agents::CUSTOM) => Some(PathBuf::from("/bin/sh")),
+            Some(crate::agents::CUSTOM) => {
+                Some(PathBuf::from(if host.info().is_windows() { "cmd.exe" } else { "/bin/sh" }))
+            }
             _ => settings.claude_path.clone(),
         };
         let engine = settings.terminal_engine;
@@ -494,6 +496,9 @@ impl ConsolePanel {
                     args.splice(0..0, extra.0.iter().cloned());
                 }
             }
+            Some(a) if host.info().is_windows() => {
+                args = vec!["/d".into(), "/c".into(), a.command.clone().unwrap_or_default()]
+            }
             Some(a) => args = vec!["-c".into(), a.command.clone().unwrap_or_default()],
             None => {}
         }
@@ -508,9 +513,7 @@ impl ConsolePanel {
                         configured.or_else(|| crate::agents::find_codex(&*host))
                     }
                     Kind::Claude => configured.or_else(|| find_claude(&*host)),
-                    Kind::Shell => shell.or_else(|| {
-                        Some(host.info().var("SHELL").map_or_else(|| PathBuf::from("/bin/zsh"), PathBuf::from))
-                    }),
+                    Kind::Shell => shell.or_else(|| Some(default_shell(&*host))),
                 };
                 let program = program.or(found).ok_or(None)?;
                 let env_remove: &[&str] = if kind == Kind::Claude { ENV_REMOVE } else { &[] };
@@ -630,7 +633,7 @@ impl ConsolePanel {
     fn on_key(&mut self, e: &KeyDownEvent, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         let m = k.modifiers;
-        // Find: ⌘F on a Mac; Ctrl+Shift+F on Linux, where Ctrl+F belongs to the shell.
+        // Find: ⌘F on a Mac; Ctrl+Shift+F on Linux and Windows, where Ctrl+F belongs to the shell.
         let find = if cfg!(target_os = "macos") {
             m.platform && !m.control && !m.alt
         } else {
@@ -981,8 +984,7 @@ impl ConsolePanel {
                 let program = Some(m.settings.terminal_shell.trim())
                     .filter(|s| !s.is_empty())
                     .map(str::to_owned)
-                    .or_else(|| crate::host::host(cx).info().var("SHELL").map(str::to_owned))
-                    .unwrap_or_else(|| "zsh".into());
+                    .unwrap_or_else(|| default_shell_name(crate::host::host(cx).info()));
                 let name = std::path::Path::new(&program)
                     .file_name()
                     .map_or_else(|| program.clone(), |n| n.to_string_lossy().into_owned());
@@ -1693,5 +1695,29 @@ pub fn continue_args(agent: &crate::agents::Agent) -> Vec<String> {
         crate::agents::CLAUDE => vec!["--continue".into()],
         crate::agents::CODEX => vec!["resume".into(), "--last".into()],
         _ => Vec::new(),
+    }
+}
+
+/// The shell the Terminal tab starts when Settings names none: the user's `SHELL`; on Windows
+/// PowerShell (7 where it is installed), else the Command Prompt; else zsh.
+pub fn default_shell(host: &dyn snout_host::Host) -> PathBuf {
+    let info = host.info();
+    if let Some(shell) = info.var("SHELL") {
+        return PathBuf::from(shell);
+    }
+    if info.is_windows() {
+        return snout_host::which(host, &["pwsh", "powershell"], &[])
+            .or_else(|| info.var("ComSpec").or_else(|| info.var("COMSPEC")).map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("cmd.exe"));
+    }
+    PathBuf::from("/bin/zsh")
+}
+
+/// The name of [`default_shell`], without looking for it.
+fn default_shell_name(info: &snout_host::HostInfo) -> String {
+    match info.var("SHELL") {
+        Some(shell) => shell.to_owned(),
+        None if info.is_windows() => "powershell".into(),
+        None => "zsh".into(),
     }
 }

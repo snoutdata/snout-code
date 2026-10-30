@@ -4,7 +4,6 @@
 //! answers are canned ([`crate::editor::CannedLang`]); `lang_tests` has the real engine.
 
 use std::path::Path;
-use std::process::Command;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -291,9 +290,12 @@ fn ask_to_fix_types_the_file_lines_and_problem_into_the_agents_prompt(cx: &mut T
     let (repo, ws, editor, cx) = setup("ask-fix", cx);
     let bin = scratch_dir("ask-fix-bin");
     // A stand-in for the agent: it waits, and the terminal echoes what is typed at it.
-    let fake = bin.join("claude");
-    std::fs::write(&fake, "#!/bin/sh\necho ready\nsleep 30\n").unwrap();
-    Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let fake = crate::tests::fake_program(
+        &bin,
+        "claude",
+        "#!/bin/sh\necho ready\nsleep 30\n",
+        "@echo off\necho ready\nping -n 30 127.0.0.1 >nul\n",
+    );
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).expect("the console is docked");
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     let wait_for = |cx: &mut VisualTestContext, what: &str| {

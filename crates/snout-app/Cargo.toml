@@ -76,6 +76,15 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # Lucide icons drawn for menu items that have no SF Symbol (GPUI's own SVG renderer).
 resvg = { version = "0.46", default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+# When the app started, the console of the command prompt it was started from, and the
+# system's random numbers (Claude Code's IDE token).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Console", "Win32_System_Threading"] }
+
+[build-dependencies]
+# The Windows program's icon and version (build.rs).
+embed-resource = "3"
+
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 gpui-component = { workspace = true, features = ["test-support"] }

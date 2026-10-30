@@ -239,19 +239,34 @@ pub fn spawn_reaper(targets: &[(u32, u64)], grace: Duration, files: &[PathBuf]) 
     if targets.is_empty() && files.is_empty() {
         return Ok(());
     }
-    use std::os::unix::process::CommandExt as _;
     let exe = std::env::current_exe()?;
     let list = targets.iter().map(|(p, s)| format!("{p}:{s}")).collect::<Vec<_>>().join(",");
     let files = files.iter().map(|f| f.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
-    std::process::Command::new(exe)
-        .env(REAP_ENV, list)
+    let mut c = std::process::Command::new(exe);
+    c.env(REAP_ENV, list)
         .env(REAP_GRACE_ENV, grace.as_millis().to_string())
         .env(REAP_FILES_ENV, files)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .process_group(0)
-        .spawn()
-        .map(drop)
+        .stdout(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        c.process_group(0).spawn().map(drop)
+    }
+    // Windows: the reaper leaves the app's job, holding a handle to it, so the processes in it
+    // stay until the reaper has stopped them; when it ends, the job ends what is left.
+    #[cfg(windows)]
+    {
+        let job = snout_host::win::app_job();
+        if let Some(job) = job {
+            job.set_inheritable(true)?;
+        }
+        let spawned = snout_host::win::spawn_detached(&mut c).map(drop);
+        if let Some(job) = job {
+            let _ = job.set_inheritable(false);
+        }
+        spawned
+    }
 }
 
 /// The reaper's targets, from [`REAP_ENV`]'s text.
@@ -287,7 +302,7 @@ mod tests {
     #[test]
     fn the_reaper_stops_what_it_is_handed() {
         assert_eq!(parse_targets("12:100, 13:200,x:1,"), [(12, 100), (13, 200)]);
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = crate::tests::sleeper().spawn().unwrap();
         let pid = child.id();
         let host = snout_host::local();
         let start = host.processes(false).unwrap().into_iter().find(|p| p.pid == pid).unwrap().start;

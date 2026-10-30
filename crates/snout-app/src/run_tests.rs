@@ -320,8 +320,7 @@ fn test_jdk() -> Option<PathBuf> {
 fn run_app(name: &str) -> PathBuf {
     let dir = scratch_dir(name);
     let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../engine/sync-cli/src/test/fixtures/run-app");
-    let ok = std::process::Command::new("cp").arg("-R").arg(&from).arg(&dir).status().unwrap().success();
-    assert!(ok, "copy the fixture");
+    crate::tests::copy_tree(&from, &dir);
     let repo = dir.join("run-app");
     std::fs::write(repo.join("gradle.properties"), "org.gradle.daemon.idletimeout=60000\n").unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);
@@ -532,7 +531,7 @@ fn a_real_project_lists_runs_and_tests(cx: &mut TestAppContext) {
         println!("real project: skipped; set SNOUT_TEST_PROJECT");
         return;
     };
-    let project = project.canonicalize().unwrap();
+    let project = snout_host::canonical(&project).unwrap();
     cx.executor().allow_parking();
     let _engine = crate::tests::engine_lock();
     let mut settings = crate::settings::Settings::default();

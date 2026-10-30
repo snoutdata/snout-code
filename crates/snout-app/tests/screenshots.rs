@@ -60,7 +60,7 @@ mod shots {
         let dir = std::env::temp_dir().join(format!("snout-app-shot-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();
-        let dir = dir.canonicalize().unwrap();
+        let dir = snout_host::canonical(&dir).unwrap();
         git(&dir, &["init", "-q", "-b", "main"]);
         for (k, v) in [
             ("user.name", "Demo"),
@@ -1836,7 +1836,7 @@ sleep 30
         std::fs::create_dir_all(&dir).unwrap();
         let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shop");
         assert!(Command::new("cp").arg("-R").arg(&from).arg(&dir).status().unwrap().success());
-        let repo = dir.join("shop").canonicalize().unwrap();
+        let repo = snout_host::canonical(&dir.join("shop")).unwrap();
         std::fs::write(repo.join("gradle.properties"), "org.gradle.daemon.idletimeout=60000\n").unwrap();
         git(&repo, &["init", "-q", "-b", "main"]);
         let c = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
@@ -2079,7 +2079,7 @@ sleep 30
         std::fs::create_dir_all(&dir).unwrap();
         let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../engine/sync-cli/src/test/fixtures/run-app");
         assert!(Command::new("cp").arg("-R").arg(&from).arg(&dir).status().unwrap().success());
-        let repo = dir.join("run-app").canonicalize().unwrap();
+        let repo = snout_host::canonical(&dir.join("run-app")).unwrap();
         std::fs::write(repo.join("gradle.properties"), "org.gradle.daemon.idletimeout=60000\n").unwrap();
         git(&repo, &["init", "-q", "-b", "main"]);
         git(&repo, &["-c", "user.name=t", "-c", "user.email=t@example.com", "add", "-A"]);

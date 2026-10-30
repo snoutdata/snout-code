@@ -31,9 +31,28 @@ pub fn default_dir(host: &dyn Host) -> Option<PathBuf> {
 /// A fresh token: 128 bits from the operating system's generator, as 32 lowercase hex
 /// digits.
 pub fn new_token() -> std::io::Result<String> {
-    use std::io::Read as _;
     let mut bytes = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    #[cfg(unix)]
+    {
+        use std::io::Read as _;
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
+        // SAFETY: the system's generator fills the buffer it is given.
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                bytes.as_mut_ptr(),
+                bytes.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status != 0 {
+            return Err(std::io::Error::other(format!("no random bytes from the system ({status:#x})")));
+        }
+    }
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
@@ -119,8 +138,11 @@ mod tests {
         assert_eq!(v["ideName"], IDE_NAME);
         assert_eq!(v["transport"], "ws");
         assert_eq!(v["authToken"], "00ff");
-        use std::os::unix::fs::PermissionsExt as _;
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -129,7 +151,11 @@ mod tests {
         let dir = scratch("stale");
         std::fs::create_dir_all(&dir).unwrap();
         // A child that has exited and been reaped: its pid is free.
-        let mut child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let mut child = if cfg!(windows) {
+            std::process::Command::new("cmd.exe").args(["/d", "/c", "exit"]).spawn().unwrap()
+        } else {
+            std::process::Command::new("/usr/bin/true").spawn().unwrap()
+        };
         let dead = child.id();
         child.wait().unwrap();
         std::fs::write(dir.join("1.lock"), contents(dead, &[], "t").to_string()).unwrap();

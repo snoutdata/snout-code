@@ -1,5 +1,5 @@
 //! What differs between the systems SnoutCode runs on, behind one small interface: macOS
-//! (`mac.rs`) and Linux (`linux.rs`). The rest of the app asks here rather than testing the
+//! (`mac.rs`), Linux (`linux.rs`) and Windows (`windows.rs`). The rest of the app asks here rather than testing the
 //! system itself. Other platform code lives in modules of its own: the menu bar's AppKit icons
 //! (`menu_icons`), the terminal apps (`external_terminal`), the keys (`keymap::platform_keys`),
 //! and the in-window menu bar drawn where there is no global one (`menu_bar`).
@@ -11,10 +11,15 @@ mod mac;
 #[cfg(target_os = "macos")]
 use mac as imp;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 mod linux;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 use linux as imp;
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as imp;
 
 /// The app's id on the desktop: the windows' Wayland app id and X11 class, which the
 /// `.desktop` file of the Linux packages names (`StartupWMClass`), so the desktop shows the
@@ -22,6 +27,13 @@ use linux as imp;
 pub const APP_ID: &str = "snout-code";
 
 pub use imp::{IN_WINDOW_MENUS, REVEAL, THIS_MACHINE, process_start, window_decorations};
+
+/// The app (not the reaper, not ssh's password prompt) is starting: on Windows, what it
+/// starts is tied to it, and stderr goes to the console it was started from.
+pub fn app_started() {
+    #[cfg(windows)]
+    imp::app_started();
+}
 
 /// The folders a packaged SnoutCode keeps its resources in (the engine, the Linux servers for
 /// Remote SSH), for the program at `exe`, most likely first.
@@ -48,11 +60,15 @@ mod tests {
     fn a_packaged_app_finds_its_resources_beside_it() {
         let exe = if cfg!(target_os = "macos") {
             Path::new("/Applications/SnoutCode.app/Contents/MacOS/snout-code")
+        } else if cfg!(windows) {
+            Path::new(r"C:\Users\ann\AppData\Local\Programs\SnoutCode\snout-code.exe")
         } else {
             Path::new("/usr/lib/snout-code/snout-code")
         };
         let want = if cfg!(target_os = "macos") {
             Path::new("/Applications/SnoutCode.app/Contents/Resources/engine")
+        } else if cfg!(windows) {
+            Path::new(r"C:\Users\ann\AppData\Local\Programs\SnoutCode\engine")
         } else {
             Path::new("/usr/lib/snout-code/engine")
         };

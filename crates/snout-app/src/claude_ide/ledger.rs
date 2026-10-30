@@ -223,11 +223,11 @@ pub struct SavedFile {
 
 /// `at` as the clock on the wall said it here: "3:39 PM".
 pub fn clock(at: SystemTime) -> String {
-    let secs = at.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs() as libc::time_t;
-    // SAFETY: localtime_r only writes the struct it is given.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let ok = !unsafe { libc::localtime_r(&secs, &mut tm) }.is_null();
-    let (h, m) = if ok { (tm.tm_hour, tm.tm_min) } else { (((secs / 3600) % 24) as i32, ((secs / 60) % 60) as i32) };
+    let secs = at.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs() as i64;
+    let (h, m) = match snout_host::local_time(secs) {
+        Some([_, _, _, h, m, _]) => (h, m),
+        None => (((secs / 3600) % 24) as i32, ((secs / 60) % 60) as i32),
+    };
     let (h12, half) = match h {
         0 => (12, "AM"),
         1..=11 => (h, "AM"),

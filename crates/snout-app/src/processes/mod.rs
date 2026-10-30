@@ -162,7 +162,8 @@ fn dir_name(p: &Path) -> String {
     p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())
 }
 
-const SHELLS: [&str; 9] = ["zsh", "bash", "fish", "sh", "nu", "tcsh", "csh", "ksh", "dash"];
+const SHELLS: [&str; 12] =
+    ["zsh", "bash", "fish", "sh", "nu", "tcsh", "csh", "ksh", "dash", "pwsh", "powershell", "cmd"];
 
 /// The window's lines, from a snapshot and what the app knows: SnoutCode, under it its engines
 /// (each with its language server, its programs and its Gradle daemons with what they started),
@@ -374,7 +375,9 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
         if shown.contains(&child.pid) {
             continue;
         }
-        let name = child.name.rsplit('/').next().unwrap_or(&child.name).trim_start_matches('-').to_owned();
+        // Without its folder, its leading `-` (a login shell) and Windows's `.exe`.
+        let base = child.name.rsplit(['/', '\\']).next().unwrap_or(&child.name).trim_start_matches('-');
+        let name = base.strip_suffix(".exe").unwrap_or(base).to_owned();
         let within = project.as_deref().map(|p| format!(" in {p}")).unwrap_or_default();
         let (kind, purpose, state) = if child.is_engine() {
             let folder = child.engine_folder().map(|f| dir_name(Path::new(f))).unwrap_or_default();
@@ -472,7 +475,10 @@ pub fn duration(secs: u64) -> String {
 pub fn is_maven(line: &str) -> bool {
     line.contains("org.codehaus.plexus.classworlds.launcher.Launcher")
         || line.contains("MavenWrapperMain")
-        || line.split_whitespace().any(|w| w.ends_with("/mvnw") || w == "mvnw")
+        || line.split_whitespace().any(|w| {
+            let w = w.trim_matches('"');
+            w.ends_with("/mvnw") || w == "mvnw" || w.ends_with("\\mvnw.cmd") || w == "mvnw.cmd"
+        })
 }
 
 /// How long the engine's Gradle daemons idle before they stop, unless the settings say.

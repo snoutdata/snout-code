@@ -31,8 +31,7 @@ pub(crate) fn jdk17() -> Option<PathBuf> {
 fn fixture(name: &str) -> PathBuf {
     let dir = scratch_dir(name);
     let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../engine/lsp-driver/src/test/fixtures/java-app");
-    let ok = std::process::Command::new("cp").arg("-R").arg(&from).arg(&dir).status().unwrap().success();
-    assert!(ok, "copy the fixture");
+    crate::tests::copy_tree(&from, &dir);
     let repo = dir.join("java-app");
     // The Gradle daemon the sync starts goes away soon after the test.
     std::fs::write(repo.join("project/gradle.properties"), "org.gradle.daemon.idletimeout=60000\n").unwrap();

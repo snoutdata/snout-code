@@ -44,7 +44,7 @@ pub fn server_binaries() -> Option<PathBuf> {
         return Some(found);
     }
     let built = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/snout-server-dist");
-    has(&built).then(|| built.canonicalize().unwrap_or(built))
+    has(&built).then(|| snout_host::canonical(&built).unwrap_or(built))
 }
 
 /// The variable naming an ssh config file to use instead of `~/.ssh/config` (`ssh -F`):
@@ -62,15 +62,26 @@ pub fn target(name: &str) -> SshTarget {
     let mut t = SshTarget::new(name);
     t.config_file = std::env::var_os(SSH_CONFIG_ENV).map(PathBuf::from);
     t.askpass = std::env::current_exe().ok();
-    // Short: the control socket's path must fit in 104 bytes.
-    // SAFETY: getuid cannot fail.
-    let uid = unsafe { libc::getuid() };
-    t.control_dir = Some(
-        std::env::var_os("SNOUT_SSH_CONTROL_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp").join(format!("snout-ssh-{uid}"))),
-    );
+    t.control_dir = control_dir();
     t
+}
+
+/// Where the shared connection's control socket lives: short, since the socket's path must
+/// fit in 104 bytes. Windows's OpenSSH cannot share a connection (it has no ControlMaster), so
+/// there each ssh connects on its own.
+fn control_dir() -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        // SAFETY: getuid cannot fail.
+        let uid = unsafe { libc::getuid() };
+        Some(
+            std::env::var_os("SNOUT_SSH_CONTROL_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp").join(format!("snout-ssh-{uid}"))),
+        )
+    }
+    #[cfg(not(unix))]
+    None
 }
 
 /// A project on a remote machine, as File ▸ Open Recent lists it.

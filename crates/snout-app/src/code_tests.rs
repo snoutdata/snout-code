@@ -1049,7 +1049,7 @@ fn the_navigation_modifier_underlines_a_link_and_the_popup_lists_places(cx: &mut
 /// what its workspace started, never those.
 #[gpui::test]
 fn quitting_in_a_test_leaves_the_other_tests_processes_be(cx: &mut TestAppContext) {
-    let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let mut other = crate::tests::sleeper().spawn().unwrap();
     let (repo, model, ws, _, cx) = open_text("Spare.java", "class Spare {}\n", (0, 0), cx);
     act(&model, cx, Action::Quit(crate::model::QuitChoice { save: None, dont_ask: true }));
     cx.run_until_parked();

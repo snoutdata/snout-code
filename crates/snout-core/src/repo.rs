@@ -604,7 +604,10 @@ mod tests {
         run(repo.root(), &["config", "core.hooksPath", ".hooks"]).unwrap();
         fs::create_dir_all(repo.root().join(".hooks")).unwrap();
         fs::write(repo.root().join(".hooks/pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
-        std::process::Command::new("chmod").arg("+x").arg(repo.root().join(".hooks/pre-commit")).status().unwrap();
+        // Git for Windows runs a hook through its own sh, executable or not.
+        if cfg!(unix) {
+            std::process::Command::new("chmod").arg("+x").arg(repo.root().join(".hooks/pre-commit")).status().unwrap();
+        }
         assert!(repo.commit("fourth", false, &["d.txt".into()]).is_err());
         assert_eq!(repo.status().unwrap().staged_count(), 0);
 

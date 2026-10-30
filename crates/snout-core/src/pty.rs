@@ -652,6 +652,37 @@ mod tests {
         }
     }
 
+    /// Windows: the Command Prompt on the system's pseudo console, in colour, typed at.
+    #[cfg(windows)]
+    fn runs_a_process_on(engine: EngineKind) {
+        let dir = std::env::temp_dir();
+        let line = "echo hello & echo \x1b[31mred\x1b[0m & set /p line= & call echo got:%line%";
+        let args = ["/d".to_owned(), "/c".to_owned(), line.to_owned()];
+        let launch = Launch {
+            program: Path::new("cmd.exe"),
+            args: &args,
+            cwd: &dir,
+            env: &[],
+            env_remove: &[],
+            scrollback: crate::term::SCROLLBACK,
+        };
+        let mut term = Pty::spawn(&*snout_host::local(), &launch, engine, (255, 255, 255), (0, 0, 0), || {}).unwrap();
+        assert_eq!(term.engine(), engine);
+        wait_for(&term, "hello");
+        wait_for(&term, "red");
+        assert!(term.key(&KeyInput { text: Some("typed"), ..KeyInput::default() }));
+        assert!(term.key(&KeyInput { key: Some(Key::Enter), ..KeyInput::default() }));
+        wait_for(&term, "got:typed");
+        for _ in 0..500 {
+            if term.exit_status().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(term.exit_status(), Some("exited"));
+    }
+
+    #[cfg(unix)]
     fn runs_a_process_on(engine: EngineKind) {
         let dir = std::env::temp_dir();
         // Ask for the cursor position, then echo what the terminal answered (minus ESC).

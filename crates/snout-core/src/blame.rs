@@ -360,7 +360,7 @@ filename src/Old.java
         let dir = std::env::temp_dir().join(format!("snout-blame-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let dir = dir.canonicalize().unwrap();
+        let dir = snout_host::canonical(&dir).unwrap();
         let git = |args: &[&str], who: &str| {
             let ok = std::process::Command::new("git")
                 .arg("-C")

@@ -508,8 +508,13 @@ impl ProjectStructureView {
                         this.selected_jdk = Some(jdk.home);
                     }
                     Err(dir) => {
-                        this.note =
-                            Some((format!("No JDK in {}: pick the folder holding bin/java", dir.display()), true))
+                        this.note = Some((
+                            format!(
+                                "No JDK in {}: pick the folder holding the bin folder with Java in it",
+                                dir.display()
+                            ),
+                            true,
+                        ))
                     }
                 }
                 cx.notify();

@@ -14,7 +14,7 @@ use snout_host::{Cmd, Host, Stdio};
 /// Linux package, see [`crate::platform::resource_dirs`]), else `engine/build/dist` of the
 /// workspace the binary was built in (development).
 pub fn engine_dist(host: &dyn Host) -> Option<PathBuf> {
-    let ok = |d: &Path| host.is_file(&d.join("runtime/bin/java")) && host.is_dir(&d.join("lib"));
+    let ok = |d: &Path| host.is_file(&java_bin(host.info(), &d.join("runtime"))) && host.is_dir(&d.join("lib"));
     if let Some(d) = host.info().var("SNOUT_ENGINE_DIST").map(PathBuf::from) {
         return ok(&d).then_some(d);
     }
@@ -41,9 +41,9 @@ pub fn engine_command(
     idle_minutes: u64,
     maven_profiles: &[String],
 ) -> Cmd {
-    let mut c = Cmd::new(dist.join("runtime/bin/java"))
+    let mut c = Cmd::new(java_bin(host.info(), &dist.join("runtime")))
         .arg("-cp")
-        .arg(format!("{}/*", dist.join("lib").display()))
+        .arg(engine_classpath(dist))
         .arg("com.snoutcode.engine.cli.SnoutEngine")
         .arg("lsp")
         .arg(project)
@@ -171,9 +171,20 @@ pub struct Jdk {
     pub version: String,
 }
 
+/// The `java` of the JDK (or runtime) at `home` on the host `info` describes: `bin/java`, on
+/// Windows `bin\java.exe`.
+pub fn java_bin(info: &snout_host::HostInfo, home: &Path) -> PathBuf {
+    home.join("bin").join(if info.is_windows() { "java.exe" } else { "java" })
+}
+
+/// The engine's class path: every jar in the distribution's `lib` (a wildcard Java expands).
+pub fn engine_classpath(dist: &Path) -> PathBuf {
+    dist.join("lib").join("*")
+}
+
 /// The JDK at `home`, read from its `release` file.
 pub fn jdk_at(host: &dyn Host, home: &Path) -> Option<Jdk> {
-    if !host.is_file(&home.join("bin/java")) {
+    if !host.is_file(&java_bin(host.info(), home)) {
         return None;
     }
     let release = host.read_to_string(&home.join("release")).ok()?;
@@ -239,8 +250,22 @@ pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
             homes.push(home.to_owned());
         }
         found.extend(homes.iter().filter_map(|h| jdk_at(host, h)));
-        for dir in ["/usr/lib/jvm", "/usr/java", "/usr/local/java", "/opt/java", "/opt/jdk"] {
-            found.extend(jdks_in(host, Path::new(dir)));
+        if host.info().is_windows() {
+            // Where the JDK installers put them: under Program Files, by vendor.
+            let program_files: Vec<PathBuf> = ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]
+                .iter()
+                .filter_map(|v| host.info().var(v).map(PathBuf::from))
+                .collect();
+            for base in program_files {
+                for vendor in ["Java", "Eclipse Adoptium", "Microsoft", "Zulu", "Amazon Corretto", "BellSoft", "Semeru"]
+                {
+                    found.extend(jdks_in(host, &base.join(vendor)));
+                }
+            }
+        } else {
+            for dir in ["/usr/lib/jvm", "/usr/java", "/usr/local/java", "/opt/java", "/opt/jdk"] {
+                found.extend(jdks_in(host, Path::new(dir)));
+            }
         }
     } else if let Ok(out) = host.run(&Cmd::new("/usr/libexec/java_home").arg("-V"), None) {
         // It lists on stderr: `    17.0.2 (arm64) "Vendor" - "Name" /path/to/home`.
@@ -468,8 +493,15 @@ fn fetch_file(host: &dyn Host, url: &str, out: &Path, progress: &DownloadProgres
     Err(last)
 }
 
-/// The SHA-256 of `path` on `host`, in hex.
+/// The SHA-256 of `path` on `host`, in hex: read here on the machine the app runs on, else
+/// with the host's `sha256sum` or `shasum`.
 pub fn sha256_on(host: &dyn Host, path: &Path) -> anyhow::Result<String> {
+    if !is_remote(host) {
+        use sha2::Digest as _;
+        let mut hasher = sha2::Sha256::new();
+        std::io::copy(&mut std::fs::File::open(path)?, &mut hasher)?;
+        return Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect());
+    }
     for cmd in [Cmd::new("sha256sum").arg(path), Cmd::new("shasum").args(["-a", "256"]).arg(path)] {
         if let Ok(out) = host.run(&cmd, None)
             && out.status.success()
@@ -534,7 +566,9 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
     progress.total.store(size, Ordering::Relaxed);
 
     host.create_dir_all(dir)?;
-    let part = dir.join(format!(".temurin-{major}.tar.gz.part"));
+    // Windows's JDKs come as zip files, the others' as gzipped tarballs; Windows's own `tar`
+    // (bsdtar) unpacks both.
+    let part = dir.join(format!(".temurin-{major}.{}.part", if link.ends_with(".zip") { "zip" } else { "tar.gz" }));
     if let Err(e) = fetch_file(host, link, &part, progress) {
         if !remote {
             return Err(e);
@@ -557,7 +591,8 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
     let unpack = dir.join(format!(".temurin-{major}.unpack"));
     let _ = host.remove_dir_all(&unpack);
     host.create_dir_all(&unpack)?;
-    let ok = host.run(&Cmd::new("tar").arg("-xzf").arg(&part).arg("-C").arg(&unpack), None)?.status.success();
+    let flags = if link.ends_with(".zip") { "-xf" } else { "-xzf" };
+    let ok = host.run(&Cmd::new("tar").arg(flags).arg(&part).arg("-C").arg(&unpack), None)?.status.success();
     let _ = host.remove_file(&part);
     if !ok {
         bail!("the download could not be unpacked");

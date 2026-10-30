@@ -101,6 +101,10 @@ tasks.named('test') {
 
 def runtimeDir = rootProject.layout.buildDirectory.dir('runtime')
 
+// A program of a JDK's bin folder by its file name: `java`, on Windows `java.exe`.
+def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+def exe = { String name -> isWindows ? "${name}.exe" : name }
+
 def jlinkRuntime = tasks.register('jlinkRuntime') {
     description = 'Links a Java 21 runtime from the JDK running the build.'
     def javaHome = file(System.getProperty('java.home'))
@@ -118,7 +122,7 @@ def jlinkRuntime = tasks.register('jlinkRuntime') {
         }
         File out = runtimeDir.get().asFile
         out.deleteDir()
-        def jlink = new ProcessBuilder(new File(javaHome, 'bin/jlink').absolutePath,
+        def jlink = new ProcessBuilder(new File(javaHome, "bin/${exe('jlink')}").absolutePath,
             '--module-path', jmods.absolutePath,
             '--add-modules', 'ALL-MODULE-PATH',
             '--strip-debug', '--no-man-pages', '--no-header-files', '--compress=zip-6',
@@ -174,9 +178,13 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 exec "$here/runtime/bin/java" -cp "$here/lib/*" com.snoutcode.engine.cli.SnoutEngine "$@"
 '''
         launcher.setExecutable(true, false)
+        new File(bin, 'snout-engine.cmd').text = """@echo off\r
+rem snout-engine on the bundled Java runtime.\r
+"%~dp0..\\runtime\\bin\\java.exe" -cp "%~dp0..\\lib\\*" com.snoutcode.engine.cli.SnoutEngine %*\r
+"""
         new File(staging, 'dist.properties').text =
             "version=${project.version}\njava=${System.getProperty('java.version')}\n"
-        File java = new File(staging, 'runtime/bin/java')
+        File java = new File(staging, "runtime/bin/${exe('java')}")
         if (System.getProperty('os.name').toLowerCase().contains('mac')) {
             // An unsigned or broken signature gets the binary killed: sign it ad hoc when needed.
             def verify = new ProcessBuilder('codesign', '--verify', java.absolutePath).redirectErrorStream(true).start()
@@ -197,7 +205,7 @@ exec "$here/runtime/bin/java" -cp "$here/lib/*" com.snoutcode.engine.cli.SnoutEn
             throw new GradleException("could not move ${staging} to ${dist}")
         }
         project.delete(old)
-        checkRuntime(new File(dist, 'runtime/bin/java'))
+        checkRuntime(new File(dist, "runtime/bin/${exe('java')}"))
     }
 }
 

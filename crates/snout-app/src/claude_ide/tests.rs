@@ -579,7 +579,9 @@ fn hook_command(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> (u16, Str
 /// Run a hook as Claude Code does: its command through the shell, its input on stdin.
 fn run_hook(port: u16, cmd: &str, input: Value) {
     use std::io::Write as _;
-    let mut child = std::process::Command::new("/bin/sh")
+    // Claude Code runs hooks with `sh`; on Windows with Git for Windows's bash.
+    let shell = if cfg!(windows) { r"C:\Program Files\Git\bin\bash.exe" } else { "/bin/sh" };
+    let mut child = std::process::Command::new(shell)
         .arg("-c")
         .arg(cmd)
         .env(super::hooks::PORT_ENV, port.to_string())

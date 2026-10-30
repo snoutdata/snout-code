@@ -400,7 +400,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
         [
             vec![MenuItem::separator()],
             settings_items().into(),
-            vec![MenuItem::separator(), MenuItem::action("Quit", Quit)],
+            // Windows calls it Exit.
+            vec![MenuItem::separator(), MenuItem::action(if cfg!(windows) { "Exit" } else { "Quit" }, Quit)],
         ]
         .into_iter()
         .flatten()

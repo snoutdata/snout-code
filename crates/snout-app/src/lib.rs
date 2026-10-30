@@ -168,6 +168,7 @@ pub fn run() {
         workspace::quit::reap();
         return;
     }
+    platform::app_started();
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut App| {
         startup::mark("app running");
@@ -214,7 +215,12 @@ fn quit_on_signals(cx: &mut App) {
             unsafe { libc::_exit(130) };
         }
     }
-    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+    #[cfg(unix)]
+    let signals = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP];
+    // Windows: Ctrl+C in the console the app was started from (a C runtime signal).
+    #[cfg(not(unix))]
+    let signals = [libc::SIGTERM, libc::SIGINT];
+    for signal in signals {
         // SAFETY: the handler only touches an atomic, or calls `_exit`.
         unsafe { libc::signal(signal, on_signal as *const () as libc::sighandler_t) };
     }

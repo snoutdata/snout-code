@@ -173,15 +173,41 @@ pub fn parse_codex(body: &Value) -> Option<HookEvent> {
 
 /// The arguments that make a `codex` started in the console tell the endpoint when a turn
 /// ends: its `notify` program set for this session only (`-c`), posting Codex's JSON (its
-/// last argument) with the token from `header`. The user's own config is never touched.
-pub fn codex_args(header: &Path) -> Vec<String> {
-    let header = header.to_string_lossy().replace('\'', "'\\''");
-    let script = format!(
-        "[ -n \"${PORT_ENV}\" ] && curl -s -m 5 -o /dev/null -X POST -H @'{header}' \
-         -H 'content-type: application/json' --data-binary \"$1\" \"http://127.0.0.1:${PORT_ENV}/codex\"; exit 0"
-    );
-    let notify = serde_json::to_string(&["/bin/sh", "-c", script.as_str(), "snout-notify"]).unwrap_or_default();
-    vec!["-c".into(), format!("notify={notify}")]
+/// last argument) with the token from `header` to `port`. The user's own config is never
+/// touched. On a Unix host through `sh` (the port from the environment); on Windows (a
+/// `header` with a drive) Windows's own `curl.exe` directly, the JSON the value of its last
+/// option.
+pub fn codex_args(header: &Path, port: u16) -> Vec<String> {
+    let windows = matches!(header.components().next(), Some(std::path::Component::Prefix(_)));
+    let notify = if windows {
+        let url = format!("http://127.0.0.1:{port}/codex");
+        let header = format!("@{}", header.display());
+        serde_json::to_string(&[
+            "curl.exe",
+            "-s",
+            "-m",
+            "5",
+            "-o",
+            "NUL",
+            "-X",
+            "POST",
+            "-H",
+            header.as_str(),
+            "-H",
+            "content-type: application/json",
+            "--url",
+            url.as_str(),
+            "--data-binary",
+        ])
+    } else {
+        let header = header.to_string_lossy().replace('\'', "'\\''");
+        let script = format!(
+            "[ -n \"${PORT_ENV}\" ] && curl -s -m 5 -o /dev/null -X POST -H @'{header}' \
+             -H 'content-type: application/json' --data-binary \"$1\" \"http://127.0.0.1:${PORT_ENV}/codex\"; exit 0"
+        );
+        serde_json::to_string(&["/bin/sh", "-c", script.as_str(), "snout-notify"])
+    };
+    vec!["-c".into(), format!("notify={}", notify.unwrap_or_default())]
 }
 
 /// Take `path` as it is now on `host`.
@@ -404,7 +430,7 @@ pub mod tests {
         let dir = std::env::temp_dir().join(format!("snout-hooks-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        dir.canonicalize().unwrap()
+        snout_host::canonical(&dir).unwrap()
     }
 
     #[test]
@@ -460,13 +486,22 @@ pub mod tests {
         // The hook command itself, as Claude Code runs it: through the shell, with curl.
         let settings = write_settings(&*snout_host::local(), &dir.join("conf"), server.token()).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-        use std::os::unix::fs::PermissionsExt as _;
-        assert_eq!(std::fs::metadata(dir.join("conf/hook-header")).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(dir.join("conf/hook-header")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
         let cmd = v["hooks"]["PostToolUse"][0]["hooks"][0]["command"].as_str().unwrap().to_owned();
+        // Claude Code runs hooks with `sh`; on Windows with Git for Windows's bash.
+        let shell = if cfg!(windows) { r"C:\Program Files\Git\bin\bash.exe" } else { "/bin/sh" };
+        if !Path::new(shell).exists() {
+            return;
+        }
         let post_input = json!({ "hook_event_name": "PostToolUse", "session_id": "s", "tool_name": "Edit",
             "tool_input": { "file_path": file } });
         let run = |env: Option<u16>| {
-            let mut c = std::process::Command::new("/bin/sh");
+            let mut c = std::process::Command::new(shell);
             c.arg("-c").arg(&cmd).stdin(std::process::Stdio::piped());
             match env {
                 Some(port) => c.env(PORT_ENV, port.to_string()),
@@ -513,7 +548,7 @@ pub mod tests {
         let tx = Mutex::new(tx);
         let server = HookServer::start(snout_host::local(), move |e| tx.lock().unwrap().send(e).unwrap()).unwrap();
         write_settings(&*snout_host::local(), &dir, server.token()).unwrap();
-        let args = codex_args(&dir.join("hook-header"));
+        let args = codex_args(&dir.join("hook-header"), server.port());
         assert_eq!(args[0], "-c");
         // Codex reads `-c notify=<TOML array>`; a JSON array of strings is one.
         let notify: Vec<String> = serde_json::from_str(args[1].strip_prefix("notify=").unwrap()).unwrap();

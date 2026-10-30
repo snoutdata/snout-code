@@ -39,6 +39,10 @@ import java.util.function.Consumer;
  * attaches with the arguments it gets back.
  */
 final class Launches {
+    /** The {@code java} program's file name: {@code java.exe} on Windows. */
+    private static final String JAVA =
+        System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("windows") ? "java.exe" : "java";
+
     private Launches() {
     }
 
@@ -220,11 +224,11 @@ final class Launches {
         if (java == null && module != null) {
             String home = moduleJavaHome(engine.model(), module);
             if (home != null) {
-                java = Path.of(home, "bin", "java").toString();
+                java = Path.of(home, "bin", JAVA).toString();
             }
         }
         if (java == null) {
-            java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+            java = Path.of(System.getProperty("java.home"), "bin", JAVA).toString();
         }
         String dir = Engine.string(config, "workingDir");
         Path workingDir = dir != null ? Path.of(dir) : module != null ? module.projectDir() : Path.of(System.getProperty("user.dir"));

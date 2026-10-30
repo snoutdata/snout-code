@@ -188,13 +188,10 @@ fn cut(s: &str, n: usize) -> String {
 
 /// The local time of `secs`: year, month (1 to 12), day, hour, minute.
 fn local(secs: i64) -> (i32, i32, i32, i32, i32) {
-    let t = secs as libc::time_t;
-    // SAFETY: localtime_r only writes the struct it is given.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
-        return (1970, 1, 1, 0, 0);
+    match snout_host::local_time(secs) {
+        Some([y, mo, d, h, mi, _]) => (y, mo, d, h, mi),
+        None => (1970, 1, 1, 0, 0),
     }
-    (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min)
 }
 
 /// `secs` as a short date: "2024-03-15".
