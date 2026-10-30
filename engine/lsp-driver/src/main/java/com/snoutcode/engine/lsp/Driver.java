@@ -38,10 +38,17 @@ import java.util.TreeMap;
  *   "checks": [
  *     { "name": "...", "kind": "definition" | "completion" | "references",
  *       "file": "src/main/java/demo/App.java", "find": "Lib.hello", "occurrence": 1, "offset": 4,
- *       "expect": "substring of a result URI or completion label" }
+ *       "expect": "substring of a result URI or completion label" },
+ *     { "kind": "runTests", "module": "shop:app", "filter": { "kind": "all" } },
+ *     { "kind": "run", "mainClass": "demo.App", "expect": "a line of its output" }
  *   ]
  * }
  * </pre>
+ *
+ * {@code capabilities} replaces the client capabilities sent in {@code initialize}, and
+ * {@code settings} goes in its initialization options, to start jdtls as a given client does.
+ * The report has the milliseconds from the engine's start to jdtls's {@code ServiceReady}, to
+ * every module ready, and to the first diagnostics of each file opened.
  *
  * A definition check with {@code "single": true} passes only with exactly one result. A references
  * check passes with at least {@code min} results, at most {@code max} when given, and with
@@ -146,7 +153,7 @@ public final class Driver {
         folder.addProperty("name", projectDir.getFileName().toString());
         folders.add(folder);
         params.add("workspaceFolders", folders);
-        params.add("capabilities", JsonParser.parseString("""
+        params.add("capabilities", script.has("capabilities") ? script.get("capabilities") : JsonParser.parseString("""
             {
               "workspace": { "configuration": true, "workspaceFolders": true,
                              "didChangeWatchedFiles": { "dynamicRegistration": true } },
@@ -301,6 +308,9 @@ public final class Driver {
 
     public JsonObject check(JsonObject check) throws IOException {
         String kind = check.get("kind").getAsString();
+        if (kind.equals("runTests") || kind.equals("run")) {
+            return runCheck(kind, check);
+        }
         Path file = resolve(check.get("file").getAsString());
         int[] pos = find(file, check.get("find").getAsString(),
             check.has("occurrence") ? check.get("occurrence").getAsInt() : 1,
@@ -369,6 +379,69 @@ public final class Driver {
                 pass = uris.size() >= min && uris.size() <= max && (!flag(check, "distinct") || distinct.size() == uris.size());
             }
             default -> throw new IllegalArgumentException("unknown check kind " + kind);
+        }
+        out.addProperty("millis", (System.nanoTime() - start) / 1_000_000);
+        out.addProperty("pass", pass);
+        return out;
+    }
+
+    /**
+     * A run through the engine: {@code runTests} runs a module's tests ({@code module}, and
+     * {@code filter} as {@code snout/runTests} takes it) and passes when the run's outcome is
+     * {@code expect} (default {@code success}) and at least one test passed; {@code run} launches
+     * the run configuration of {@code mainClass} and passes when it exits with 0 and its output
+     * has a line containing {@code expect}.
+     */
+    private JsonObject runCheck(String kind, JsonObject check) throws IOException {
+        JsonObject out = new JsonObject();
+        out.addProperty("name", check.has("name") ? check.get("name").getAsString() : kind);
+        long start = System.nanoTime();
+        Duration limit = Duration.ofMinutes(10);
+        String runId;
+        if (kind.equals("runTests")) {
+            JsonObject params = new JsonObject();
+            params.add("module", check.get("module"));
+            if (check.has("filter")) {
+                params.add("filter", check.get("filter"));
+            }
+            runId = client.request("snout/runTests", params, limit).getAsJsonObject().get("runId").getAsString();
+        } else {
+            JsonObject config = null;
+            JsonArray configs = client.request("snout/runConfigurations", new JsonObject(), limit).getAsJsonObject()
+                .getAsJsonArray("configurations");
+            for (JsonElement c : configs) {
+                JsonObject o = c.getAsJsonObject();
+                if (o.has("mainClass") && o.get("mainClass").getAsString().equals(check.get("mainClass").getAsString())) {
+                    config = o;
+                }
+            }
+            if (config == null) {
+                throw new IOException("no run configuration of " + check.get("mainClass") + " in " + configs);
+            }
+            JsonObject params = new JsonObject();
+            params.add("config", config);
+            runId = client.request("snout/run", params, limit).getAsJsonObject().get("runId").getAsString();
+        }
+        JsonObject done;
+        try {
+            done = client.awaitNotification("snout/taskFinished", runId, p -> true, limit);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(e);
+        }
+        List<String> lines = client.outputLines(runId);
+        out.add("finished", done);
+        boolean pass;
+        if (kind.equals("runTests")) {
+            String expect = check.has("expect") ? check.get("expect").getAsString() : "success";
+            int passed = done.has("tests") ? done.getAsJsonObject("tests").get("passed").getAsInt() : 0;
+            pass = expect.equals(done.get("outcome").getAsString()) && passed > 0;
+        } else {
+            String expect = check.get("expect").getAsString();
+            pass = done.has("exitCode") && done.get("exitCode").getAsInt() == 0 && lines.stream().anyMatch(l -> l.contains(expect));
+        }
+        if (!pass) {
+            out.add("output", new GsonBuilder().create().toJsonTree(lines.subList(Math.max(0, lines.size() - 40), lines.size())));
         }
         out.addProperty("millis", (System.nanoTime() - start) / 1_000_000);
         out.addProperty("pass", pass);
