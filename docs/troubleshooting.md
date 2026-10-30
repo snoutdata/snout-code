@@ -98,6 +98,18 @@ its last model, marked with a warning, so its modules stay. See [Gradle](gradle.
 
 When a build script changes, the bar says "Gradle files changed. Sync?". Click **Sync**.
 
+A build that is slow to sync, or slow to fail, does not hold up the others: once most builds
+are in, the engine goes on without the last few, and they join the project when their sync is
+done.
+
+## A build outside the supported versions
+
+When a build's Gradle is older than 7.0 or newer than 9.x, or its Maven wrapper is older than
+3.6 or of Maven 4, the status line and the Notifications tool window say so once, and the
+build's node in the Project view carries a warning badge with the same note. The build still
+opens and syncs if it can, but parts of it may be missing or wrong. Update its wrapper to a
+supported version. See [Supported versions and performance](versions-and-performance.md).
+
 ## Errors from Git and the tools
 
 The Notifications tool window, on the right stripe, lists the errors from Git and the tools.
@@ -124,6 +136,14 @@ held up the window.
 - When `snout.sh` says "Building SnoutCode…", the sources changed since the last build (or
   another build changed the binary), and cargo builds before the app starts. If cargo says it
   is waiting for a lock, another build in the same folder runs; it goes on when that is done.
+
+With the trace on, the log also says when the Java engine started, when the project's model
+was read, when the Java language server was ready, when the open file got its first
+diagnostics, and when every module was ready. The first open of a project syncs its builds and,
+for Scala, compiles the Scala its Java uses, which can take a minute on a large project; a
+later open reuses all of it and is ready in a few seconds. If every open is slow, check that
+SnoutCode's caches are kept (see below). `scripts/bench-open.sh` times each phase of an open;
+see [Supported versions and performance](versions-and-performance.md#measure-it-yourself).
 
 ## Logs
 

@@ -106,6 +106,8 @@ SnoutCode needs no Maven of yours:
 - When the build has the Maven wrapper (`mvnw` and `.mvn/wrapper/maven-wrapper.properties`), goals run with it, on the Maven version it names.
 - Otherwise SnoutCode downloads Apache Maven 3.9.16 from Maven Central the first time it runs a goal, checks it against its SHA-512, and keeps it in `~/Library/Caches/SnoutCode/maven`.
 
+SnoutCode supports Maven 3.6 to 3.9. A wrapper of an older Maven, or of Maven 4, still runs, with a note that says it is outside the range; see [Supported versions and performance](versions-and-performance.md).
+
 Maven runs on the build's JDK (see [Gradle](gradle.md#the-jdk-each-build-runs-on) for how SnoutCode picks one: for a Maven build, a JDK of its Java level), with your `settings.xml` and local repository. While it runs, the Processes window lists it, with the test JVM or the application it starts. See [Processes](processes.md).
 
 ![Maven and the application spring-boot:run started, in the Processes window](images/maven-processes.png)

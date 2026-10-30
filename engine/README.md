@@ -48,7 +48,9 @@ Each build syncs on its own Gradle daemon (one of the engine's, see [Gradle daem
 - When no installed JDK runs the build's Gradle version, the build is never synced on one that cannot work: its `failedBuilds` entry says `needsJdk`, the Java major to install (the newest LTS its Gradle runs on, not newer than it wants: 17 for Gradle 8.1.1, 11 for 7.0.2 and for anything before 6.7), with the reason "Needs JDK 17, which isn't installed". The engine's methods refuse such a build the same way. A sync that fails because its Gradle cannot run on the JDK it got after all (a class file it cannot read, Groovy failing inside Gradle) gets a `needsJdk` too.
 - `--java-home` is preferred whenever the build's Gradle runs on it and the script asks for nothing newer.
 
-A build that fails does not fail the others: its entry in the model carries the error, the Gradle version and a short reason.
+A build that fails does not fail the others: its entry in the model carries the error, the Gradle version and a short reason. When the Tooling API's exception cannot say what went wrong (a failure it could not deserialize reports only `invalid type code: 00`), the reason comes from Gradle's own "What went wrong" output, which the engine keeps the last 64 KB of. A plugin that says it needs a newer Java ("Android Gradle plugin requires Java 11 to run") gets a `needsJdk` of that Java.
+
+SnoutCode supports Gradle 7.0 to 9.x and Maven 3.6 to 3.9 (tested on JDKs 17, 21 and 25; `scripts/compat-matrix.sh` and docs/versions-and-performance.md). A build on another version syncs all the same; the model lists it in `unsupportedBuilds` with a note for people, which the app shows.
 
 | Option | Meaning |
 | --- | --- |
@@ -130,7 +132,9 @@ The model is kept with a record of what it was synced from: the scripts the sync
 
 What a sync may give differently with the same inputs is synced again in the background, once the Scala bridge is done: a build that failed for a reason that may pass (the network, a daemon), dynamic or snapshot versions, libraries no longer on disk. When their model changed, the engine writes it, imports the projects into jdtls again (`snout.reimport`, a command of the importer bundle), compiles their Scala and sends `snout/modelChanged`.
 
-jdtls's workspace (`jdtls/<hash>/workspace`) persists too, with its search indexes: a start reads them, and writes none again unless their libraries or sources changed.
+jdtls's workspace (`jdtls/<hash>/workspace`) persists too, with its search indexes: a start reads them, and writes none again unless their libraries or sources changed. jdtls saves the workspace on LSP `shutdown`, but the app's quit and the engine's own end stop it with SIGTERM, on which Equinox exits without saving; the next start then refreshes every linked folder to recover (on a large project, 4.2 s to ready instead of 1.6 s). So the importer bundle saves the workspace in a JVM shutdown hook too, for at most 4 seconds. The model file is written only when its content changed, as the app reads it again on every change.
+
+**Late builds.** A first sync does not wait for the last few builds: once at most a third of them still sync and none finished for 2 seconds (a build slow to configure, or slow to fail), the model goes on without them. Each is in it as a placeholder (`status: "syncing"`, `late: true`; its last good entry, `stale`, when an earlier model had one), and its sync goes on; when it is in (and the Scala bridge's first compile is done), it joins as a background sync's builds do. A model written with a placeholder records it as uncertain, so a start that finds it syncs that build again.
 
 Only one jdtls can hold a workspace. When an engine dies outright (killed, or crashed with the app), its jdtls can outlive it with the workspace's lock, so the next engine of the folder stops it before it starts its own: a jdtls on the same workspace (`-data` on its command line) whose engine is gone, or whose engine the same app is replacing (after five seconds for it to end by itself). One that another app's engine runs is left alone. When jdtls dies, the engine ends too (with jdtls's exit code), and the app starts it again.
 
@@ -144,6 +148,8 @@ Independent builds often compile one folder of Java and Scala into each of them 
 - These builds compile into the bridge's own build directories (`bridge/<hash>/`), so a test or task run, which compiles the folder into the build as its script says, never mixes with them.
 - The unit's classes go to jdtls once, as the shared JDT project's library; the users' own mirrors leave the shared folders out.
 - A unit that fails to compile before it ever worked (a folder that needs something of each build) falls back to compiling the folder in each build, and does so on later starts while its inputs stay the same.
+
+The builds that use a unit wait for it; the first one handed out after it, an open file's build or else the one with the most sources, goes alone for 1.5 seconds, so that it gets the daemon the unit compiled on, its Scala compiler loaded (a build that starts a daemon of its own took 10 seconds longer). The others follow, longest first.
 
 Each unit and build has a fingerprint of its inputs: its sources' paths, sizes and times, its build's model (classpath, compiler settings), and the units it uses. A compile whose fingerprint is the one of its last good compile does not run; when nothing changed, a start runs no Gradle for Scala at all.
 
@@ -336,7 +342,7 @@ lsp-driver/build/install/lsp-driver/bin/lsp-driver --engine sync-cli/build/insta
     --project /path/to/project --script script.json --report report.json
 ```
 
-The script names the engine's arguments, files to open, and definition, completion and references checks at text positions; see the `Driver` class. The report has the time to the first diagnostics, the error count and error kinds across all Java files, each check's result, and the peak memory of jdtls.
+The script names the engine's arguments, files to open, and definition, completion and references checks at text positions, `runTests` checks (a module's tests through Gradle or Maven) and `run` checks (a main class's configuration, launched); `capabilities` and `settings` start jdtls as a given client does. See the `Driver` class. The report has the times from the engine's start to jdtls's `ServiceReady`, to every module ready and to each open file's first diagnostics, the error count and error kinds across all Java files, each check's result, and the peak memory of jdtls. `scripts/bench-open.sh` times a cold and warm open with it, and `scripts/compat-matrix.sh` checks Gradle and Maven versions and JDKs. The engine's log says when jdtls started and when it was ready, counted from the engine's start.
 
 ## How sync works
 
@@ -374,8 +380,10 @@ Format version 2. The top holds the project view, which the app shows as the Pro
                                                   | "versionCatalog" | "wrapper" } ] } ],
   "failedBuilds": [ { "build", "rootDir", "gradleVersion", "javaHome", "reason", "error", "stale",
                       "needsJdk": the Java major to install, when no installed JDK runs the build's Gradle } ],
+  "unsupportedBuilds": [ { "build", "rootDir", "tool": "gradle" | "maven", "version",
+                           "note": why it may not work in full, for people } ],
   "gradleBuilds": [ {
-    "id": "<build id>", "status": "synced" | "failed" | "stale", "rootDir", "gradleVersion",
+    "id": "<build id>", "status": "synced" | "failed" | "stale" | "syncing", "late", "rootDir", "gradleVersion",
     "gradleJavaHome", "javaVersion", "syncMillis", "error", "reason", "needsJdk" (failed and stale only),
     "builds": [ { "name", "kind": "root" | "included" | "buildSrc", "rootDir", "errors": [],
       "projects": [ {

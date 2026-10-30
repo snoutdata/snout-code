@@ -10,6 +10,8 @@ The next time you open the project, the engine reuses the last model when nothin
 
 The status bar shows what the engine is doing while it syncs and imports.
 
+SnoutCode supports Gradle 7.0 to 9.x, on JDKs 17, 21 and 25. A build on another version still opens, with a note that says so; see [Supported versions and performance](versions-and-performance.md).
+
 ## Many builds in one folder
 
 The folder you open is the project. It can be one Gradle build or hold many side by side, for example `~/projects/shop` with `billing/`, `catalog/` and `web/`, each a build of its own.
