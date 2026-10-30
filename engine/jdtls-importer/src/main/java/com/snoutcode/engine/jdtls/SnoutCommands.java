@@ -17,6 +17,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.lang.management.LockInfo;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MonitorInfo;
+import java.lang.management.ThreadInfo;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -38,6 +42,9 @@ import org.osgi.framework.Bundle;
  * it, as the import at the start does, after the engine synced a build again or the Scala bridge
  * changed its class folders. Answers how many projects the model has.
  *
+ * <p>{@code snout.threadDump}: jdtls's threads, their stacks and the locks they hold or wait
+ * for, as text: what the engine logs when a command to jdtls times out.
+ *
  * <p>{@code snout.startDebugSession}: java-debug's {@code vscode.java.startDebugSession}, on the
  * loopback address. java-debug's own server listens on every address, so Windows Firewall asks
  * the user whether Java may take connections from the network each time a debug session starts;
@@ -52,6 +59,9 @@ public final class SnoutCommands implements IDelegateCommandHandler {
         }
         if ("snout.startDebugSession".equals(commandId)) {
             return startDebugSession();
+        }
+        if ("snout.threadDump".equals(commandId)) {
+            return threadDump();
         }
         if (!"snout.refreshClassFolders".equals(commandId)) {
             throw new UnsupportedOperationException(commandId);
@@ -91,6 +101,40 @@ public final class SnoutCommands implements IDelegateCommandHandler {
         JavaLanguageServerPlugin.logInfo("SnoutCode: imported " + plan.projects.size() + " project(s) again in "
             + (System.currentTimeMillis() - start) + " ms");
         return plan.projects.size();
+    }
+
+    /** Every thread with its state, the lock it waits for and who holds it, and its stack. */
+    static String threadDump() {
+        StringBuilder out = new StringBuilder();
+        for (ThreadInfo t : ManagementFactory.getThreadMXBean().dumpAllThreads(true, true)) {
+            out.append('"').append(t.getThreadName()).append("\" ").append(t.getThreadState());
+            if (t.getLockName() != null) {
+                out.append(" on ").append(t.getLockName());
+            }
+            if (t.getLockOwnerName() != null) {
+                out.append(" held by \"").append(t.getLockOwnerName()).append('"');
+            }
+            out.append('\n');
+            StackTraceElement[] stack = t.getStackTrace();
+            for (int i = 0; i < Math.min(stack.length, 40); i++) {
+                out.append("    at ").append(stack[i]).append('\n');
+            }
+            for (MonitorInfo m : t.getLockedMonitors()) {
+                out.append("    holds ").append(m).append('\n');
+            }
+            for (LockInfo l : t.getLockedSynchronizers()) {
+                out.append("    holds ").append(l).append('\n');
+            }
+        }
+        // The workspace's lock is a job rule, no Java monitor: the running jobs say who has it.
+        out.append("Running jobs:\n");
+        for (Job job : Job.getJobManager().find(null)) {
+            if (job.getState() == Job.RUNNING) {
+                out.append("    ").append(job.getName()).append(" (").append(job.getClass().getName()).append(", rule ")
+                    .append(job.getRule()).append(", thread ").append(job.getThread() == null ? "?" : job.getThread().getName()).append(")\n");
+            }
+        }
+        return out.toString();
     }
 
     /** How long a debug session's port waits for the app: a Gradle task compiles first. */

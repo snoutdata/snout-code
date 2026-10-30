@@ -19,6 +19,7 @@
       <delegateCommandHandler class="com.snoutcode.engine.jdtls.SnoutCommands">
          <command id="snout.refreshClassFolders"/>
          <command id="snout.reimport"/>
+         <command id="snout.threadDump"/>
          <command id="snout.startDebugSession"/>
       </delegateCommandHandler>
    </extension>

@@ -1135,6 +1135,9 @@ final class Engine implements GradleRuns.Client {
             }
         } catch (Exception e) {
             log.println("snout-engine: could not refresh the Scala class folders in jdtls: " + SnoutEngine.describe(e));
+            if (String.valueOf(e.getMessage()).contains("timed out")) {
+                logThreadDump();
+            }
         } finally {
             Readiness r = readiness;
             List<String> modules = new ArrayList<>();
@@ -1310,6 +1313,16 @@ final class Engine implements GradleRuns.Client {
     }
 
     /** Runs a jdtls command ({@code workspace/executeCommand}) once jdtls has imported the projects. */
+    /** What jdtls's threads are doing, in the log: after a command to it timed out. */
+    private void logThreadDump() {
+        try {
+            JsonElement dump = executeCommand("snout.threadDump", new JsonArray(), 30);
+            log.println("snout-engine: jdtls's threads:\n" + (dump != null && dump.isJsonPrimitive() ? dump.getAsString() : dump));
+        } catch (Exception e) {
+            log.println("snout-engine: could not list jdtls's threads: " + SnoutEngine.describe(e));
+        }
+    }
+
     JsonElement executeCommand(String command, JsonArray arguments, int timeoutSeconds) throws Exception {
         Jdtls j = jdtls;
         if (j == null) {
