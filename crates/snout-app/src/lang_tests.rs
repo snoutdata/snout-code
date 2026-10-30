@@ -513,3 +513,23 @@ fn readiness_reads_the_answer_and_the_notifications() {
     assert_eq!(crate::lang::java::Requirement { declared: None, gradle_max: Some(19) }.wanted(), 17);
     assert_eq!(crate::lang::java::Requirement { declared: None, gradle_max: Some(16) }.wanted(), 11);
 }
+
+/// A Java file of a build a few levels down the project goes to the project's engine, even
+/// before the app's look for builds is done (as for a tab restored at startup): never to an
+/// engine of its build's own, which would sync that build a second time beside the project's.
+#[gpui::test]
+fn a_build_in_the_project_is_served_by_the_projects_engine(cx: &mut TestAppContext) {
+    let repo = crate::tests::demo_repo("root-for");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    // Nothing on disk says the project holds a build: only the editor's look at the file does.
+    let build = repo.join("services/api");
+    let file = build.join("src/main/java/demo/Api.java");
+    let root = cx.update(|_, cx| hub.read(cx).root_for(&file, Some(build.clone()), cx));
+    assert_eq!(root.as_deref(), Some(repo.as_path()));
+    // Deeper than the project's look goes, the build keeps an engine of its own, as before.
+    let deep = repo.join("a/b/c/d");
+    let root = cx.update(|_, cx| hub.read(cx).root_for(&deep.join("X.java"), Some(deep.clone()), cx));
+    assert_eq!(root.as_deref(), Some(deep.as_path()));
+    let _ = std::fs::remove_dir_all(&repo);
+}

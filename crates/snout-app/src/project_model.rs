@@ -18,6 +18,7 @@ use snout_host::{Cmd, Host, HostRef, Stdio};
 
 use crate::lang::LangHub;
 use crate::model::Model;
+use crate::panels::Activity;
 
 /// What a source root holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -523,8 +524,11 @@ fn look_for_gradle(host: &dyn Host, dir: &Path) -> bool {
             !skip && e.is_dir && (java::is_gradle_root(host, &e.path) || (depth > 1 && below(host, &e.path, depth - 1)))
         })
     }
-    below(host, dir, 3)
+    below(host, dir, GRADLE_DEPTH)
 }
+
+/// How many levels below the project [`has_gradle`] looks for a build.
+pub const GRADLE_DEPTH: usize = 3;
 
 // ----- The store --------------------------------------------------------------------------
 
@@ -722,8 +726,18 @@ impl ProjectModels {
             && !self.engine_runs(&root, cx)
             && gradle
         {
-            self.tried = true;
-            self.sync(cx);
+            // The Project view shows: the project's Java engine syncs as it starts, so it
+            // starts now rather than a sync of the app's own beside it (two syncs of the same
+            // builds take turns at Gradle's locks, and each takes several times as long).
+            let project_view = self.model.read(cx).settings.activity.is_none_or(|a| a == Activity::Project);
+            let hub = self.hub.clone().filter(|h| !h.read(cx).servers.contains_key(&root));
+            match hub {
+                Some(hub) if project_view => hub.update(cx, |h, cx| h.ensure_server(&root, cx)),
+                _ => {
+                    self.tried = true;
+                    self.sync(cx);
+                }
+            }
         }
         if changed && self.current.is_some() && !self.scripts_changed && !self.stamps.is_empty() {
             self.scripts_changed = true;
@@ -767,6 +781,7 @@ impl ProjectModels {
                         model.failed.len(),
                         model.libraries.len()
                     );
+                    crate::startup::mark("project model read");
                     // A build that needs a JDK this machine lacks: offer to download it.
                     let wanted = model.failed.iter().find_map(|f| f.needs_jdk);
                     this.current = Some(Rc::new(model));

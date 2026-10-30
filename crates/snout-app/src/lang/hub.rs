@@ -436,7 +436,14 @@ impl LangHub {
         let listed =
             crate::project_model::store(cx).and_then(|s| s.read(cx).model_for(project)).is_some_and(|m| m.holds(path));
         let inside = path.starts_with(project) && build.is_some();
-        if (inside || listed) && crate::project_model::project_has_gradle(project, cx) {
+        // A build a few levels down in the project is one the project's look for builds finds
+        // (`project_model::has_gradle`): no need to wait for that look, which a tab restored
+        // at startup would otherwise beat, starting an engine of its own for its build.
+        let near = build
+            .as_deref()
+            .and_then(|b| b.strip_prefix(project).ok())
+            .is_some_and(|rel| rel.components().count() <= crate::project_model::GRADLE_DEPTH);
+        if (inside || listed) && (near || crate::project_model::project_has_gradle(project, cx)) {
             return Some(project.clone());
         }
         build.filter(|r| r.starts_with(project))
@@ -749,6 +756,7 @@ impl LangHub {
             }
         };
         eprintln!("[java] started the engine for {} on JDK {} (pid {})", root.display(), jdk.version, client.pid());
+        crate::startup::mark("Java engine started");
         server.client = Some(client.clone());
         server.stage = Stage::Importing;
         server.progress.clear();
@@ -859,6 +867,7 @@ impl LangHub {
                     let took = server.started.elapsed();
                     server.first_diagnostics = Some(took);
                     eprintln!("[java] first diagnostics for an open file after {:.1} s", took.as_secs_f32());
+                    crate::startup::mark("first diagnostics for an open file");
                 }
                 if list.is_empty() {
                     server.diagnostics.remove(&uri);
@@ -886,6 +895,7 @@ impl LangHub {
                 match kind {
                     "ServiceReady" => {
                         server.stage = Stage::Ready;
+                        crate::startup::mark("Java language server ready");
                         if server.recovering.take().is_some() {
                             eprintln!("[java] the engine for {} is back", root.display());
                         }
@@ -926,6 +936,9 @@ impl LangHub {
                         && let Some(p) = &server.readiness.project
                     {
                         eprintln!("[java] readiness: {}, {}", p.label(), server.readiness.summary());
+                        if p.is_ready() {
+                            crate::startup::mark("every module ready");
+                        }
                     }
                     // The editors of the build show their module's state.
                     for doc in self.docs.values().filter(|d| d.root == root) {
