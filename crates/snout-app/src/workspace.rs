@@ -49,6 +49,7 @@ pub struct Tabs {
     pub output: PanelId,
     pub problems: PanelId,
     pub gradle: PanelId,
+    pub maven: PanelId,
     pub spring: PanelId,
     pub notifications: PanelId,
     pub claude_changes: PanelId,
@@ -100,6 +101,7 @@ pub struct Workspace {
     pub project_structure: Option<Entity<crate::structure::ProjectStructureView>>,
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::run::gradle_window::GradleWindow>,
+    pub maven: Entity<crate::run::maven_window::MavenWindow>,
     pub spring_window: Entity<crate::spring::window::SpringWindow>,
     /// The project's Spring model, for the Spring window and the editors' gutters.
     pub spring: Entity<crate::spring::Spring>,
@@ -306,6 +308,7 @@ impl Workspace {
         ];
         let terminal = crate::console::build_terminal(&model, cx);
         let gradle = cx.new(|cx| crate::run::gradle_window::GradleWindow::new(runs.clone(), cx));
+        let maven = cx.new(|cx| crate::run::maven_window::MavenWindow::new(runs.clone(), cx));
         use crate::run::Place;
         use crate::run::windows::RunWindow;
         let run_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Run, window, cx));
@@ -324,6 +327,7 @@ impl Workspace {
             output: PanelId::from(output.entity_id()),
             problems: PanelId::from(problems.entity_id()),
             gradle: PanelId::from(gradle.entity_id()),
+            maven: PanelId::from(maven.entity_id()),
             spring: PanelId::from(spring_window.entity_id()),
             notifications: PanelId::from(notifications.entity_id()),
             claude_changes: PanelId::from(claude_changes.entity_id()),
@@ -349,6 +353,7 @@ impl Workspace {
         panels.push((panel_handle(structure.clone()), DockPlacement::Right));
         panels.push((panel_handle(hierarchy.clone()), DockPlacement::Right));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
+        panels.push((panel_handle(maven.clone()), DockPlacement::Right));
         panels.push((panel_handle(spring_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
         panels.push((panel_handle(claude_changes.clone()), DockPlacement::Right));
@@ -475,6 +480,7 @@ impl Workspace {
             settings_page: None,
             project_structure: None,
             gradle,
+            maven,
             spring_window,
             spring,
             notifications,
@@ -1975,6 +1981,12 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &CollapseGradle, _, cx| {
                 this.gradle.update(cx, |g, cx| g.collapse_all(cx));
             }))
+            .on_action(cx.listener(|this, _: &CollapseMaven, _, cx| {
+                this.maven.update(cx, |g, cx| g.collapse_all(cx));
+            }))
+            .on_action(cx.listener(|this, _: &RefreshMaven, _, cx| {
+                this.runs.update(cx, |r, cx| r.load_maven_goals(true, cx));
+            }))
             .on_action(cx.listener(|this, _: &CollapseSpring, _, cx| {
                 this.spring_window.update(cx, |w, cx| w.collapse_all(cx));
             }))
@@ -2027,6 +2039,17 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &RerunFailedTests, _, cx| this.rerun_failed_tests(cx)))
             .on_action(cx.listener(|this, _: &RunGradleTask, w, cx| this.open_task_picker(w, cx)))
             .on_action(cx.listener(|this, a: &RunTask, _, cx| this.run_task(a.build.clone(), a.task.clone(), cx)))
+            .on_action(cx.listener(|this, a: &RunMavenGoal, _, cx| {
+                let launch = crate::run::Launch::Maven {
+                    build: a.build.clone(),
+                    project: a.project.clone(),
+                    module: a.module.clone(),
+                    goals: a.goals.clone(),
+                };
+                this.runs.update(cx, |r, cx| {
+                    r.start(launch, cx);
+                });
+            }))
             .on_action(cx.listener(|this, _: &SortStructure, _, cx| {
                 this.structure.update(cx, |s, cx| {
                     use crate::lang::symbols::Sort;

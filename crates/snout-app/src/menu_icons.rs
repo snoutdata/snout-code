@@ -143,7 +143,9 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "ShowStructure" => sf("list.bullet.indent", L::ListTree),
         "ShowHierarchy" => sf("point.3.connected.trianglepath.dotted", L::Network),
         "LocateFile" => sf("scope", L::LocateFixed),
-        "CollapseAll" | "CollapseGradle" | "CollapseSpring" => sf("rectangle.compress.vertical", L::ChevronsDownUp),
+        "CollapseAll" | "CollapseGradle" | "CollapseMaven" | "CollapseSpring" => {
+            sf("rectangle.compress.vertical", L::ChevronsDownUp)
+        }
         "HideSide" => sf("sidebar.left", L::PanelLeftClose),
         "SortStructure" => sf("arrow.up.arrow.down", L::ArrowDownAZ),
         "ClearOutput" => sf("clear", L::Eraser),
@@ -237,7 +239,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "StopIdleProcesses" => sf("stop.circle", L::CircleStop),
         "RestartJava" => sf("arrow.clockwise.circle", L::RotateCw),
         "SyncGradle" => sf("arrow.triangle.2.circlepath.circle", L::RefreshCw),
-        "RefreshGradle" => sf("arrow.clockwise", L::RefreshCw),
+        "RefreshGradle" | "RefreshMaven" => sf("arrow.clockwise", L::RefreshCw),
         "RefreshSpring" => sf("arrow.clockwise", L::RefreshCw),
         "ShowSpring" => sf("leaf", L::Leaf),
         // Window.

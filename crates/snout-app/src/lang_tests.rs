@@ -435,6 +435,7 @@ fn readiness_shows_in_the_status_bar_and_the_editor(cx: &mut TestAppContext) {
         uses: Vec::new(),
         jdk: None,
         stale: None,
+        maven: false,
     };
     let project = ProjectModel {
         root: repo.clone(),
@@ -508,7 +509,7 @@ fn readiness_reads_the_answer_and_the_notifications() {
     assert_eq!(r.summary(), "1 of 2 modules ready");
     let mut r = Readiness::default();
     assert!(r.apply(&json!({ "module": null, "stage": "syncing", "percent": 0, "modules": 0, "ready": 0 })));
-    assert_eq!(r.summary(), "Syncing the Gradle model");
+    assert_eq!(r.summary(), "Syncing the build model");
     assert!(!r.apply(&json!({ "module": null, "stage": "syncing", "percent": 0, "modules": 0, "ready": 0 })));
     assert_eq!(crate::lang::java::Requirement { declared: None, gradle_max: Some(19) }.wanted(), 17);
     assert_eq!(crate::lang::java::Requirement { declared: None, gradle_max: Some(16) }.wanted(), 11);

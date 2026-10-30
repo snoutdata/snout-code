@@ -1,5 +1,5 @@
-//! What the Java engine needs around it: where its distribution is, which Gradle build a
-//! file belongs to, which JDK that build needs, the JDKs installed, and downloading one
+//! What the Java engine needs around it: where its distribution is, which Gradle or Maven
+//! build a file belongs to, which JDK that build needs, the JDKs installed, and downloading one
 //! from Adoptium when none fits. All of it on the workspace's [`Host`]: blocking, so off the
 //! UI thread.
 
@@ -34,8 +34,16 @@ pub fn engine_dist(host: &dyn Host) -> Option<PathBuf> {
 }
 
 /// The command that runs `snout-engine lsp` on `project` with the distribution's own Java,
-/// Gradle running on `jdk`, its Gradle daemons stopping after `idle_minutes` without a build.
-pub fn engine_command(host: &dyn Host, dist: &Path, project: &Path, jdk: &Path, idle_minutes: u64) -> Cmd {
+/// Gradle running on `jdk`, its Gradle daemons stopping after `idle_minutes` without a build,
+/// and Maven builds read with `maven_profiles` turned on (`a`) or off (`!a`).
+pub fn engine_command(
+    host: &dyn Host,
+    dist: &Path,
+    project: &Path,
+    jdk: &Path,
+    idle_minutes: u64,
+    maven_profiles: &[String],
+) -> Cmd {
     let mut c = Cmd::new(dist.join("runtime/bin/java"))
         .arg("-cp")
         .arg(format!("{}/*", dist.join("lib").display()))
@@ -51,6 +59,9 @@ pub fn engine_command(host: &dyn Host, dist: &Path, project: &Path, jdk: &Path, 
         .arg("--daemon-idle-minutes")
         .arg(idle_minutes.max(1).to_string())
         .cwd(project);
+    if !maven_profiles.is_empty() {
+        c = c.arg("--maven-profiles").arg(maven_profiles.join(","));
+    }
     // The JDKs the app downloaded, for builds that want another Java than `jdk`.
     for extra in downloaded_jdks(host) {
         if extra.home != jdk {
@@ -72,16 +83,28 @@ pub fn engine_cache(host: &dyn Host) -> PathBuf {
 
 const SETTINGS: [&str; 2] = ["settings.gradle", "settings.gradle.kts"];
 const BUILDS: [&str; 2] = ["build.gradle", "build.gradle.kts"];
+/// A Maven build's file.
+pub const POM: &str = "pom.xml";
 
-/// Whether `dir` is the root of a Gradle build (it has a settings or build script).
+/// Whether `dir` is the root of a build the engine reads: a Gradle build (it has a settings
+/// or build script) or a Maven one (it has a `pom.xml`).
 pub fn is_gradle_root(host: &dyn Host, dir: &Path) -> bool {
-    SETTINGS.iter().chain(BUILDS.iter()).any(|f| host.is_file(&dir.join(f)))
+    SETTINGS.iter().chain(BUILDS.iter()).any(|f| host.is_file(&dir.join(f))) || host.is_file(&dir.join(POM))
 }
 
-/// The Gradle build `file` belongs to: the nearest folder above it with a settings script,
-/// else the nearest with a build script, looking no higher than `stop`.
+/// Whether `dir` is a Maven build: a `pom.xml` and no Gradle script (a folder with both is
+/// a Gradle build, as the engine reads it).
+pub fn is_maven_root(host: &dyn Host, dir: &Path) -> bool {
+    host.is_file(&dir.join(POM)) && !SETTINGS.iter().chain(BUILDS.iter()).any(|f| host.is_file(&dir.join(f)))
+}
+
+/// The build `file` belongs to: the nearest folder above it with a Gradle settings script,
+/// else the nearest with a build script, else the Maven reactor of the nearest `pom.xml`
+/// (the outermost POM that lists the one below among its modules), looking no higher than
+/// `stop`.
 pub fn gradle_root(host: &dyn Host, file: &Path, stop: Option<&Path>) -> Option<PathBuf> {
     let mut nearest_build = None;
+    let mut nearest_pom: Option<PathBuf> = None;
     for dir in file.ancestors().skip(1) {
         if SETTINGS.iter().any(|f| host.is_file(&dir.join(f))) {
             return Some(dir.to_owned());
@@ -89,11 +112,57 @@ pub fn gradle_root(host: &dyn Host, file: &Path, stop: Option<&Path>) -> Option<
         if nearest_build.is_none() && BUILDS.iter().any(|f| host.is_file(&dir.join(f))) {
             nearest_build = Some(dir.to_owned());
         }
+        if nearest_pom.is_none() && host.is_file(&dir.join(POM)) {
+            nearest_pom = Some(dir.to_owned());
+        }
         if stop.is_some_and(|s| dir == s) {
             break;
         }
     }
-    nearest_build
+    nearest_build.or_else(|| nearest_pom.map(|d| maven_reactor(host, &d, stop)))
+}
+
+/// The outermost folder above `dir` (a Maven module) whose POM lists the one below among
+/// its modules, looking no higher than `stop`; `dir` itself when none does.
+pub fn maven_reactor(host: &dyn Host, dir: &Path, stop: Option<&Path>) -> PathBuf {
+    let mut at = dir.to_owned();
+    while stop.is_none_or(|s| at != s)
+        && let Some(up) = at.parent()
+        && lists_module(host, up, &at)
+    {
+        at = up.to_owned();
+    }
+    at
+}
+
+/// Whether the POM in `parent` names `child` in a `<module>` (in any profile).
+fn lists_module(host: &dyn Host, parent: &Path, child: &Path) -> bool {
+    let Ok(text) = host.read_to_string(&parent.join(POM)) else { return false };
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("<module>") {
+        rest = &rest[at + 8..];
+        let Some(end) = rest.find("</module>") else { break };
+        let name = rest[..end].trim().trim_end_matches("/pom.xml").trim_end_matches('/');
+        if normalize(&parent.join(name)) == normalize(child) {
+            return true;
+        }
+        rest = &rest[end..];
+    }
+    false
+}
+
+fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// An installed JDK.

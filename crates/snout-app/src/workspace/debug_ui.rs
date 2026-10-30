@@ -155,7 +155,8 @@ impl Workspace {
         }
     }
 
-    /// Run Gradle Task… (⌃⌥G): every task of the project's builds, picked by name.
+    /// Run Gradle Task… (⌃⌥G): every task of the project's Gradle builds, and every phase and
+    /// goal of its Maven modules (`web: package`, `web: spring-boot:run`), picked by name.
     pub fn open_task_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let runs = self.runs.read(cx);
         let mut commands: Vec<crate::search::Command> = Vec::new();
@@ -177,6 +178,25 @@ impl Workspace {
                             keys: None,
                         });
                     }
+                }
+            }
+        }
+        for b in &runs.maven.builds {
+            for m in &b.modules {
+                let goals = m.lifecycle.iter().cloned().chain(
+                    m.plugins.iter().flat_map(|p| p.goals.iter().map(move |(g, _)| format!("{}:{g}", p.prefix))),
+                );
+                for goal in goals {
+                    commands.push(crate::search::Command {
+                        name: format!("{}: {goal}", m.name).into(),
+                        action: Box::new(crate::menus::RunMavenGoal {
+                            build: b.build.clone(),
+                            project: m.project.clone(),
+                            module: m.name.clone(),
+                            goals: goal.clone(),
+                        }),
+                        keys: None,
+                    });
                 }
             }
         }

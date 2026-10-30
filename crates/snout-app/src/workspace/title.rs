@@ -269,6 +269,7 @@ impl Workspace {
                 crate::run::config::Kind::Main if c.spring_boot => Icon::Leaf,
                 crate::run::config::Kind::Main => Icon::Play,
                 crate::run::config::Kind::Gradle => Icon::Build,
+                crate::run::config::Kind::Maven => Icon::Feather,
                 crate::run::config::Kind::Tests => Icon::Check,
             });
             Trigger(

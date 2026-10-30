@@ -38,6 +38,7 @@ fn glyph(kind: &Kind) -> Icon {
         Kind::Run { .. } => Icon::Play,
         Kind::Tests { .. } => Icon::Check,
         Kind::GradleChild { .. } => Icon::Hammer,
+        Kind::Maven { .. } => Icon::Feather,
         Kind::Terminal => Icon::Terminal,
         Kind::Claude => Icon::Spark,
         Kind::Other => Icon::Tools,
@@ -69,7 +70,7 @@ impl Render for ProcessesWindow {
         if procs.rows.is_empty() {
             return base.child(
                 crate::components::EmptyState::new(snout_core::art::spots::no_processes(), "Looking at the processes")
-                    .hint("SnoutCode's own processes show here: the Java engine, Gradle daemons, runs and terminals.")
+                    .hint("SnoutCode's own processes show here: the Java engine, Gradle daemons, Maven, runs and terminals.")
                     .compact(),
             );
         }
@@ -117,7 +118,10 @@ impl Render for ProcessesWindow {
                     };
                     let ink = match &r.kind {
                         Kind::Leftover => p.warn,
-                        Kind::Engine { .. } | Kind::LanguageServer { .. } | Kind::Daemon { .. } => p.accent,
+                        Kind::Engine { .. }
+                        | Kind::LanguageServer { .. }
+                        | Kind::Daemon { .. }
+                        | Kind::Maven { .. } => p.accent,
                         Kind::Run { .. } | Kind::Tests { .. } => p.ok,
                         _ => p.fg_dim,
                     };

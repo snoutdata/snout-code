@@ -75,6 +75,7 @@ actions!(
         LocateFile,
         CollapseAll,
         CollapseGradle,
+        CollapseMaven,
         ClearOutput,
         EditConfigurations,
         RunSelected,
@@ -88,6 +89,7 @@ actions!(
         Resume,
         SyncGradle,
         RefreshGradle,
+        RefreshMaven,
         RefreshSpring,
         CollapseSpring,
         ShowSpring,
@@ -133,6 +135,16 @@ pub struct SetSpringProfiles(pub crate::spring::ProfileMode);
 pub struct RunTask {
     pub build: Option<String>,
     pub task: String,
+}
+
+/// Run Gradle Task…: run these Maven goals (or phases) in this module of this build.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct RunMavenGoal {
+    pub build: String,
+    pub project: String,
+    pub module: String,
+    pub goals: String,
 }
 
 /// File ▸ Open Recent: open this project of a remote machine.
@@ -257,6 +269,9 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Project Structure…", Box::new(ProjectStructure)),
         ("Refresh Gradle Tasks", Box::new(RefreshGradle)),
         ("Collapse All Gradle Tasks", Box::new(CollapseGradle)),
+        ("Reload Maven Project", Box::new(SyncGradle)),
+        ("Read the Maven Goals Again", Box::new(RefreshMaven)),
+        ("Collapse All Maven Goals", Box::new(CollapseMaven)),
         ("Spring Beans and Endpoints", Box::new(ShowSpring)),
         ("Read the Spring Model Again", Box::new(RefreshSpring)),
         ("Go to Spring Bean or Usages…", Box::new(SpringAtCaret)),
@@ -418,6 +433,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
                 MenuItem::separator(),
                 MenuItem::action("Sort Structure by Name", SortStructure),
                 MenuItem::action("Collapse All Gradle Tasks", CollapseGradle),
+                MenuItem::action("Collapse All Maven Goals", CollapseMaven),
                 MenuItem::action("Collapse the Spring Window", CollapseSpring),
                 MenuItem::action("Clear Output", ClearOutput),
             ])),

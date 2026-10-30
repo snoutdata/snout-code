@@ -17,11 +17,12 @@ const WRAPPER_JAR: &[u8] = include_bytes!("../../../../engine/gradle/wrapper/gra
 const GRADLEW: &str = include_str!("../../../../engine/gradlew");
 const GRADLEW_BAT: &str = include_str!("../../../../engine/gradlew.bat");
 
-/// The build script's language.
+/// The build: Gradle with its script in Kotlin or Groovy, or Maven.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dsl {
     Kotlin,
     Groovy,
+    Maven,
 }
 
 impl Dsl {
@@ -29,15 +30,74 @@ impl Dsl {
         match self {
             Dsl::Kotlin => "build.gradle.kts",
             Dsl::Groovy => "build.gradle",
+            Dsl::Maven => "pom.xml",
         }
     }
 
+    /// Gradle's settings script; a Maven build has none.
     pub fn settings_file(self) -> &'static str {
         match self {
             Dsl::Kotlin => "settings.gradle.kts",
             Dsl::Groovy => "settings.gradle",
+            Dsl::Maven => "",
         }
     }
+}
+
+const MAVEN_GITIGNORE: &str = "target/
+out/
+bin/
+*.class
+.DS_Store
+";
+
+/// A POM for a plain Java application: JUnit 5, the Java level, and surefire.
+fn java_pom(b: &Basics) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n         \
+         xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n         \
+         xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd\">\n  \
+         <modelVersion>4.0.0</modelVersion>\n\n  <groupId>{group}</groupId>\n  <artifactId>{artifact}</artifactId>\n  \
+         <version>1.0-SNAPSHOT</version>\n  <name>{name}</name>\n\n  <properties>\n    \
+         <maven.compiler.release>{java}</maven.compiler.release>\n    \
+         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>\n  </properties>\n\n  \
+         <dependencyManagement>\n    <dependencies>\n      <dependency>\n        <groupId>org.junit</groupId>\n        \
+         <artifactId>junit-bom</artifactId>\n        <version>5.11.3</version>\n        <type>pom</type>\n        \
+         <scope>import</scope>\n      </dependency>\n    </dependencies>\n  </dependencyManagement>\n\n  \
+         <dependencies>\n    <dependency>\n      <groupId>org.junit.jupiter</groupId>\n      \
+         <artifactId>junit-jupiter</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  \
+         <build>\n    <plugins>\n      <plugin>\n        <artifactId>maven-surefire-plugin</artifactId>\n        \
+         <version>3.5.2</version>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+        group = b.group,
+        artifact = b.artifact,
+        name = b.name,
+        java = b.java,
+    )
+}
+
+/// A dependency of the offline Spring Boot template as a POM's: Gradle's configuration
+/// becomes Maven's scope, compile only and annotation processors optional.
+fn pom_dependency(conf: &str, coords: &str) -> Option<String> {
+    let (group, artifact) = coords.split_once(':')?;
+    let (scope, optional) = match conf {
+        "implementation" => (None, false),
+        "runtimeOnly" => (Some("runtime"), false),
+        "developmentOnly" => (Some("runtime"), true),
+        "compileOnly" | "annotationProcessor" => (None, true),
+        "testImplementation" | "testRuntimeOnly" => (Some("test"), false),
+        _ => return None,
+    };
+    let mut s =
+        format!("    <dependency>\n      <groupId>{group}</groupId>\n      <artifactId>{artifact}</artifactId>\n");
+    if let Some(scope) = scope {
+        s += &format!("      <scope>{scope}</scope>\n");
+    }
+    if optional {
+        s += "      <optional>true</optional>\n";
+    }
+    s += "    </dependency>\n";
+    Some(s)
 }
 
 /// What every new project is asked for.
@@ -174,7 +234,11 @@ const GITIGNORE: &str = ".gradle/\nbuild/\n!gradle/wrapper/gradle-wrapper.jar\no
 pub fn write_java(host: &dyn Host, dir: &Path, b: &Basics) -> anyhow::Result<()> {
     host.create_dir_all(dir)?;
     let main = format!("{}.Main", b.package);
+    if b.dsl == Dsl::Maven {
+        write(host, dir, "pom.xml", &java_pom(b))?;
+    }
     let (settings, build) = match b.dsl {
+        Dsl::Maven => (String::new(), String::new()),
         Dsl::Kotlin => (
             format!(
                 "plugins {{\n    // Lets Gradle download the Java the toolchain asks for.\n    \
@@ -216,8 +280,10 @@ pub fn write_java(host: &dyn Host, dir: &Path, b: &Basics) -> anyhow::Result<()>
             ),
         ),
     };
-    write(host, dir, b.dsl.settings_file(), &settings)?;
-    write(host, dir, b.dsl.build_file(), &build)?;
+    if b.dsl != Dsl::Maven {
+        write(host, dir, b.dsl.settings_file(), &settings)?;
+        write(host, dir, b.dsl.build_file(), &build)?;
+    }
     let pkg_dir = b.package.replace('.', "/");
     let pkg = &b.package;
     write(
@@ -243,6 +309,10 @@ pub fn write_java(host: &dyn Host, dir: &Path, b: &Basics) -> anyhow::Result<()>
         ),
     )?;
     host.create_dir_all(&dir.join("src/main/resources"))?;
+    if b.dsl == Dsl::Maven {
+        // No wrapper: SnoutCode runs Maven itself, downloading it when it needs to.
+        return write(host, dir, ".gitignore", MAVEN_GITIGNORE);
+    }
     write(host, dir, ".gitignore", GITIGNORE)?;
     write_wrapper(host, dir, GRADLE_VERSION)
 }
@@ -411,6 +481,33 @@ pub fn write_boot_offline(host: &dyn Host, dir: &Path, b: &Basics, boot: &Boot) 
     lines.sort_by_key(|(c, a)| (ORDER.iter().position(|o| o == c).unwrap_or(ORDER.len()), *a));
     lines.dedup();
     let deps: String = lines.iter().map(|(c, a)| dep(c, a)).collect();
+    if b.dsl == Dsl::Maven {
+        let mut seen = std::collections::HashSet::new();
+        let pom_deps: String = lines
+            .iter()
+            .filter(|(c, a)| *c != "testRuntimeOnly" && seen.insert(*a))
+            .filter_map(|(c, a)| pom_dependency(c, a))
+            .collect();
+        let pom = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n         \
+             xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n         \
+             xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd\">\n  \
+             <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    \
+             <artifactId>spring-boot-starter-parent</artifactId>\n    <version>{v}</version>\n    \
+             <relativePath/>\n  </parent>\n\n  <groupId>{group}</groupId>\n  <artifactId>{artifact}</artifactId>\n  \
+             <version>0.0.1-SNAPSHOT</version>\n  <name>{name}</name>\n\n  <properties>\n    \
+             <java.version>{java}</java.version>\n  </properties>\n\n  <dependencies>\n{pom_deps}  </dependencies>\n\n  \
+             <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        \
+             <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+            v = boot.version,
+            group = b.group,
+            artifact = b.artifact,
+            name = b.name,
+            java = b.java,
+        );
+        write(host, dir, "pom.xml", &pom)?;
+    }
     let (settings, build) = if kotlin {
         (
             format!("rootProject.name = \"{}\"\n", b.name),
@@ -442,8 +539,10 @@ pub fn write_boot_offline(host: &dyn Host, dir: &Path, b: &Basics, boot: &Boot) 
             ),
         )
     };
-    write(host, dir, b.dsl.settings_file(), &settings)?;
-    write(host, dir, b.dsl.build_file(), &build)?;
+    if b.dsl != Dsl::Maven {
+        write(host, dir, b.dsl.settings_file(), &settings)?;
+        write(host, dir, b.dsl.build_file(), &build)?;
+    }
     let pkg_dir = b.package.replace('.', "/");
     let pkg = &b.package;
     let app = format!("{}Application", class_stem(&b.name));
@@ -473,6 +572,9 @@ pub fn write_boot_offline(host: &dyn Host, dir: &Path, b: &Basics, boot: &Boot) 
         host.create_dir_all(&dir.join("src/main/resources/static"))?;
         host.create_dir_all(&dir.join("src/main/resources/templates"))?;
     }
+    if b.dsl == Dsl::Maven {
+        return write(host, dir, ".gitignore", MAVEN_GITIGNORE);
+    }
     write(host, dir, ".gitignore", GITIGNORE)?;
     write_wrapper(host, dir, BOOT_GRADLE_VERSION)
 }
@@ -482,6 +584,7 @@ pub fn starter_url(base: &str, b: &Basics, boot: &Boot) -> String {
     let kind = match b.dsl {
         Dsl::Kotlin => "gradle-project-kotlin",
         Dsl::Groovy => "gradle-project",
+        Dsl::Maven => "maven-project",
     };
     let q = |s: &str| encode(s);
     let mut url = format!(

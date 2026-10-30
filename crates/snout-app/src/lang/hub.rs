@@ -93,7 +93,7 @@ impl Ready {
 /// The readable name of a readiness stage.
 pub fn readiness_label(stage: &str) -> &'static str {
     match stage {
-        "syncing" => "Syncing the Gradle model",
+        "syncing" => "Syncing the build model",
         "compilingScala" => "Compiling Scala",
         "importing" => "Importing",
         "ready" => "Ready",
@@ -688,6 +688,7 @@ impl LangHub {
     /// Start (or restart) the engine of `root` on its JDK.
     fn spawn(&mut self, root: &Path, cx: &mut Context<Self>) {
         let idle_minutes = self.model.read(cx).settings.daemon_idle_minutes;
+        let maven_profiles = crate::run::maven_profiles_of(&self.model, root, cx);
         let Some(server) = self.servers.get_mut(root) else { return };
         let Some(jdk) = server.jdk.clone() else { return };
         if self.engine_build.as_ref().is_some_and(|b| !b.finished()) {
@@ -710,7 +711,7 @@ impl LangHub {
             }
             let dist =
                 java::engine_dist(&*host).ok_or_else(|| "The Java engine is not built (run snout.sh)".to_owned())?;
-            let command = java::engine_command(&*host, &dist, &root_buf, &jdk.home, idle_minutes);
+            let command = java::engine_command(&*host, &dist, &root_buf, &jdk.home, idle_minutes, &maven_profiles);
             let started = Client::spawn(&*host, &command).map_err(|e| format!("The Java engine did not start: {e}"))?;
             Ok((started, jdk))
         });

@@ -52,6 +52,10 @@ pub enum Kind {
     GradleChild {
         session: Option<u64>,
     },
+    /// Maven running goals for the engine (its wrapper too), and the run's session when known.
+    Maven {
+        session: Option<u64>,
+    },
     Terminal,
     Claude,
     Other,
@@ -98,7 +102,12 @@ impl Row {
             Kind::Engine { .. } if self.pid.is_none() => vec![Act::Restart],
             Kind::LanguageServer { .. } => vec![Act::Restart],
             Kind::Run { session: Some(_) } => vec![Act::Restart, Act::Stop],
-            Kind::Daemon { .. } | Kind::Run { .. } | Kind::Tests { .. } | Kind::GradleChild { .. } | Kind::Leftover => {
+            Kind::Daemon { .. }
+            | Kind::Run { .. }
+            | Kind::Tests { .. }
+            | Kind::GradleChild { .. }
+            | Kind::Maven { .. }
+            | Kind::Leftover => {
                 vec![Act::Stop]
             }
             _ => Vec::new(),
@@ -258,6 +267,49 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 r.state = engine.state.clone();
                 r.busy = engine.busy;
                 out.push(r);
+            } else if is_maven(&child.line()) {
+                // Maven runs goals for the engine; its forked JVMs (surefire's tests, the
+                // application spring-boot:run starts) show under it.
+                let s = gradle_session(false);
+                let purpose = match s {
+                    Some(s) => format!("Maven for {project}: runs {}", s.title),
+                    None => format!("Maven for {project}: runs goals"),
+                };
+                let mut r = row(child, 2, Kind::Maven { session: s.map(|s| s.id) }, purpose, Some(project.clone()));
+                r.state = "Building".into();
+                r.busy = true;
+                out.push(r);
+                let mut stack: Vec<u32> = snap.children(child.pid).iter().map(|c| c.pid).collect();
+                while let Some(pid) = stack.pop() {
+                    let Some(c) = snap.get(pid) else { continue };
+                    shown.push(pid);
+                    stack.extend(snap.children(pid).iter().map(|x| x.pid));
+                    let line = c.line();
+                    if is_maven(&line) {
+                        continue; // the wrapper's Maven, already listed
+                    }
+                    let (kind, purpose) = if line.contains("surefire") || line.contains("failsafe") {
+                        let t = gradle_session(true);
+                        (
+                            Kind::Tests { session: t.map(|t| t.id) },
+                            match t {
+                                Some(t) => format!("Tests of {}: the test JVM Maven started", t.title),
+                                None => format!("Tests for {project}: the test JVM Maven started"),
+                            },
+                        )
+                    } else {
+                        (
+                            Kind::GradleChild { session: s.map(|s| s.id) },
+                            match s {
+                                Some(s) => format!("{}: your program, started by Maven", s.title),
+                                None => format!("Program Maven started for {project}"),
+                            },
+                        )
+                    };
+                    let mut r = row(c, 3, kind, purpose, Some(project.clone()));
+                    r.busy = true;
+                    out.push(r);
+                }
             } else {
                 let session = session_by_pid(child.pid);
                 let purpose = match session {
@@ -414,6 +466,13 @@ pub fn duration(secs: u64) -> String {
         s if s >= 60 => format!("{} min", s / 60),
         s => format!("{s} s"),
     }
+}
+
+/// Whether a command line runs Maven: its launcher, or the wrapper (script or main class).
+pub fn is_maven(line: &str) -> bool {
+    line.contains("org.codehaus.plexus.classworlds.launcher.Launcher")
+        || line.contains("MavenWrapperMain")
+        || line.split_whitespace().any(|w| w.ends_with("/mvnw") || w == "mvnw")
 }
 
 /// How long the engine's Gradle daemons idle before they stop, unless the settings say.
@@ -581,7 +640,8 @@ impl Processes {
             (
                 Kind::Run { session: Some(id) }
                 | Kind::Tests { session: Some(id) }
-                | Kind::GradleChild { session: Some(id) },
+                | Kind::GradleChild { session: Some(id) }
+                | Kind::Maven { session: Some(id) },
                 Act::Stop,
             ) => {
                 let id = *id;

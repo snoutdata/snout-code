@@ -13,6 +13,7 @@ pub mod config_dialog;
 pub mod debug;
 pub mod debug_dialogs;
 pub mod gradle_window;
+pub mod maven_window;
 pub mod test_tree;
 pub mod windows;
 
@@ -39,9 +40,29 @@ pub enum Place {
 /// What a session runs, so it can run again.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Launch {
-    Config { config: RunConfig, debug: bool },
-    Tests { module: String, filter: Value, label: String, debug: bool, rerun_failed: bool },
-    Task { build: Option<String>, task: String },
+    Config {
+        config: RunConfig,
+        debug: bool,
+    },
+    Tests {
+        module: String,
+        filter: Value,
+        label: String,
+        debug: bool,
+        rerun_failed: bool,
+    },
+    Task {
+        build: Option<String>,
+        task: String,
+    },
+    /// Maven goals (or phases) in a module of a Maven build (`:` for the whole build), with
+    /// the Maven window's profiles, offline and skip tests.
+    Maven {
+        build: String,
+        project: String,
+        module: String,
+        goals: String,
+    },
 }
 
 impl Launch {
@@ -55,6 +76,7 @@ impl Launch {
             Launch::Tests { label, rerun_failed: true, .. } => format!("{label} (failed)"),
             Launch::Tests { label, .. } => label.clone(),
             Launch::Task { task, .. } => task.clone(),
+            Launch::Maven { module, goals, .. } => format!("{module} [{goals}]"),
         }
     }
 
@@ -65,7 +87,7 @@ impl Launch {
 
     pub fn place(&self) -> Place {
         match self {
-            Launch::Task { .. } => Place::Build,
+            Launch::Task { .. } | Launch::Maven { .. } => Place::Build,
             l if l.debug() => Place::Debug,
             _ => Place::Run,
         }
@@ -285,6 +307,105 @@ pub fn parse_gradle_tasks(v: &Value) -> Vec<GradleBuild> {
         .collect()
 }
 
+/// The project's Maven builds, as `snout/mavenGoals` lists them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MavenBuild {
+    pub build: String,
+    pub root_dir: PathBuf,
+    pub version: String,
+    pub wrapper: bool,
+    pub error: Option<String>,
+    pub modules: Vec<MavenModule>,
+    /// Every profile of the build: its id, whether the POMs activate it, and where it is.
+    pub profiles: Vec<(String, bool, Option<PathBuf>)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MavenModule {
+    /// The module path (`:` for the root, `:app`) and the model's module id.
+    pub project: String,
+    pub module: String,
+    pub name: String,
+    pub packaging: String,
+    pub build_file: Option<PathBuf>,
+    pub lifecycle: Vec<String>,
+    pub plugins: Vec<MavenPlugin>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MavenPlugin {
+    pub artifact: String,
+    pub version: Option<String>,
+    pub prefix: String,
+    /// Each goal, and what it does.
+    pub goals: Vec<(String, Option<String>)>,
+}
+
+pub fn parse_maven_goals(v: &Value) -> Vec<MavenBuild> {
+    let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
+    let arr = |v: &Value, k: &str| v.get(k).and_then(Value::as_array).cloned().unwrap_or_default();
+    arr(v, "builds")
+        .iter()
+        .map(|b| MavenBuild {
+            build: s(b, "build").unwrap_or_default(),
+            root_dir: s(b, "rootDir").map(PathBuf::from).unwrap_or_default(),
+            version: s(b, "mavenVersion").unwrap_or_default(),
+            wrapper: b.get("wrapper").and_then(Value::as_bool).unwrap_or(false),
+            error: s(b, "error"),
+            profiles: arr(b, "profiles")
+                .iter()
+                .filter_map(|p| {
+                    Some((
+                        s(p, "id")?,
+                        p.get("active").and_then(Value::as_bool).unwrap_or(false),
+                        s(p, "source").map(PathBuf::from),
+                    ))
+                })
+                .collect(),
+            modules: arr(b, "modules")
+                .iter()
+                .map(|m| MavenModule {
+                    project: s(m, "project").unwrap_or_else(|| ":".into()),
+                    module: s(m, "module").unwrap_or_default(),
+                    name: s(m, "name").unwrap_or_default(),
+                    packaging: s(m, "packaging").unwrap_or_else(|| "jar".into()),
+                    build_file: s(m, "buildFile").map(PathBuf::from),
+                    lifecycle: arr(m, "lifecycle").iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+                    plugins: arr(m, "plugins")
+                        .iter()
+                        .map(|p| MavenPlugin {
+                            artifact: s(p, "artifactId").unwrap_or_default(),
+                            version: s(p, "version"),
+                            prefix: s(p, "prefix").unwrap_or_default(),
+                            goals: arr(p, "goals")
+                                .iter()
+                                .filter_map(|g| Some((s(g, "name")?, s(g, "description").filter(|d| !d.is_empty()))))
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MavenGoals {
+    pub builds: Vec<MavenBuild>,
+    pub loading: bool,
+    pub error: Option<String>,
+    pub from: Option<u32>,
+}
+
+/// The Maven profiles the open project's engine reads its Maven builds with: the Maven
+/// window's choices, kept with the project's settings.
+pub fn maven_profiles_of(model: &Entity<Model>, root: &Path, cx: &App) -> Vec<String> {
+    match model.read(cx).support_dir() {
+        Some(dir) => ProjectSettings::load(&config::project_file(&dir, root)).maven.profiles,
+        None => runs(cx).map(|r| r.read(cx).project.maven.profiles.clone()).unwrap_or_default(),
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct GradleTasks {
     pub builds: Vec<GradleBuild>,
@@ -411,6 +532,7 @@ pub struct Runs {
     /// Engine notifications for runs whose id is not known yet.
     orphans: HashMap<String, Vec<(String, Value)>>,
     pub gradle: GradleTasks,
+    pub maven: MavenGoals,
     /// A Scala compile is running (since then).
     pub scala: Option<Instant>,
     pub scala_error: Option<String>,
@@ -456,6 +578,7 @@ impl Runs {
             next_id: 1,
             orphans: HashMap::new(),
             gradle: GradleTasks::default(),
+            maven: MavenGoals::default(),
             scala: None,
             scala_error: None,
             run_to: None,
@@ -482,6 +605,7 @@ impl Runs {
         self.engine_configs.clear();
         self.configs_from = None;
         self.gradle = GradleTasks::default();
+        self.maven = MavenGoals::default();
         self.sync_marks(cx);
         cx.notify();
     }
@@ -581,6 +705,58 @@ impl Runs {
         if self.gradle.from != Some(pid) && !self.gradle.loading {
             self.load_gradle_tasks(false, cx);
         }
+        if self.maven.from != Some(pid) && !self.maven.loading {
+            self.load_maven_goals(false, cx);
+        }
+    }
+
+    /// Read the Maven builds' modules, goals and profiles.
+    pub fn load_maven_goals(&mut self, refresh: bool, cx: &mut Context<Self>) {
+        let Some((_, pid)) = self.engine(cx) else {
+            self.maven.error = Some("The Java engine is not ready yet".into());
+            cx.notify();
+            return;
+        };
+        self.maven.loading = true;
+        self.maven.error = None;
+        let call = self.request("snout/mavenGoals", json!({ "refresh": refresh }), cx);
+        cx.spawn(async move |this, cx| {
+            let result = call.await;
+            let _ = this.update(cx, |this, cx| {
+                this.maven.loading = false;
+                this.maven.from = Some(pid);
+                match result {
+                    Ok(v) => this.maven.builds = parse_maven_goals(&v),
+                    Err(e) => this.maven.error = Some(e.to_string()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Turn a Maven profile on or off; the engine reads the builds again with it.
+    pub fn toggle_maven_profile(&mut self, id: &str, active: bool, cx: &mut Context<Self>) {
+        self.project.maven.toggle(id, active);
+        self.save_project();
+        if let Some(root) = self.model.read(cx).project_root() {
+            self.maven.from = None;
+            self.hub.update(cx, |h, cx| h.restart(&root, cx));
+        }
+        cx.notify();
+    }
+
+    pub fn set_maven_offline(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.project.maven.offline = on;
+        self.save_project();
+        cx.notify();
+    }
+
+    pub fn set_maven_skip_tests(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.project.maven.skip_tests = on;
+        self.save_project();
+        cx.notify();
     }
 
     pub fn load_configurations(&mut self, cx: &mut Context<Self>) {
@@ -737,7 +913,7 @@ impl Runs {
         let Some(root) = hub.engine_root(&project) else {
             return if !crate::project_model::project_has_gradle(&project, cx) {
                 EngineState::Unavailable(format!(
-                    "{} has no Gradle build: runs, tests and the debugger need one.",
+                    "{} has no Gradle or Maven build: runs, tests and the debugger need one.",
                     Model::dir_name(&project)
                 ))
             } else if !hub.enabled {
@@ -804,6 +980,7 @@ impl Runs {
             },
             Launch::Tests { label, .. } => format!("Testing {label}"),
             Launch::Task { task, .. } => format!("Running {task}"),
+            Launch::Maven { goals, module, .. } => format!("Running mvn {goals} in {module}"),
         };
         session.lines.push(ConsoleLine::system(what));
         if matches!(&launch, Launch::Tests { .. })
@@ -876,7 +1053,24 @@ impl Runs {
                 }
                 ("snout/runTask", p)
             }
+            Launch::Maven { build, project, goals, .. } => {
+                ("snout/runTask", json!({ "build": build, "project": project, "task": goals }))
+            }
         };
+        let mut params = params;
+        if method == "snout/runTask" || method == "snout/runTests" || method == "snout/run" {
+            // The Maven window's choices go with every Maven run; Gradle's ignore them.
+            let m = &self.project.maven;
+            let choices = json!({ "profiles": m.profiles, "offline": m.offline, "skipTests": m.skip_tests });
+            let target = if method == "snout/run" { params.get_mut("config") } else { Some(&mut params) };
+            if let Some(Value::Object(o)) = target {
+                for (k, v) in choices.as_object().expect("an object") {
+                    if k != "skipTests" || method == "snout/runTask" {
+                        o.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                }
+            }
+        }
         let call = self.request(method, params, cx);
         cx.spawn(async move |this, cx| {
             let result = call.await;
@@ -996,7 +1190,8 @@ impl Runs {
         if let Some(tasks) = v.get("tasks").and_then(Value::as_array) {
             let names: Vec<&str> = tasks.iter().filter_map(Value::as_str).collect();
             if !names.is_empty() {
-                s.push(Stream::System, &format!("Gradle: {}", names.join(" ")));
+                let tool = if v.get("tool").and_then(Value::as_str) == Some("maven") { "Maven" } else { "Gradle" };
+                s.push(Stream::System, &format!("{tool}: {}", names.join(" ")));
             }
         }
         // A main class debugged answers once its JVM listens: attach now.
@@ -1298,7 +1493,11 @@ impl Runs {
                 .find(|t| t.outcome.is_none())
                 .map_or_else(|| "Running".to_owned(), |t| t.path.clone());
             out.push(crate::background::BgTask {
-                title: format!("Gradle: {}", s.title),
+                title: format!(
+                    "{}: {}",
+                    if matches!(s.launch, Launch::Maven { .. }) { "Maven" } else { "Gradle" },
+                    s.title
+                ),
                 stage,
                 percent: None,
                 ..Default::default()

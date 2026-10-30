@@ -58,6 +58,8 @@ mod java_tools_tests;
 #[cfg(test)]
 mod lang_tests;
 #[cfg(test)]
+mod maven_tests;
+#[cfg(test)]
 mod project_settings_tests;
 #[cfg(test)]
 mod project_tests;

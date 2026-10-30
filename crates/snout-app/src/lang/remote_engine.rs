@@ -16,8 +16,9 @@ use super::java::{self, DownloadProgress};
 /// The Java release the engine runs on.
 pub const ENGINE_JAVA: u32 = 21;
 
-/// What the distribution holds besides its runtime: what is copied.
-const PARTS: [&str; 5] = ["bin", "lib", "jdtls", "jdtls-plugins", "dist.properties"];
+/// What the distribution holds besides its runtime: what is copied (`maven` holds the test
+/// listener Maven runs load).
+const PARTS: [&str; 6] = ["bin", "lib", "jdtls", "jdtls-plugins", "maven", "dist.properties"];
 
 /// Marks a folder whose copy is whole.
 const COMPLETE: &str = ".complete";

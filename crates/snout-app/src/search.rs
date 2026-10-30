@@ -180,7 +180,7 @@ impl SearchView {
             Mode::GoToFile => "Go to file",
             Mode::GoToLine => "Line, or line:column",
             Mode::Commands => "Type a command",
-            Mode::Tasks => "Run a Gradle task: its name or path",
+            Mode::Tasks => "Run a Gradle task or Maven goal: its name or path",
             Mode::Profiles => "Spring profiles: pick one to turn it on or off",
             Mode::Symbols => "Go to symbol",
             Mode::Structure => "Filter the file's symbols",

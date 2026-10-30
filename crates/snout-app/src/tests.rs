@@ -645,6 +645,7 @@ fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext
         ("build.gradle", "apply plugin: 'java'\n", "groovy"),
         ("application.yml", "server:\n  port: 8080\n", "yaml"),
         ("gradle.properties", "org.gradle.jvmargs=-Xmx2g\n", "properties"),
+        ("pom.xml", "<project>\n  <artifactId>demo</artifactId>\n</project>\n", "html"),
     ];
     for (name, text, _) in files {
         std::fs::write(repo.join(name), text).unwrap();

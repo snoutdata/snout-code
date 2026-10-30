@@ -1,4 +1,4 @@
-//! The Project tool window's Project view: the project as its Gradle model has it. The
+//! The Project tool window's Project view: the project as its Gradle or Maven model has it. The
 //! project's folder, its modules (each with its content and its source roots marked by
 //! what they hold), the source folders several modules share, the builds that failed to
 //! sync, every build's Gradle scripts, and the external libraries down to their classes.
@@ -462,9 +462,9 @@ impl Render for ProjectView {
             let store = self.store.read(cx);
             let failed = store.sync_error.is_some();
             let note = match (&store.sync_error, root.is_some()) {
-                (Some(e), true) => Some(format!("The Gradle model could not be read: {e}")),
+                (Some(e), true) => Some(format!("The build model could not be read: {e}")),
                 (None, true) if root.as_deref().is_some_and(|r| crate::project_model::project_has_gradle(r, cx)) => {
-                    Some("Reading Gradle model".to_owned())
+                    Some("Reading the build model".to_owned())
                 }
                 _ => None,
             };
@@ -601,7 +601,10 @@ fn row_look(
             look.bold = true;
             look.glyph = folder(Icon::Module, p.fg_dim);
             look.ink = p.fg_dim;
-            look.note = f.gradle_version.as_ref().map(|v| format!("Gradle {v}"));
+            look.note = f.gradle_version.as_ref().map(|v| match v.strip_prefix("maven-") {
+                Some(m) => format!("Maven {m}"),
+                None => format!("Gradle {v}"),
+            });
             look.badge = Some((Icon::Problems, p.error));
             look.tip = Some(format!("Did not sync: {}", f.reason));
             look.path = Some(f.root_dir.clone());
@@ -650,8 +653,10 @@ fn row_look(
             look.path = Some(path.clone());
         }
         RowKind::Scripts => {
-            look.label = "Gradle Scripts".into();
-            look.glyph = icon(Icon::Build, 14., green).into_any_element();
+            look.label = model.scripts_label().into();
+            look.glyph =
+                icon(if model.scripts_label() == "Maven Files" { Icon::Feather } else { Icon::Build }, 14., green)
+                    .into_any_element();
         }
         RowKind::Script(i) => {
             let s = &model.scripts[*i];
@@ -659,6 +664,9 @@ fn row_look(
             // A module's own script names the module; others, the build that reads them.
             let module = s.path.parent().and_then(|dir| model.modules.iter().find(|m| m.content_root == dir));
             look.note = Some(match (s.kind, s.builds.len(), module) {
+                (ScriptKind::Build | ScriptKind::Settings, _, Some(m)) if m.maven && m.gradle_path != ":" => {
+                    format!("{} {}", m.build, m.name)
+                }
                 (ScriptKind::Build | ScriptKind::Settings, _, Some(m)) if m.gradle_path != ":" => {
                     format!("{} {}", m.build, m.gradle_path)
                 }
@@ -964,7 +972,7 @@ mod tests {
                     RowKind::Dir { path, root: Some(k), .. } => format!("{} ({k:?})", name_of(path)),
                     RowKind::Dir { path, excluded: true, .. } => format!("{} (excluded)", name_of(path)),
                     RowKind::Dir { path, .. } | RowKind::File { path, .. } => name_of(path),
-                    RowKind::Scripts => "Gradle Scripts".into(),
+                    RowKind::Scripts => model.scripts_label().into(),
                     RowKind::Script(i) => name_of(&model.scripts[*i].path),
                     RowKind::Libraries => "External Libraries".into(),
                     RowKind::Jdk(i) => model.jdks[*i].label(),

@@ -35,6 +35,7 @@ pub mod context_actions;
 mod inlay;
 mod lang_features;
 pub mod navigation;
+pub mod pom_lang;
 pub mod problem_hover;
 mod refactor;
 mod run_gutter;
@@ -190,6 +191,8 @@ pub fn language_for(path: &Path) -> &'static str {
         "groovy" | "gradle" | "gvy" => "groovy",
         "yml" | "yaml" => "yaml",
         "properties" => "properties",
+        // A POM and other XML: the HTML grammar reads its tags, attributes and comments.
+        "xml" | "pom" | "xsd" | "html" | "htm" => "html",
         // A class file of a library, shown as the source the server gives.
         "class" => "java",
         _ if name == "Jenkinsfile" => "groovy",

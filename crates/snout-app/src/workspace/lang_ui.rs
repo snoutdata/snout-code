@@ -512,15 +512,22 @@ impl Workspace {
         )
     }
 
-    /// The bar saying the Gradle scripts changed since the model was read, offering to sync.
+    /// The bar saying the build files (Gradle scripts, POMs) changed since the model was read,
+    /// offering to sync.
     pub(super) fn gradle_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let store = crate::project_model::store(cx)?;
         let s = store.read(cx);
+        let label = s.current.as_ref().map(|m| m.scripts_label()).unwrap_or("Gradle Scripts");
         let text = match (&s.sync_error, s.scripts_changed) {
-            (_, true) => "Gradle files changed. Sync?".to_owned(),
-            (Some(e), false) if s.current.is_some() => format!("The Gradle sync failed: {e}"),
+            (_, true) => match label {
+                "Maven Files" => "A pom.xml changed. Reload the Maven project?".to_owned(),
+                "Build Files" => "Build files changed. Sync?".to_owned(),
+                _ => "Gradle files changed. Sync?".to_owned(),
+            },
+            (Some(e), false) if s.current.is_some() => format!("The sync failed: {e}"),
             _ => return None,
         };
+        let maven = label == "Maven Files";
         let changed = s.scripts_changed;
         let p = palette(cx);
         let (sync, dismiss) = (store.clone(), store.clone());
@@ -556,7 +563,11 @@ impl Workspace {
                     look::small_button(
                         "gradle-sync",
                         crate::components::IconName::RefreshCw,
-                        if changed { "Sync" } else { "Try again" },
+                        match (changed, maven) {
+                            (true, true) => "Reload",
+                            (true, false) => "Sync",
+                            _ => "Try again",
+                        },
                         &p,
                     )
                     .debug_selector(|| "gradle-sync".into())

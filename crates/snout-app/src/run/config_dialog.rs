@@ -339,9 +339,15 @@ impl ConfigDialog {
             .child(row("Kind", div().flex().child(kind_menu).into_any_element()))
             .child(row("Module", div().flex().child(module_menu).into_any_element()))
             .when(c.kind == Kind::Main, |d| d.child(row("Main class", input(&self.fields.main_class))))
-            .when(c.kind != Kind::Main, |d| d.child(row("Task", input(&self.fields.task))))
+            .when(c.kind != Kind::Main, |d| {
+                d.child(row(if c.kind == Kind::Maven { "Goals" } else { "Task" }, input(&self.fields.task)))
+            })
             .child(row(
-                if c.kind == Kind::Gradle { "Gradle arguments" } else { "Program arguments" },
+                match c.kind {
+                    Kind::Gradle => "Gradle arguments",
+                    Kind::Maven => "Maven arguments",
+                    _ => "Program arguments",
+                },
                 input(&self.fields.args),
             ))
             .child(row("VM options", input(&self.fields.jvm_args)))
@@ -399,6 +405,7 @@ impl Render for ConfigDialog {
                     match c.kind {
                         Kind::Main => Icon::Play,
                         Kind::Gradle => Icon::Build,
+                        Kind::Maven => Icon::Feather,
                         Kind::Tests => Icon::Check,
                     },
                     12.,

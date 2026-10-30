@@ -564,6 +564,25 @@ drawing!(
 );
 
 drawing!(
+    /// A Maven build: its POM, a sheet of angle brackets, the quill that writes it, and the
+    /// lifecycle's three steps beside it, the last one green.
+    maven,
+    |d| {
+        d.rotated(-4.0, 96.0, 84.0, |d| {
+            sheet(d, 66.0, 34.0, 62.0, 84.0, Fill::Paper, 0);
+            d.line("M78 54L72 60L78 66").line("M90 54L96 60L90 66");
+            d.line("M80 78H112").line("M80 90H104").line("M80 102H114");
+        });
+        d.path("M150 30C176 34 186 56 178 80L166 96L156 96L150 70Z", Fill::Tint);
+        d.line("M164 40C164 62 160 80 152 104").line("M152 104L146 118");
+        d.line("M168 56L176 54").line("M166 70L176 70").line("M162 84L172 86");
+        d.circle(150.0, 132.0, 5.0, Fill::Paper).circle(170.0, 132.0, 5.0, Fill::Paper).circle(190.0, 132.0, 6.0, Fill::Accent);
+        d.line("M155 132H164").line("M175 132H183");
+        d.twinkling_spark(40.0, 44.0, 0.7).twinkling_spark(204.0, 36.0, 0.55).twinkling_spark(44.0, 126.0, 0.45);
+    }
+);
+
+drawing!(
     /// No notifications: a quiet bell, and the green tick beside it for all clear.
     quiet_bell,
     |d| {
@@ -811,7 +830,7 @@ drawing!(
 );
 
 /// Every spot drawing of this module, by name: for tests and the gallery.
-pub fn all() -> [(&'static str, &'static Drawing); 37] {
+pub fn all() -> [(&'static str, &'static Drawing); 38] {
     [
         ("discard", discard()),
         ("push_rejected", push_rejected()),
@@ -838,6 +857,7 @@ pub fn all() -> [(&'static str, &'static Drawing); 37] {
         ("debugger_idle", debugger_idle()),
         ("no_beans", no_beans()),
         ("gradle_failed", gradle_failed()),
+        ("maven", maven()),
         ("quiet_bell", quiet_bell()),
         ("shared_settings", shared_settings()),
         ("appearance", appearance()),

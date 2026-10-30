@@ -293,11 +293,17 @@ impl ProjectStructureView {
             }),
             &p,
         ));
-        // Each build's Gradle, and the JVM it ran on.
-        body = body.child(section("Gradle", &p));
+        // Each build's Gradle or Maven, and the JVM it ran on.
+        let tools = match (s.builds.iter().any(|b| b.maven), s.builds.iter().any(|b| !b.maven)) {
+            (true, true) => "Gradle and Maven",
+            (true, false) => "Maven",
+            _ => "Gradle",
+        };
+        body = body.child(section(tools, &p));
         for (i, b) in s.builds.iter().enumerate() {
             let module = s.modules.iter().find(|m| m.build == b.id && m.included.is_none() && m.gradle_path == ":");
-            let version = b.gradle_version.clone().map(|v| format!("Gradle {v}")).unwrap_or_else(|| "Unknown".into());
+            let tool = if b.maven { "Maven" } else { "Gradle" };
+            let version = b.gradle_version.clone().map(|v| format!("{tool} {v}")).unwrap_or_else(|| "Unknown".into());
             let several = s.builds.len() > 1;
             body = body
                 .when(several, |d| {
@@ -307,7 +313,11 @@ impl ProjectStructureView {
                             .flex()
                             .items_center()
                             .gap(px(6.))
-                            .child(crate::glyphs::icon(Icon::Build, 13., p.fg_dim))
+                            .child(crate::glyphs::icon(
+                                if b.maven { Icon::Feather } else { Icon::Build },
+                                13.,
+                                p.fg_dim,
+                            ))
                             .child(div().font_weight(FontWeight::MEDIUM).child(b.id.clone()))
                             .when(!b.synced, |d| {
                                 d.child(badge_with_icon("Did not sync", IconName::TriangleAlert, Tone::Danger, &p))
@@ -315,7 +325,7 @@ impl ProjectStructureView {
                     )
                 })
                 .child(row(
-                    "Gradle version",
+                    if b.maven { "Maven version" } else { "Gradle version" },
                     div().flex().items_center().gap(px(8.)).child(gradle_value(version, &p)).when_some(
                         module.map(|m| m.id.clone()),
                         |d, id| {
@@ -329,7 +339,7 @@ impl ProjectStructureView {
                     &p,
                 ))
                 .child(row(
-                    "Gradle JVM",
+                    if b.maven { "Maven JVM" } else { "Gradle JVM" },
                     match (&b.java_version, &b.gradle_java_home) {
                         (Some(v), Some(h)) => div()
                             .flex()
@@ -344,11 +354,23 @@ impl ProjectStructureView {
                     &p,
                 ));
         }
-        body = body.child(hint("The JVM the last sync ran Gradle on: the JDK above when one is set.", &p));
+        body = body.child(hint(
+            if tools == "Maven" {
+                "The JDK Maven runs on and compiles with, chosen for the build's Java level: the JDK above when one is set."
+            } else {
+                "The JVM the last sync ran Gradle on: the JDK above when one is set."
+            },
+            &p,
+        ));
         body.child(div().pt(px(14.)).child(crate::components::callout(
             Tone::Info,
-            "Values with a lock are Gradle's: Edit in build file opens the line that sets them. Once you \
-                     save it, the bar over the editor offers to sync.",
+            if tools == "Maven" {
+                "Values with a lock are Maven's: Edit in build file opens the pom.xml line that sets them. Once \
+                     you save it, the bar over the editor offers to reload."
+            } else {
+                "Values with a lock are the build's: Edit in build file opens the line that sets them. Once you \
+                     save it, the bar over the editor offers to sync."
+            },
             &p,
         )))
         .into_any_element()

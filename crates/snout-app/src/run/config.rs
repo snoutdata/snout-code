@@ -1,5 +1,5 @@
 //! Run configurations: those the engine finds in the build (`snout/runConfigurations`: Spring
-//! Boot apps, main classes, `bootRun` and `run`, each module's tests) and those the user
+//! Boot apps, main classes, `bootRun` and `run`, Maven's `spring-boot:run`, each module's tests) and those the user
 //! makes or changes, kept with the project's settings outside the repository, with the
 //! configuration picked last and the breakpoints.
 
@@ -19,16 +19,19 @@ pub enum Kind {
     Gradle,
     /// A module's tests.
     Tests,
+    /// Maven goals (`spring-boot:run`), in `task`.
+    Maven,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Main, Kind::Gradle, Kind::Tests];
+    pub const ALL: [Kind; 4] = [Kind::Main, Kind::Gradle, Kind::Maven, Kind::Tests];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "main" => Some(Kind::Main),
             "gradle" => Some(Kind::Gradle),
             "tests" => Some(Kind::Tests),
+            "maven" => Some(Kind::Maven),
             _ => None,
         }
     }
@@ -38,6 +41,7 @@ impl Kind {
             Kind::Main => "main",
             Kind::Gradle => "gradle",
             Kind::Tests => "tests",
+            Kind::Maven => "maven",
         }
     }
 
@@ -46,6 +50,7 @@ impl Kind {
             Kind::Main => "Application",
             Kind::Gradle => "Gradle",
             Kind::Tests => "Tests",
+            Kind::Maven => "Maven",
         }
     }
 }
@@ -89,7 +94,7 @@ impl RunConfig {
             module: s("module").unwrap_or_default(),
             build: s("build"),
             main_class: s("mainClass"),
-            task: s("task"),
+            task: s("task").or_else(|| s("goals")),
             spring_boot: v.get("springBoot").and_then(Value::as_bool).unwrap_or(false),
             args: strings(v, "args"),
             jvm_args: strings(v, "jvmArgs"),
@@ -115,6 +120,7 @@ impl RunConfig {
                 Kind::Main => jvm_args.push(format!("-Dspring.profiles.active={profiles}")),
                 Kind::Gradle => args.push(format!("--args=--spring.profiles.active={profiles}")),
                 Kind::Tests => jvm_args.push(format!("-Dspring.profiles.active={profiles}")),
+                Kind::Maven => args.push(format!("-Dspring-boot.run.profiles={profiles}")),
             }
         }
         let mut v = json!({
@@ -129,7 +135,7 @@ impl RunConfig {
             o.insert("mainClass".into(), json!(c));
         }
         if let Some(t) = &self.task {
-            o.insert("task".into(), json!(t));
+            o.insert((if self.kind == Kind::Maven { "goals" } else { "task" }).into(), json!(t));
         }
         if let Some(d) = &self.working_dir {
             o.insert("workingDir".into(), json!(d));
@@ -143,6 +149,7 @@ impl RunConfig {
             Kind::Main if self.spring_boot => "Spring Boot",
             Kind::Main => "Application",
             Kind::Gradle => "Gradle",
+            Kind::Maven => "Maven",
             Kind::Tests => "Tests",
         }
     }
@@ -236,7 +243,7 @@ pub fn default_config(all: &[RunConfig]) -> Option<RunConfig> {
     all.iter()
         .find(|c| c.kind == Kind::Main && c.spring_boot)
         .or_else(|| all.iter().find(|c| c.kind == Kind::Main))
-        .or_else(|| all.iter().find(|c| c.kind == Kind::Gradle))
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Gradle || c.kind == Kind::Maven))
         .cloned()
 }
 
@@ -250,6 +257,40 @@ pub struct ProjectSettings {
     /// picked (then [`default_config`]).
     pub selected: Option<String>,
     pub breakpoints: Vec<Breakpoint>,
+    /// The Maven window's choices.
+    pub maven: MavenChoices,
+}
+
+/// How the Maven window runs goals, for one project: profiles turned on or off by hand
+/// (`a`, `!a`; the import reads the builds with them too), offline, and tests skipped.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MavenChoices {
+    pub profiles: Vec<String>,
+    pub offline: bool,
+    pub skip_tests: bool,
+}
+
+impl MavenChoices {
+    /// Whether `id` is on: as chosen, else as the POMs activate it (`active`).
+    pub fn profile_on(&self, id: &str, active: bool) -> bool {
+        if self.profiles.iter().any(|p| p == id) {
+            true
+        } else if self.profiles.iter().any(|p| p.strip_prefix('!') == Some(id)) {
+            false
+        } else {
+            active
+        }
+    }
+
+    /// Turn `id` the other way; a choice that matches what the POMs do is forgotten.
+    pub fn toggle(&mut self, id: &str, active: bool) {
+        let on = !self.profile_on(id, active);
+        self.profiles.retain(|p| p != id && p.strip_prefix('!') != Some(id));
+        if on != active {
+            self.profiles.push(if on { id.to_owned() } else { format!("!{id}") });
+        }
+    }
 }
 
 impl ProjectSettings {

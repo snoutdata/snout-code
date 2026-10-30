@@ -90,6 +90,8 @@ pub struct Module {
     pub jdk: Option<Jdk>,
     /// Its build failed to sync now; the module is from the last sync that worked.
     pub stale: Option<String>,
+    /// It is a module of a Maven build.
+    pub maven: bool,
 }
 
 impl Module {
@@ -140,12 +142,15 @@ impl ScriptKind {
     }
 }
 
-/// A Gradle script, and the builds that read it.
+/// A Gradle script (or a Maven build's POM, `.mvn` config and wrapper), and the builds that
+/// read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Script {
     pub path: PathBuf,
     pub kind: ScriptKind,
     pub builds: Vec<String>,
+    /// A Maven build's file.
+    pub maven: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -267,6 +272,7 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
             excluded: array(m, "excludedDirs").filter_map(Value::as_str).map(PathBuf::from).collect(),
             uses,
             jdk,
+            maven: str_of(m, "tool") == Some("maven"),
         });
     }
     for group in &mut shared {
@@ -291,6 +297,7 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
     let mut scripts: Vec<Script> = Vec::new();
     for group in array(json, "gradleScripts") {
         let build = str_of(group, "build").unwrap_or_default().to_owned();
+        let maven = str_of(group, "tool") == Some("maven");
         for f in array(group, "files") {
             let Some(path) = str_of(f, "path").map(PathBuf::from) else { continue };
             match scripts.iter_mut().find(|s| s.path == path) {
@@ -299,6 +306,7 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
                     path,
                     kind: ScriptKind::parse(str_of(f, "kind").unwrap_or_default()),
                     builds: vec![build.clone()],
+                    maven,
                 }),
             }
         }
@@ -327,6 +335,21 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
 }
 
 impl ProjectModel {
+    /// What the build files' node is called: Gradle Scripts, Maven Files, or Build Files
+    /// when the project has both.
+    pub fn scripts_label(&self) -> &'static str {
+        match (self.scripts.iter().any(|s| s.maven), self.scripts.iter().any(|s| !s.maven)) {
+            (true, true) => "Build Files",
+            (true, false) => "Maven Files",
+            _ => "Gradle Scripts",
+        }
+    }
+
+    /// Whether every build of the project is a Maven build.
+    pub fn maven_only(&self) -> bool {
+        !self.modules.is_empty() && self.modules.iter().all(|m| m.maven)
+    }
+
     /// The module named `name`, if there is one.
     pub fn module_named(&self, name: &str) -> Option<&Module> {
         self.modules.iter().find(|m| m.name == name)
@@ -818,8 +841,8 @@ impl ProjectModels {
     pub fn task(&self) -> Option<crate::background::BgTask> {
         let root = self.root.as_ref()?;
         self.syncing.map(|_| crate::background::BgTask {
-            title: format!("Gradle: {}", Model::dir_name(root)),
-            stage: "Syncing the Gradle model".into(),
+            title: format!("Sync: {}", Model::dir_name(root)),
+            stage: "Syncing the build model".into(),
             percent: None,
             ..Default::default()
         })

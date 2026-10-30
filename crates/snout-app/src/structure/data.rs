@@ -39,6 +39,8 @@ pub struct BuildInfo {
     pub gradle_java_home: Option<PathBuf>,
     pub java_version: Option<String>,
     pub synced: bool,
+    /// A Maven build: `gradle_version` is its Maven version.
+    pub maven: bool,
 }
 
 /// A source set of a module.
@@ -500,10 +502,12 @@ pub fn parse(json: &Value) -> Option<Structure> {
     let mut modules = Vec::new();
     for gb in array(json, "gradleBuilds") {
         let Some(id) = str_of(gb, "id") else { continue };
+        let maven = str_of(gb, "tool") == Some("maven");
         builds.push(BuildInfo {
             id: id.to_owned(),
+            maven,
             root_dir: str_of(gb, "rootDir").map(PathBuf::from).unwrap_or_default(),
-            gradle_version: opt(gb, "gradleVersion"),
+            gradle_version: if maven { opt(gb, "mavenVersion") } else { opt(gb, "gradleVersion") },
             gradle_java_home: opt(gb, "gradleJavaHome").map(PathBuf::from),
             java_version: opt(gb, "javaVersion"),
             synced: str_of(gb, "status") != Some("failed"),

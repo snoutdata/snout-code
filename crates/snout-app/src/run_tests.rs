@@ -858,7 +858,7 @@ fn opening_another_project_drops_the_engines_outside_it(cx: &mut TestAppContext)
     let id = cx.update(|_, cx| runs.update(cx, |r, cx| r.start(Launch::Config { config, debug: false }, cx))).unwrap();
     cx.update(|_, cx| {
         let s = runs.read(cx).session(id).unwrap().clone_lines();
-        assert!(s.iter().any(|l| l.contains("Gradle build") || l.contains("Java")), "{s:?}");
+        assert!(s.iter().any(|l| l.contains("Gradle or Maven build") || l.contains("Java")), "{s:?}");
         assert!(!runs.read(cx).session(id).unwrap().running(), "it does not hang");
     });
     let _ = std::fs::remove_dir_all(a);

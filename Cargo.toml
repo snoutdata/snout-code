@@ -63,4 +63,4 @@ gpui = { package = "gpui-pre", version = "=0.3.10" }
 # gpui-kit facade crate cannot join this workspace: its optional gpui-fast backend pins a
 # unicode-properties that egui's epaint rules out.)
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "runtime_shaders"] }
-gpui-component = { version = "=0.8.1", features = ["tree-sitter-java", "tree-sitter-kotlin", "tree-sitter-yaml"] }
+gpui-component = { version = "=0.8.1", features = ["tree-sitter-java", "tree-sitter-kotlin", "tree-sitter-yaml", "tree-sitter-html"] }

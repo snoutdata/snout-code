@@ -97,6 +97,8 @@ pub enum Icon {
     Structure,
     /// The Hierarchy window: a box above two it branches to.
     Hierarchy,
+    /// Maven: a quill.
+    Feather,
 }
 
 /// One stroke of an icon, in grid units (16 across).
@@ -359,6 +361,12 @@ impl Icon {
                 Curve((13.5, 2.5), (13., 13.), (3., 13.)),
                 Line(&[(3., 13.), (9.5, 6.5)], false),
                 Line(&[(3., 13.), (1.5, 14.5)], false),
+            ],
+            Icon::Feather => &[
+                Curve((4., 12.), (4., 3.), (13.5, 2.5)),
+                Curve((13.5, 2.5), (12.5, 10.), (6., 10.)),
+                Line(&[(2., 14.), (10., 6.)], false),
+                Line(&[(7., 9.), (10., 9.)], false),
             ],
             Icon::Inject => &[
                 Line(&[(1.5, 8.), (7.5, 8.)], false),

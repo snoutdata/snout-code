@@ -259,6 +259,9 @@ pub fn catalog_place(host: &dyn Host, s: &Structure, m: &ModuleInfo, group: &str
 /// Where `target` of the module `m` is declared: the line that says it, else the file it
 /// belongs in.
 pub fn find(host: &dyn Host, s: &Structure, m: &ModuleInfo, target: &Target) -> Option<Place> {
+    if m.build_file.as_ref().is_some_and(|f| f.file_name().is_some_and(|n| n == "pom.xml")) {
+        return find_in_poms(host, s, m, target);
+    }
     let dir = build_dir(s, m);
     let root_script = build_file(host, &dir);
     // The module's own script, the scripts it applies, then the build's root script (which
@@ -301,6 +304,118 @@ pub fn find(host: &dyn Host, s: &Structure, m: &ModuleInfo, target: &Target) -> 
                 }
             }
             scripts.into_iter().next().map(|file| Place { file, line: None })
+        }
+    }
+}
+
+// ----- Maven ---------------------------------------------------------------------------------
+
+/// The line of the `<artifactId>` of the first `<tag>` block (a dependency, a plugin) that
+/// names `artifact`, and `group` when given; lines from 0.
+pub fn pom_block_line(pom: &str, tag: &str, group: Option<&str>, artifact: &str) -> Option<u32> {
+    let lines: Vec<&str> = pom.lines().collect();
+    let (open, close) = (format!("<{tag}>"), format!("</{tag}>"));
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].contains(&open) {
+            let start = i;
+            while i < lines.len() && !lines[i].contains(&close) {
+                i += 1;
+            }
+            let block = &lines[start..=i.min(lines.len() - 1)];
+            let tagged =
+                |name: &str, value: &str| block.iter().position(|l| l.contains(&format!("<{name}>{value}</{name}>")));
+            if let Some(at) = tagged("artifactId", artifact)
+                && group.is_none_or(|g| {
+                    tagged("groupId", g).is_some() || (g == "org.apache.maven.plugins" && tag == "plugin")
+                })
+            {
+                return Some((start + at) as u32);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The line that sets the Java level in a POM: the compiler properties, else the compiler
+/// plugin's `release` or `source`.
+pub fn pom_level_line(pom: &str) -> Option<u32> {
+    first_line(pom, |l| {
+        let l = l.trim_start();
+        ["<maven.compiler.release>", "<maven.compiler.source>", "<java.version>", "<release>", "<source>"]
+            .iter()
+            .any(|t| l.starts_with(t))
+    })
+}
+
+/// The `<module>` line that lists `name` in a POM.
+pub fn pom_module_line(pom: &str, name: &str) -> Option<u32> {
+    first_line(pom, |l| {
+        l.trim().strip_prefix("<module>").and_then(|r| r.strip_suffix("</module>")).is_some_and(|m| {
+            let m = m.trim().trim_end_matches('/');
+            m == name || m.rsplit('/').next() == Some(name)
+        })
+    })
+}
+
+/// Where `target` of a Maven module is declared: its own POM, then its parents' in the build
+/// (dependency management, plugin management, properties), up to the build's root POM.
+fn find_in_poms(host: &dyn Host, s: &Structure, m: &ModuleInfo, target: &Target) -> Option<Place> {
+    let own = m.build_file.clone()?;
+    let root = s.build_of(m).map(|b| b.root_dir.clone()).unwrap_or_else(|| s.root.clone());
+    let mut poms = vec![own.clone()];
+    let mut dir = m.dir.parent().map(Path::to_path_buf);
+    while let Some(d) = dir {
+        if !d.starts_with(&root) {
+            break;
+        }
+        let pom = d.join("pom.xml");
+        if host.is_file(&pom) {
+            poms.push(pom);
+        }
+        dir = d.parent().map(Path::to_path_buf);
+    }
+    let read = |f: &Path| host.read_to_string(f).ok();
+    match target {
+        Target::GradleVersion => {
+            let file = root.join(".mvn/wrapper/maven-wrapper.properties");
+            match read(&file) {
+                Some(text) => {
+                    Some(Place { line: first_line(&text, |l| l.trim_start().starts_with("distributionUrl")), file })
+                }
+                None => Some(Place { file: root.join("pom.xml"), line: None }),
+            }
+        }
+        Target::Include => {
+            let name = m.dir.file_name()?.to_string_lossy().into_owned();
+            for pom in poms.iter().skip(1) {
+                if let Some(text) = read(pom)
+                    && let Some(line) = pom_module_line(&text, &name)
+                {
+                    return Some(Place { file: pom.clone(), line: Some(line) });
+                }
+            }
+            Some(Place { file: own, line: None })
+        }
+        _ => {
+            for pom in &poms {
+                let Some(text) = read(pom) else { continue };
+                let line = match target {
+                    Target::Library { group, name } => pom_block_line(&text, "dependency", Some(group), name),
+                    Target::Project { path } => pom_block_line(&text, "dependency", None, path.trim_start_matches(':')),
+                    Target::Level => pom_level_line(&text),
+                    Target::Plugin(id) => {
+                        let (g, a) = id.split_once(':').unwrap_or(("", id.as_str()));
+                        pom_block_line(&text, "plugin", (!g.is_empty()).then_some(g), a)
+                    }
+                    Target::GradleVersion | Target::Include => None,
+                };
+                if line.is_some() {
+                    return Some(Place { file: pom.clone(), line });
+                }
+            }
+            Some(Place { file: own, line: None })
         }
     }
 }

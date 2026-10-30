@@ -1,7 +1,8 @@
 //! The tool window stripes: thin icon strips down both edges of the window. Left, at the
 //! top: the Project and Git activities; at the bottom: Run, Debug, Build, Output,
-//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Structure, Hierarchy, Gradle,
-//! Spring, Notifications and Claude Changes, in the right dock. The item showing is a filled accent square with a white glyph.
+//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Structure, Hierarchy, Gradle
+//! (unless the project is Maven alone), Maven (when it has a Maven build), Spring, Notifications and
+//! Claude Changes, in the right dock. The item showing is a filled accent square with a white glyph.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -36,6 +37,7 @@ pub enum Tool {
     Problems,
     Claude,
     Gradle,
+    Maven,
     Spring,
     Notifications,
     ClaudeChanges,
@@ -49,6 +51,7 @@ impl Tool {
     pub fn placement(self) -> DockPlacement {
         match self {
             Tool::Gradle
+            | Tool::Maven
             | Tool::Spring
             | Tool::Notifications
             | Tool::ClaudeChanges
@@ -69,6 +72,7 @@ impl Tool {
             "Problems" | "References" => Tool::Problems,
             "Claude" => Tool::Claude,
             "Gradle" => Tool::Gradle,
+            "Maven" => Tool::Maven,
             "Spring" => Tool::Spring,
             "Notifications" => Tool::Notifications,
             "Claude Changes" => Tool::ClaudeChanges,
@@ -89,6 +93,7 @@ impl Tool {
             Tool::Problems => Icon::Problems,
             Tool::Claude => Icon::Spark,
             Tool::Gradle => Icon::Build,
+            Tool::Maven => Icon::Feather,
             Tool::Spring => Icon::Leaf,
             Tool::Notifications => Icon::Bell,
             Tool::ClaudeChanges => Icon::ClaudeChanges,
@@ -109,6 +114,7 @@ impl Tool {
             Tool::Problems => 6,
             Tool::Claude => 7,
             Tool::Gradle => 5,
+            Tool::Maven => 3,
             Tool::Spring => 1,
             Tool::Notifications => 6,
             Tool::Processes => 0,
@@ -128,6 +134,7 @@ impl Tool {
             Tool::Problems => "Problems (⇧⌘M)",
             Tool::Claude => "Agent Console (⌘J)",
             Tool::Gradle => "Gradle",
+            Tool::Maven => "Maven",
             Tool::Spring => "Spring",
             Tool::Notifications => "Notifications",
             Tool::ClaudeChanges => "Agent Changes",
@@ -147,6 +154,7 @@ impl Tool {
             Tool::Problems => "stripe-problems",
             Tool::Claude => "stripe-claude",
             Tool::Gradle => "stripe-gradle",
+            Tool::Maven => "stripe-maven",
             Tool::Spring => "stripe-spring",
             Tool::Notifications => "stripe-notifications",
             Tool::ClaudeChanges => "stripe-claude-changes",
@@ -225,6 +233,23 @@ fn item(
 }
 
 impl Workspace {
+    /// Whether the project has a Maven build, as its model or the engine's goals say.
+    pub fn shows_maven(&self, cx: &gpui::App) -> bool {
+        let runs = self.runs.read(cx);
+        !runs.maven.builds.is_empty()
+            || crate::project_model::store(cx)
+                .and_then(|s| s.read(cx).current.clone())
+                .is_some_and(|m| m.modules.iter().any(|m| m.maven))
+    }
+
+    /// The Gradle window shows unless the project is known to be Maven alone.
+    pub fn shows_gradle(&self, cx: &gpui::App) -> bool {
+        match crate::project_model::store(cx).and_then(|s| s.read(cx).current.clone()) {
+            Some(m) if !m.modules.is_empty() => m.modules.iter().any(|m| !m.maven),
+            _ => true,
+        }
+    }
+
     /// The dock panel of `tool`.
     pub fn tool_panel(&self, tool: Tool) -> Option<PanelId> {
         match tool {
@@ -236,6 +261,7 @@ impl Workspace {
             Tool::Problems => Some(self.tabs.problems),
             Tool::Claude => self.tabs.console,
             Tool::Gradle => Some(self.tabs.gradle),
+            Tool::Maven => Some(self.tabs.maven),
             Tool::Spring => Some(self.tabs.spring),
             Tool::Notifications => Some(self.tabs.notifications),
             Tool::ClaudeChanges => Some(self.tabs.claude_changes),
@@ -382,7 +408,8 @@ impl Workspace {
             .border_color(p.border)
             .child(self.tool_item(Tool::Structure, None, cx))
             .child(self.tool_item(Tool::Hierarchy, None, cx))
-            .child(self.tool_item(Tool::Gradle, None, cx))
+            .when(self.shows_gradle(cx), |d| d.child(self.tool_item(Tool::Gradle, None, cx)))
+            .when(self.shows_maven(cx), |d| d.child(self.tool_item(Tool::Maven, None, cx)))
             .child(self.tool_item(Tool::Spring, None, cx))
             .child(self.tool_item(Tool::Notifications, Some((notes, p.accent)), cx))
             .child(self.tool_item(Tool::ClaudeChanges, Some((claude, p.claude().mark)), cx))

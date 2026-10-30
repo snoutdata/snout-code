@@ -173,6 +173,7 @@ pub fn expand_tilde(path: &str, home: &std::path::Path) -> std::path::PathBuf {
 pub fn language_id(path: &std::path::Path) -> &'static str {
     match crate::editor::language_for(path) {
         "text" => "plaintext",
+        "html" if path.extension().is_some_and(|e| e != "html" && e != "htm") => "xml",
         other => other,
     }
 }

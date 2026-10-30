@@ -443,23 +443,28 @@ impl NewProjectView {
                 .child(div().pt(px(24.)).text_color(p.fg_dim).child("Asking start.spring.io what it offers…"))
                 .into_any_element();
         }
-        // The build script's language.
+        // The build: Gradle (its script's language) or Maven.
         let dsl = |d: Dsl, label: &'static str, id: &'static str, cx: &mut Context<Self>| {
-            look::toggle(id, crate::components::IconName::FileCode, label, self.dsl == d, &p)
-                .debug_selector(move || id.to_owned())
-                .on_click(cx.listener(move |this, _, _, cx| {
+            let ico = if d == Dsl::Maven {
+                crate::components::IconName::Feather
+            } else {
+                crate::components::IconName::FileCode
+            };
+            look::toggle(id, ico, label, self.dsl == d, &p).debug_selector(move || id.to_owned()).on_click(cx.listener(
+                move |this, _, _, cx| {
                     this.dsl = d;
                     cx.notify();
-                }))
+                },
+            ))
         };
         body = body.child(section("Build", &p)).child(row(
-            "Build script",
-            div().flex().gap(px(4.)).child(dsl(Dsl::Kotlin, "Kotlin", "new-project-kotlin", cx)).child(dsl(
-                Dsl::Groovy,
-                "Groovy",
-                "new-project-groovy",
-                cx,
-            )),
+            "Build",
+            div()
+                .flex()
+                .gap(px(4.))
+                .child(dsl(Dsl::Kotlin, "Gradle Kotlin", "new-project-kotlin", cx))
+                .child(dsl(Dsl::Groovy, "Gradle Groovy", "new-project-groovy", cx))
+                .child(dsl(Dsl::Maven, "Maven", "new-project-maven", cx)),
             &p,
         ));
         let (javas, java_now): (Vec<u32>, u32) = match (self.kind, &self.catalog) {

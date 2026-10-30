@@ -29,7 +29,7 @@ impl EditorPanel {
         self.detach_lang(cx);
         self.problems.clear();
         self.signature = None;
-        if self.attach_settings_lang(cx) {
+        if self.attach_settings_lang(cx) || self.attach_pom_lang(cx) {
             return;
         }
         let served = language_for(&self.path) == "java" || crate::spring::is_config_file(&self.path);

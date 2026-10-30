@@ -513,7 +513,10 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
     use crate::glyphs::Icon;
     let p = palette(cx);
     let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
-    let right = matches!(active, "Gradle" | "Spring" | "Notifications" | "Claude Changes" | "Structure" | "Hierarchy");
+    let right = matches!(
+        active,
+        "Gradle" | "Maven" | "Spring" | "Notifications" | "Claude Changes" | "Structure" | "Hierarchy"
+    );
     let mut row = div()
         .id(("tool-header", group.node().as_u64()))
         .debug_selector(|| "tool-header".into())
@@ -580,6 +583,21 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
                 .child(
                     tool_button("tool-collapse-gradle", Icon::CollapseAll, "Collapse All", &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseGradle), cx)),
+                )
+        }
+        "Maven" => {
+            row = row
+                .child(
+                    tool_button("tool-sync-maven", Icon::Refresh, "Reload the Maven Project", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
+                )
+                .child(
+                    tool_button("tool-refresh-maven", Icon::Fetch, "Read the Goals Again", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RefreshMaven), cx)),
+                )
+                .child(
+                    tool_button("tool-collapse-maven", Icon::CollapseAll, "Collapse All", &p)
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseMaven), cx)),
                 )
         }
         "Processes" => {
