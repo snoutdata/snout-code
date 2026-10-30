@@ -13,10 +13,20 @@
 #
 # The Java engine (engine/build/dist) is built when it is missing or older than its sources,
 # beside the app, which starts first and shows the build's progress; with JDK 21:
-# SNOUT_JDK21=<path>, else JAVA_HOME if it is 21, else one that /usr/libexec/java_home finds,
-# else Temurin 21 downloaded to ~/Library/Caches/SnoutCode. If that fails the app runs on the
-# previous build, or without Java support.
+# SNOUT_JDK21=<path>, else JAVA_HOME if it is 21, else one that /usr/libexec/java_home finds
+# (macOS) or one in /usr/lib/jvm (Linux), else Temurin 21 downloaded to the cache
+# (~/Library/Caches/SnoutCode on a Mac, ~/.cache/SnoutCode on Linux). If that fails the app
+# runs on the previous build, or without Java support.
+#
+# It runs on macOS and on Linux (GNU or BSD tools alike).
 set -euo pipefail
+
+case "$(uname -s)" in
+  Darwin) OS=mac ;;
+  *) OS=linux ;;
+esac
+# `stat` of GNU coreutils (Linux) or of BSD (macOS).
+if stat --version >/dev/null 2>&1; then GNU_STAT=true; else GNU_STAT=false; fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${CARGO_TARGET_DIR:-$ROOT/target}"
@@ -26,7 +36,11 @@ LOG="${TMPDIR:-/tmp}"; LOG="${LOG%/}/snout-code.log"
 
 trace=false
 [[ -n "${SNOUT_STARTUP_TRACE:-}" && "${SNOUT_STARTUP_TRACE}" != 0 ]] && trace=true
-now_ms() { perl -MTime::HiRes=time -e 'printf "%d", time() * 1000'; }
+now_ms() {
+  local t
+  t="$(date +%s%3N 2>/dev/null)"
+  if [[ "$t" =~ ^[0-9]+$ ]]; then echo "$t"; else perl -MTime::HiRes=time -e 'printf "%d", time() * 1000'; fi
+}
 $trace && started_ms="$(now_ms)"
 step() { $trace && echo "snout.sh $(( $(now_ms) - started_ms )) ms  $1" >&2; return 0; }
 
@@ -39,8 +53,16 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage; exit 0 ;;
     --fg) foreground=true ;;
     -p|--pick)
-      repo="$(osascript -e 'POSIX path of (choose folder with prompt "Open Git repository")' 2>/dev/null)" \
-        || { echo "No folder chosen." >&2; exit 1; }
+      if [[ $OS == mac ]]; then
+        repo="$(osascript -e 'POSIX path of (choose folder with prompt "Open Git repository")' 2>/dev/null)" || repo=""
+      elif command -v zenity >/dev/null 2>&1; then
+        repo="$(zenity --file-selection --directory --title="Open Git repository" 2>/dev/null)" || repo=""
+      elif command -v kdialog >/dev/null 2>&1; then
+        repo="$(kdialog --getexistingdirectory "$HOME" --title "Open Git repository" 2>/dev/null)" || repo=""
+      else
+        echo "No folder dialog (zenity or kdialog): give the folder instead, ./snout.sh <path>." >&2; exit 1
+      fi
+      [[ -n "$repo" ]] || { echo "No folder chosen." >&2; exit 1; }
       ;;
     -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     *) repo="$1" ;;
@@ -66,7 +88,12 @@ command -v cargo >/dev/null 2>&1 || { echo "cargo not found; install Rust from h
 # required to start the app: without the engine it runs without Java support.
 ENGINE="$ROOT/engine"
 DIST="$ENGINE/build/dist"
-BUILD_JDK_DIR="$HOME/Library/Caches/SnoutCode/build-jdk"
+if [[ $OS == mac ]]; then
+  BUILD_JDK_DIR="$HOME/Library/Caches/SnoutCode/build-jdk"
+else
+  cache="${XDG_CACHE_HOME:-}"; [[ "$cache" == /* ]] || cache="$HOME/.cache"
+  BUILD_JDK_DIR="$cache/SnoutCode/build-jdk"
+fi
 java_major() { "$1/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java.specification.version = //p'; }
 is_jdk21() { [[ -n "$1" && -x "$1/bin/java" && -x "$1/bin/jlink" && "$(java_major "$1")" == "21" ]]; }
 find_jdk21() {
@@ -76,11 +103,24 @@ find_jdk21() {
     echo "SNOUT_JDK21 is not a JDK 21: $SNOUT_JDK21" >&2
     return 1
   fi
-  for c in "${JAVA_HOME:-}" "$(/usr/libexec/java_home -v 21 2>/dev/null || true)" \
-           "$BUILD_JDK_DIR"/*/Contents/Home; do
+  local mac_jdk=""
+  [[ -x /usr/libexec/java_home ]] && mac_jdk="$(/usr/libexec/java_home -v 21 2>/dev/null || true)"
+  for c in "${JAVA_HOME:-}" "$mac_jdk" /usr/lib/jvm/*21* \
+           "$BUILD_JDK_DIR"/*/Contents/Home "$BUILD_JDK_DIR"/*; do
     is_jdk21 "$c" && { echo "$c"; return 0; }
   done
   return 1
+}
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+# A field of the first asset in Adoptium's answer (`binary.package.link`).
+asset_field() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -I -c 'import json, sys; v = json.load(open(sys.argv[1]))[0]
+for k in sys.argv[2].split("."): v = v[k]
+print(v)' "$1" "$2"
+  else
+    plutil -extract "0.$2" raw -o - "$1"
+  fi
 }
 # Eclipse Temurin 21 from api.adoptium.net into the build JDK folder, checked against its SHA-256.
 download_jdk21() {
@@ -89,11 +129,11 @@ download_jdk21() {
   mkdir -p "$BUILD_JDK_DIR" || return 1
   json="$BUILD_JDK_DIR/assets.json"; part="$BUILD_JDK_DIR/jdk21.tar.gz.part"
   curl -fsSL --max-time 60 -o "$json" \
-    "https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=$arch&image_type=jdk&os=mac&vendor=eclipse" || return 1
-  link="$(plutil -extract 0.binary.package.link raw -o - "$json" 2>/dev/null)" || return 1
-  sum="$(plutil -extract 0.binary.package.checksum raw -o - "$json" 2>/dev/null)" || return 1
+    "https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=$arch&image_type=jdk&os=$OS&vendor=eclipse" || return 1
+  link="$(asset_field "$json" binary.package.link 2>/dev/null)" || return 1
+  sum="$(asset_field "$json" binary.package.checksum 2>/dev/null)" || return 1
   curl -fsSL -o "$part" "$link" || { rm -f "$part"; return 1; }
-  [[ "$(shasum -a 256 "$part" | cut -d' ' -f1)" == "$sum" ]] || { rm -f "$part"; return 1; }
+  [[ "$(sha256 "$part")" == "$sum" ]] || { rm -f "$part"; return 1; }
   tar -xzf "$part" -C "$BUILD_JDK_DIR" || { rm -f "$part"; return 1; }
   rm -f "$part" "$json"
 }
@@ -140,7 +180,7 @@ step "engine checked"
 # without one the app builds with the built-in engine only. SNOUT_NO_GHOSTTY=1 skips it.
 # A zig found to be 0.15 is remembered (by its file) so later starts need not run it.
 ZIG_SEEN="$TARGET/.snout-zig"
-file_id() { stat -L -f '%i:%m:%z' "$1" 2>/dev/null; }
+file_id() { if $GNU_STAT; then stat -L -c '%i:%Y:%s' "$1"; else stat -L -f '%i:%m:%z' "$1"; fi 2>/dev/null; }
 is_zig015() {
   local id
   [[ -n "$1" && -x "$1" ]] || return 1
@@ -171,7 +211,7 @@ step "zig checked"
 STAMP="$TARGET/release/.snout-code.stamp"
 want="features:${features[*]:-none}"
 # The binary by its time and size (cargo copies it in again, as a new file, on each build).
-bin_id() { stat -f '%Fm:%z' "$BIN" 2>/dev/null; }
+bin_id() { if $GNU_STAT; then stat -c '%y:%s' "$BIN"; else stat -f '%Fm:%z' "$BIN"; fi 2>/dev/null; }
 built_from() {
   local p
   for p in "$ROOT/crates" "$ROOT/Cargo.toml" "$ROOT/Cargo.lock" "$ROOT/assets" "$ROOT/.cargo" \
