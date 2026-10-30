@@ -64,6 +64,25 @@ JDK11=/path/to/jdk11 JDK17=/path/to/jdk17 JDK21=/path/to/jdk21 JDK25=/path/to/jd
 
 It writes everything under a folder of its own (`--out`): the sample builds, a Gradle user home, a Maven local repository and the Maven wrappers' downloads. Nothing goes to `~/.gradle` or `~/.m2`.
 
+## Real builds
+
+Besides the samples above, SnoutCode is checked against 24 public open-source builds of different shapes: Gradle multi-project and composite builds, buildSrc and convention plugins, the Kotlin DSL, version catalogs, Spring Boot applications, Maven multi-module builds with and without the Maven wrapper, Java modules, Lombok and source generators. Each is pinned to a commit in `engine/corpus/projects.txt`. A GitHub Actions workflow (`Corpus`) syncs each one through the engine every week, or when started by hand, and reports for each whether it synced, how long it took, and how many Java errors the editor shows in its code. These builds compile, so every error the editor shows is one SnoutCode should not.
+
+The latest run (October 2026):
+
+- All 24 builds sync.
+- 12 open with no errors, or fewer than 10: Spring Boot, Spring PetClinic (both), Testcontainers, Jenkins, Maven, Commons Lang, Jackson Databind, java-design-patterns, resilience4j, RxJava and Log4j. The Spring Data examples show 0 or 99 from one run to the next.
+- The errors left, 5,555 in all (from 55,766 in the first run), come mostly from four builds: JUnit (2,096) and Caffeine (949), where Java modules read packages from more than one place; Hibernate (1,146), whose generated sources are not always picked up in time; and Groovy (762).
+
+To run it yourself, on a machine where you are happy to run these projects' build scripts:
+
+```sh
+scripts/corpus.sh                 # every project
+scripts/corpus.sh spring-petclinic guava
+```
+
+It writes everything (the sources, a Gradle user home, a Maven local repository) under a folder of its own and prints where the results are.
+
 ## Performance
 
 ### What happens when a project opens
