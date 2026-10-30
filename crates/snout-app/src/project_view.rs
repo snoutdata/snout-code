@@ -128,6 +128,10 @@ impl Walk<'_> {
         match s {
             Special::Module(i) => {
                 if self.push(RowKind::Module(i), depth, Some(NodeId::Module(m.modules[i].id.clone()))) {
+                    // A build outside the supported range says so first.
+                    if let Some(u) = m.unsupported_at(&m.modules[i].content_root) {
+                        self.push(RowKind::Note(u.note.clone()), depth + 1, None);
+                    }
                     self.dir(&m.modules[i].content_root.clone(), depth + 1, false);
                 }
             }
@@ -140,6 +144,9 @@ impl Walk<'_> {
             Special::Failed(i) => {
                 if self.push(RowKind::Failed(i), depth, Some(NodeId::Failed(m.failed[i].build.clone()))) {
                     self.push(RowKind::Reason(i), depth + 1, None);
+                    if let Some(u) = m.unsupported_at(&m.failed[i].root_dir) {
+                        self.push(RowKind::Note(u.note.clone()), depth + 1, None);
+                    }
                     self.dir(&m.failed[i].root_dir.clone(), depth + 1, false);
                 }
             }
@@ -582,6 +589,11 @@ fn row_look(
             if m.stale.is_some() {
                 look.badge = Some((Icon::Warning, p.warn));
             }
+            // A build on a version outside the supported range: its root project says why.
+            if let Some(u) = model.unsupported_at(&m.content_root) {
+                look.badge = Some((Icon::Warning, p.warn));
+                look.tip = Some(format!("{}\n\n{}", u.note, look.tip.take().unwrap_or_default()));
+            }
             look.path = Some(m.content_root.clone());
             look.mark = marks.get(&m.content_root).copied();
         }
@@ -606,7 +618,10 @@ fn row_look(
                 None => format!("Gradle {v}"),
             });
             look.badge = Some((Icon::Problems, p.error));
-            look.tip = Some(format!("Did not sync: {}", f.reason));
+            look.tip = Some(match model.unsupported_at(&f.root_dir) {
+                Some(u) => format!("Did not sync: {}\n\n{}", f.reason, u.note),
+                None => format!("Did not sync: {}", f.reason),
+            });
             look.path = Some(f.root_dir.clone());
         }
         RowKind::Reason(i) => {
@@ -718,6 +733,7 @@ fn row_look(
         RowKind::Note(text) => {
             look.label = text.clone();
             look.ink = p.fg_dim;
+            look.tip = Some(text.clone());
         }
     }
     look

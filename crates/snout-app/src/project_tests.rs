@@ -87,6 +87,10 @@ fn the_project_view_shows_modules_shared_folders_failed_builds_and_libraries(cx:
     let legacy = cx.debug_bounds("project-row-legacy").unwrap().center();
     cx.simulate_click(legacy, Modifiers::none());
     assert!(cx.debug_bounds("project-row-Gradle 6.0.1 needs Java 13 or older").is_some(), "the reason shows");
+    assert!(
+        cx.debug_bounds("project-row-Gradle 6.0.1 is older than SnoutCode supports (Gradle 7.0 to 9.x).").is_some(),
+        "and that its Gradle is outside the supported range"
+    );
     // The module opens to its source roots; the libraries to packages and classes.
     let project = cx.update(|_, cx| side.read(cx).project.clone());
     cx.update(|_, cx| {

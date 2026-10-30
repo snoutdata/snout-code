@@ -165,6 +165,17 @@ pub struct FailedBuild {
     pub needs_jdk: Option<u32>,
 }
 
+/// A build on a Gradle or Maven version outside the range SnoutCode supports: it may sync,
+/// but may not work in full. `note` says so, for people.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unsupported {
+    pub build: String,
+    pub root_dir: PathBuf,
+    /// "Gradle 6.0.1", "Maven 3.5.4".
+    pub version: String,
+    pub note: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ProjectModel {
     pub root: PathBuf,
@@ -174,6 +185,8 @@ pub struct ProjectModel {
     pub libraries: Vec<Library>,
     pub scripts: Vec<Script>,
     pub failed: Vec<FailedBuild>,
+    /// The builds outside the supported range.
+    pub unsupported: Vec<Unsupported>,
     /// The modules' JDKs, newest first.
     pub jdks: Vec<Jdk>,
 }
@@ -325,6 +338,17 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
             })
         })
         .collect();
+    let unsupported = array(json, "unsupportedBuilds")
+        .filter_map(|u| {
+            let tool = if str_of(u, "tool") == Some("maven") { "Maven" } else { "Gradle" };
+            Some(Unsupported {
+                build: str_of(u, "build")?.to_owned(),
+                root_dir: PathBuf::from(str_of(u, "rootDir")?),
+                version: format!("{tool} {}", str_of(u, "version").unwrap_or_default()),
+                note: str_of(u, "note")?.to_owned(),
+            })
+        })
+        .collect();
     let mut jdks: Vec<Jdk> = Vec::new();
     for jdk in modules.iter().filter_map(|m| m.jdk.clone()) {
         if !jdks.iter().any(|j| j.home == jdk.home) {
@@ -332,10 +356,15 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
         }
     }
     jdks.sort_by_key(|j| std::cmp::Reverse(version_key(&j.version)));
-    Some(ProjectModel { root, name, modules, shared, libraries, scripts, failed, jdks })
+    Some(ProjectModel { root, name, modules, shared, libraries, scripts, failed, unsupported, jdks })
 }
 
 impl ProjectModel {
+    /// Why the build at `root_dir` may not work in full, when its version is outside the range.
+    pub fn unsupported_at(&self, root_dir: &Path) -> Option<&Unsupported> {
+        self.unsupported.iter().find(|u| u.root_dir == root_dir)
+    }
+
     /// What the build files' node is called: Gradle Scripts, Maven Files, or Build Files
     /// when the project has both.
     pub fn scripts_label(&self) -> &'static str {
@@ -556,6 +585,8 @@ pub struct ProjectModels {
     /// Sync on its own when the project has no model yet (the app; not the tests).
     pub auto_sync: bool,
     tried: bool,
+    /// The builds outside the supported range already said (their folder and version).
+    announced: std::collections::HashSet<(PathBuf, String)>,
     host: HostRef,
     _poll: Option<Task<()>>,
     _sync: Option<Task<()>>,
@@ -609,6 +640,7 @@ impl ProjectModels {
             scripts_changed: false,
             auto_sync,
             tried: false,
+            announced: Default::default(),
             host,
             _poll: Some(poll),
             _sync: None,
@@ -782,6 +814,22 @@ impl ProjectModels {
                         model.libraries.len()
                     );
                     crate::startup::mark("project model read");
+                    // Builds outside the supported range, said once each: in Notifications,
+                    // and the first in the status line.
+                    let fresh: Vec<&Unsupported> = model
+                        .unsupported
+                        .iter()
+                        .filter(|u| this.announced.insert((u.root_dir.clone(), u.version.clone())))
+                        .collect();
+                    if !fresh.is_empty() {
+                        let first = format!("{}: {}", fresh[0].build, fresh[0].note);
+                        let lines: Vec<String> = fresh.iter().map(|u| format!("{}: {}", u.build, u.note)).collect();
+                        this.model.update(cx, |m, cx| {
+                            lines.into_iter().for_each(|l| m.log_output(l, true));
+                            m.message = first;
+                            cx.notify();
+                        });
+                    }
                     // A build that needs a JDK this machine lacks: offer to download it.
                     let wanted = model.failed.iter().find_map(|f| f.needs_jdk);
                     this.current = Some(Rc::new(model));
@@ -935,6 +983,9 @@ mod tests {
         assert_eq!(m.shared[0].modules, ["app", "billing"]);
         assert_eq!(m.failed.len(), 1);
         assert_eq!(m.failed[0].build, "legacy");
+        let legacy = m.unsupported_at(Path::new("/w/shop/legacy")).expect("outside the supported range");
+        assert_eq!(legacy.version, "Gradle 6.0.1");
+        assert!(m.unsupported_at(Path::new("/w/shop")).is_none());
         assert_eq!(m.libraries[0].id, "com.google.guava:guava:33.0.0-jre");
         let applied = m.scripts.iter().find(|s| s.kind == ScriptKind::Applied).unwrap();
         assert_eq!(applied.builds, ["shop", "billing"], "a script two builds apply is listed once");

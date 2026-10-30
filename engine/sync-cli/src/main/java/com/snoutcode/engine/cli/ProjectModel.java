@@ -27,7 +27,9 @@ import java.util.Set;
  *       compile each;</li>
  *   <li>{@code libraries}: every jar of every module, once;</li>
  *   <li>{@code gradleScripts}: the build's scripts and properties files, per build;</li>
- *   <li>{@code failedBuilds}: the builds that did not sync, and why.</li>
+ *   <li>{@code failedBuilds}: the builds that did not sync, and why;</li>
+ *   <li>{@code unsupportedBuilds}: the builds on a Gradle or Maven version outside the supported
+ *       range (see {@link Support}), with a note for people.</li>
  * </ul>
  */
 final class ProjectModel {
@@ -50,6 +52,7 @@ final class ProjectModel {
         Map<String, Mod> byBuildKey = new HashMap<>();
         Map<String, Mod> byOutputDir = new HashMap<>();
         JsonArray failed = new JsonArray();
+        JsonArray unsupported = new JsonArray();
         JsonArray scripts = new JsonArray();
 
         for (JsonElement g : array(model, "gradleBuilds")) {
@@ -57,6 +60,17 @@ final class ProjectModel {
             String buildId = string(gradleBuild, "id");
             scripts.add(scripts(gradleBuild));
             String status = string(gradleBuild, "status");
+            String version = maven(gradleBuild) ? string(gradleBuild, "mavenVersion") : string(gradleBuild, "gradleVersion");
+            String note = maven(gradleBuild) ? Support.maven(version) : Support.gradle(version);
+            if (note != null) {
+                JsonObject u = new JsonObject();
+                u.addProperty("build", buildId);
+                u.addProperty("rootDir", string(gradleBuild, "rootDir"));
+                u.addProperty("tool", maven(gradleBuild) ? "maven" : "gradle");
+                u.addProperty("version", version);
+                u.addProperty("note", note);
+                unsupported.add(u);
+            }
             if ("failed".equals(status) || "stale".equals(status)) {
                 JsonObject f = new JsonObject();
                 f.addProperty("build", buildId);
@@ -204,6 +218,7 @@ final class ProjectModel {
         model.add("libraries", libs);
         model.add("gradleScripts", scripts);
         model.add("failedBuilds", failed);
+        model.add("unsupportedBuilds", unsupported);
     }
 
     // ---- source roots

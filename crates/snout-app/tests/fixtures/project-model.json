@@ -75,5 +75,9 @@
       "reason": "Gradle 6.0.1 needs Java 13 or older",
       "error": "Could not run build action using connection to Gradle distribution 'gradle-6.0.1-all.zip'.", "stale": false }
   ],
+  "unsupportedBuilds": [
+    { "build": "legacy", "rootDir": "$ROOT/legacy", "tool": "gradle", "version": "6.0.1",
+      "note": "Gradle 6.0.1 is older than SnoutCode supports (Gradle 7.0 to 9.x)." }
+  ],
   "gradleBuilds": []
 }
