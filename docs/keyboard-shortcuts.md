@@ -15,6 +15,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘2 | Show Git | |
 | ⌘7 | Show or hide the Structure window | |
 | ⌘J | Show or hide the agent console | |
+| ⌥F12 | Show the Terminal | |
 | F5 | Refresh (⌘R is Rerun) | |
 | ⌘= or ⌘+ | Zoom In | |
 | ⌘- | Zoom Out | |
@@ -105,6 +106,7 @@ See [Java](java.md) for what each one does.
 | ⌘R | Rerun (what ran last) | |
 | ⌥⌘R | Rerun Failed Tests | |
 | ⌃⌥G | Run Gradle Task… (Gradle tasks and Maven goals) | |
+| ⌘F9 | Build Project | |
 | F8 | Step Over | |
 | F7 | Step Into | |
 | ⇧F8 | Step Out | |
@@ -182,7 +184,7 @@ the program running there.
 | ⌘C / ⌘V | Copy the selection / paste | Terminal, console |
 | ⌥ and a key | Meta and the key (Esc, then the key), unless Use Option as Meta is off | Terminal, console |
 
-**Open in External Terminal** (File menu, command palette) has no shortcut out of the box: give
+**Open in External Terminal** (File and Tools menus, command palette) has no shortcut out of the box: give
 it one on the Keymap page.
 
 See [Terminal](terminal.md).

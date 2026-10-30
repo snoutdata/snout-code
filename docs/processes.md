@@ -4,7 +4,7 @@ The Processes window shows every process SnoutCode runs for you, says what each 
 
 ## Open the Processes window
 
-- Choose **View ▸ Processes**.
+- Choose **View ▸ Processes** or **Tools ▸ Processes**.
 - Or click the memory figure in the status bar. Its tooltip gives the number of processes and the memory they take.
 - Or run **Show Processes** from the command palette (⇧⌘P).
 
@@ -25,7 +25,7 @@ The processes show as a tree under SnoutCode itself:
 
 Each line says what the process is for, and its columns give its **PID**, **Memory**, **CPU**, **Uptime** and **State**. Hover a line to see its project. A Gradle daemon's state is **Building**, or how long it has been idle and when it stops.
 
-The foot of the window gives the totals: processes, memory and CPU.
+The foot of the window gives the totals: processes, memory and CPU, and how many are idle.
 
 ![The Processes window](images/processes-window.png)
 
@@ -50,7 +50,7 @@ To restart the Java engine of the open project without the window, run **Restart
 
 ## Stop idle processes
 
-Click **Stop Idle Processes** at the foot of the window, or in its header, or run it from the command palette. It stops:
+Click the stop button in the window's header (**Stop Idle Processes**), choose **Tools ▸ Stop Idle Processes**, or run it from the command palette. It stops:
 
 - the Gradle daemons that are not building,
 - what an earlier session left running,

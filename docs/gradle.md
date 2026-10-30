@@ -66,7 +66,7 @@ The tasks appear once the Java engine has imported the project. Until then the w
 
 ## Run a task
 
-Double click a task in the Gradle tool window, or press ⌃⌥G (**Run ▸ Run Gradle Task…**) and type part of its name or path, such as `boot` or `:app:test`, then press Enter. It runs in the **Build** tool window, at the bottom of the window.
+Double click a task in the Gradle tool window, or press ⌃⌥G (**Build ▸ Run Gradle Task…**) and type part of its name or path, such as `boot` or `:app:test`, then press Enter. It runs in the **Build** tool window, at the bottom of the window.
 
 The Build window shows the run and, under it, each task Gradle ran with its outcome: up to date, from cache, skipped or no source. When the compile reports errors or warnings, the run shows their count; click it to open the Problems tool window. Compile errors go to Problems on their own, and Problems opens when there are errors (⇧⌘M shows it at any time).
 

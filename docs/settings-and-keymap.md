@@ -15,6 +15,12 @@ for example "jdk" or "font". Each page opens with a drawing of its subject and a
 what it is for. The pages with only a few settings show what they change (the Editor and
 Terminal pages have a live preview) or a few tips under **Good to know**.
 
+Drag the sheet's edges or corners to make it bigger or smaller. The page tree keeps its width
+and the page takes the rest. SnoutCode remembers the size (`dialog_sizes` in your settings) and
+keeps the sheet inside the window. Project Structure and New Project resize the same way.
+
+**Tools ▸ Tool Settings** opens the Keymap, Terminal, Agents and Gradle pages directly.
+
 The sheet edits a copy of your settings:
 
 - **Apply** puts the changes in place and keeps the sheet open.

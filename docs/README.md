@@ -8,6 +8,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot on macOS, with
 - [Projects](projects.md): open, close and reopen projects, the Project view, and the New Project wizard.
 - [Settings and keymap](settings-and-keymap.md): every setting, a project's own settings (`.snout/settings.json`), settings as JSON with completion and checks, changing shortcuts, and what SnoutCode restores when it starts.
 - [Keyboard shortcuts](keyboard-shortcuts.md): every shortcut, by area.
+- [Tool windows and menus](tool-windows.md): the tool windows around the editor, their headers and empty states, and the Build and Tools menus.
 
 ## Writing code
 

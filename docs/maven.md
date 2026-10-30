@@ -77,7 +77,7 @@ Click a profile in the Maven window. SnoutCode reads the build again with it, so
 
 ## Run a goal
 
-Double click a phase or a goal in the Maven window, or press ⌃⌥G (**Run ▸ Run Gradle Task…**) and type part of it, such as `web: package` or `spring-boot`, then press Enter. It runs in the **Build** tool window.
+Double click a phase or a goal in the Maven window, or press ⌃⌥G (**Build ▸ Run Gradle Task…**, or **Build ▸ Run Maven Goal…** for the goals alone) and type part of it, such as `web: package` or `spring-boot`, then press Enter. It runs in the **Build** tool window.
 
 A goal of a module runs in that module alone, as `mvn -pl` would with the modules it uses built first:
 

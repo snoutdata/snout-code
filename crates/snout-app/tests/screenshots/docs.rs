@@ -7,7 +7,8 @@
 //!
 //! `scripts/docs-screenshots.sh` sets it all up and writes `docs/images`. `SNOUT_DOCS_JDK`
 //! names the JDK the builds run on; `SNOUT_DOCS_ONLY` takes only the parts it names
-//! (ledger, java, javatools, debug, welcome, wizard, settings, structure, git, blame, claude, palette, remote, maven), separated
+//! (ledger, java, javatools, debug, welcome, wizard, settings, tools, structure, git, blame, claude, palette, remote,
+//! maven), separated
 //! by commas. `remote` needs Docker and the Linux server builds; `SNOUT_DOCS_SSH_DIR` is a
 //! short folder for ssh's control sockets.
 
@@ -318,6 +319,9 @@ pub fn run(projects: PathBuf) {
     if wanted("settings") {
         settings_pages(&projects);
     }
+    if wanted("tools") {
+        tool_windows(&projects);
+    }
     if wanted("structure") {
         structure(&projects);
     }
@@ -388,6 +392,33 @@ fn wizard() {
         w.pump(2, &mut |_| false);
         w.snap(name);
     }
+}
+
+/// The tool windows with nothing in them yet (Build in the bottom dock, Spring on the right),
+/// and the Settings sheet made large.
+fn tool_windows(projects: &Path) {
+    let shop = copy(projects, "tools", "shop");
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);
+    w.activity(Activity::Project);
+    w.tool(Tool::Build);
+    w.tool(Tool::Spring);
+    w.pump(2, &mut |_| false);
+    w.snap("tool-windows-empty-light");
+    drop(w);
+    let mut s = settings(ThemeChoice::Light, vec![shop.clone()], Some(shop));
+    s.dialog_sizes.insert("settings".into(), [1300., 820.]);
+    let mut w = Win::new(s, false);
+    w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.open_settings(window, cx)));
+    w.pump(3, &mut |_| false);
+    w.with(|ws, _, cx| {
+        let sheet = ws.read(cx).settings_sheet.clone().unwrap();
+        sheet.update(cx, |s, cx| {
+            s.page = snout_app::settings_view::Page::Editor;
+            cx.notify();
+        });
+    });
+    w.pump(2, &mut |_| false);
+    w.snap("settings-resized-light");
 }
 
 fn settings_pages(projects: &Path) {
