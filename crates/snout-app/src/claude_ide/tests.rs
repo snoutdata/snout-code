@@ -228,7 +228,8 @@ fn connected<'a>(name: &str, cx: &'a mut TestAppContext) -> Connected<'a> {
 #[gpui::test]
 fn claude_code_finds_the_window_and_calls_every_tool(cx: &mut TestAppContext) {
     let (repo, lock_dir, model, ws, mut c, cx) = connected("claude-tools", cx);
-    let hello = repo.join("src/demo/Hello.java");
+    // As the system writes it (backslashes on Windows), as the tools answer with it.
+    let hello = repo.join("src").join("demo").join("Hello.java");
 
     // Discovery: the lock file, and the variables the console gives `claude`.
     let lock = lock_in(&lock_dir);

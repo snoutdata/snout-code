@@ -116,6 +116,9 @@ A JDK it downloads comes from Eclipse Temurin, for your PC's architecture.
 Gradle builds run as on a Mac, through Gradle itself; a Maven build uses the project's
 `mvnw.cmd` when it has one. Projects SnoutCode creates get both `gradlew` and `gradlew.bat`.
 
+The Java engine and the debugger take connections only from this PC (the loopback address), so
+Windows Firewall does not ask whether Java may use the network when you run or debug.
+
 ## Remote SSH
 
 [Remote SSH](remote-ssh.md) uses the OpenSSH client that comes with Windows (`ssh.exe`;

@@ -35,8 +35,8 @@ import java.util.function.Consumer;
  * as Gradle resolved it ({@code runtimeOnly} ones too, compile only ones not).
  *
  * <p>In debug mode the JVM starts with a JDWP agent that waits for the debugger, and java-debug
- * opens a DAP session ({@code vscode.java.startDebugSession}); the app connects to its port and
- * attaches with the arguments it gets back.
+ * opens a DAP session ({@code snout.startDebugSession}, java-debug's on the loopback address); the
+ * app connects to its port and attaches with the arguments it gets back.
  */
 final class Launches {
     /** The {@code java} program's file name: {@code java.exe} on Windows. */
@@ -444,9 +444,18 @@ final class Launches {
         return s.startsWith(".") ? "_" + s.substring(1) : s;
     }
 
-    /** Opens a java-debug DAP session in jdtls and returns the port its server listens on. */
+    /**
+     * Opens a java-debug DAP session in jdtls and returns the port its server listens on: on the
+     * loopback address through the importer bundle's {@code snout.startDebugSession}, or where that
+     * cannot be had (an older bundle), java-debug's own on every address.
+     */
     static int startDebugSession(Engine engine) throws Exception {
-        JsonElement port = engine.executeCommand("vscode.java.startDebugSession", new JsonArray(), 600);
+        JsonElement port;
+        try {
+            port = engine.executeCommand("snout.startDebugSession", new JsonArray(), 600);
+        } catch (Engine.RequestError e) {
+            port = engine.executeCommand("vscode.java.startDebugSession", new JsonArray(), 600);
+        }
         if (port == null || port.isJsonNull()) {
             throw new Engine.RequestError(-32603, "java-debug did not start a debug session; is its bundle loaded?");
         }
