@@ -340,6 +340,8 @@ sleep 30
         /// The next shots' terminals are set up: another typeface and size, a taller line, a
         /// bar cursor, a shell and variables.
         static TERMINAL_SET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// The size the next shots' Settings sheet was left at (none: its default).
+        static SHEET_SIZE: std::cell::Cell<Option<[f32; 2]>> = const { std::cell::Cell::new(None) };
     }
 
     /// `shot` with the terminals on another engine.
@@ -356,9 +358,14 @@ sleep 30
         COLORS.set(ColorTheme::default());
     }
 
+    /// Whether `SNOUT_SHOT_ONLY` (parts of names, separated by commas) takes the shot `name`.
+    fn only(name: &str) -> bool {
+        std::env::var("SNOUT_SHOT_ONLY").map_or(true, |only| only.split(',').any(|o| name.contains(o)))
+    }
+
     fn shot(name: &str, theme: ThemeChoice, activity: Activity, select: Option<Select>) {
-        // `SNOUT_SHOT_ONLY=<part of a name>` takes only the shots it names.
-        if std::env::var("SNOUT_SHOT_ONLY").is_ok_and(|only| !name.contains(&only)) {
+        // `SNOUT_SHOT_ONLY=<part of a name>[,<another>…]` takes only the shots it names.
+        if !only(name) {
             return;
         }
         let repo = demo_repo(name);
@@ -379,6 +386,10 @@ sleep 30
             current,
             ..Settings::default()
         };
+        if let Some(size) = SHEET_SIZE.get() {
+            settings.dialog_sizes.insert("settings".into(), size);
+            settings.dialog_sizes.insert("project-structure".into(), size);
+        }
         if TERMINAL_SET.get() {
             settings.terminal_font = Some("Menlo".into());
             settings.terminal_font_size = Some(14.);
@@ -2645,7 +2656,7 @@ sleep 30
 
     /// The shared components and every spot drawing, on one page.
     fn gallery_shot(name: &str, colors: ColorTheme, theme: ThemeChoice) {
-        if std::env::var("SNOUT_SHOT_ONLY").is_ok_and(|only| !name.contains(&only)) {
+        if !only(name) {
             return;
         }
         let mut cx = HeadlessAppContext::with_platform(
@@ -2793,6 +2804,19 @@ sleep 30
                 shot(&format!("settings-page-{slug}-{mode}"), theme, Activity::Project, Some(Select::Settings(page)));
             }
         }
+        // The Settings sheet left at its least and made large (`SNOUT_SHOT_ONLY=settings-size-`).
+        for (size, name) in [([780., 480.], "min"), ([1340., 850.], "large")] {
+            SHEET_SIZE.set(Some(size));
+            for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
+                shot(
+                    &format!("settings-size-{name}-{mode}"),
+                    theme,
+                    Activity::Project,
+                    Some(Select::Settings(Page::Terminal)),
+                );
+            }
+            SHEET_SIZE.set(None);
+        }
         TERMINAL_SET.set(true);
         shot(
             "settings-page-terminal-set-light",
@@ -2881,6 +2905,9 @@ sleep 30
             (Tool::Problems, Tool::ClaudeChanges, "problems-claude"),
             (Tool::Processes, Tool::Notifications, "processes-notifications"),
             (Tool::Build, Tool::Spring, "build-spring"),
+            (Tool::Output, Tool::Hierarchy, "output-hierarchy"),
+            (Tool::Terminal, Tool::Structure, "terminal-structure"),
+            (Tool::Run, Tool::Maven, "run-maven"),
         ] {
             for (theme, mode) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
                 shot(&format!("ui-empty-{name}-{mode}"), theme, Activity::Project, Some(Select::Tools(bottom, right)));

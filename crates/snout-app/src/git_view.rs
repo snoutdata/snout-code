@@ -1243,7 +1243,12 @@ impl GitView {
                     .flex()
                     .flex_col()
                     .child(back)
-                    .child(look::centered_note(e.clone(), &p))
+                    .child(look::art_note(
+                        snout_core::art::spots::warning(),
+                        "The commit could not be read",
+                        e.clone(),
+                        cx,
+                    ))
                     .into_any_element();
             }
         };
@@ -1686,18 +1691,28 @@ fn diff_body(
     let p = palette(cx);
     let view = match diff {
         None => return look::art_note(snout_core::art::pick(), "", empty.to_owned(), cx),
-        Some(Err(e)) => return look::centered_note(e.clone(), &p).into_any_element(),
+        Some(Err(e)) => return look::art_note(snout_core::art::spots::warning(), "No diff", e.clone(), cx),
         Some(Ok(view)) => view.clone(),
     };
     let d = &view.diff;
     if d.binary {
-        return look::centered_note("Binary file differs", &p).into_any_element();
+        return look::art_note(snout_core::art::spots::info(), "Binary file", "Its versions differ, as bytes.", cx);
     }
     if d.too_large {
-        return look::centered_note("File too large to display", &p).into_any_element();
+        return look::art_note(
+            snout_core::art::spots::info(),
+            "Too large to show",
+            "The file is too large to diff here.",
+            cx,
+        );
     }
     if d.is_identical() {
-        return look::centered_note(format!("No differences between {left} and {right}"), &p).into_any_element();
+        return look::art_note(
+            snout_core::art::clean(),
+            "No differences",
+            format!("{left} and {right} are the same."),
+            cx,
+        );
     }
     let count = view.len(side_by_side);
     let digits = view.number_digits;

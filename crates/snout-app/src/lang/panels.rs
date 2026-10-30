@@ -194,14 +194,39 @@ crate::panels::panel!(ReferencesPanel, "References", |_, _| "References".into(),
 impl Render for ReferencesPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        div()
-            .id("references")
-            .size_full()
-            .bg(p.panel)
-            .flex()
-            .flex_col()
-            .text_size(px(12.5))
-            .child(div().flex_none().px(px(10.)).py(px(4.)).text_color(p.weak()).child(self.title.clone()))
-            .when(!self.rows.is_empty(), |d| d.child(rows_view("reference", self.rows.clone(), self.hub.clone(), cx)))
+        let base = div().id("references").size_full().bg(p.ground).flex().flex_col().text_size(px(12.5));
+        if self.rows.is_empty() {
+            let searched = self.title.contains(':');
+            let (title, hint) = if searched {
+                ("No usages found", self.title.clone())
+            } else {
+                ("No usages yet", "Find Usages on a symbol lists every place it is used.".into())
+            };
+            return base.child(
+                crate::components::EmptyState::new(snout_core::art::spots::no_usages(), title)
+                    .hint(hint)
+                    .compact()
+                    .primary_action(
+                        "references-empty-find",
+                        crate::components::IconName::Link,
+                        "Find Usages at the Caret",
+                        crate::editor::FindReferences,
+                    ),
+            );
+        }
+        // What was looked for and how many: a quiet line over the results, not a header.
+        base.child(
+            div()
+                .flex_none()
+                .px(px(12.))
+                .pt(px(6.))
+                .pb(px(4.))
+                .text_size(px(11.5))
+                .text_color(p.weak())
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(self.title.clone()),
+        )
+        .child(rows_view("reference", self.rows.clone(), self.hub.clone(), cx))
     }
 }

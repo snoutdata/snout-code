@@ -11,6 +11,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::DropdownMenu as _;
 use gpui_component::scroll::ScrollableElement as _;
 
+use crate::menus::ShowGit;
 use crate::model::Model;
 use crate::theme::palette;
 
@@ -138,16 +139,10 @@ impl Render for SidePanel {
             });
         // The tool window's header: its title, the view switcher and the toolbar, then the
         // view.
-        let header = div()
-            .flex_none()
-            .h(px(32.))
-            .pl(px(12.))
-            .pr(px(6.))
-            .flex()
-            .items_center()
-            .gap(px(2.))
-            .text_size(px(crate::look::BODY))
-            .child(div().ml(px(-8.)).font_weight(FontWeight::MEDIUM).child(switcher))
+        crate::tabs::HEADERS.with(|h| h.borrow_mut().push("Side".into()));
+        let header = crate::tabs::header_row("side-header", &p)
+            .debug_selector(|| "tool-header-Project".into())
+            .child(div().ml(px(-8.)).font_weight(FontWeight::SEMIBOLD).child(switcher))
             .child(div().flex_1())
             .child(
                 tool_button("side-locate", Icon::Locate, "Select Opened File", &p)
@@ -190,12 +185,21 @@ impl Render for OutputPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let m = self.model.read(cx);
+        if m.output.is_empty() {
+            return div().size_full().bg(p.ground).flex().flex_col().child(
+                crate::components::EmptyState::new(snout_core::art::spots::no_output(), "No output yet")
+                    .hint("What Git and the tools say shows here as they work.")
+                    .compact()
+                    .primary_action("output-empty-git", crate::components::IconName::GitBranch, "Open Git", ShowGit),
+            );
+        }
         div().size_full().bg(p.ground).flex().flex_col().child(
             div()
                 .id("output")
                 .flex_1()
                 .overflow_y_scrollbar()
-                .px(px(8.))
+                .px(px(12.))
+                .py(px(6.))
                 .font_family(cx.theme_mono())
                 .text_size(px(12.))
                 .children(

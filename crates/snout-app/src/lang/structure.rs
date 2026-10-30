@@ -204,7 +204,7 @@ impl StructureWindow {
 }
 
 const NO_FILE: &str = "Open a Java file to see its structure.";
-const LOADING: &str = "Reading the file's structure";
+const LOADING: &str = "The Java engine is reading the file.";
 
 crate::panels::panel!(StructureWindow, "Structure", |_, _| "Structure".into(), true);
 
@@ -262,20 +262,26 @@ impl Render for StructureWindow {
             .gap(px(6.))
             .child(div().flex_1().child(look::field(&self.filter, true, None, &p)))
             .child(sort);
-        let empty = |title: &'static str, hint: &'static str| {
-            crate::components::EmptyState::new(snout_core::art::spots::no_results(), title)
-                .hint(hint)
-                .on(p.panel)
-                .compact()
-                .into_any_element()
+        let empty = |art: &'static snout_core::art::Drawing, title: &'static str, hint: &'static str| {
+            crate::components::EmptyState::new(art, title).hint(hint).compact()
         };
+        use snout_core::art::spots;
+        let filtering = !self.filter.read(cx).value().is_empty();
         let body = match (self.note, count) {
-            (Some(NO_FILE), _) => empty("No structure", NO_FILE),
-            (Some(note), _) => look::centered_note(note, &p).into_any_element(),
-            (None, 0) if !self.filter.read(cx).value().is_empty() => {
-                empty("No symbol matches", "Try fewer letters of the name.")
+            (Some(NO_FILE), _) => empty(spots::outline(), "No structure", NO_FILE)
+                .primary_action(
+                    "structure-empty-open",
+                    crate::components::IconName::FileSearch,
+                    "Go to File…",
+                    crate::menus::GoToFile,
+                )
+                .into_any_element(),
+            (Some(note), _) => empty(spots::outline(), "Reading the structure", note).into_any_element(),
+            (None, 0) if filtering => {
+                empty(spots::no_results(), "No symbol matches", "Try fewer letters of the name.").into_any_element()
             }
-            (None, 0) => empty("Nothing declared", "The file declares no class, field or method."),
+            (None, 0) => empty(spots::outline(), "Nothing declared", "The file declares no class, field or method.")
+                .into_any_element(),
             (None, _) => uniform_list("structure-rows", count, move |range, _, _| {
                 range
                     .map(|i| {
@@ -320,7 +326,7 @@ impl Render for StructureWindow {
             .bg(p.ground)
             .text_size(px(look::BODY))
             .text_color(p.fg)
-            .child(toolbar)
+            .when(self.note.is_none() && (count > 0 || filtering), |d| d.child(toolbar))
             .child(body)
     }
 }

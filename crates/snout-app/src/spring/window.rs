@@ -535,7 +535,11 @@ impl SpringWindow {
                     })),
             );
         let body: AnyElement = if rows.is_empty() {
-            note(if self.spring.read(cx).bean_count() == 0 { "No beans" } else { "No bean matches" }, "", cx)
+            if self.spring.read(cx).bean_count() == 0 {
+                note("No beans", "The project declares no Spring bean yet.", true, cx)
+            } else {
+                note("No bean matches", "Try fewer letters, or another stereotype or source.", false, cx)
+            }
         } else {
             let this = cx.entity();
             let count = rows.len();
@@ -700,7 +704,11 @@ impl SpringWindow {
             })
             .child(div().w(px(18.)).flex_none());
         let body: AnyElement = if rows.is_empty() {
-            note(if total == 0 { "No endpoints" } else { "No endpoint matches" }, "", cx)
+            if total == 0 {
+                note("No endpoints", "No controller of the project maps a request yet.", true, cx)
+            } else {
+                note("No endpoint matches", "Try fewer letters of the path or the method.", false, cx)
+            }
         } else {
             let this = cx.entity();
             let count = rows.len();
@@ -994,7 +1002,7 @@ impl SpringWindow {
 }
 
 /// A note in the middle of an empty tab.
-fn note(title: &'static str, text: &'static str, cx: &App) -> AnyElement {
+fn note(title: &'static str, text: &'static str, refresh: bool, cx: &App) -> AnyElement {
     use snout_core::art::spots;
     let art = if title.contains("matches") {
         spots::no_results()
@@ -1007,7 +1015,14 @@ fn note(title: &'static str, text: &'static str, cx: &App) -> AnyElement {
     div()
         .flex_1()
         .min_h_0()
-        .child(crate::components::EmptyState::new(art, title).hint(text).compact())
+        .child(crate::components::EmptyState::new(art, title).hint(text).compact().when(refresh, |e| {
+            e.primary_action(
+                "spring-empty-refresh",
+                crate::components::IconName::RefreshCw,
+                "Read the Spring Model",
+                crate::menus::RefreshSpring,
+            )
+        }))
         .into_any_element()
 }
 
@@ -1017,13 +1032,15 @@ impl Render for SpringWindow {
         let spring = self.spring.read(cx);
         let base = div().size_full().flex().flex_col().bg(p.ground).text_size(px(crate::look::BODY)).text_color(p.fg);
         if !spring.loaded {
-            let (title, text) = match &spring.load {
-                Load::Loading => ("Reading the Spring model", "The beans and endpoints are being read."),
-                Load::Failed(_) | Load::Idle => {
-                    ("No Spring model yet", "Beans and endpoints appear once the Java engine has imported the project.")
-                }
+            let (title, text, refresh) = match &spring.load {
+                Load::Loading => ("Reading the Spring model", "The beans and endpoints are being read.", false),
+                Load::Failed(_) | Load::Idle => (
+                    "No Spring model yet",
+                    "Beans and endpoints appear once the Java engine has imported the project.",
+                    true,
+                ),
             };
-            return base.child(note(title, text, cx));
+            return base.child(note(title, text, refresh, cx));
         }
         let beans = format!("Beans {}", thousands(spring.bean_count()));
         let endpoints = format!("Endpoints {}", thousands(spring.endpoints.len()));

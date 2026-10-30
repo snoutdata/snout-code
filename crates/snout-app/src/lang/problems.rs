@@ -691,7 +691,7 @@ impl Render for ProblemsPanel {
                 this.actions_at_selection(window, cx)
             }))
             .size_full()
-            .bg(p.panel)
+            .bg(p.ground)
             .flex()
             .flex_col()
             .text_size(px(12.5))
@@ -700,15 +700,19 @@ impl Render for ProblemsPanel {
                 d.child(
                     crate::components::EmptyState::new(snout_core::art::spots::no_problems(), "No problems")
                         .hint("Nothing to fix in the files the Java engine checked.")
-                        .on(p.panel)
-                        .compact(),
+                        .compact()
+                        .primary_action(
+                            "problems-empty-build",
+                            crate::components::IconName::Hammer,
+                            "Build Project",
+                            crate::menus::BuildProject,
+                        ),
                 )
             })
             .when(!none && empty, |d| {
                 d.child(
                     crate::components::EmptyState::new(snout_core::art::spots::no_results(), "No problems match")
                         .hint("Clear the filter, or turn on more of errors, warnings and information above.")
-                        .on(p.panel)
                         .compact(),
                 )
             })

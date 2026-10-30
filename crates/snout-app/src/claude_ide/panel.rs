@@ -398,7 +398,7 @@ impl Render for ChangesPanel {
                                         .child(dir),
                                 )
                                 .when(d.front, |r| r.child(counts(d.added, d.removed, &p, cx)))
-                                .when(d.new_file, |r| r.child(look::chip("new", p.ok, &p))),
+                                .when(d.new_file, |r| r.child(new_chip(&p))),
                         )
                         .child(div().text_color(p.fg_dim).text_size(px(11.5)).child(if d.front {
                             "Claude asks to make this change"
@@ -577,7 +577,7 @@ impl Render for ChangesPanel {
                         .text_size(px(11.5))
                         .child(dir),
                 )
-                .when(f.created(), |d| d.child(look::chip("new", p.ok, &p)))
+                .when(f.created(), |d| d.child(new_chip(&p)))
                 .when(f.source == Source::Watcher, |d| {
                     d.child(
                         div()
@@ -703,20 +703,31 @@ impl Render for ChangesPanel {
             }
         }
         if rows.is_empty() {
-            let note = if changes.hooks_heard || cx.try_global::<super::IdeStatus>().is_some_and(|s| s.clients > 0) {
-                "Files Claude Code changes show here as it works, with each change to accept or revert."
+            let connected = changes.hooks_heard || cx.try_global::<super::IdeStatus>().is_some_and(|s| s.clients > 0);
+            let state =
+                crate::components::EmptyState::new(snout_core::art::spots::claude_idle(), "No changes from agents yet")
+                    .hint("The files an agent changes show here as it works, each change to accept or revert.")
+                    .compact();
+            return base.child(if connected {
+                state
             } else {
-                "Start Claude Code in the console (⌘J): the files it changes show here as it works, with each \
-                 change to accept or revert."
-            };
-            return base.child(
-                crate::components::EmptyState::new(snout_core::art::spots::claude_idle(), "No changes from Claude yet")
-                    .hint(note)
-                    .compact(),
-            );
+                state.primary_action(
+                    "changes-empty-console",
+                    crate::components::IconName::Sparkles,
+                    "Open the Agent Console",
+                    crate::menus::ToggleConsole,
+                )
+            });
         }
         base.child(div().id("claude-changes-list").flex_1().min_h_0().pb(px(8.)).overflow_y_scrollbar().children(rows))
     }
+}
+
+/// The pill of a file the agent made: it was not there before.
+fn new_chip(p: &Palette) -> gpui::Stateful<gpui::Div> {
+    look::chip("new", p.ok, p)
+        .id("agent-new-file")
+        .tooltip(|w, cx| Tooltip::new("A new file: the agent created it; reverting deletes it").build(w, cx))
 }
 
 /// A section's label.

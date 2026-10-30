@@ -21,7 +21,7 @@ use snout_core::art::Glyph;
 use snout_host::{Host, HostRef, WalkOptions};
 
 use crate::art::glyph;
-use crate::look::{self, separator, title};
+use crate::look;
 use crate::model::{Action, Model};
 use crate::theme::{Palette, mix, palette};
 
@@ -471,41 +471,48 @@ impl Render for FileTree {
             .size_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(20.))
-                    .flex()
-                    .items_center()
-                    .child(title(name.clone().unwrap_or_else(|| "Files".into()))),
-            )
-            .child(separator(&p))
+            // The project's folder: the tree's root row, padded off the edges.
+            .when_some(name.clone(), |d, name| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .h(px(26.))
+                        .mx(px(4.))
+                        .px(px(6.))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .overflow_hidden()
+                        .child(crate::components::icon(crate::components::IconName::FolderRoot, 14., p.accent))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(name),
+                        ),
+                )
+            })
             .when(name.is_none(), |d| {
-                use crate::components::{Button, EmptyState, IconName};
+                use crate::components::{EmptyState, IconName};
                 d.child(
                     EmptyState::new(snout_core::art::spots::no_project(), "No project open")
                         .hint("Open a project to see its files.")
-                        .action(
-                            Button::new("files-open", IconName::FolderOpen)
-                                .compact()
-                                .label("Open Project…")
-                                .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::Open), cx)),
-                        )
+                        .primary_action("files-open", IconName::FolderOpen, "Open Project…", crate::menus::Open)
                         .compact(),
                 )
             })
             .map(|d| match crate::remote::connection(cx) {
                 Some((host, snout_remote::Status::Lost(_))) => {
-                    use crate::components::{Button, EmptyState, IconName};
+                    use crate::components::{EmptyState, IconName};
                     d.child(
                         EmptyState::new(snout_core::art::spots::remote_lost(), "The connection is lost")
                             .hint(format!("The files on {host} come back when it reconnects."))
-                            .action(
-                                Button::new("files-reconnect", IconName::RefreshCw)
-                                    .compact()
-                                    .label("Reconnect")
-                                    .on_click(|_, _, cx| crate::remote::reconnect(cx)),
-                            )
+                            .primary("files-reconnect", IconName::RefreshCw, "Reconnect", |_, _, cx| {
+                                crate::remote::reconnect(cx)
+                            })
                             .compact(),
                     )
                 }

@@ -969,13 +969,25 @@ impl ConsolePanel {
         let show_title = !title.is_empty() && running && title != agent.name.as_ref() && title != agent.short.as_ref();
         let who = match kind {
             Kind::Claude => self.agent_picker(&agent, p, cx),
-            Kind::Shell => div()
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .child(crate::components::icon(IconName::SquareTerminal, 14., p.fg))
-                .child(div().font_weight(gpui::FontWeight::MEDIUM).child("Terminal"))
-                .into_any_element(),
+            // The dock's title says Terminal: the row names the shell it runs.
+            Kind::Shell => {
+                let m = self.model.read(cx);
+                let program = Some(m.settings.terminal_shell.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| crate::host::host(cx).info().var("SHELL").map(str::to_owned))
+                    .unwrap_or_else(|| "zsh".into());
+                let name = std::path::Path::new(&program)
+                    .file_name()
+                    .map_or_else(|| program.clone(), |n| n.to_string_lossy().into_owned());
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(crate::components::icon(IconName::SquareTerminal, 14., p.fg_dim))
+                    .child(div().font_weight(gpui::FontWeight::MEDIUM).child(name))
+                    .into_any_element()
+            }
         };
         let pill_color = match status {
             Status::Connected => p.ok,

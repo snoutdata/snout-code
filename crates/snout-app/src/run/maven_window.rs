@@ -255,15 +255,15 @@ impl Render for MavenWindow {
         let p = palette(cx);
         let runs = self.runs.read(cx);
         let base = div().size_full().flex().flex_col().bg(p.ground).text_size(px(crate::look::BODY)).text_color(p.fg);
-        use crate::components::{Button, EmptyState, IconName};
+        use crate::components::{EmptyState, IconName};
         use snout_core::art::spots;
         let note = |art: &'static snout_core::art::Drawing, title: &'static str, text: String, sync: bool| {
             EmptyState::new(art, title).hint(text).compact().when(sync, |e| {
-                e.action(
-                    Button::new("maven-empty-sync", IconName::RefreshCw)
-                        .compact()
-                        .label("Reload the Maven Project")
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
+                e.primary_action(
+                    "maven-empty-sync",
+                    IconName::RefreshCw,
+                    "Reload the Maven Project",
+                    crate::menus::SyncGradle,
                 )
             })
         };
@@ -278,11 +278,9 @@ impl Render for MavenWindow {
                     spots::maven(),
                     "No goals yet",
                     "The goals appear once the Java engine has imported the project.".into(),
-                    false,
+                    true,
                 ),
-                (None, _, true) => {
-                    note(spots::maven(), "No Maven builds", "This project has no pom.xml.".into(), false)
-                }
+                (None, _, true) => note(spots::maven(), "No Maven builds", "This project has no pom.xml.".into(), true),
             });
         }
         let choices = runs.project.maven.clone();

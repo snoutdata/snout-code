@@ -75,6 +75,8 @@ mod settings_json_tests;
 mod spring_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tool_window_tests;
 
 use gpui::{App, AppContext as _, Bounds, Entity, WindowBounds, WindowOptions, px, size};
 

@@ -538,6 +538,8 @@ pub struct Runs {
     pub scala_error: Option<String>,
     /// Run to Cursor: the session, and the line (from 0) of the file it stops at once.
     pub run_to: Option<(u64, PathBuf, u32)>,
+    /// What starts once a session ends well (Rebuild Project: the compile after `clean`).
+    pub then: HashMap<u64, Launch>,
     _tick: Option<Task<()>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -582,6 +584,7 @@ impl Runs {
             scala: None,
             scala_error: None,
             run_to: None,
+            then: HashMap::new(),
             _tick: None,
             _subscriptions: subscriptions,
         };
@@ -1382,6 +1385,15 @@ impl Runs {
                 self.sync_marks(cx);
             }
             _ => {}
+        }
+        let next = (method == "snout/taskFinished").then(|| self.then.remove(&id)).flatten();
+        if let Some(next) = next
+            && self
+                .sessions
+                .iter()
+                .any(|s| s.id == id && s.ended.as_ref().is_some_and(|e| e.outcome == Outcome::Success))
+        {
+            self.start(next, cx);
         }
         cx.notify();
     }

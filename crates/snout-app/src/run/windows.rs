@@ -240,8 +240,8 @@ impl RunWindow {
         let mut row = div()
             .id("run-tabs")
             .flex_none()
-            .h(px(30.))
-            .px(px(6.))
+            .h(px(32.))
+            .px(px(8.))
             .flex()
             .items_center()
             .gap(px(2.))
@@ -489,7 +489,7 @@ impl RunWindow {
                     .flex_none()
                     .w(px(360.))
                     .h_full()
-                    .py(px(2.))
+                    .p(px(4.))
                     .border_r_1()
                     .border_color(mix(p.border, 0.6, p.ground))
                     .overflow_y_scrollbar()
@@ -639,7 +639,7 @@ impl RunWindow {
             .flex_none()
             .w(px(320.))
             .h_full()
-            .py(px(2.))
+            .p(px(4.))
             .border_r_1()
             .border_color(mix(p.border, 0.6, p.ground))
             .overflow_y_scrollbar()
@@ -924,7 +924,7 @@ impl RunWindow {
                     .flex_none()
                     .w(px(340.))
                     .h_full()
-                    .py(px(2.))
+                    .p(px(4.))
                     .border_r_1()
                     .border_color(mix(p.border, 0.6, p.ground))
                     .overflow_y_scrollbar()
@@ -937,6 +937,7 @@ impl RunWindow {
                     .flex_1()
                     .min_w_0()
                     .h_full()
+                    .p(px(4.))
                     .overflow_y_scrollbar()
                     .children(vars),
             )
@@ -944,28 +945,22 @@ impl RunWindow {
     }
 
     fn empty(&self, cx: &App) -> AnyElement {
-        use crate::components::{Button, EmptyState, IconName};
+        use crate::components::{EmptyState, IconName};
         use snout_core::art::spots;
         let _ = cx;
         let state = match self.place {
             Place::Run => EmptyState::new(spots::no_tests(), "Nothing running")
                 .hint("Run a configuration from the title bar, or a test from the gutter.")
-                .action(
-                    Button::new("run-empty-run", IconName::Play)
-                        .compact()
-                        .label("Run")
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RunSelected), cx)),
-                ),
+                .primary_action("run-empty-run", IconName::Play, "Run", crate::menus::RunSelected),
             Place::Debug => EmptyState::new(spots::debugger_idle(), "No debug session")
                 .hint("Debug a configuration from the title bar, or a test from the gutter.")
-                .action(
-                    Button::new("debug-empty-debug", IconName::Bug)
-                        .compact()
-                        .label("Debug")
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::DebugSelected), cx)),
-                ),
+                .primary_action("debug-empty-debug", IconName::Bug, "Debug", crate::menus::DebugSelected),
             Place::Build => EmptyState::new(snout_core::art::building(), "No build output")
-                .hint("Double click a task in the Gradle tool window to run it."),
+                .hint("Build the project, or run one of its Gradle tasks or Maven goals.")
+                .primary_action("build-empty-build", IconName::Hammer, "Build Project", crate::menus::BuildProject)
+                .secondary("build-empty-task", IconName::SquarePlay, "Run Task…", |_, w, cx| {
+                    w.dispatch_action(Box::new(crate::menus::RunGradleTask), cx)
+                }),
         };
         state.compact().into_any_element()
     }

@@ -21,9 +21,14 @@ pub fn title(panel_name: &str) -> &str {
     }
 }
 
-/// An empty tool window's note: its drawing, centred.
+/// The Notifications window with nothing in it: the quiet bell, and the full log.
 fn empty(title: &'static str, text: &'static str, _: &App) -> crate::components::EmptyState {
-    crate::components::EmptyState::new(snout_core::art::spots::quiet_bell(), title).hint(text).compact()
+    crate::components::EmptyState::new(snout_core::art::spots::quiet_bell(), title).hint(text).compact().primary_action(
+        "notifications-empty-output",
+        crate::components::IconName::ScrollText,
+        "Show Output",
+        crate::menus::ShowOutput,
+    )
 }
 
 pub struct NotificationsPanel {
@@ -53,7 +58,7 @@ impl Render for NotificationsPanel {
         if items.is_empty() {
             return base.child(empty("No notifications", "Errors from Git and the tools show here.", cx));
         }
-        base.child(div().id("notifications").size_full().p(px(8.)).overflow_y_scrollbar().children(
+        base.child(div().id("notifications").size_full().p(px(10.)).overflow_y_scrollbar().children(
             items.into_iter().map(|text| {
                 div()
                     .mb(px(6.))

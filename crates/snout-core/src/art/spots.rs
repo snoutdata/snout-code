@@ -829,8 +829,106 @@ drawing!(
     }
 );
 
+drawing!(
+    /// Nothing said yet: a console whose lines are only dots, asleep, and the accent badge
+    /// of what it waits to say.
+    no_output,
+    |d| {
+        d.rotated(-4.0, 110.0, 84.0, |d| {
+            d.rect(56.0, 34.0, 112.0, 96.0, 8.0, Fill::Paper);
+            d.path("M56 48V42Q56 34 64 34H160Q168 34 168 42V48Z", Fill::Tint);
+            d.dot(66.0, 41.0, 1.6).dot(73.0, 41.0, 1.6).dot(80.0, 41.0, 1.6);
+            for (y, end) in [(64.0, 140.0), (78.0, 128.0), (92.0, 148.0), (106.0, 120.0)] {
+                thread(d, &format!("M70 {y}H{end}"));
+            }
+        });
+        d.circle(184.0, 110.0, 14.0, Fill::Accent);
+        d.dot(178.0, 110.0, 1.8).dot(184.0, 110.0, 1.8).dot(190.0, 110.0, 1.8);
+        asleep(d, 176.0, 46.0);
+        d.twinkling_spark(36.0, 60.0, 0.7).twinkling_spark(120.0, 20.0, 0.45).twinkling_spark(40.0, 128.0, 0.5);
+    }
+);
+
+drawing!(
+    /// Usages: the symbol's card, its mark the green, and dotted threads to the pages that
+    /// use it.
+    no_usages,
+    |d| {
+        d.rotated(-3.0, 70.0, 80.0, |d| {
+            d.rect(30.0, 56.0, 78.0, 48.0, 6.0, Fill::Paper);
+            d.circle(50.0, 80.0, 10.0, Fill::Accent);
+            d.line("M46 80H54M50 76V84");
+            d.line("M68 72H98").line("M68 88H90");
+        });
+        sheet(d, 150.0, 22.0, 44.0, 54.0, Fill::Tint, 2);
+        sheet(d, 160.0, 92.0, 44.0, 54.0, Fill::Paper, 2);
+        thread(d, "M110 70C126 60 134 52 148 50");
+        thread(d, "M110 92C128 102 140 112 158 116");
+        d.twinkling_spark(36.0, 40.0, 0.7).twinkling_spark(218.0, 76.0, 0.5).twinkling_spark(120.0, 136.0, 0.45);
+    }
+);
+
+drawing!(
+    /// A hierarchy: a type and the two below it, joined, the one in view the green, and the
+    /// next generation still dotted.
+    hierarchy,
+    |d| {
+        d.rect(96.0, 22.0, 48.0, 32.0, 4.0, Fill::Paper);
+        d.line("M106 34H134").line("M106 43H126");
+        d.line("M120 54V70").line("M70 70H170").line("M70 70V86").line("M170 70V86");
+        d.line("M114 60L120 54L126 60");
+        d.rect(46.0, 86.0, 48.0, 32.0, 4.0, Fill::Tint);
+        d.line("M56 98H84").line("M56 107H76");
+        d.rect(146.0, 86.0, 48.0, 32.0, 4.0, Fill::Accent);
+        d.line("M156 98H184").line("M156 107H176");
+        thread(d, "M170 118V134H204");
+        thread(d, "M70 118V134H40");
+        d.twinkling_spark(40.0, 40.0, 0.7).twinkling_spark(206.0, 42.0, 0.55).twinkling_spark(120.0, 140.0, 0.45);
+    }
+);
+
+drawing!(
+    /// A file's outline: its members in a page, indented under the class, one of them the
+    /// green, and the arrows that sort them.
+    outline,
+    |d| {
+        d.rotated(-3.0, 112.0, 80.0, |d| {
+            d.rect(62.0, 24.0, 104.0, 112.0, 6.0, Fill::Paper);
+            d.line("M80 48V112");
+            for (i, (x, y, len)) in
+                [(74.0, 40.0, 50.0), (88.0, 58.0, 44.0), (88.0, 76.0, 36.0), (88.0, 94.0, 48.0), (88.0, 112.0, 30.0)]
+                    .into_iter()
+                    .enumerate()
+            {
+                let fill = match i {
+                    0 => Fill::Tint,
+                    2 => Fill::Accent,
+                    _ => Fill::Paper,
+                };
+                d.rect(x, y - 5.0, 10.0, 10.0, 2.5, fill);
+                d.line(&format!("M{} {y}H{}", x + 16.0, x + 16.0 + len));
+            }
+        });
+        d.line("M192 56V104").line("M186 98L192 104L198 98").line("M186 62L192 56L198 62");
+        d.twinkling_spark(40.0, 52.0, 0.7).twinkling_spark(206.0, 32.0, 0.5).twinkling_spark(40.0, 126.0, 0.45);
+    }
+);
+
+drawing!(
+    /// Find in Files, waiting for words: the project's pages fanned out, and the lens with
+    /// its caret blinking, its handle the green.
+    find_files,
+    |d| {
+        d.rotated(-10.0, 80.0, 80.0, |d| sheet(d, 48.0, 40.0, 56.0, 72.0, Fill::Tint, 3));
+        d.rotated(4.0, 116.0, 78.0, |d| sheet(d, 84.0, 30.0, 60.0, 82.0, Fill::Paper, 5));
+        lens(d, 158.0, 98.0, 22.0, Fill::Paper, Fill::Accent);
+        d.line("M158 89V107");
+        d.twinkling_spark(36.0, 36.0, 0.7).twinkling_spark(214.0, 48.0, 0.55).twinkling_spark(212.0, 136.0, 0.45);
+    }
+);
+
 /// Every spot drawing of this module, by name: for tests and the gallery.
-pub fn all() -> [(&'static str, &'static Drawing); 38] {
+pub fn all() -> [(&'static str, &'static Drawing); 43] {
     [
         ("discard", discard()),
         ("push_rejected", push_rejected()),
@@ -870,6 +968,11 @@ pub fn all() -> [(&'static str, &'static Drawing); 38] {
         ("modules", modules()),
         ("dependencies", dependencies()),
         ("facets", facets()),
+        ("no_output", no_output()),
+        ("no_usages", no_usages()),
+        ("hierarchy", hierarchy()),
+        ("outline", outline()),
+        ("find_files", find_files()),
     ]
 }
 

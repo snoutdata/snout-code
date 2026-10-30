@@ -140,6 +140,9 @@ pub struct Settings {
     /// The Project tool window shows the plain file tree (Files) rather than the project
     /// as its Gradle model has it.
     pub plain_files: bool,
+    /// The size each resizable sheet was left at (Settings, Project Structure, New
+    /// Project), by its name: width and height in points.
+    pub dialog_sizes: std::collections::BTreeMap<String, [f32; 2]>,
     /// When each project was last opened (seconds since 1970), for the Welcome page.
     pub opened: std::collections::BTreeMap<PathBuf, u64>,
     /// Each recent project's editor tabs as it left them (the center of the dock layout),
@@ -318,6 +321,7 @@ impl Default for Settings {
             custom_agent_name: String::new(),
             follow_claude: true,
             plain_files: false,
+            dialog_sizes: Default::default(),
             opened: Default::default(),
             sessions: Default::default(),
             keymap: Default::default(),

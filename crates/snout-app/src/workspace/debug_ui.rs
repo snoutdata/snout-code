@@ -158,9 +158,18 @@ impl Workspace {
     /// Run Gradle Task… (⌃⌥G): every task of the project's Gradle builds, and every phase and
     /// goal of its Maven modules (`web: package`, `web: spring-boot:run`), picked by name.
     pub fn open_task_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pick_task(true, true, window, cx)
+    }
+
+    /// Build ▸ Run Maven Goal…: the phases and goals of the project's Maven modules alone.
+    pub fn open_goal_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pick_task(false, true, window, cx)
+    }
+
+    fn pick_task(&mut self, gradle: bool, maven: bool, window: &mut Window, cx: &mut Context<Self>) {
         let runs = self.runs.read(cx);
         let mut commands: Vec<crate::search::Command> = Vec::new();
-        for b in &runs.gradle.builds {
+        for b in runs.gradle.builds.iter().filter(|_| gradle) {
             for project in &b.projects {
                 for (_, tasks) in &project.groups {
                     for t in tasks {
@@ -181,7 +190,7 @@ impl Workspace {
                 }
             }
         }
-        for b in &runs.maven.builds {
+        for b in runs.maven.builds.iter().filter(|_| maven) {
             for m in &b.modules {
                 let goals = m.lifecycle.iter().cloned().chain(
                     m.plugins.iter().flat_map(|p| p.goals.iter().map(move |(g, _)| format!("{}:{g}", p.prefix))),
@@ -202,6 +211,18 @@ impl Workspace {
         }
         commands.sort_by(|a, b| a.name.cmp(&b.name));
         commands.dedup_by(|a, b| a.name == b.name);
+        if commands.is_empty() && !gradle {
+            let loading = runs.maven.loading;
+            self.runs.update(cx, |r, cx| r.load_maven_goals(false, cx));
+            return self.say(
+                if loading {
+                    "The Maven goals are being read; try again in a moment"
+                } else {
+                    "No Maven goals: the project has no Maven build, or it is being read"
+                },
+                cx,
+            );
+        }
         if commands.is_empty() {
             let loading = runs.gradle.loading;
             self.runs.update(cx, |r, cx| r.load_gradle_tasks(false, cx));
@@ -288,6 +309,35 @@ impl Workspace {
     }
 
     /// Run one Gradle task, in the Build window.
+    /// Build ▸ Build Project (⌘F9): compile the main and test code of every module, with
+    /// Gradle (`testClasses`) or Maven (`test-compile`); Rebuild Project cleans first.
+    pub fn build_project(&mut self, rebuild: bool, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::run::Launch;
+        let maven = !self.shows_gradle(cx);
+        let launch = if maven {
+            let runs = self.runs.read(cx);
+            let root = runs.maven.builds.first().and_then(|b| {
+                let m = b.modules.iter().find(|m| m.project == ":").or_else(|| b.modules.first())?;
+                Some((b.build.clone(), m.project.clone(), m.name.clone()))
+            });
+            let Some((build, project, module)) = root else {
+                self.runs.update(cx, |r, cx| r.load_maven_goals(false, cx));
+                return self.say("The Maven build is being read; try again in a moment", cx);
+            };
+            let goals = if rebuild { "clean test-compile" } else { "test-compile" }.to_owned();
+            Launch::Maven { build, project, module, goals }
+        } else {
+            Launch::Task { build: None, task: if rebuild { "clean" } else { "testClasses" }.to_owned() }
+        };
+        self.show_tool(crate::workspace::Tool::Build, window, cx);
+        self.runs.update(cx, |r, cx| {
+            let id = r.start(launch, cx);
+            if let (true, false, Some(id)) = (rebuild, maven, id) {
+                r.then.insert(id, Launch::Task { build: None, task: "testClasses".into() });
+            }
+        });
+    }
+
     pub fn run_task(&mut self, build: Option<String>, task: String, cx: &mut Context<Self>) {
         self.runs.update(cx, |r, cx| {
             r.start(Launch::Task { build, task }, cx);

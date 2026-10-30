@@ -21,6 +21,7 @@ use crate::theme::{Palette, mix, palette};
 
 mod list;
 mod menu;
+pub mod sheet;
 pub use list::*;
 pub use menu::*;
 
@@ -735,6 +736,40 @@ impl EmptyState {
         self
     }
 
+    /// The main thing to do about it: a normal-sized primary button with its icon. The
+    /// first action of an empty state is this one.
+    pub fn primary(
+        self,
+        id: &'static str,
+        ico: impl Into<Ico>,
+        label: impl Into<SharedString>,
+        f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.action(Button::new(id, ico).primary().label(label).on_click(f))
+    }
+
+    /// Another thing to do about it, beside the primary one: a normal-sized framed button.
+    pub fn secondary(
+        self,
+        id: &'static str,
+        ico: impl Into<Ico>,
+        label: impl Into<SharedString>,
+        f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.action(Button::new(id, ico).label(label).on_click(f))
+    }
+
+    /// The primary action as [`EmptyState::primary`] makes it, dispatching `action`.
+    pub fn primary_action(
+        self,
+        id: &'static str,
+        ico: impl Into<Ico>,
+        label: impl Into<SharedString>,
+        action: impl gpui::Action + Clone,
+    ) -> Self {
+        self.primary(id, ico, label, move |_, w, cx| w.dispatch_action(action.boxed_clone(), cx))
+    }
+
     /// What it sits on, for the drawing's blob (the tool windows' ground by default).
     pub fn on(mut self, surface: Hsla) -> Self {
         self.surface = Some(surface);
@@ -754,6 +789,7 @@ impl RenderOnce for EmptyState {
         let w = if self.compact { 132. } else { 176. };
         let ratio = self.art.size.x / self.art.size.y;
         div()
+            .debug_selector(|| "empty-state".into())
             .size_full()
             .min_h_0()
             .overflow_hidden()
@@ -764,7 +800,12 @@ impl RenderOnce for EmptyState {
             .px(px(24.))
             .py(px(12.))
             .gap(px(4.))
-            .child(crate::art::drawing_on(self.art, w, w / ratio, self.surface.unwrap_or(p.ground)))
+            .child(div().debug_selector(|| "empty-state-art".into()).child(crate::art::drawing_on(
+                self.art,
+                w,
+                w / ratio,
+                self.surface.unwrap_or(p.ground),
+            )))
             .child(
                 div()
                     .mt(px(6.))
@@ -777,7 +818,7 @@ impl RenderOnce for EmptyState {
             .when_some(self.hint, |d, h| {
                 d.child(
                     div()
-                        .max_w(px(320.))
+                        .max_w(px(360.))
                         .text_color(p.fg_dim)
                         .text_size(px(12.5))
                         .line_height(px(18.))
@@ -785,7 +826,9 @@ impl RenderOnce for EmptyState {
                         .child(h),
                 )
             })
-            .when(!self.actions.is_empty(), |d| d.child(div().mt(px(10.)).flex().gap(px(8.)).children(self.actions)))
+            .when(!self.actions.is_empty(), |d| {
+                d.child(div().mt(px(10.)).flex().flex_wrap().justify_center().gap(px(8.)).children(self.actions))
+            })
     }
 }
 

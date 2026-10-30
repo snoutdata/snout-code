@@ -116,6 +116,8 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("cmd-r", Box::new(Rerun), None),
         ("cmd-alt-r", Box::new(RerunFailedTests), None),
         ("ctrl-alt-g", Box::new(RunGradleTask), None),
+        ("cmd-f9", Box::new(BuildProject), None),
+        ("alt-f12", Box::new(ShowTerminal), None),
         ("ctrl-alt-p", Box::new(SpringProfiles), None),
         ("cmd-\\", Box::new(SplitRight), None),
         ("cmd-w", Box::new(CloseTab), Some("Workspace")),
@@ -407,6 +409,8 @@ mod tests {
                 "cmd-r",
                 "cmd-alt-r",
                 "ctrl-alt-g",
+                "cmd-f9",
+                "alt-f12",
                 "ctrl-alt-p",
                 "cmd-shift-r",
                 // Project Structure.

@@ -19,6 +19,7 @@ use gpui_component::dock::{
 };
 use snout_core::{FileEntry, PullMode, on_disk, stage_paths, unstage_paths};
 
+use crate::components::sheet;
 use crate::editor::{EditorEvent, EditorPanel};
 use crate::git_view::GitView;
 use crate::menus::{self, *};
@@ -1998,6 +1999,26 @@ impl Render for Workspace {
                     this.toggle_tool(Tool::Spring, w, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &crate::menus::ShowTerminal, w, cx| this.show_tool(Tool::Terminal, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::ShowBuild, w, cx| this.show_tool(Tool::Build, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::ShowOutput, w, cx| this.show_tool(Tool::Output, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::ShowGradle, w, cx| this.show_tool(Tool::Gradle, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::ShowMaven, w, cx| this.show_tool(Tool::Maven, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::BuildProject, w, cx| this.build_project(false, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::RebuildProject, w, cx| this.build_project(true, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::RunMavenGoals, w, cx| this.open_goal_picker(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::SettingsKeymap, w, cx| {
+                this.open_settings_at(crate::settings_view::Page::Keymap, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::menus::SettingsTerminal, w, cx| {
+                this.open_settings_at(crate::settings_view::Page::Terminal, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::menus::SettingsAgents, w, cx| {
+                this.open_settings_at(crate::settings_view::Page::ClaudeCode, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::menus::SettingsBuildTools, w, cx| {
+                this.open_settings_at(crate::settings_view::Page::Gradle, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &ShowProcesses, w, cx| {
                 if !this.tool_open(Tool::Processes, cx) {
                     this.toggle_tool(Tool::Processes, w, cx);
@@ -2204,7 +2225,8 @@ impl Render for Workspace {
                     .justify_center()
                     .bg(p.scrim)
                     .occlude()
-                    .child(sheet)
+                    .on_drop(sheet::persist_on_drop(self.model.clone()))
+                    .child(sheet::resizable(sheet::SETTINGS, sheet, &self.model, window, cx))
             }))
             .children(self.project_structure.clone().map(|view| {
                 div()
@@ -2216,7 +2238,8 @@ impl Render for Workspace {
                     .justify_center()
                     .bg(p.scrim)
                     .occlude()
-                    .child(view)
+                    .on_drop(sheet::persist_on_drop(self.model.clone()))
+                    .child(sheet::resizable(sheet::PROJECT_STRUCTURE, view, &self.model, window, cx))
             }))
             .children(self.connect_dialog.clone().map(|dialog| {
                 div()
@@ -2252,7 +2275,8 @@ impl Render for Workspace {
                     .justify_center()
                     .bg(p.scrim)
                     .occlude()
-                    .child(dialog)
+                    .on_drop(sheet::persist_on_drop(self.model.clone()))
+                    .child(sheet::resizable(sheet::NEW_PROJECT, dialog, &self.model, window, cx))
             }))
             .children(self.breakpoints_dialog.clone().map(|dialog| {
                 div()

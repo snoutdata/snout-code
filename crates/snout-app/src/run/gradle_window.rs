@@ -118,15 +118,15 @@ impl Render for GradleWindow {
         let p = palette(cx);
         let runs = self.runs.read(cx);
         let base = div().size_full().bg(p.ground).text_size(px(crate::look::BODY)).text_color(p.fg);
-        use crate::components::{Button, EmptyState, IconName};
+        use crate::components::{EmptyState, IconName};
         use snout_core::art::spots;
         let note = |art: &'static snout_core::art::Drawing, title: &'static str, text: String, sync: bool| {
             EmptyState::new(art, title).hint(text).compact().when(sync, |e| {
-                e.action(
-                    Button::new("gradle-empty-sync", IconName::RefreshCw)
-                        .compact()
-                        .label("Sync the Gradle Project")
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
+                e.primary_action(
+                    "gradle-empty-sync",
+                    IconName::RefreshCw,
+                    "Sync the Gradle Project",
+                    crate::menus::SyncGradle,
                 )
             })
         };
@@ -141,13 +141,13 @@ impl Render for GradleWindow {
                 ),
                 (Some(e), _, _) => note(spots::gradle_failed(), "The tasks could not be read", e.clone(), true),
                 (None, _, false) => note(
-                    snout_core::art::building(),
+                    spots::gradle(),
                     "No tasks yet",
                     "The tasks appear once the Java engine has imported the project.".into(),
-                    false,
+                    true,
                 ),
                 (None, _, true) => {
-                    note(spots::no_project(), "No Gradle tasks", "This project has no Gradle build.".into(), false)
+                    note(spots::no_project(), "No Gradle tasks", "This project has no Gradle build.".into(), true)
                 }
             });
         }

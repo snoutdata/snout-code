@@ -1196,7 +1196,15 @@ impl Render for FindInFiles {
         let body: AnyElement = if let Some(e) = &self.error {
             div().flex_1().p(px(12.)).child(components::callout(Tone::Warning, e.clone(), &p)).into_any_element()
         } else if self.rows.is_empty() && blank {
-            div().flex_1().child(look::centered_note("Type what to look for", &p)).into_any_element()
+            div()
+                .flex_1()
+                .child(
+                    components::EmptyState::new(snout_core::art::spots::find_files(), "Find in the project's files")
+                        .hint("Type a word, a phrase or a regular expression above.")
+                        .on(p.card)
+                        .compact(),
+                )
+                .into_any_element()
         } else if self.rows.is_empty() && !self.searching && self.listed {
             div()
                 .flex_1()

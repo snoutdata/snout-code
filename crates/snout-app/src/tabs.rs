@@ -507,19 +507,11 @@ pub fn tool_button(
         .child(crate::glyphs::icon(g, 14., crate::theme::mix(p.fg, 0.7, p.fg_dim)))
 }
 
-/// A tool window's header, in place of a tab bar (the stripes open tool windows): its
-/// title, tabs where two windows belong together, and its toolbar.
-fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
-    use crate::glyphs::Icon;
-    let p = palette(cx);
-    let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
-    let right = matches!(
-        active,
-        "Gradle" | "Maven" | "Spring" | "Notifications" | "Claude Changes" | "Structure" | "Hierarchy"
-    );
-    let mut row = div()
-        .id(("tool-header", group.node().as_u64()))
-        .debug_selector(|| "tool-header".into())
+/// The one header row of a tool window (and of the side panel): 32 points high, its
+/// title at 12 points from the edge, its toolbar 6 points from the other.
+pub fn header_row(id: impl Into<gpui::ElementId>, p: &crate::theme::Palette) -> Stateful<Div> {
+    div()
+        .id(id)
         .flex_none()
         .h(px(32.))
         .w_full()
@@ -530,7 +522,28 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
         .gap(px(4.))
         .bg(p.ground)
         .text_size(px(crate::look::BODY))
-        .text_color(p.fg);
+        .text_color(p.fg)
+}
+
+thread_local! {
+    /// The tool windows whose header was drawn, by panel name, in order: the tests clear it,
+    /// draw the window, and count each window's headers.
+    pub static HEADERS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A tool window's header, in place of a tab bar (the stripes open tool windows): its
+/// title, tabs where two windows belong together, and its toolbar.
+fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
+    use crate::glyphs::Icon;
+    let p = palette(cx);
+    let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
+    let right = matches!(
+        active,
+        "Gradle" | "Maven" | "Spring" | "Notifications" | "Claude Changes" | "Structure" | "Hierarchy"
+    );
+    let selector = format!("tool-header-{}", crate::tool_windows::title(active));
+    let mut row = header_row(("tool-header", group.node().as_u64()), &p).debug_selector(move || selector.clone());
+    HEADERS.with(|h| h.borrow_mut().push(active.to_owned()));
     if TABBED.contains(&active) {
         for (ix, panel) in group.panels().iter().enumerate() {
             let name = panel.panel_name(cx);
@@ -562,7 +575,8 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
             .when_some(tool, |d, t| d.child(div().mr(px(2.)).child(crate::glyphs::icon(t.icon(), 14., p.hue(t.hue())))))
             .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(crate::tool_windows::title(active).to_owned()));
     }
-    row = row.child(div().flex_1());
+    // The row carries the window's own name, for the tests; the spacer, what any header is.
+    row = row.child(div().flex_1().h_full().debug_selector(|| "tool-header".into()));
     match active {
         "Output" => {
             row = row.child(
@@ -602,8 +616,13 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
         }
         "Processes" => {
             row = row.child(
-                tool_button("tool-stop-idle", Icon::Stop, "Stop Idle Processes", &p)
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::StopIdleProcesses), cx)),
+                tool_button(
+                    "tool-stop-idle",
+                    Icon::Stop,
+                    "Stop Idle Processes: idle Gradle daemons, leftovers, and the engines of projects not open",
+                    &p,
+                )
+                .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::StopIdleProcesses), cx)),
             )
         }
         "Spring" => {

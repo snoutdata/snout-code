@@ -1,6 +1,6 @@
 //! The Processes tool window: every process SnoutCode runs, as a tree under SnoutCode itself,
 //! each line saying what the process is for, with its pid, memory, CPU, age and state, and
-//! Stop and Restart where they make sense. The foot has the totals and Stop Idle Processes.
+//! Stop and Restart where they make sense. The foot has the totals; the header, Stop Idle Processes.
 
 use std::rc::Rc;
 
@@ -125,6 +125,11 @@ impl Render for ProcessesWindow {
                         Kind::Run { .. } | Kind::Tests { .. } => p.ok,
                         _ => p.fg_dim,
                     };
+                    let state_tip: &'static str = if r.busy {
+                        "Busy: at work now (a filled dot)"
+                    } else {
+                        "Waiting: alive, doing nothing now (a hollow dot)"
+                    };
                     let state_ink = if r.state.starts_with("Failed") || r.kind == Kind::Leftover {
                         p.warn
                     } else if r.busy {
@@ -182,6 +187,8 @@ impl Render for ProcessesWindow {
                         .child(num(if live { duration(r.uptime) } else { String::new() }).w(px(UPTIME_W)))
                         .child(
                             cell(STATE_W)
+                                .id(("process-state", i))
+                                .tooltip(move |w, cx| Tooltip::new(state_tip).build(w, cx))
                                 .pl(px(12.))
                                 .flex()
                                 .items_center()
@@ -211,7 +218,6 @@ impl Render for ProcessesWindow {
             bytes(memory),
             cpu
         );
-        let processes = self.processes.clone();
         let foot = div()
             .flex_none()
             .h(px(30.))
@@ -235,32 +241,7 @@ impl Render for ProcessesWindow {
                         .child(n),
                 )
             })
-            .child(div().flex_1())
-            .child(
-                crate::look::small_button(
-                    "processes-stop-idle",
-                    crate::components::IconName::CircleStop,
-                    "Stop Idle Processes",
-                    &p,
-                )
-                .debug_selector(|| "processes-stop-idle".into())
-                .px(px(8.))
-                .h(px(22.))
-                .text_color(if idle > 0 { p.fg } else { p.fg_dim })
-                .font_weight(FontWeight::MEDIUM)
-                .tooltip(|w, cx| {
-                    Tooltip::new(
-                        "Stops the idle Gradle daemons, what an earlier session left running, and the engines of \
-                             projects that are not open",
-                    )
-                    .build(w, cx)
-                })
-                .on_click(move |_, _, cx| {
-                    processes.update(cx, |p, cx| {
-                        p.stop_idle(cx);
-                    });
-                }),
-            );
+            .when(idle > 0, |d| d.child(format!("{idle} idle")));
         base.child(header).child(list).child(foot)
     }
 }
