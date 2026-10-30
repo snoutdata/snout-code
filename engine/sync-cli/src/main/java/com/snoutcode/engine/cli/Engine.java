@@ -14,6 +14,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -1127,50 +1128,97 @@ final class Engine implements GradleRuns.Client {
                 }
                 log.println("snout-engine: syncing " + wanted.size() + " build(s) again in the background: " + String.join(", ", builds));
                 List<JsonObject> entries = ProjectSync.lanes(wanted, options.parallel, plan -> ProjectSync.syncOne(plan, options.log));
-                List<String> changed = new ArrayList<>();
-                synchronized (model) {
-                    JsonArray all = model.getAsJsonArray("gradleBuilds");
-                    for (JsonObject fresh : entries) {
-                        for (int i = 0; i < all.size(); i++) {
-                            JsonObject old = all.get(i).getAsJsonObject();
-                            if (!string(old, "id").equals(string(fresh, "id"))) {
-                                continue;
-                            }
-                            if ("failed".equals(string(fresh, "status")) && !"failed".equals(string(old, "status"))) {
-                                break; // keep the last good model, as a start does
-                            }
-                            if (!ScalaBridge.canonicalHash(old).equals(ScalaBridge.canonicalHash(fresh))) {
-                                all.set(i, fresh);
-                                changed.add(string(fresh, "id"));
-                            }
-                        }
-                    }
-                    if (!changed.isEmpty()) {
-                        ProjectModel.assemble(model);
-                    }
-                }
-                recordInputs.run();
-                if (changed.isEmpty()) {
-                    log.println("snout-engine: the background sync found nothing new");
-                    return;
-                }
-                log.println("snout-engine: the background sync changed " + String.join(", ", changed));
-                ScalaBridge.Work work = ScalaBridge.plan(model, plans.values(), bridge == null ? null : bridgeState);
-                ScalaBridge.annotate(work);
-                bridge = work;
-                Readiness r = readiness;
-                if (r != null) {
-                    r.model(model);
-                }
-                writeModel();
-                imported = work.folderSet();
-                reimport("the background sync changed " + String.join(", ", changed)).get(10, TimeUnit.MINUTES);
-                compileScala(new ScalaBridge.Selection(new LinkedHashSet<>(changed), Set.of(), Set.of()), ProjectSync.defaultParallelism(), null);
-                notify("snout/modelChanged", new JsonObject());
+                merge(entries, "the background sync", recordInputs);
             } catch (Exception | LinkageError e) {
                 log.println("snout-engine: the background sync failed: " + SnoutEngine.describe(e));
             }
         });
+    }
+
+    /**
+     * The builds the start went on without (see {@link ProjectSync#syncEarly}): when their syncs
+     * are in (and the bridge's first compile is done, as for a background sync), they join the
+     * model, jdtls imports them, and their Scala compiles.
+     */
+    void lateBuilds(Collection<CompletableFuture<JsonObject>> late, Runnable recordInputs) {
+        pool.submit(() -> {
+            List<JsonObject> entries = new ArrayList<>();
+            for (CompletableFuture<JsonObject> f : late) {
+                try {
+                    entries.add(f.get());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (ExecutionException e) {
+                    log.println("snout-engine: a build's sync failed: " + SnoutEngine.describe(e.getCause()));
+                }
+            }
+            scalaQueue.submit(() -> {
+                try {
+                    merge(entries, "the builds still syncing at the start", recordInputs);
+                } catch (Exception | LinkageError e) {
+                    log.println("snout-engine: the builds still syncing at the start did not join: " + SnoutEngine.describe(e));
+                }
+            });
+        });
+    }
+
+    /**
+     * Puts fresh entries of builds in the model in place of theirs, where they changed: a build
+     * that fails now keeps its last good model (as a start does) unless it had none. Then the
+     * model is written, jdtls imports the projects again, their Scala compiles and the app hears
+     * {@code snout/modelChanged}.
+     */
+    private void merge(List<JsonObject> entries, String what, Runnable recordInputs) throws Exception {
+        List<String> changed = new ArrayList<>();
+        synchronized (model) {
+            JsonArray all = model.getAsJsonArray("gradleBuilds");
+            for (JsonObject fresh : entries) {
+                for (int i = 0; i < all.size(); i++) {
+                    JsonObject old = all.get(i).getAsJsonObject();
+                    if (!string(old, "id").equals(string(fresh, "id"))) {
+                        continue;
+                    }
+                    String was = string(old, "status");
+                    boolean placeholder = "syncing".equals(was);
+                    if ("failed".equals(string(fresh, "status")) && !"failed".equals(was) && !placeholder) {
+                        // keep the last good model, as a start does, with what went wrong now
+                        if (old.has("late")) {
+                            old.remove("late");
+                            old.add("error", fresh.get("error"));
+                            old.add("reason", fresh.get("reason"));
+                            changed.add(string(fresh, "id"));
+                        }
+                        break;
+                    }
+                    if (placeholder || !ScalaBridge.canonicalHash(old).equals(ScalaBridge.canonicalHash(fresh))) {
+                        all.set(i, fresh);
+                        changed.add(string(fresh, "id"));
+                    }
+                }
+            }
+            if (!changed.isEmpty()) {
+                ProjectModel.assemble(model);
+            }
+        }
+        recordInputs.run();
+        if (changed.isEmpty()) {
+            log.println("snout-engine: " + what + " found nothing new");
+            return;
+        }
+        log.println("snout-engine: " + what + " changed " + String.join(", ", changed));
+        ScalaBridge.Work work = ScalaBridge.plan(model, plans.values(), bridge == null ? null : bridgeState);
+        ScalaBridge.annotate(work);
+        bridge = work;
+        Readiness r = readiness;
+        if (r != null) {
+            r.model(model);
+        }
+        writeModel();
+        imported = work.folderSet();
+        reimport(what + " changed " + String.join(", ", changed)).get(10, TimeUnit.MINUTES);
+        compileScala(new ScalaBridge.Selection(new LinkedHashSet<>(changed), Set.of(), Set.of()), ProjectSync.defaultParallelism(), null);
+        notify("snout/modelChanged", new JsonObject());
     }
 
     /** Where the bridge keeps its state, for a plan made after a background sync. */

@@ -29,6 +29,11 @@ import java.util.List;
 public final class SnoutProjectImporter extends AbstractProjectImporter {
     public static final String MODEL_PROPERTY = "snout.model";
 
+    static {
+        // jdtls loads the importers at every start: the workspace is saved however it ends.
+        SaveOnExit.register();
+    }
+
     private ImportPlan plan;
 
     @Override

@@ -213,6 +213,11 @@ final class ModelCache {
             String id = string(entry, "id");
             String status = string(entry, "status");
             String error = string(entry, "error");
+            // A build the start went on without, whose sync did not come in.
+            if (entry.has("late") && entry.get("late").getAsBoolean()) {
+                out.add(id);
+                continue;
+            }
             if (("failed".equals(status) || "stale".equals(status)) && !entry.has("needsJdk")
                 && (error == null || TRANSIENT.matcher(error).find())) {
                 out.add(id);

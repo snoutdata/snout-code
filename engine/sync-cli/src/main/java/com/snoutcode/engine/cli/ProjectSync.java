@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -90,6 +91,120 @@ public final class ProjectSync {
         ProjectModel.assemble(model);
         model.addProperty("syncMillis", (System.nanoTime() - start) / 1_000_000);
         return model;
+    }
+
+    /**
+     * How long a start waits for the last builds once most are done (see {@link #syncEarly}): no
+     * build finished for this long, and those still syncing are at most a third of them.
+     */
+    static final long LATE_QUIET_MILLIS = 2000;
+
+    /** A sync that went on without some builds: theirs come when {@code late} completes. */
+    public record Early(JsonObject model, Map<Plan, CompletableFuture<JsonObject>> late) {
+    }
+
+    /**
+     * Syncs the planned builds as {@link #sync} does, but does not wait for the last few: once
+     * at most a third of the builds still sync and none finished for {@link #LATE_QUIET_MILLIS}
+     * (a build that is slow to configure, or slow to fail), the model is assembled without them.
+     * Each of those is in the model as a placeholder, {@code status: "syncing"} and
+     * {@code late: true}, and its sync goes on: its entry completes its future in {@code late}.
+     */
+    public static Early syncEarly(Options options, List<Plan> plans, long quietMillis) throws IOException {
+        long start = System.nanoTime();
+        File folder = options.sync.projectDir.getCanonicalFile();
+        Map<Plan, CompletableFuture<JsonObject>> futures = new LinkedHashMap<>();
+        plans.forEach(p -> futures.put(p, new CompletableFuture<>()));
+        Object changed = new Object();
+        long[] lastDone = {System.nanoTime()};
+        Thread lanes = new Thread(() -> {
+            try {
+                lanes(plans, options.parallel, plan -> {
+                    JsonObject entry = syncOne(plan, options.log);
+                    synchronized (changed) {
+                        futures.get(plan).complete(entry);
+                        lastDone[0] = System.nanoTime();
+                        changed.notifyAll();
+                    }
+                    return entry;
+                });
+            } catch (IOException | RuntimeException e) {
+                futures.values().forEach(f -> f.completeExceptionally(e));
+            } finally {
+                synchronized (changed) {
+                    changed.notifyAll();
+                }
+            }
+        }, "snout-sync-lanes");
+        lanes.setDaemon(true);
+        lanes.start();
+        synchronized (changed) {
+            while (true) {
+                long pending = futures.values().stream().filter(f -> !f.isDone()).count();
+                if (pending == 0) {
+                    break;
+                }
+                long quiet = (System.nanoTime() - lastDone[0]) / 1_000_000;
+                if (goOn(pending, plans.size(), quiet, quietMillis)) {
+                    break;
+                }
+                try {
+                    changed.wait(Math.max(10, quietMillis - quiet));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("interrupted", e);
+                }
+            }
+        }
+        JsonArray builds = new JsonArray();
+        Map<Plan, CompletableFuture<JsonObject>> late = new LinkedHashMap<>();
+        for (Map.Entry<Plan, CompletableFuture<JsonObject>> e : futures.entrySet()) {
+            CompletableFuture<JsonObject> f = e.getValue();
+            if (f.isDone() && !f.isCompletedExceptionally()) {
+                builds.add(f.join());
+            } else if (f.isDone()) {
+                throw new IOException(f.handle((v, x) -> x).join());
+            } else {
+                builds.add(placeholder(e.getKey()));
+                late.put(e.getKey(), f);
+            }
+        }
+        JsonObject model = new JsonObject();
+        model.addProperty("modelVersion", MODEL_VERSION);
+        model.addProperty("pluginModelVersion", ProjectModelBuilder.MODEL_VERSION);
+        model.addProperty("rootDir", folder.getAbsolutePath());
+        model.addProperty("name", folder.getName());
+        model.add("gradleBuilds", builds);
+        ProjectModel.assemble(model);
+        model.addProperty("syncMillis", (System.nanoTime() - start) / 1_000_000);
+        return new Early(model, late);
+    }
+
+    /**
+     * Whether a start goes on without the {@code pending} builds of {@code total}: some are done,
+     * at most a third still sync, and none finished for {@code quietMillis}.
+     */
+    static boolean goOn(long pending, long total, long quiet, long quietMillis) {
+        return pending > 0 && pending < total && pending * 3 <= total && quiet >= quietMillis;
+    }
+
+    /** A build still syncing, in a model that went on without it. */
+    static JsonObject placeholder(Plan plan) {
+        JsonObject out = new JsonObject();
+        out.addProperty("id", plan.id());
+        out.addProperty("rootDir", plan.rootDir().getAbsolutePath());
+        if (plan.maven()) {
+            out.addProperty("tool", "maven");
+            out.addProperty("mavenVersion", plan.gradleVersion() == null ? null : plan.gradleVersion().replaceFirst("^maven-", ""));
+        } else {
+            out.addProperty("gradleVersion", plan.gradleVersion());
+        }
+        out.addProperty("javaVersion", plan.jdk() == null ? null : plan.jdk().version());
+        out.add("builds", new JsonArray());
+        out.addProperty("status", "syncing");
+        out.addProperty("late", true);
+        out.addProperty("reason", "Still syncing");
+        return out;
     }
 
     /** The builds of the folder, each with its id, Gradle version, JDK and own options. */
@@ -355,11 +470,28 @@ public final class ProjectSync {
         if (error == null || jdk == null || JavaHomes.gradleVersion(gradleVersion) == null) {
             return null;
         }
+        // A plugin that needs a newer Java than the daemon's ("Android Gradle plugin requires
+        // Java 11 to run"): the LTS release at or above it, when the build's Gradle runs on that.
+        Matcher needs = PLUGIN_NEEDS_JAVA.matcher(error);
+        if (needs.find()) {
+            int wanted = Integer.parseInt(needs.group(1));
+            int lts = JavaHomes.lts(gradleVersion, JavaHomes.maxJava(gradleVersion));
+            for (int candidate : new int[] {8, 11, 17, 21, 25}) {
+                if (candidate >= wanted && candidate <= JavaHomes.maxJava(gradleVersion)) {
+                    lts = candidate;
+                    break;
+                }
+            }
+            if (lts >= wanted && jdk.feature() < wanted) {
+                return lts;
+            }
+        }
         boolean mismatch = GROOVY_ON_NEW_JAVA.matcher(error).find() || error.contains("Unsupported Java")
             || jdk.feature() > JavaHomes.maxJava(gradleVersion) || jdk.feature() < JavaHomes.minJava(gradleVersion);
         return mismatch ? JavaHomes.lts(gradleVersion, JavaHomes.wantedJava(gradleVersion, null)) : null;
     }
 
+    private static final Pattern PLUGIN_NEEDS_JAVA = Pattern.compile("requires Java (\\d+) to run");
     private static final Pattern CLASS_VERSION = Pattern.compile("class file (?:major )?version (\\d+)");
     private static final Pattern PLUGIN_NOT_FOUND = Pattern.compile("Plugin \\[id: '([^']+)'(?:, version: '([^']+)')?[^]]*\\] was not found");
     private static final Pattern REQUIRES_GRADLE = Pattern.compile("[^\\n.]*requires Gradle [^\\n]*");
@@ -401,6 +533,10 @@ public final class ProjectSync {
         // The innermost cause usually says what is wrong; the outer ones say where.
         String[] causes = error.split("\n\\s*caused by: ");
         String last = causes[causes.length - 1].split("\n")[0].trim();
+        if (causes[0].startsWith(GradleSaid.PREFIX)) {
+            // What Gradle printed says more than an exception the Tooling API could not carry.
+            last = GradleSaid.deepest(causes[0].substring(GradleSaid.PREFIX.length()));
+        }
         m = SCRIPT_LOCATION.matcher(error);
         String where = m.find() ? new File(m.group(1)).getName() + ":" + m.group(2) + ": " : "";
         String reason = where + last;

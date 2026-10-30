@@ -150,9 +150,17 @@ public final class Sync {
             }
             if (options.gradleOutput != null) {
                 action.setStandardOutput(options.gradleOutput);
-                action.setStandardError(options.gradleOutput);
             }
-            return action.run();
+            // Gradle's own account of a failure, kept: the Tooling API's exception sometimes
+            // cannot carry it (a failure it cannot deserialize says only "invalid type code").
+            GradleSaid.Tail stderr = new GradleSaid.Tail(options.gradleOutput);
+            action.setStandardError(stderr);
+            try {
+                return action.run();
+            } catch (RuntimeException e) {
+                String said = GradleSaid.whatWentWrong(stderr.text());
+                throw said == null ? e : new GradleSaid(said, e);
+            }
         }
     }
 

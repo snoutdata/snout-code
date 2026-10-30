@@ -105,6 +105,11 @@ final class Lsp {
         }
     }
 
+    /** Milliseconds since this JVM started, for the log's timings. */
+    static long sinceStart() {
+        return System.currentTimeMillis() - java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
+    }
+
     /** How long the daemons get to end on their own before they are killed. */
     static final long DAEMON_GRACE_MILLIS = 3000;
 
@@ -159,6 +164,7 @@ final class Lsp {
         List<ProjectSync.Plan> plans = List.of();
         JsonObject inputs = null;
         Set<String> uncertain = Set.of();
+        Map<ProjectSync.Plan, java.util.concurrent.CompletableFuture<JsonObject>> late = Map.of();
         try {
             plans = ProjectSync.plan(project);
             // A start whose builds did not change since the last sync takes that sync's model.
@@ -173,12 +179,15 @@ final class Lsp {
                 // Each stage announces itself on stderr, for a client that shows progress.
                 log.println("snout-engine: syncing " + projectDir + (changed == null ? "" : " (" + changed + ")"));
                 readiness.syncing();
-                model = ProjectSync.sync(project, plans);
+                // The last few builds, when slow (to configure, or to fail), join in the background.
+                ProjectSync.Early early = ProjectSync.syncEarly(project, plans, ProjectSync.LATE_QUIET_MILLIS);
+                model = early.model();
+                late = early.late();
                 // A broken build file must not cost the user the editor: a build that fails now keeps
                 // its model from the last sync that worked.
                 int stale = keepLastGood(model, modelFile);
                 if (stale > 0) {
-                    log.println("snout-engine: using the last good model for " + stale + " build(s) that failed");
+                    log.println("snout-engine: using the last good model for " + stale + " build(s) that failed or still sync");
                 }
                 inputs = ModelCache.inputs(model, plans, optionsKey, options.gradleUserHome);
             }
@@ -252,7 +261,7 @@ final class Lsp {
         // app) would hold its lock, and the new one could not start.
         Leftovers.stopJdtls(home.resolve("workspace"), log);
         log.println("snout-engine: starting jdtls (" + command.stream().filter(a -> a.startsWith("-Xmx")).reduce((a, b) -> b).orElse("")
-            + ")");
+            + ", " + sinceStart() + " ms after the engine started)");
         Process process = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.INHERIT).start();
         LspProxy proxy = new LspProxy(System.in, appOut, process, log);
         Engine engine = new Engine(model, plans, proxy::toApp, log, home.resolve("runs"));
@@ -272,16 +281,20 @@ final class Lsp {
         if (bridge != null) {
             engine.startScala(project.parallel);
         }
+        JsonObject synced = model;
+        List<ProjectSync.Plan> planned = plans;
+        Runnable recordInputs = () -> {
+            try {
+                ModelCache.write(inputsFile, ModelCache.inputs(synced, planned, optionsKey, options.gradleUserHome));
+            } catch (IOException e) {
+                log.println("snout-engine: could not record the sync's inputs: " + SnoutEngine.describe(e));
+            }
+        };
         if (!uncertain.isEmpty()) {
-            JsonObject synced = model;
-            List<ProjectSync.Plan> planned = plans;
-            engine.resyncLater(uncertain, project, () -> {
-                try {
-                    ModelCache.write(inputsFile, ModelCache.inputs(synced, planned, optionsKey, options.gradleUserHome));
-                } catch (IOException e) {
-                    log.println("snout-engine: could not record the sync's inputs: " + SnoutEngine.describe(e));
-                }
-            });
+            engine.resyncLater(uncertain, project, recordInputs);
+        }
+        if (!late.isEmpty()) {
+            engine.lateBuilds(late.values(), recordInputs);
         }
         Thread stop = new Thread(() -> {
             engine.shutdown();
@@ -439,7 +452,7 @@ final class Lsp {
     }
 
     /**
-     * Replaces each failed build of the model with its entry from the last model written, when
+     * Replaces each failed build of the model (and each still syncing) with its entry from the last model written, when
      * that sync worked, marked stale and carrying the new error. Returns how many it replaced.
      */
     static int keepLastGood(JsonObject model, Path lastModel) {
@@ -451,7 +464,8 @@ final class Lsp {
             JsonObject last = JsonParser.parseString(Files.readString(lastModel)).getAsJsonObject();
             for (JsonElement g : last.has("gradleBuilds") ? last.getAsJsonArray("gradleBuilds") : new JsonArray()) {
                 JsonObject entry = g.getAsJsonObject();
-                if (entry.has("status") && !"failed".equals(entry.get("status").getAsString()) && entry.has("rootDir")) {
+                String status = entry.has("status") ? entry.get("status").getAsString() : "failed";
+                if (!"failed".equals(status) && !"syncing".equals(status) && entry.has("rootDir")) {
                     previous.put(entry.get("rootDir").getAsString(), entry);
                 }
             }
@@ -463,12 +477,18 @@ final class Lsp {
         for (int i = 0; i < builds.size(); i++) {
             JsonObject entry = builds.get(i).getAsJsonObject();
             JsonObject last = previous.get(entry.get("rootDir").getAsString());
-            if (!"failed".equals(entry.get("status").getAsString()) || last == null) {
+            String status = entry.get("status").getAsString();
+            if (!"failed".equals(status) && !"syncing".equals(status) || last == null) {
                 continue;
             }
             JsonObject stale = last.deepCopy();
             stale.addProperty("id", entry.get("id").getAsString());
             stale.addProperty("status", "stale");
+            stale.remove("late");
+            if (entry.has("late")) {
+                // Still syncing: the last good model until the sync comes in.
+                stale.add("late", entry.get("late"));
+            }
             stale.add("error", entry.get("error"));
             stale.add("reason", entry.get("reason"));
             if (entry.has("needsJdk")) {
@@ -622,9 +642,18 @@ final class Lsp {
         }
     }
 
+    /**
+     * Writes {@code text} (and a newline) to {@code file} by replacing it whole, unless it holds
+     * that already: the app reads the model again each time the file changes, a few MB of JSON
+     * on a large project.
+     */
     static void writeAtomically(Path file, String text) throws IOException {
+        byte[] bytes = (text + "\n").getBytes(StandardCharsets.UTF_8);
+        if (Files.isRegularFile(file) && Files.size(file) == bytes.length && java.util.Arrays.equals(Files.readAllBytes(file), bytes)) {
+            return;
+        }
         Path temp = Files.createTempFile(file.getParent(), file.getFileName().toString(), ".tmp");
-        Files.writeString(temp, text + "\n", StandardCharsets.UTF_8);
+        Files.write(temp, bytes);
         Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 

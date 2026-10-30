@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -204,9 +205,80 @@ class ProjectSyncTest {
             Could not resolve all artifacts for configuration ':classpath'.
               caused by: Cannot choose between the following variants of org.springframework.boot:spring-boot-gradle-plugin:3.1.1:
               - javadocElements""", "6.0.1", j11));
+        // A failure the Tooling API could not deserialize: what Gradle printed tells.
+        String printed = """
+            FAILURE: Build failed with an exception.
+
+            * What went wrong:
+            A problem occurred configuring root project 'old'.
+            > Could not resolve all artifacts for configuration ':classpath'.
+               > Could not resolve com.example:tool:1.0.
+                  > Something deep went wrong.
+
+            * Try:
+            Run with --stacktrace option to get the stack trace.
+            """;
+        String said = GradleSaid.whatWentWrong(printed);
+        assertEquals("Something deep went wrong.", GradleSaid.deepest(said));
+        String error = SnoutEngine.describe(new GradleSaid(said, new RuntimeException("invalid type code: 00")));
+        assertEquals("Something deep went wrong.", ProjectSync.reason(error, "6.0.1", j11));
+        assertNull(GradleSaid.whatWentWrong("BUILD SUCCESSFUL"));
         assertEquals("plugin com.example.missing 1.0 was not found",
             ProjectSync.reason("Plugin [id: 'com.example.missing', version: '1.0'] was not found in any of the following sources:",
                 "8.1.1", j11));
+    }
+
+    @Test
+    void aPluginThatNeedsANewerJavaAsksForIt() {
+        JavaHomes.Jdk j8 = new JavaHomes.Jdk(new File("/jdk8"), 8, "1.8.0_512");
+        String error = "Android Gradle plugin requires Java 11 to run. You are currently using Java 1.8.";
+        assertEquals(11, ProjectSync.jdkMismatch(error, "7.0.2", j8));
+        JavaHomes.Jdk j11 = new JavaHomes.Jdk(new File("/jdk11"), 11, "11.0.20");
+        assertNull(ProjectSync.jdkMismatch(error, "7.0.2", j11), "the JDK it has is new enough: something else is wrong");
+    }
+
+    @Test
+    void goesOnWithoutTheLastFewBuilds() {
+        assertFalse(ProjectSync.goOn(0, 21, 5000, 2000), "every build is in");
+        assertFalse(ProjectSync.goOn(21, 21, 5000, 2000), "none is in yet");
+        assertFalse(ProjectSync.goOn(8, 21, 5000, 2000), "more than a third still sync");
+        assertFalse(ProjectSync.goOn(2, 21, 1500, 2000), "a build finished a moment ago");
+        assertTrue(ProjectSync.goOn(2, 21, 2000, 2000));
+        assertFalse(ProjectSync.goOn(1, 2, 9000, 2000), "of two builds, the start waits for both");
+        assertTrue(ProjectSync.goOn(1, 3, 2000, 2000));
+    }
+
+    @Test
+    void aBuildStillSyncingIsAPlaceholderThenItsLastGoodModel(@TempDir Path dir) throws Exception {
+        ProjectSync.Plan plan = new ProjectSync.Plan("slow", new File("/w/slow"), "8.14.3", null, new Sync.Options(), null);
+        JsonObject placeholder = ProjectSync.placeholder(plan);
+        assertEquals("syncing", placeholder.get("status").getAsString());
+        assertTrue(placeholder.get("late").getAsBoolean());
+        JsonObject model = new JsonObject();
+        model.addProperty("rootDir", "/w");
+        model.addProperty("syncMillis", 1);
+        JsonArray builds = new JsonArray();
+        builds.add(placeholder);
+        model.add("gradleBuilds", builds);
+        ProjectModel.assemble(model);
+        assertEquals(0, model.getAsJsonArray("failedBuilds").size(), "still syncing is not failed");
+        assertTrue(SnoutEngine.summary(model).contains("still syncing: slow"), SnoutEngine.summary(model));
+        // With a model from an earlier sync, the build keeps it until its sync comes in.
+        JsonObject last = new JsonObject();
+        JsonArray lastBuilds = new JsonArray();
+        JsonObject good = new JsonObject();
+        good.addProperty("id", "slow");
+        good.addProperty("rootDir", "/w/slow");
+        good.addProperty("status", "synced");
+        good.add("builds", new JsonArray());
+        lastBuilds.add(good);
+        last.add("gradleBuilds", lastBuilds);
+        Path file = dir.resolve("model.json");
+        Files.writeString(file, last.toString());
+        assertEquals(1, Lsp.keepLastGood(model, file));
+        JsonObject kept = model.getAsJsonArray("gradleBuilds").get(0).getAsJsonObject();
+        assertEquals("stale", kept.get("status").getAsString());
+        assertTrue(kept.get("late").getAsBoolean(), "and syncs again on the next start should it not come in");
     }
 
     @Test

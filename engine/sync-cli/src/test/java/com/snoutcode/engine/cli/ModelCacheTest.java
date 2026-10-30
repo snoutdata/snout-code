@@ -102,8 +102,12 @@ class ModelCacheTest {
         bs.add(b);
         snapshot.add("builds", bs);
         builds.add(snapshot);
+        // A build the start went on without, whose sync never came in (the engine ended first).
+        JsonObject late = entry("late", "syncing", null, null);
+        late.addProperty("late", true);
+        builds.add(late);
         model.add("gradleBuilds", builds);
-        assertEquals(Set.of("offline", "snapshot"), ModelCache.uncertain(model));
+        assertEquals(Set.of("offline", "snapshot", "late"), ModelCache.uncertain(model));
     }
 
     private static JsonObject entry(String id, String status, String error, Integer needsJdk) {

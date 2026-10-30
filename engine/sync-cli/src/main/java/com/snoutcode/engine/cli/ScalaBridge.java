@@ -776,6 +776,13 @@ public final class ScalaBridge {
         return results;
     }
 
+    /**
+     * How long the first build handed out after a unit compiled goes alone, so that it, the
+     * longest or the open files', gets the daemon the unit compiled on: warm, its Scala compiler
+     * loaded. A build that starts a daemon of its own took 10 s longer to compile.
+     */
+    static final long HEAD_START_MILLIS = 1500;
+
     /** Hands out units and builds as their units are done. */
     private static final class Scheduler {
         private final Work work;
@@ -783,7 +790,12 @@ public final class ScalaBridge {
         private final List<String> builds;
         private final Set<Object> running = new HashSet<>();
         private final Supplier<Collection<String>> preferred;
+        private final Map<String, Long> costs = new HashMap<>();
         private boolean aborted;
+        /** A unit finished since a build was last handed out. */
+        private boolean unitDone;
+        /** Until when no other build is handed out (nanoTime). */
+        private long headStartUntil;
 
         Scheduler(Work work, List<Unit> units, List<String> builds, Supplier<Collection<String>> preferred) {
             this.work = work;
@@ -804,11 +816,24 @@ public final class ScalaBridge {
                 List<String> ready = builds.stream()
                     .filter(b -> work.unitsOf(b).stream().noneMatch(u -> units.contains(u) || running.contains(u)))
                     .toList();
+                long now = System.nanoTime();
+                if (!ready.isEmpty() && now < headStartUntil) {
+                    // The build handed out just now goes first to the daemon a unit warmed.
+                    wait(Math.max(1, (headStartUntil - now) / 1_000_000));
+                    continue;
+                }
                 if (!ready.isEmpty()) {
                     Collection<String> first = preferred.get();
-                    String pick = ready.stream().filter(first::contains).findFirst().orElse(ready.get(0));
+                    // The open files' builds first, then the longest compiles, so the last to
+                    // finish is a short one.
+                    String pick = ready.stream().filter(first::contains).findFirst()
+                        .orElseGet(() -> ready.stream().max(Comparator.comparingLong(this::cost)).orElseThrow());
                     builds.remove(pick);
                     running.add(pick);
+                    if (unitDone) {
+                        unitDone = false;
+                        headStartUntil = System.nanoTime() + HEAD_START_MILLIS * 1_000_000;
+                    }
                     return pick;
                 }
                 if (units.isEmpty() && builds.isEmpty()) {
@@ -821,7 +846,39 @@ public final class ScalaBridge {
 
         synchronized void done(Object item) {
             running.remove(item);
+            if (item instanceof Unit) {
+                unitDone = true;
+            }
             notifyAll();
+        }
+
+        /**
+         * What a build's compile is likely to take: its last good one, else the Scala and Java
+         * files of its own source folders (the units' folders count for none: they are compiled).
+         */
+        private long cost(String build) {
+            long last = work.lastMillis("builds", build);
+            if (last > 0) {
+                return last;
+            }
+            return costs.computeIfAbsent(build, b -> {
+                Set<Path> shared = new HashSet<>();
+                work.unitsOf(b).forEach(u -> shared.addAll(u.dirs));
+                long files = 0;
+                for (Compile c : work.compilesOf(b)) {
+                    for (Path dir : c.srcDirs) {
+                        if (shared.contains(dir) || !Files.isDirectory(dir)) {
+                            continue;
+                        }
+                        try (Stream<Path> walk = Files.walk(dir)) {
+                            files += walk.filter(f -> f.toString().endsWith(".scala") || f.toString().endsWith(".java")).count();
+                        } catch (IOException | UncheckedIOException e) {
+                            // an unreadable folder counts for nothing
+                        }
+                    }
+                }
+                return files;
+            });
         }
 
         synchronized void abort() {

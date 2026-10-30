@@ -215,9 +215,14 @@ public final class SnoutEngine {
         int projects = 0;
         int errors = 0;
         List<String> failed = new ArrayList<>();
+        List<String> late = new ArrayList<>();
         for (JsonElement g : model.getAsJsonArray("gradleBuilds")) {
             JsonObject gradleBuild = g.getAsJsonObject();
             String status = gradleBuild.get("status").getAsString();
+            if ("syncing".equals(status)) {
+                late.add(gradleBuild.get("id").getAsString());
+                continue;
+            }
             if (!"synced".equals(status)) {
                 failed.add(gradleBuild.get("id").getAsString() + " (" + gradleBuild.get("reason").getAsString()
                     + ("stale".equals(status) ? "; using the last good model" : "") + ")");
@@ -233,9 +238,10 @@ public final class SnoutEngine {
                 }
             }
         }
-        return String.format("synced %d of %d build(s), %d project(s) in %d ms; %d error(s)%s",
-            synced, synced + failed.size(), projects, model.get("syncMillis").getAsLong(), errors,
-            failed.isEmpty() ? "" : "; failed: " + String.join(", ", failed));
+        return String.format("synced %d of %d build(s), %d project(s) in %d ms; %d error(s)%s%s",
+            synced, synced + failed.size() + late.size(), projects, model.get("syncMillis").getAsLong(), errors,
+            failed.isEmpty() ? "" : "; failed: " + String.join(", ", failed),
+            late.isEmpty() ? "" : "; still syncing: " + String.join(", ", late));
     }
 
     static String describe(Throwable e) {

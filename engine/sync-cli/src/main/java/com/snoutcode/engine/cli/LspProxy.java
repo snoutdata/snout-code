@@ -36,6 +36,8 @@ final class LspProxy implements Engine.Jdtls {
     private final Process jdtls;
     private final OutputStream jdtlsIn;
     private final PrintStream log;
+    /** When jdtls was started, for the time it takes to be ready. */
+    private final long jdtlsStarted = System.nanoTime();
     private final Map<String, CompletableFuture<JsonElement>> pending = new ConcurrentHashMap<>();
     private final AtomicInteger ids = new AtomicInteger();
     private final CompletableFuture<Void> initialized = new CompletableFuture<>();
@@ -148,6 +150,8 @@ final class LspProxy implements Engine.Jdtls {
                     JsonElement type = message.getAsJsonObject("params").get("type");
                     if (type != null && "ServiceReady".equals(type.getAsString()) && !serviceReady.isDone()) {
                         serviceReady.complete(null);
+                        log.println("snout-engine: jdtls is ready, in " + (System.nanoTime() - jdtlsStarted) / 1_000_000 + " ms ("
+                            + Lsp.sinceStart() + " ms after the engine started)");
                         engine.jdtlsReady();
                         SpringSupport s = spring;
                         if (s != null) {
