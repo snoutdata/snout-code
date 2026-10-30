@@ -1,9 +1,12 @@
 package com.snoutcode.engine.cli;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * A Gradle failure with what Gradle printed about it ("What went wrong"), for a build whose
@@ -35,20 +38,48 @@ final class GradleSaid extends RuntimeException {
 
     /** The most specific line of Gradle's account: its deepest {@code >} line, else its first. */
     static String deepest(String said) {
+        String[] lines = said.split("\n");
         String best = null;
+        int at = 0;
         int depth = -1;
-        for (String line : said.split("\n")) {
-            String trimmed = line.strip();
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].strip();
             if (!trimmed.startsWith(">")) {
                 continue;
             }
-            int indent = line.indexOf('>');
+            int indent = lines[i].indexOf('>');
             if (indent > depth) {
                 depth = indent;
                 best = trimmed.substring(1).strip();
+                at = i;
             }
         }
-        return best != null ? best : said.split("\n")[0].strip();
+        return best != null ? saying(lines, at, best) : saying(lines, 0, lines[0].strip());
+    }
+
+    /** A build script Groovy or Kotlin could not compile, as the compiler names it. */
+    private static final Pattern SCRIPT_FILE = Pattern.compile("(?:build|settings|script) file '([^']+)': ");
+
+    /**
+     * {@code first}, line {@code at} of {@code lines}; when it only announces what follows
+     * ("startup failed:", "Script compilation error:"), the next line that says something, with
+     * the script it names by its file name.
+     */
+    static String saying(String[] lines, int at, String first) {
+        if (!first.endsWith(":")) {
+            return first;
+        }
+        for (int i = at + 1; i < lines.length; i++) {
+            String line = lines[i].strip();
+            if (line.startsWith(">")) {
+                break;
+            }
+            if (!line.isEmpty()) {
+                Matcher m = SCRIPT_FILE.matcher(line);
+                return m.lookingAt() ? new File(m.group(1)).getName() + ":" + line.substring(m.end()) : line;
+            }
+        }
+        return first;
     }
 
     /** Passes output on (when there is somewhere to) and keeps its last 64 KB. */

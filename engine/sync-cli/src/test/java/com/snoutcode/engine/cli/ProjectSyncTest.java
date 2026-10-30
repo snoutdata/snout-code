@@ -223,6 +223,21 @@ class ProjectSyncTest {
         String error = SnoutEngine.describe(new GradleSaid(said, new RuntimeException("invalid type code: 00")));
         assertEquals("Something deep went wrong.", ProjectSync.reason(error, "6.0.1", j11));
         assertNull(GradleSaid.whatWentWrong("BUILD SUCCESSFUL"));
+        // A script that does not compile: the compiler's message, not its "startup failed:".
+        assertEquals("build.gradle:1: Unexpected input: '{' @ line 1, column 20.", ProjectSync.reason("""
+            Gradle: Could not compile build file '/w/broken/app/build.gradle'.
+            > startup failed:
+              build file '/w/broken/app/build.gradle': 1: Unexpected input: '{' @ line 1, column 20.
+                 this is not groovy {
+                                    ^
+              caused by: Could not compile build file '/w/broken/app/build.gradle'.
+              caused by: startup failed:
+            build file '/w/broken/app/build.gradle': 1: Unexpected input: '{' @ line 1, column 20.
+               this is not groovy {
+                                  ^
+
+            1 error
+            """, "8.14.3", j11));
         assertEquals("plugin com.example.missing 1.0 was not found",
             ProjectSync.reason("Plugin [id: 'com.example.missing', version: '1.0'] was not found in any of the following sources:",
                 "8.1.1", j11));

@@ -532,7 +532,8 @@ public final class ProjectSync {
         }
         // The innermost cause usually says what is wrong; the outer ones say where.
         String[] causes = error.split("\n\\s*caused by: ");
-        String last = causes[causes.length - 1].split("\n")[0].trim();
+        String[] lines = causes[causes.length - 1].split("\n");
+        String last = GradleSaid.saying(lines, 0, lines[0].trim());
         if (causes[0].startsWith(GradleSaid.PREFIX)) {
             // What Gradle printed says more than an exception the Tooling API could not carry.
             last = GradleSaid.deepest(causes[0].substring(GradleSaid.PREFIX.length()));
