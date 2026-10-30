@@ -1,13 +1,14 @@
 #!/bin/bash
-# The three demo projects of the user guide's screenshots, made under $1: shop (a Spring Boot
-# web app, one test failing on purpose), ledger (a build of three modules with a version
-# catalog) and greeter (a small Java app). Each is a Git repository with a little history,
-# branches and some work in progress. Run by scripts/docs-screenshots.sh.
+# The demo projects of the user guide's screenshots, made under $1: shop (a Spring Boot web
+# app, one test failing on purpose), ledger (a build of three modules with a version catalog),
+# greeter (a small Java app) and pantry (a Maven build: a library and a Spring Boot app under a
+# parent that imports Spring Boot's BOM, with profiles and one test failing on purpose). Each is
+# a Git repository with a little history. Run by scripts/docs-screenshots.sh.
 set -euo pipefail
 OUT="$1"
 # The Gradle wrapper comes from the engine's build.
 WRAPPER="$(cd "$(dirname "$0")/../../engine" && pwd)"
-rm -rf "$OUT/shop" "$OUT/ledger" "$OUT/greeter"
+rm -rf "$OUT/shop" "$OUT/ledger" "$OUT/greeter" "$OUT/pantry"
 mkdir -p "$OUT"
 
 wrapper() {
@@ -813,4 +814,372 @@ EOF
 commit "$G" alex "A greeter"
 perl -pi -e 's/\/\/ The greeting\./\/\/ The greeting, with the name./' "$G/src/main/java/demo/Greeter.java"
 commit "$G" alex "Say what the greeting is"
+############################################################ pantry
+# A Maven reactor: a parent POM that imports Spring Boot's BOM, a library (stock) and a Spring
+# Boot application (web) that uses it, a dev profile on by default and a prod one off. No
+# wrapper: SnoutCode runs the Maven it downloads.
+M="$OUT/pantry"
+MS="$M/stock/src/main/java/com/example/pantry/stock"
+MT="$M/stock/src/test/java/com/example/pantry/stock"
+MW="$M/web/src/main/java/com/example/pantry/web"
+MWT="$M/web/src/test/java/com/example/pantry/web"
+mkdir -p "$MS" "$MT" "$MW" "$MWT" "$M/web/src/main/resources"
+init "$M"
+printf 'target/\n*.class\n.idea/\n' >"$M/.gitignore"
+cat >"$M/pom.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.example</groupId>
+  <artifactId>pantry</artifactId>
+  <version>1.2.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>Pantry</name>
+
+  <modules>
+    <module>stock</module>
+    <module>web</module>
+  </modules>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <spring-boot.version>3.3.5</spring-boot.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Spring Boot's versions, for every module. -->
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring-boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.example</groupId>
+        <artifactId>stock</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+          <version>${spring-boot.version}</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+          <configuration>
+            <parameters>true</parameters>
+          </configuration>
+        </plugin>
+        <plugin>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.5.2</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>dev</id>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+      <properties>
+        <spring.profiles.active>dev</spring.profiles.active>
+      </properties>
+    </profile>
+    <profile>
+      <id>prod</id>
+      <properties>
+        <spring.profiles.active>prod</spring.profiles.active>
+      </properties>
+    </profile>
+  </profiles>
+</project>
+EOF
+cat >"$M/stock/pom.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>pantry</artifactId>
+    <version>1.2.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>stock</artifactId>
+  <name>Pantry stock</name>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
+EOF
+cat >"$M/web/pom.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>pantry</artifactId>
+    <version>1.2.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>web</artifactId>
+  <name>Pantry web</name>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>stock</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-configuration-processor</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+EOF
+cat >"$MS/Item.java" <<'EOF'
+package com.example.pantry.stock;
+
+/** Something on the shelves, how many of it, and the mark at which to buy more. */
+public record Item(String name, int quantity, int low) {
+
+    public boolean runningLow() {
+        return quantity <= low;
+    }
+}
+EOF
+cat >"$MS/Shelves.java" <<'EOF'
+package com.example.pantry.stock;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.stereotype.Component;
+
+/** What the pantry holds. */
+@Component
+public class Shelves {
+
+    private final Map<String, Item> items = new ConcurrentHashMap<>();
+
+    public Shelves() {
+        put(new Item("rice", 6, 2));
+        put(new Item("olive oil", 1, 1));
+        put(new Item("coffee", 0, 1));
+    }
+
+    public List<Item> all() {
+        return items.values().stream().sorted(Comparator.comparing(Item::name)).toList();
+    }
+
+    public List<Item> toBuy() {
+        return all().stream().filter(Item::runningLow).toList();
+    }
+
+    public Item take(String name, int amount) {
+        Item item = items.get(name);
+        if (item == null) {
+            throw new IllegalArgumentException("No " + name + " in the pantry");
+        }
+        Item left = new Item(name, Math.max(0, item.quantity() - amount), item.low());
+        put(left);
+        return left;
+    }
+
+    public void put(Item item) {
+        items.put(item.name(), item);
+    }
+}
+EOF
+cat >"$MT/ShelvesTest.java" <<'EOF'
+package com.example.pantry.stock;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import org.junit.jupiter.api.Test;
+
+class ShelvesTest {
+
+    @Test
+    void takingLeavesWhatIsLeft() {
+        assertEquals(4, new Shelves().take("rice", 2).quantity());
+    }
+
+    @Test
+    void nothingGoesBelowZero() {
+        assertEquals(0, new Shelves().take("olive oil", 5).quantity());
+    }
+
+    @Test
+    void listsWhatToBuy() {
+        // An item at its low mark is to buy now; this test still counts only the empty ones.
+        assertEquals(1, new Shelves().toBuy().size());
+    }
+
+    @Test
+    void refusesWhatIsNotThere() {
+        assertThrows(IllegalArgumentException.class, () -> new Shelves().take("saffron", 1));
+    }
+}
+EOF
+cat >"$MW/PantryApplication.java" <<'EOF'
+package com.example.pantry.web;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+
+@SpringBootApplication(scanBasePackages = "com.example.pantry")
+@EnableConfigurationProperties(PantryProperties.class)
+public class PantryApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(PantryApplication.class, args);
+    }
+}
+EOF
+cat >"$MW/PantryProperties.java" <<'EOF'
+package com.example.pantry.web;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+/** The pantry's settings, from application.properties. */
+@ConfigurationProperties("pantry")
+public record PantryProperties(String owner, int reorderAt) {
+}
+EOF
+cat >"$MW/ShelfController.java" <<'EOF'
+package com.example.pantry.web;
+
+import com.example.pantry.stock.Item;
+import com.example.pantry.stock.Shelves;
+import java.util.List;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/shelves")
+public class ShelfController {
+
+    private final Shelves shelves;
+    private final PantryProperties pantry;
+
+    public ShelfController(Shelves shelves, PantryProperties pantry) {
+        this.shelves = shelves;
+        this.pantry = pantry;
+    }
+
+    @GetMapping
+    public List<Item> all() {
+        return shelves.all();
+    }
+
+    @GetMapping("/to-buy")
+    public List<Item> toBuy() {
+        return shelves.toBuy();
+    }
+
+    @PostMapping("/{name}/take")
+    public Item take(@PathVariable String name) {
+        return shelves.take(name, 1);
+    }
+
+    @GetMapping("/owner")
+    public String owner() {
+        return pantry.owner();
+    }
+}
+EOF
+cat >"$M/web/src/main/resources/application.properties" <<'EOF'
+spring.application.name=pantry
+server.port=8081
+pantry.owner=Alex
+pantry.reorder-at=2
+EOF
+cat >"$MWT/ShelfControllerTest.java" <<'EOF'
+package com.example.pantry.web;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.example.pantry.stock.Shelves;
+import org.junit.jupiter.api.Test;
+
+class ShelfControllerTest {
+
+    @Test
+    void takesOneAtATime() {
+        ShelfController controller = new ShelfController(new Shelves(), new PantryProperties("Alex", 2));
+        assertEquals(5, controller.take("rice").quantity());
+    }
+
+    @Test
+    void namesTheOwner() {
+        ShelfController controller = new ShelfController(new Shelves(), new PantryProperties("Alex", 2));
+        assertEquals("Alex", controller.owner());
+    }
+}
+EOF
+cat >"$M/README.md" <<'EOF'
+# pantry
+
+What is on the shelves, and what to buy: a Maven build of a library (stock) and a Spring Boot
+application (web).
+
+    mvn -pl web -am spring-boot:run
+EOF
+commit "$M" sam "Pantry: the shelves and their web app"
+perl -pi -e 's/^server.port=8081$/server.port=8081\nspring.jackson.default-property-inclusion=non_null/' "$M/web/src/main/resources/application.properties"
+commit "$M" alex "Leave empty fields out of the JSON"
 echo "done"

@@ -1,13 +1,13 @@
 //! The user guide's screenshots: the real app on the demo projects of `SNOUT_DOCS_SHOTS`
-//! (a folder holding `shop`, a Spring Boot web app; `ledger`, a multi-module build; and
-//! `greeter`, a small Java app; each a Git repository), with the real engine where it has
+//! (a folder holding `shop`, a Spring Boot web app; `ledger`, a multi-module build;
+//! `greeter`, a small Java app; and `pantry`, a Maven build; each a Git repository), with the real engine where it has
 //! something to say. Only with `SNOUT_DOCS_SHOTS` set; the PNGs go to `SNOUT_SCREENSHOT`.
 //! Each part copies the projects it uses into `~/projects` first; `HOME` is a scratch folder,
 //! so paths read as `~/projects/shop`.
 //!
 //! `scripts/docs-screenshots.sh` sets it all up and writes `docs/images`. `SNOUT_DOCS_JDK`
 //! names the JDK the builds run on; `SNOUT_DOCS_ONLY` takes only the parts it names
-//! (ledger, java, javatools, debug, welcome, wizard, settings, structure, git, blame, claude, palette, remote), separated
+//! (ledger, java, javatools, debug, welcome, wizard, settings, structure, git, blame, claude, palette, remote, maven), separated
 //! by commas. `remote` needs Docker and the Linux server builds; `SNOUT_DOCS_SSH_DIR` is a
 //! short folder for ssh's control sockets.
 
@@ -337,6 +337,10 @@ pub fn run(projects: PathBuf) {
     }
     if wanted("remote") {
         remote(&projects);
+    }
+    if wanted("maven") {
+        maven(&projects, ThemeChoice::Light, "light");
+        maven(&projects, ThemeChoice::Dark, "dark");
     }
 }
 
@@ -2147,4 +2151,233 @@ fn blame(theme: ThemeChoice, mode: &str) {
     w.with(|_, window, cx| e2.update(cx, |e, cx| e.go_to(27, 0, window, cx)));
     w.settle();
     w.snap("blame-agents-light");
+}
+
+/// Wait for a run to end (the last session).
+fn run_ended(w: &mut Win, secs: u64) -> bool {
+    let runs = w.runs();
+    w.pump(secs, &mut |cx| runs.read(cx).sessions.last().is_some_and(|s| s.ended.is_some()))
+}
+
+/// The Maven build: the Project view and a POM, the Maven window with a goal run, the tests,
+/// the application from its gutter, `spring-boot:run` with the processes, Project Structure
+/// and the reload bar. In the dark, the Maven window alone.
+fn maven(projects: &Path, theme: ThemeChoice, mode: &str) {
+    use snout_app::project_view::NodeId;
+    let pantry = copy(projects, "maven", "pantry");
+    let mut w = Win::new(settings(theme, vec![pantry.clone()], Some(pantry.clone())), true);
+    w.activity(Activity::Project);
+    engine_ready(&mut w, &pantry, 1500);
+    let runs = w.runs();
+    let ws = w.ws.clone();
+    let r = runs.clone();
+    let ok = w.pump(600, &mut |cx| !r.read(cx).maven.builds.is_empty());
+    println!("docs: maven goals {ok}");
+    let light = mode == "light";
+
+    if light {
+        // The Project view: the modules, the library's sources, the Maven files; the web
+        // module's POM in the editor.
+        let modules: Vec<String> = w.cx.update(|cx| {
+            let s = snout_app::project_model::store(cx).unwrap();
+            s.read(cx).current.as_ref().unwrap().modules.iter().map(|m| m.id.clone()).collect()
+        });
+        println!("docs: pantry modules {modules:?}");
+        let mut ids: Vec<NodeId> = modules.iter().map(|id| NodeId::Module(id.clone())).collect();
+        let stock = pantry.join("stock");
+        for d in ["src", "src/main", "src/main/java", "src/main/java/com", "src/main/java/com/example"] {
+            ids.push(NodeId::Dir(stock.join(d)));
+        }
+        for d in ["src/main/java/com/example/pantry", "src/main/java/com/example/pantry/stock"] {
+            ids.push(NodeId::Dir(stock.join(d)));
+        }
+        ids.push(NodeId::Scripts);
+        expand(&mut w, ids);
+        w.open(&pantry.join("web/pom.xml"), Some((14, 0)));
+        w.pump(5, &mut |_| false);
+        w.snap("maven-project-view-light");
+    }
+
+    // The Maven window: the profiles, the web module's lifecycle and Spring Boot's goals, and
+    // package run with the tests skipped.
+    w.tool(Tool::Maven);
+    w.cx.update(|cx| {
+        let m = ws.read(cx).maven.clone();
+        m.update(cx, |m, cx| {
+            m.reveal("package", cx);
+            m.reveal("spring-boot:run", cx);
+        })
+    });
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.set_maven_skip_tests(true, cx)));
+    let launch = snout_app::run::Launch::Maven {
+        build: "pantry".into(),
+        project: ":web".into(),
+        module: "web".into(),
+        goals: "package".into(),
+    };
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.start(launch, cx)));
+    let ok = run_ended(&mut w, 900);
+    println!("docs: maven package ended {ok}");
+    w.pump(2, &mut |_| false);
+    w.snap(&format!("maven-window-{mode}"));
+    w.cx.update(|cx| runs.update(cx, |r, cx| r.set_maven_skip_tests(false, cx)));
+    w.tool(Tool::Maven);
+    if !light {
+        w.shutdown();
+        return;
+    }
+
+    // The library's tests, through surefire: one fails.
+    let test_file = pantry.join("stock/src/test/java/com/example/pantry/stock/ShelvesTest.java");
+    w.open(&test_file, Some((20, 0)));
+    w.cx.update(|cx| {
+        runs.update(cx, |r, cx| {
+            r.start(
+                snout_app::run::Launch::Tests {
+                    module: "pantry:stock".into(),
+                    filter: serde_json::Value::Null,
+                    label: "All tests in stock".into(),
+                    debug: false,
+                    rerun_failed: false,
+                },
+                cx,
+            )
+        })
+    });
+    let ok = run_ended(&mut w, 900);
+    println!("docs: maven tests ended {ok}");
+    w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.show_bottom(ws.tabs.run, window, cx)));
+    w.pump(4, &mut |_| false);
+    w.snap("maven-tests-light");
+
+    // The application, from the run icon in its gutter.
+    let app = pantry.join("web/src/main/java/com/example/pantry/web/PantryApplication.java");
+    w.open(&app, Some((8, 0)));
+    let config = w.cx.update(|cx| {
+        runs.read(cx).configurations().into_iter().find(|c| {
+            c.kind == snout_app::run::config::Kind::Main
+                && c.main_class.as_deref().is_some_and(|m| m.ends_with("PantryApplication"))
+        })
+    });
+    println!("docs: pantry application {:?}", config.as_ref().map(|c| &c.name));
+    if let Some(config) = config {
+        w.cx.update(|cx| runs.update(cx, |r, cx| r.start(snout_app::run::Launch::Config { config, debug: false }, cx)));
+        let r = runs.clone();
+        let ok = w.pump(300, &mut |cx| {
+            r.read(cx)
+                .sessions
+                .last()
+                .is_some_and(|s| s.lines.iter().any(|l| l.text().contains("Started PantryApplication")))
+        });
+        println!("docs: pantry started {ok}");
+        w.pump(3, &mut |_| false);
+        w.snap("maven-gutter-run-light");
+        let id = w.cx.update(|cx| runs.read(cx).sessions.last().unwrap().id);
+        w.cx.update(|cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        let r = runs.clone();
+        w.pump(30, &mut |cx| !r.read(cx).any_running());
+    }
+
+    // spring-boot:run, a Maven configuration, with Maven and the application in Processes.
+    let boot = w.cx.update(|cx| {
+        runs.read(cx).configurations().into_iter().find(|c| c.kind == snout_app::run::config::Kind::Maven)
+    });
+    println!("docs: maven configuration {:?}", boot.as_ref().map(|c| &c.name));
+    if let Some(config) = boot {
+        w.cx.update(|cx| runs.update(cx, |r, cx| r.start(snout_app::run::Launch::Config { config, debug: false }, cx)));
+        let r = runs.clone();
+        let ok = w.pump(600, &mut |cx| {
+            r.read(cx)
+                .sessions
+                .last()
+                .is_some_and(|s| s.lines.iter().any(|l| l.text().contains("Started PantryApplication")))
+        });
+        println!("docs: spring-boot:run started {ok}");
+        let p = w.cx.update(|cx| ws.read(cx).processes.clone());
+        w.cx.update(|cx| p.update(cx, |p, cx| p.look(cx)));
+        w.tool(Tool::Processes);
+        w.pump(6, &mut |_| false);
+        w.snap("maven-processes-light");
+        w.tool(Tool::Processes);
+        let id = w.cx.update(|cx| runs.read(cx).sessions.last().unwrap().id);
+        w.cx.update(|cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        let r = runs.clone();
+        w.pump(30, &mut |cx| !r.read(cx).any_running());
+    }
+
+    // Spring in the Maven application: its beans and endpoints, and application.properties.
+    let spring = w.cx.update(|cx| ws.read(cx).spring.clone());
+    let s = spring.clone();
+    let ok = w.pump(900, &mut |cx| s.read(cx).loaded);
+    let (beans, endpoints) = w.cx.update(|cx| {
+        let s = spring.read(cx);
+        (s.modules.iter().map(|m| m.beans.len()).sum::<usize>(), s.endpoints.len())
+    });
+    println!("docs: maven spring loaded {ok}: {beans} beans, {endpoints} endpoints");
+    w.tool(Tool::Spring);
+    let win = w.cx.update(|cx| ws.read(cx).spring_window.clone());
+    w.with(|_, window, cx| win.update(cx, |w, cx| w.show_endpoints(None, window, cx)));
+    w.pump(2, &mut |_| false);
+    w.snap("maven-spring-endpoints-light");
+    w.tool(Tool::Spring);
+    let props = pantry.join("web/src/main/resources/application.properties");
+    let pe = w.open(&props, Some((3, 0)));
+    w.caret(&pe, "pantry.owner=Alex\n", "pantry.owner=Alex\n".len());
+    w.insert(&pe, "pantry.\n");
+    w.caret(&pe, "pantry.\n", "pantry.".len());
+    let p2 = pe.clone();
+    w.with(|_, window, cx| p2.update(cx, |e, cx| e.state.update(cx, |s, cx| s.show_completions(window, cx))));
+    let p3 = pe.clone();
+    let ok = w.pump(60, &mut |cx| !p3.read(cx).state.read(cx).completion_menu_state().items.is_empty());
+    let items: Vec<String> = w.cx.update(|cx| {
+        pe.read(cx).state.read(cx).completion_menu_state().items.iter().map(|i| i.label.clone()).collect()
+    });
+    println!("docs: maven properties completion {ok}: {items:?}");
+    w.snap("maven-properties-completion-light");
+    w.key("escape");
+    let p4 = pe.clone();
+    w.with(|_, window, cx| p4.update(cx, |e, cx| e.reload(window, cx)));
+
+    // Project Structure: the modules, and the web module's dependencies.
+    use snout_app::structure::{ModuleSel, Page, Scope};
+    let view = open_structure(&mut w);
+    structure_page(&mut w, &view, |v| {
+        v.page = Page::Modules;
+        v.selected = Some(ModuleSel::Module("pantry:web".into()));
+    });
+    w.snap("maven-structure-modules-light");
+    structure_page(&mut w, &view, |v| {
+        v.page = Page::Dependencies;
+        v.dep_module = Some("pantry:web".into());
+        v.scope = Scope::Compile;
+        v.open.clear();
+    });
+    w.snap("maven-structure-dependencies-light");
+    w.with(|ws, _, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.project_structure = None;
+            cx.notify();
+        })
+    });
+    w.pump(1, &mut |_| false);
+
+    // A POM changed: the bar offers to reload.
+    let pom = pantry.join("stock/pom.xml");
+    let text = std::fs::read_to_string(&pom).unwrap();
+    std::fs::write(
+        &pom,
+        text.replace(
+            "    <dependency>\n      <groupId>org.junit.jupiter</groupId>",
+            "    <dependency>\n      <groupId>org.apache.commons</groupId>\n      <artifactId>commons-lang3</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.junit.jupiter</groupId>",
+        ),
+    )
+    .unwrap();
+    let pe = w.open(&pom, Some((17, 0)));
+    let store = w.cx.update(|cx| snout_app::project_model::store(cx).unwrap());
+    let ok = w.pump(30, &mut |cx| store.read(cx).scripts_changed);
+    println!("docs: reload bar {ok}");
+    let _ = pe;
+    w.pump(2, &mut |_| false);
+    w.snap("maven-reload-bar-light");
+    w.shutdown();
 }

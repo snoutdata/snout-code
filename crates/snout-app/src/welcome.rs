@@ -361,7 +361,7 @@ impl Render for WelcomePanel {
                 "welcome-new",
                 Icon::Plus,
                 "New Project…",
-                "Java or Spring Boot, with Gradle".into(),
+                "Java or Spring Boot app".into(),
                 Some(Action::ShowNewProject),
             ));
 

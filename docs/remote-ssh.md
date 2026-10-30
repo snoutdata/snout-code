@@ -92,7 +92,7 @@ Everything is under `~/.snout-code/`, except the engine's caches and Claude Code
 | `~/.snout-code/jdks/` | Java 21 for the engine, from Eclipse Temurin, checked by SHA-256, and any JDK a build asked SnoutCode to download. |
 | `~/.claude/ide/<port>.lock` | While a window is open on the machine: Claude Code's lock file, readable by you only (see [Claude Code on the remote machine](#claude-code-on-the-remote-machine)). |
 | `$TMPDIR/snout-code-claude-<pid>-<port>/` | While a window is open on the machine: the settings for the hooks of the console's `claude`, readable by you only. `$TMPDIR` is `/tmp` when it is not set. |
-| `~/.cache/SnoutCode/` | The engine's caches: the Gradle model, Gradle's project caches, the Java language server's workspace. With `XDG_CACHE_HOME` set, it is `$XDG_CACHE_HOME/SnoutCode/`. |
+| `~/.cache/SnoutCode/` | The engine's caches: the Gradle or Maven model, Gradle's project caches, the Java language server's workspace, and the Maven it downloads (`maven/`) when a Maven build has no wrapper. With `XDG_CACHE_HOME` set, it is `$XDG_CACHE_HOME/SnoutCode/`. |
 
 To remove it all, stop the server, then delete the folders. The next connection installs it again.
 

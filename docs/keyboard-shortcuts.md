@@ -104,7 +104,7 @@ See [Java](java.md) for what each one does.
 | ⌘F2 | Stop | |
 | ⌘R | Rerun (what ran last) | |
 | ⌥⌘R | Rerun Failed Tests | |
-| ⌃⌥G | Run Gradle Task… | |
+| ⌃⌥G | Run Gradle Task… (Gradle tasks and Maven goals) | |
 | F8 | Step Over | |
 | F7 | Step Into | |
 | ⇧F8 | Step Out | |
@@ -130,6 +130,9 @@ These have no key out of the box; the command palette and **View ▸ Tool Window
 | Hide the Side Panel | Closes the left panel |
 | Sort Structure by Name | Sorts the Structure window by name, or back in file order |
 | Collapse All Gradle Tasks | Folds the Gradle window |
+| Collapse All Maven Goals | Folds the Maven window |
+| Read the Maven Goals Again | Lists the Maven plugins' goals again |
+| Reload Maven Project | Reads the Maven builds again |
 | Collapse the Spring Window | Folds the Spring window |
 | Clear Output | Empties the Output tab |
 

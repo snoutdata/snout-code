@@ -1,6 +1,6 @@
 # SnoutCode user guide
 
-SnoutCode is a native IDE for Java, Gradle and Spring Boot on macOS, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
+SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot on macOS, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
 
 ## Start here
 
@@ -18,6 +18,7 @@ SnoutCode is a native IDE for Java, Gradle and Spring Boot on macOS, with Git an
 ## Building and running
 
 - [Gradle](gradle.md): syncing builds, the Gradle window, tasks, build problems, JDKs and Gradle daemons.
+- [Maven](maven.md): Maven builds without a Maven install: reactors, parents, BOMs and profiles, the Maven window, goals, tests, and POM editing.
 - [Project Structure](project-structure.md): the project's JDK, modules, source sets, dependencies and their conflicts, the JDKs on your machine, and the facets SnoutCode found.
 - [Run and debug](run-and-debug.md): run configurations, the Run window, tests, and the debugger.
 - [Processes](processes.md): what SnoutCode runs on your Mac, and how to stop it.

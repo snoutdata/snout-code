@@ -2,7 +2,7 @@
 
 **[Read the user guide](docs/README.md)**
 
-A native IDE for Java, Gradle and Spring Boot on macOS, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your Mac.
+A native IDE for Java, Gradle, Maven and Spring Boot on macOS, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your Mac.
 
 ![SnoutCode on a Spring Boot web shop: the Project view, the editor and the Spring window's beans](docs/images/spring-beans.png)
 
@@ -12,10 +12,11 @@ A native IDE for Java, Gradle and Spring Boot on macOS, written in Rust. It has 
 
 Each item links to its page in the user guide.
 
-- **[Projects](docs/projects.md):** open any folder as the project, with one Gradle build or many side by side. The Project view shows the modules as Gradle sees them, or the plain files. File ▸ New Project… makes a Java application or a Spring Boot application.
+- **[Projects](docs/projects.md):** open any folder as the project, with one Gradle or Maven build or many side by side. The Project view shows the modules as the build sees them, or the plain files. File ▸ New Project… makes a Java application or a Spring Boot application, with Gradle or Maven.
 - **[Editor](docs/editor.md):** tabs and split editors, find and replace, Find and Replace in Files, Go to File, Search Everywhere and the command palette.
 - **[Java](docs/java.md):** completion that adds imports, go to definition (into libraries too), find references, rename, quick fixes, organize imports, formatting, parameter hints and problems. Scala classes in the build are compiled so Java sees them.
 - **[Gradle](docs/gradle.md):** sync, the Gradle window and its tasks, build problems, a JDK that suits each build's Gradle version, with a download offered when none is installed.
+- **[Maven](docs/maven.md):** Maven builds with no Maven install: reactors, parent POMs, BOM imports and profiles, the Maven window with its phases, goals and profiles, tests through Surefire, and POM completion from the local repository.
 - **[Run and debug](docs/run-and-debug.md):** run configurations, run icons in the gutter, tests with their results in a tree, and a debugger with breakpoints, stepping, variables and expressions.
 - **[Spring](docs/spring.md):** beans and where they are injected, endpoints, the Spring window, and help in `application.properties` and `application.yml`.
 - **[Git](docs/git.md):** changes, diffs, commit, branches, history, pull, fetch and push.
@@ -82,7 +83,7 @@ crates/
   snout-remote-proto/  the wire protocol between the app and snout-server
   snout-server/        the remote side of Remote SSH
   snout-gui/           the earlier Git-only app (binary: snout)
-engine/                the Java engine: Gradle sync, Eclipse JDT LS, debugging, Spring
+engine/                the Java engine: Gradle and Maven sync, Eclipse JDT LS, debugging, Spring
 ```
 
 `snout-core` runs the `git` CLI instead of using a library, so authentication, hooks and settings such as `pull.rebase` behave exactly as they do in a terminal.

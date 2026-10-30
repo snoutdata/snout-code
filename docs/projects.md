@@ -8,8 +8,9 @@ The folder you open is the project, as you give it. Git finds the repository at 
 so you can open a whole repository or one folder inside it, such as one service of a larger
 repository. The project's name is the folder's name.
 
-A project can be one Gradle build or hold several builds side by side. SnoutCode reads them
-together into one model of modules (see [The Project view](#the-project-view)).
+A project can be one Gradle or Maven build, or hold several builds side by side, Gradle and
+Maven alike. SnoutCode reads them together into one model of modules (see
+[The Project view](#the-project-view), and [Maven](maven.md) for Maven builds).
 
 SnoutCode has one window. It shows one project at a time; opening another project takes its
 place.
@@ -72,20 +73,21 @@ windows and their sizes, and the view (Project or Git) you were on.
 ## Create a new project
 
 Choose File ▸ New Project…, or **New Project…** on the Welcome page. The dialog makes a Gradle
-project and opens it.
+or Maven project and opens it.
 
 ![The New Project dialog for a Spring Boot project](images/projects-new-spring.png)
 
 *A Spring Boot project: its name, folder, build and coordinates.*
 
 1. Pick the kind of project:
-   - **Java**: an application with Gradle. SnoutCode writes it itself, so it needs no network.
+   - **Java**: an application built by Gradle or Maven. SnoutCode writes it itself, so it needs
+     no network.
    - **Spring Boot**: from start.spring.io, with the versions and dependencies it offers.
 2. Fill in the **Name** and the **Location**. **Choose…** picks the folder. The dialog shows
    the folder the project goes in. By default it goes beside the project you opened last, or
    in your home folder.
-3. Under **Build**, pick the **Build script** language (Kotlin or Groovy) and the **Java**
-   version. A Java project can target Java 25, 21, 17, 11 or 8. A Spring Boot project offers
+3. Under **Build**, pick the **Build tool**: **Gradle Kotlin** or **Gradle Groovy** (the build
+   script's language), or **Maven**; and the **Java** version. A Java project can target Java 25, 21, 17, 11 or 8. A Spring Boot project offers
    the Java and **Spring Boot** versions start.spring.io lists.
 4. Under **Coordinates**, set the **Group**, **Artifact** and **Package**. Left empty, the
    artifact comes from the name and the package from the group and artifact.
@@ -102,7 +104,10 @@ The dialog says what is wrong while it cannot create the project, for example "G
 project a name." or a folder that already exists and is not empty. Esc or **Cancel** closes it.
 
 A Java project gets a `settings` and `build` script, a `Main` class with a test (JUnit 5), a
-`.gitignore` and the Gradle wrapper, so `./gradlew` builds it.
+`.gitignore` and the Gradle wrapper, so `./gradlew` builds it. With Maven, it gets a `pom.xml`
+instead (the Java level, JUnit 5 and Surefire) and no wrapper: SnoutCode runs Maven itself
+(see [Maven](maven.md)). A Spring Boot project with Maven has Spring Boot's parent POM and its
+Maven plugin, as start.spring.io makes it.
 
 When start.spring.io cannot be reached, the dialog says so and lists the dependencies
 SnoutCode knows itself. **Try Again** asks start.spring.io again. The project is then made from
@@ -117,7 +122,7 @@ left stripe. ⌘2 shows the Git view instead (see [Git](git.md)).
 
 The name at the top of the tool window switches between two views:
 
-- **Project**: the project as its Gradle model has it.
+- **Project**: the project as its Gradle or Maven model has it.
 - **Files**: the plain file tree of the folder.
 
 SnoutCode remembers which one you chose. The buttons on the right of its header:
@@ -137,23 +142,25 @@ All three are also in View ▸ Tool Window Actions and the command palette (**Se
 The Project view shows:
 
 - **The project's folder**, with its path.
-- **Its modules**, one per Gradle project. A module's note names its build when that differs
+- **Its modules**, one per Gradle project or Maven module. A module's note names its build when that differs
   from its name, and the modules it uses. A module whose build failed to sync this time shows
   a warning, and the last model that synced.
 - **Shared folders**, marked "shared": source folders that several modules compile. The
   tooltip names them.
-- **Builds that did not sync**, with their Gradle version and the reason. See
+- **Builds that did not sync**, with their Gradle or Maven version and the reason. See
   [Troubleshooting](troubleshooting.md).
-- **Gradle Scripts**: every build's settings, build and applied scripts.
+- **Gradle Scripts**: every build's settings, build and applied scripts. For a Maven project
+  the node is **Maven Files**: the POMs, `.mvn/maven.config` and the wrapper's properties; a
+  project with both is **Build Files**.
 - **External Libraries**: the JDK and the libraries, down to their packages and classes. A
   library with sources says "sources". Click a class to open it read only.
 
 Source folders have their own icons and colours: sources, test sources, resources, test
 resources, generated sources, and excluded folders. Hover over a folder to see which it is.
 
-Until the Gradle model has been read, the Project view shows the plain file tree with the
-note "Reading Gradle model". If the model cannot be read, the note says why. See
-[Gradle](gradle.md) for syncing.
+Until the build model has been read, the Project view shows the plain file tree with the
+note "Reading the build model". If the model cannot be read, the note says why. See
+[Gradle](gradle.md) and [Maven](maven.md) for syncing.
 
 ### The Files view
 

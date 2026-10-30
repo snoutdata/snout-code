@@ -923,7 +923,11 @@ impl ProjectStructureView {
                             snout_core::art::spots::no_results(),
                             format!("No {} dependencies", self.scope.label().to_lowercase()),
                         )
-                        .hint(format!("{} declares nothing for this scope. {}", m.name, self.scope.detail()))
+                        .hint(format!(
+                            "{} declares nothing for this scope. {}",
+                            m.name,
+                            self.scope.detail_for(s.is_maven(m))
+                        ))
                         .on(p.card)
                         .compact(),
                     ),
@@ -945,7 +949,7 @@ impl ProjectStructureView {
             .text_size(px(12.))
             .text_color(p.fg_dim)
             .child(format!("{declared} declared, {} in all.", graph.nodes.len()))
-            .child(self.scope.detail())
+            .child(self.scope.detail_for(s.is_maven(m)))
             .child(div().flex_1())
             .when(!conflicts.is_empty(), |d| {
                 let n = conflicts.len();
@@ -1452,6 +1456,16 @@ impl ProjectStructureView {
 
     /// What the page says under its title.
     fn subtitle(&self) -> &'static str {
+        if self.structure().is_some_and(|s| s.tool() == "Maven") {
+            match self.page {
+                Page::Project => {
+                    return "The project as a whole: the JDK it runs on is yours to pick, the rest is Maven's.";
+                }
+                Page::Modules => return "Every Maven module of every build, with its source sets, roots and outputs.",
+                Page::Dependencies => return "What each module declares and what that brings in, as Maven resolved it.",
+                _ => {}
+            }
+        }
         match self.page {
             Page::Project => "The project as a whole: the JDK it runs on is yours to pick, the rest is Gradle's.",
             Page::Modules => "Every Gradle project of every build, with its source sets, roots and outputs.",
@@ -1702,14 +1716,16 @@ impl Render for ProjectStructureView {
         };
         let syncing = crate::project_model::store(cx).is_some_and(|s| s.read(cx).syncing.is_some());
         let gradle_page = matches!(self.page, Page::Project | Page::Modules | Page::Dependencies);
+        let tool = self.structure().map_or("Gradle", |s| s.tool());
         let status = self.note.clone().map(|(t, err)| (t, if err { p.error } else { p.fg_dim })).or_else(|| {
             self.structure().map(|s| {
                 let modules = s.modules.len();
                 (
                     format!(
-                        "{} · {modules} module{} from the last Gradle sync",
+                        "{} · {modules} module{} from the last {} sync",
                         s.name,
-                        if modules == 1 { "" } else { "s" }
+                        if modules == 1 { "" } else { "s" },
+                        s.tool()
                     ),
                     p.fg_dim,
                 )
@@ -1764,9 +1780,18 @@ impl Render for ProjectStructureView {
                                         .debug_selector("structure-sync")
                                         .compact()
                                         .ghost()
-                                        .label(if syncing { "Syncing…" } else { "Sync Gradle" })
+                                        .label(match (syncing, tool) {
+                                            (true, _) => "Syncing…",
+                                            (_, "Maven") => "Reload Maven",
+                                            (_, "Gradle") => "Sync Gradle",
+                                            _ => "Sync",
+                                        })
                                         .disabled(syncing)
-                                        .tooltip("Read the Gradle builds again")
+                                        .tooltip(match tool {
+                                            "Maven" => "Read the Maven builds again",
+                                            "Gradle" => "Read the Gradle builds again",
+                                            _ => "Read the builds again",
+                                        })
                                         .on_click(cx.listener(|this, _, _, cx| this.sync(cx))),
                                 )
                             }),

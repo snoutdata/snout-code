@@ -10,12 +10,15 @@
 # then crops, resizes (1600 px wide at most) and optimises the shots into docs/images.
 #
 # `parts` takes only some of them, separated by commas: ledger, java, javatools, debug, welcome,
-# wizard, settings, structure, git, blame, claude, palette, remote. The images of parts not taken stay.
+# wizard, settings, structure, git, blame, claude, palette, remote, maven. The images of parts not
+# taken stay.
 #
-# Needs: Docker (for remote), the network the first time (Gradle, Spring Boot, a JDK 21 and
-# Pillow), and a JDK 21 (SNOUT_JDK21, JAVA_HOME, an installed one, or the one snout.sh
+# Needs: Docker (for remote), the network the first time (Gradle, Maven, Spring Boot, a JDK 21
+# and Pillow), and a JDK 21 (SNOUT_JDK21, JAVA_HOME, an installed one, or the one snout.sh
 # downloads). The app runs with HOME set to the scratch folder, so paths read as
-# ~/projects/shop; your own settings and Gradle caches are only read. Environment:
+# ~/projects/shop; your own settings and Gradle caches are only read, and Maven's repository
+# and the Maven the app downloads are the scratch home's (MAVEN_OPTS may name another
+# repository with -Dmaven.repo.local). Environment:
 #   SNOUT_DOCS_SCRATCH  the scratch folder (default $TMPDIR/snoutcode-docs)
 #   SNOUT_DOCS_KEEP=1   keep the raw shots and the scratch home afterwards
 set -euo pipefail
@@ -25,7 +28,7 @@ HERE="$ROOT/scripts/docs-screenshots"
 TMP="${TMPDIR:-/tmp}"
 TMP="${TMP%/}"
 SCRATCH="${SNOUT_DOCS_SCRATCH:-$TMP/snoutcode-docs}"
-PARTS="${1:-ledger,java,javatools,debug,welcome,wizard,settings,structure,git,blame,claude,palette,remote}"
+PARTS="${1:-ledger,java,javatools,debug,welcome,wizard,settings,structure,git,blame,claude,palette,remote,maven}"
 REAL_HOME="$HOME"
 DOCS_HOME="$SCRATCH/home"
 RAW="$SCRATCH/raw"
@@ -98,7 +101,7 @@ done
 
 say "Taking the shots: $PARTS"
 rm -f "$RAW"/*.png
-(cd "$ROOT/crates/snout-app" && env HOME="$DOCS_HOME" GRADLE_USER_HOME="$DOCS_HOME/.gradle" "${ro_cache[@]}" \
+(cd "$ROOT/crates/snout-app" && env HOME="$DOCS_HOME" GRADLE_USER_HOME="$DOCS_HOME/.gradle" ${ro_cache[@]+"${ro_cache[@]}"} \
   DOCKER_CONFIG="${DOCKER_CONFIG:-$REAL_HOME/.docker}" CARGO_HOME="${CARGO_HOME:-$REAL_HOME/.cargo}" \
   RUSTUP_HOME="${RUSTUP_HOME:-$REAL_HOME/.rustup}" \
   SNOUT_DOCS_SHOTS="$SCRATCH/demos" SNOUT_SCREENSHOT="$RAW" SNOUT_DOCS_ONLY="$PARTS" \
@@ -109,6 +112,6 @@ say "Writing docs/images"
 "$SCRATCH/venv/bin/python" -I "$HERE/process.py" "$RAW" "$ROOT/docs/images"
 
 if [[ "${SNOUT_DOCS_KEEP:-}" != 1 ]]; then
-  rm -rf "$DOCS_HOME/projects" "$SCRATCH/demos"
+  rm -rf "$DOCS_HOME/projects" "$SCRATCH/demos" "$DOCS_HOME/.m2"
 fi
 say "Done: docs/images (raw shots in $RAW)"

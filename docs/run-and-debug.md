@@ -1,6 +1,6 @@
 # Running and debugging
 
-Run your application, its Gradle tasks and its tests, and debug them, from the title bar, the editor's gutter or the keyboard. Runs, tests and the debugger need a Gradle build and the Java engine; see [Gradle](gradle.md).
+Run your application, its Gradle tasks or Maven goals and its tests, and debug them, from the title bar, the editor's gutter or the keyboard. Runs, tests and the debugger need a Gradle or Maven build and the Java engine; see [Gradle](gradle.md) and [Maven](maven.md).
 
 ## Run configurations
 
@@ -9,9 +9,10 @@ A run configuration says what runs. The Java engine finds these in your build by
 - **Spring Boot**: the application class marked `@SpringBootApplication`.
 - **Application**: the other main classes.
 - **Gradle**: the `bootRun` and `run` tasks.
+- **Maven**: `spring-boot:run` in a Maven module with Spring Boot's plugin.
 - **Tests**: the tests of each module.
 
-They appear once the Java engine is ready. Until you pick one, the title bar starts on the Spring Boot application, else the first main class, else the first Gradle task.
+They appear once the Java engine is ready. Until you pick one, the title bar starts on the Spring Boot application, else the first main class, else the first Gradle task or Maven goal.
 
 Your configurations, your changes to the build's, the configuration you picked last and your breakpoints are kept with SnoutCode's settings, under `~/Library/Application Support/SnoutCode/projects/`, never in the project folder.
 
@@ -24,16 +25,16 @@ For the configuration you select, set:
 | Field | What it is |
 |---|---|
 | Name | What the title bar shows |
-| Kind | Application, Gradle or Tests |
-| Module | The Gradle module it runs in |
+| Kind | Application, Gradle, Maven or Tests |
+| Module | The module it runs in |
 | Main class | For an application, as `com.example.App` |
-| Task | For Gradle and tests, as `:app:bootRun` |
-| Program arguments | What the program gets; for a Gradle configuration this is **Gradle arguments**, Gradle's own |
+| Task | For Gradle and tests, as `:app:bootRun`; **Goals** for Maven, as `spring-boot:run` |
+| Program arguments | What the program gets; for a Gradle or Maven configuration these are **Gradle arguments** or **Maven arguments**, the build tool's own |
 | VM options | As `-Xmx1g -Dkey=value` |
 | Environment variables | As `NAME=value; OTHER=value` |
 | Active profiles | Spring profiles, as `dev, local` |
 
-Quotes keep an argument with spaces whole. Active profiles become `spring.profiles.active` for the program (for a Gradle task, through `--args`). The **Profiles** button beside the field lists the profiles the Spring model knows, with where each comes from; pick one to add it or take it out. To see the beans as such a configuration would run, pick **As '…' runs** in the Spring window's profile switch (see [Spring](spring.md#profiles)).
+Quotes keep an argument with spaces whole. Active profiles become `spring.profiles.active` for the program (for a Gradle task, through `--args`; for Maven, `-Dspring-boot.run.profiles`). The **Profiles** button beside the field lists the profiles the Spring model knows, with where each comes from; pick one to add it or take it out. To see the beans as such a configuration would run, pick **As '…' runs** in the Spring window's profile switch (see [Spring](spring.md#profiles)).
 
 - Click **+** (Add Configuration) to make a new one.
 - Click **−** to remove one of yours. On a configuration from the build, it puts the build's version back.
@@ -78,13 +79,13 @@ Running a main class from the gutter makes its configuration the title bar's, wh
 
 ## How a run starts
 
-A main class runs as the editor compiled it, not through Gradle, so it waits until every module is ready. Gradle tasks and tests compile through Gradle and only wait for the engine.
+A main class runs as the editor compiled it, not through Gradle or Maven, so it waits until every module is ready. Gradle tasks and tests compile through Gradle, Maven goals and tests through Maven, and only wait for the engine. In a Maven module, the main class runs with the module's runtime classpath as Maven resolves it (`compile` and `runtime` scopes), and its tests run through Surefire with the module's test classpath; see [Maven](maven.md#run-and-debug).
 
 If you start a run before the Java engine is ready, the run's tab says **Waiting for the Java engine**, and the run starts as soon as the engine is ready.
 
 When nothing can run, the run's tab says why. For example:
 
-- the project has no Gradle build,
+- the project has no Gradle or Maven build,
 - the build needs a JDK that is not installed (download it from the bar above the editor, or pick a JDK in Settings; see [Gradle](gradle.md)),
 - the Java engine is not running.
 
@@ -94,13 +95,13 @@ When nothing can run, the run's tab says why. For example:
 
 *The shop's Spring Boot application started from the title bar, its output in the Run window.*
 
-Runs show in the **Run** tool window, debug sessions in **Debug**, and Gradle tasks in **Build**. Each opens at the bottom of the window when a run starts. You can also open them from the buttons at the bottom of the left edge.
+Runs show in the **Run** tool window, debug sessions in **Debug**, and Gradle tasks and Maven goals in **Build**. Each opens at the bottom of the window when a run starts. You can also open them from the buttons at the bottom of the left edge.
 
 Each run gets a tab, with its state at the right: **Running 0:12**, **Finished in 3.2 s**, **Failed after …** or **Stopped after …**. Starting the same thing again reuses the tab of a finished run.
 
 The console shows:
 
-- the command line of a main class, its working directory, or the Gradle tasks,
+- the command line of a main class, its working directory, the Gradle tasks, or the Maven command,
 - the program's output, in its colours,
 - how it ended: **Finished**, **Failed** or **Stopped**, with the exit code when there is one.
 
@@ -137,9 +138,13 @@ When the run ends, the first failed test is selected.
 
 *All the shop's tests: one failed, with what it expected and what it got.*
 
+In a Maven module, tests run through Maven's Surefire and report to the same tree as they run: each class, then its tests. **Rerun Failed Tests** runs only those that failed (`-Dtest=Class#method`). Tests that only JUnit 4 runs show once the run ends, from Surefire's reports.
+
+![The tests of a Maven module, through Surefire](images/maven-tests.png)
+
 ## Debug
 
-Start a debug session with the title bar's Debug button (⌃D), **Debug '…'** on a gutter icon, or ⌃⇧D in the editor. Tests can be debugged the same way.
+Start a debug session with the title bar's Debug button (⌃D), **Debug '…'** on a gutter icon, or ⌃⇧D in the editor. Tests can be debugged the same way. In a Maven module, a debugged test's JVM, or the application `spring-boot:run` starts, waits for the debugger, which attaches as soon as it listens.
 
 ### Breakpoints
 

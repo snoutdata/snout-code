@@ -43,7 +43,7 @@ impl Kind {
 
     fn note(self) -> &'static str {
         match self {
-            Kind::Java => "An application, with Gradle",
+            Kind::Java => "Gradle or Maven",
             Kind::SpringBoot => "From start.spring.io",
         }
     }
@@ -458,7 +458,7 @@ impl NewProjectView {
             ))
         };
         body = body.child(section("Build", &p)).child(row(
-            "Build",
+            "Build tool",
             div()
                 .flex()
                 .gap(px(4.))
@@ -777,7 +777,7 @@ impl Render for NewProjectView {
                     crate::components::Tone::Accent,
                     crate::components::IconName::FolderPlus,
                     "New Project",
-                    Some("A Java or Spring Boot project, built with Gradle.".into()),
+                    Some("A Java or Spring Boot project, built with Gradle or Maven.".into()),
                     &p,
                 )
                 .pb(px(12.))

@@ -1,6 +1,6 @@
 # Project Structure
 
-Project Structure shows your project as Gradle and SnoutCode configure it, in one window: the JDK it runs on, its modules and their source folders, every dependency and where it comes from, the JDKs on your machine, and the frameworks SnoutCode found.
+Project Structure shows your project as Gradle (or Maven) and SnoutCode configure it, in one window: the JDK it runs on, its modules and their source folders, every dependency and where it comes from, the JDKs on your machine, and the frameworks SnoutCode found.
 
 ![The Project page of the ledger project](images/project-structure-project.png)
 
@@ -35,6 +35,8 @@ The window reads what the last Gradle sync wrote. Until a project has been synce
 - **Gradle JVM**: the JDK the last sync ran each build's Gradle on.
 
 A project of several builds lists the Gradle rows once per build.
+
+For a Maven build, the section is **Maven** and its rows are **Maven version** (the wrapper's, or the Maven SnoutCode downloads; its **Edit in build file** opens the wrapper's `distributionUrl`, else the root POM) and **Maven JVM** (the JDK Maven runs on and compiles with). A project with both lists them under **Gradle and Maven**.
 
 ## Modules
 
@@ -72,6 +74,20 @@ The tree starts with the dependencies the module declares, each with the configu
 - **Projects**: a dependency on another project of the build reads **project :core** with a **project** badge. Click its name to show that module on the Modules page, or the arrow at the end of the row to see its own dependencies.
 - **Version conflicts**: when one dependency asks for a version and another one is used, the row shows the version asked for struck through, an arrow and the version used, with a **Conflict** badge. Hover it to read why: a newer version asked for elsewhere won, or a dependency management plugin or a platform chose it. The version that won says **won over** and the versions it replaced. A version a platform or a BOM gives (the dependency names none) says **managed**.
 - **Unresolved**: a dependency Gradle could not find is a red row with Gradle's reason.
+
+### Maven modules
+
+A Maven module's pages show what Maven resolves, by scope:
+
+| Scope | What it lists |
+|---|---|
+| **Compile** | The `compile`, `provided` and `system` dependencies the main code compiles against |
+| **Runtime** | The `compile` and `runtime` dependencies it runs with |
+| **Test** | Every scope, as the tests compile and run with it |
+
+Each declared dependency names its scope. A dependency on another module of the reactor reads **project :stock**. Where dependency management (a parent POM, an imported BOM) chose another version than the one a POM asked for, the row shows both. **Edit in build file** and **Show in build file** open the POM line that declares the dependency, the `<module>` that lists the module, the plugin, or the property that sets the Java level, in the module's POM or the parent POM in the build that sets it.
+
+![The web module of the pantry Maven build](images/maven-structure-dependencies.png)
 
 **Filter** finds dependencies by group, name or version anywhere in the tree, and shows each one under what brings it in. **Conflicts only** lists just the dependencies whose version lost a conflict.
 

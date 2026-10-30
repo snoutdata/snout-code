@@ -2,7 +2,7 @@
 
 SnoutCode reads the Spring model of your project: its beans, where they are injected, and its HTTP endpoints. It shows them in the editor's gutter and in the Spring tool window, and helps you edit `application.properties` and `application.yml`.
 
-Spring support comes from the Java engine. It starts once the engine has imported the project (see [Java](java.md)). A project without Spring on its classpath simply shows nothing.
+Spring support comes from the Java engine. It starts once the engine has imported the project (see [Java](java.md)), Gradle or Maven alike: in a Maven Spring Boot application the beans, injections, endpoints, profiles and the help in `application.properties` and `application.yml` work as in a Gradle one, from the module's classpath as Maven resolves it. Spring Boot's Maven plugin also gives the module a `spring-boot:run` run configuration (see [Maven](maven.md#run-and-debug)). A project without Spring on its classpath simply shows nothing.
 
 ## What SnoutCode finds
 
@@ -135,4 +135,4 @@ Your choice is kept with the project, in your settings, or in the project's own
 
 - [Run and debug](run-and-debug.md): running the Spring Boot application.
 - [Java](java.md): diagnostics, quick fixes and navigation.
-- [Gradle](gradle.md): how the project's modules are read.
+- [Gradle](gradle.md) and [Maven](maven.md): how the project's modules are read.

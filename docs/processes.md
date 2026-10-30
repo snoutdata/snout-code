@@ -15,9 +15,10 @@ The window opens in the bottom dock and looks at the processes again every few s
 The processes show as a tree under SnoutCode itself:
 
 - **SnoutCode**: the window, the editors and Git.
-- **Java engine** for each project: it reads the Gradle build, runs and tests the code.
+- **Java engine** for each project: it reads the Gradle or Maven build, runs and tests the code.
 - **Java language server** under its engine: completion, errors, navigation.
 - **Gradle daemons** of the engine, with what they start: test JVMs, Gradle workers, and programs Gradle started (as `bootRun` does).
+- **Maven**, while it runs goals for the engine (the wrapper too), with what it starts: Surefire's test JVMs, and the application `spring-boot:run` starts.
 - **Your programs**, run or debugged from the editor.
 - **Terminals**, the **Claude Code** console, and **Git** commands that are running.
 - Processes **left over from an earlier session** (see below).
@@ -30,6 +31,10 @@ The foot of the window gives the totals: processes, memory and CPU.
 
 *The shop's engine, its language server, a Gradle daemon, and the application started with Run.*
 
+![Maven running spring-boot:run, and the application it started](images/maven-processes.png)
+
+*The pantry's engine, Maven running `spring-boot:run`, and the application Maven started under it.*
+
 ## Stop or restart a process
 
 Each line offers the buttons that make sense for it:
@@ -39,7 +44,7 @@ Each line offers the buttons that make sense for it:
 | Java engine | **Restart**, **Stop** |
 | Java language server | **Restart** (restarts its engine) |
 | A program you ran or debugged | **Restart**, **Stop** |
-| Gradle daemon, test JVM, Gradle worker, leftover | **Stop** |
+| Gradle daemon, Maven, test JVM, Gradle worker, leftover | **Stop** |
 
 To restart the Java engine of the open project without the window, run **Restart the Java Engine** from the command palette.
 

@@ -164,6 +164,20 @@ impl Scope {
         }
     }
 
+    /// What the classpath is, for the line under the scopes: in Maven's words for a Maven
+    /// module.
+    pub fn detail_for(self, maven: bool) -> &'static str {
+        if !maven {
+            return self.detail();
+        }
+        match self {
+            Scope::Compile => "What the main code compiles against (compile, provided and system scopes).",
+            Scope::Runtime => "What the main code runs with (compile and runtime scopes).",
+            Scope::Test => "What the tests compile and run with (every scope).",
+            Scope::AnnotationProcessor => self.detail(),
+        }
+    }
+
     /// What the classpath is, for the line under the scopes.
     pub fn detail(self) -> &'static str {
         match self {
@@ -574,6 +588,21 @@ impl Structure {
 
     pub fn build_of(&self, m: &ModuleInfo) -> Option<&BuildInfo> {
         self.builds.iter().find(|b| b.id == m.build)
+    }
+
+    /// Whether `m` is a module of a Maven build.
+    pub fn is_maven(&self, m: &ModuleInfo) -> bool {
+        self.build_of(m).is_some_and(|b| b.maven)
+    }
+
+    /// The build tool the project's builds use, for the window's words: Gradle, Maven, or
+    /// the build when it has both.
+    pub fn tool(&self) -> &'static str {
+        match (self.builds.iter().any(|b| b.maven), self.builds.iter().any(|b| !b.maven)) {
+            (true, true) => "build",
+            (true, false) => "Maven",
+            _ => "Gradle",
+        }
     }
 
     /// The module a project dependency of `from` points to: same build when `build` is `:`,

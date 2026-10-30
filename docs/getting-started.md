@@ -53,7 +53,7 @@ Welcome page shows:
 
 - **Open Project…** opens a folder on this Mac.
 - **Clone Repository…** copies a repository from a Git URL and opens it.
-- **New Project…** makes a Java or Spring Boot project with Gradle.
+- **New Project…** makes a Java or Spring Boot project with Gradle or Maven.
 - **Recent Projects** lists the projects you opened, with their branch and when you last
   opened them. Type in the search box to filter them.
 

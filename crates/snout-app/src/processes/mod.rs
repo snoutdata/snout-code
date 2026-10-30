@@ -225,7 +225,7 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 p,
                 1,
                 Kind::Engine { root: engine.root.clone() },
-                format!("Java engine for {project}: reads the Gradle build, runs and tests the code"),
+                format!("Java engine for {project}: reads the Gradle or Maven build, runs and tests the code"),
                 Some(project.clone()),
             ),
             None => Row {
@@ -233,7 +233,7 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 start: 0,
                 depth: 1,
                 kind: Kind::Engine { root: engine.root.clone() },
-                purpose: format!("Java engine for {project}: reads the Gradle build, runs and tests the code"),
+                purpose: format!("Java engine for {project}: reads the Gradle or Maven build, runs and tests the code"),
                 project: Some(project.clone()),
                 memory: 0,
                 cpu: 0.,
@@ -276,7 +276,7 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                     None => format!("Maven for {project}: runs goals"),
                 };
                 let mut r = row(child, 2, Kind::Maven { session: s.map(|s| s.id) }, purpose, Some(project.clone()));
-                r.state = "Building".into();
+                r.state = "Running".into();
                 r.busy = true;
                 out.push(r);
                 let mut stack: Vec<u32> = snap.children(child.pid).iter().map(|c| c.pid).collect();
@@ -790,7 +790,7 @@ mod tests {
             said,
             vec![
                 (0, "SnoutCode: the window, the editors and Git"),
-                (1, "Java engine for shop: reads the Gradle build, runs and tests the code"),
+                (1, "Java engine for shop: reads the Gradle or Maven build, runs and tests the code"),
                 (2, "Java language server for shop: completion, errors, navigation"),
                 (2, "Main: your program, started with Run"),
                 (2, "Gradle daemon 8.5 for shop: syncs the build, runs tasks and tests"),

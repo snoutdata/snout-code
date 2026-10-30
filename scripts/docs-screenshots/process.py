@@ -90,6 +90,15 @@ SPEC = {
     "project-structure-conflicts": ("structure-conflicts-light", (420, 220, 2460, 1580)),
     "project-structure-sdks": ("structure-sdks-light", (420, 220, 2460, 1580)),
     "project-structure-facets": ("structure-facets-light", (420, 220, 2460, 1580)),
+    "maven-project-view": ("maven-project-view-light", None),
+    "maven-window": ("maven-window-light", None),
+    "maven-window-dark": ("maven-window-dark", None),
+    "maven-tests": ("maven-tests-light", None),
+    "maven-gutter-run": ("maven-gutter-run-light", None),
+    "maven-processes": ("maven-processes-light", None),
+    "maven-structure-modules": ("maven-structure-modules-light", (420, 220, 2460, 1580)),
+    "maven-structure-dependencies": ("maven-structure-dependencies-light", (420, 220, 2460, 1580)),
+    "maven-reload-bar": ("maven-reload-bar-light", None),
 }
 
 
