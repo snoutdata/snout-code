@@ -1,0 +1,31 @@
+# Maintainer: SnoutCode developers <295991524+snout-dev@users.noreply.github.com>
+#
+# SnoutCode, packaged from the tree scripts/package-linux.sh builds (the same files as the
+# .deb): the binary, the Java engine with its own Java runtime, and the Linux servers for
+# Remote SSH. scripts/package-linux.sh fills in the version and the checksums.
+pkgname=snout-code
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="A native IDE for Java, Gradle, Maven and Spring"
+arch=('x86_64' 'aarch64')
+url="https://github.com/snoutdata/snout-code"
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'fontconfig' 'freetype2' 'libxkbcommon' 'libxkbcommon-x11' 'libxcb' 'wayland'
+         'vulkan-icd-loader' 'libglvnd' 'hicolor-icon-theme'
+         # A font GPUI can stand in for the system's own with (DejaVu Sans is one it looks
+         # for); without one it cannot start, whatever fonts the app brings.
+         'ttf-dejavu')
+optdepends=('git: the Git panel and version control'
+            'vulkan-driver: drawing with the GPU'
+            'xdg-utils: opening links and folders'
+            'zenity: folder pickers on desktops without a portal')
+# The binaries are stripped already, and the runtime's are Temurin's own.
+options=('!strip' '!debug')
+source_x86_64=("snout-code-$pkgver-linux-x86_64.tar.zst")
+source_aarch64=("snout-code-$pkgver-linux-aarch64.tar.zst")
+sha256sums_x86_64=('@SHA256_X86_64@')
+sha256sums_aarch64=('@SHA256_AARCH64@')
+
+package() {
+  cp -a "$srcdir/usr" "$pkgdir/"
+}

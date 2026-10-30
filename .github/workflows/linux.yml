@@ -1,0 +1,78 @@
+# SnoutCode on Linux: the checks (clippy, the workspace's tests, the app started under X11 and
+# Wayland) and the packages (.deb and Arch Linux), for x86_64 and aarch64. Everything runs in
+# the same Docker image as on a developer's machine (scripts/linux/build.Dockerfile), through
+# scripts/test-linux.sh and scripts/package-linux.sh. The packages are kept as the run's
+# artifacts; nothing is published.
+name: Linux
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  check:
+    name: Check (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clippy, tests, and the app under X11 and Wayland
+        run: scripts/test-linux.sh ${{ matrix.arch }}
+      - name: Screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-check-${{ matrix.arch }}
+          path: target/linux-check/
+          if-no-files-found: ignore
+
+  package:
+    name: Packages (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      # The Arch Linux package is made in the archlinux image, which exists for x86_64 only.
+      - name: x86_64 containers on an arm runner
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64
+      - name: Build the .deb and the Arch Linux package
+        run: scripts/package-linux.sh ${{ matrix.arch }}
+      - name: Install them in clean containers and start the app
+        run: scripts/linux/install-test.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snout-code-linux-${{ matrix.arch }}
+          path: |
+            target/linux-packages/*.deb
+            target/linux-packages/*.pkg.tar.zst
+            target/linux-packages/arch/PKGBUILD
+            target/linux-packages/SHA256SUMS
+          if-no-files-found: error
