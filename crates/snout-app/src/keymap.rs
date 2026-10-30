@@ -125,6 +125,8 @@ fn ours() -> Vec<(&'static str, Box<dyn Action>, Option<&'static str>)> {
         ("alt-up", Box::new(e::MoveLineUp), Some("EditorPanel > Input")),
         ("alt-down", Box::new(e::MoveLineDown), Some("EditorPanel > Input")),
         ("alt-z", Box::new(e::ToggleSoftWrap), Some("EditorPanel")),
+        // Annotate with Git Blame: B for blame (IntelliJ leaves it unbound).
+        ("cmd-alt-shift-b", Box::new(e::AnnotateWithGitBlame), Some("EditorPanel")),
         // In the go-to box the arrows pick and Esc closes, ahead of the field's own keys.
         ("up", Box::new(s::SearchUp), Some("SearchBox > Input")),
         ("down", Box::new(s::SearchDown), Some("SearchBox > Input")),

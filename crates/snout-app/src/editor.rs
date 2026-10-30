@@ -29,6 +29,7 @@ use snout_core::gutter::{LineChange, LineChangeKind};
 use crate::editing::{self, Edit};
 use crate::lang::providers::DocLink;
 
+pub mod blame;
 mod claude;
 pub mod context_actions;
 mod inlay;
@@ -40,6 +41,7 @@ pub mod settings_lang;
 mod spring_gutter;
 use crate::look;
 use crate::theme::{mix, palette};
+pub use blame::{GitRequest, Row};
 pub use claude::{
     AgentCard, Answer, ClaudeRequest, LIVE_TICK, LaneRun, Outcome, Presence, Proposal, Review, STREAM_TICK, Writer,
 };
@@ -76,8 +78,14 @@ actions!(
         FormatSelection,
         ShowContextActions,
         ApplyTopFix,
+        AnnotateWithGitBlame,
     ]
 );
+
+/// The gutter's menu: the condition of the breakpoint on this line (from 0).
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = editor, no_json)]
+pub struct BreakpointConditionAt(pub u32);
 
 /// The editors' font size, which ⌘+ and ⌘- change for every tab.
 pub struct EditorFont(pub f32);
@@ -99,6 +107,10 @@ pub struct EditorDefaults {
     /// When the hover card shows, and after how long a rest.
     pub show_hover: crate::settings::ShowHover,
     pub hover_delay: Duration,
+    /// Who wrote each class and method, after its line.
+    pub author_hints: bool,
+    /// The caret line's blame after its end.
+    pub line_blame: bool,
 }
 
 impl Global for EditorDefaults {}
@@ -112,6 +124,8 @@ impl EditorDefaults {
             param_hints: s.param_hints,
             show_hover: s.show_hover,
             hover_delay: Duration::from_millis(s.hover_delay_ms.min(crate::settings::HOVER_DELAY_MAX)),
+            author_hints: s.blame_author_hints,
+            line_blame: s.blame_current_line,
         }
     }
 
@@ -123,6 +137,8 @@ impl EditorDefaults {
             param_hints: true,
             show_hover: Default::default(),
             hover_delay: Duration::from_millis(crate::settings::HOVER_DELAY_MS),
+            author_hints: true,
+            line_blame: false,
         })
     }
 }
@@ -243,6 +259,8 @@ pub enum EditorEvent {
     Claude(ClaudeRequest),
     /// Who wrote which lines moved with the text typed here ([`EditorPanel::agent_lines`]).
     AgentLines,
+    /// Something for the Git view (the annotation column's commit).
+    Git(GitRequest),
 }
 
 pub struct EditorPanel {
@@ -312,8 +330,9 @@ pub struct EditorPanel {
     /// The card of an agent's mark under the pointer, and whether the pointer is on it.
     pub agent_card: Option<claude::AgentCard>,
     card_hovered: bool,
-    /// Annotate with Agents: who wrote which lines, beside them.
-    pub annotate: bool,
+    /// Annotate with Git Blame (and with Agents): the column of who changed each line, the
+    /// author hints and the caret line's blame.
+    pub blame: blame::BlameView,
     /// An agent changed the file while the editor did not follow: a dot on the tab.
     pub touched: bool,
     /// The agent behind the changes waiting for review here, for their colour.
@@ -418,6 +437,7 @@ impl EditorPanel {
                 InputEvent::Change => {
                     this.revision += 1;
                     this.hide_card(cx);
+                    this.blame_text_changed(cx);
                     this.param_hints_changed(cx);
                     this.lang_changed(cx);
                     this.check_settings_text(cx);
@@ -464,6 +484,7 @@ impl EditorPanel {
                 let caret = state.read(cx).cursor();
                 if caret != this.caret_seen {
                     this.caret_seen = caret;
+                    this.blame_caret_moved(cx);
                     cx.emit(EditorEvent::CaretMoved);
                 }
             }),
@@ -530,7 +551,7 @@ impl EditorPanel {
             agent_painted: Default::default(),
             agent_card: None,
             card_hovered: false,
-            annotate: false,
+            blame: Default::default(),
             claude_agent: None,
             presence: None,
             fades: Vec::new(),
@@ -609,6 +630,7 @@ impl EditorPanel {
         self.spring = None;
         self.hints = Rc::new(Vec::new());
         self.param_hints = Rc::new(Vec::new());
+        self.reset_blame();
         if path.as_os_str().is_empty() {
             // A tab about to show something else (a class file).
             self.loading = false;
@@ -710,6 +732,7 @@ impl EditorPanel {
 
     /// Read the file as the last commit has it, then mark the gutter again.
     pub fn refresh_head(&mut self, cx: &mut Context<Self>) {
+        self.refresh_blame(cx);
         let Some(root) = self.root.clone() else { return };
         let Ok(rel) = self.path.strip_prefix(&root).map(|p| p.to_string_lossy().replace('\\', "/")) else { return };
         let path = self.path.clone();
@@ -733,6 +756,7 @@ impl EditorPanel {
             && self.claude_base.is_none()
             && self.claude_hunks.is_empty()
             && self.agent_lines.is_none()
+            && self.blame.data.is_none()
         {
             return;
         }
@@ -754,24 +778,30 @@ impl EditorPanel {
             cx.notify();
         }
         let owners = self.agent_lines.clone();
-        if head.is_none() && base.is_none() && owners.is_none() {
+        let (blamed, decl_lang) = self.blame_for_diff(cx);
+        if head.is_none() && base.is_none() && owners.is_none() && blamed.is_none() {
             return;
         }
-        let text = self.state.read(cx).text().to_string();
+        let rope = self.state.read(cx).text().clone();
+        let text = rope.to_string();
         let revision = self.revision;
         self._diff = Some(cx.spawn(async move |this, cx| {
-            let (changes, claude, owners) = cx
+            let (changes, claude, owners, map, decls) = cx
                 .background_executor()
                 .spawn(async move {
                     let changes = head.map(|head| snout_core::gutter::line_changes(&head, &text));
                     let claude = base.map(|base| crate::claude_ide::review::hunks(&base, &text));
                     // Who wrote which lines, moved with what was typed since.
                     let owners = owners.map(|o| o.to(&text));
-                    (changes, claude, owners)
+                    // The blamed lines, carried over to the text; the classes and methods.
+                    let map = blamed.map(|a| snout_core::blame::map_lines(&a.blame.text, &text));
+                    let decls = decl_lang.map(|l| blame::declarations(&text, l));
+                    (changes, claude, owners, map, decls)
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.revision == revision {
+                    this.blame_settled(map, decls, rope);
                     if let Some(o) = owners {
                         let moved = this.agent_lines.as_ref().is_some_and(|c| !Arc::ptr_eq(&c.text, &o.text));
                         this.agent_lines = Some(o);
@@ -974,6 +1004,8 @@ impl EditorPanel {
             s.set_soft_wrap(d.soft_wrap, window, cx);
             s.set_show_whitespaces(d.show_whitespace, window, cx);
         });
+        self.refresh_blame(cx);
+        self.diff_soon(cx);
         cx.notify();
     }
 
@@ -1056,6 +1088,8 @@ impl EditorPanel {
                 self.saved = text;
                 self.refresh_runnables(cx);
                 self.refresh_spring(cx);
+                // A save may follow a commit made elsewhere: the blame is checked against HEAD.
+                self.refresh_blame(cx);
                 if let Some(spring) = crate::spring::spring(cx) {
                     let path = self.path.clone();
                     spring.update(cx, |s, cx| s.file_saved(&path, cx));
@@ -1444,6 +1478,10 @@ impl Render for EditorPanel {
         });
         let this = cx.weak_entity();
         let chip = self.presence_chip(cx);
+        // The annotation column's width, and an earlier revision showing in its place.
+        let col = self.blame_width(cx);
+        let rev_state = self.revision_state();
+        let revisioning = rev_state.is_some();
         div()
             .size_full()
             .flex()
@@ -1463,6 +1501,8 @@ impl Render for EditorPanel {
             .on_action(cx.listener(|this, _: &ToggleSoftWrap, w, cx| this.toggle_soft_wrap(w, cx)))
             .on_action(cx.listener(|this, _: &ShowContextActions, w, cx| this.show_context_actions(w, cx)))
             .on_action(cx.listener(|this, _: &ApplyTopFix, w, cx| this.apply_top_fix(w, cx)))
+            .on_action(cx.listener(|this, _: &AnnotateWithGitBlame, _, cx| this.toggle_blame(cx)))
+            .on_action(cx.listener(|this, a: &BreakpointConditionAt, w, cx| this.condition_at_line(a.0, w, cx)))
             // GPUI Kit's Quick Fix shows the context actions too.
             .on_action(
                 cx.listener(|this, _: &gpui_component::input::ToggleCodeActions, w, cx| {
@@ -1495,6 +1535,7 @@ impl Render for EditorPanel {
             .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
             .children(self.review_bar(cx))
             .children(self.claude_bar(cx))
+            .children(self.revision_bar(cx))
             .child(
                 div()
                     .flex_1()
@@ -1505,6 +1546,7 @@ impl Render for EditorPanel {
                     .debug_selector(|| "editor-body".into())
                     .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
                         this.gutter_hover(e.position, cx);
+                        this.blame_hover(e.position, cx);
                         this.hover_move(e.position, e.modifiers, e.pressed_button.is_some(), cx);
                     }))
                     .on_modifiers_changed(
@@ -1521,7 +1563,8 @@ impl Render for EditorPanel {
                         }
                     }))
                     .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
-                        if this.bulb_press(e, window, cx)
+                        if this.blame_press(e, window, cx)
+                            || this.bulb_press(e, window, cx)
                             || this.gutter_press(e, window, cx)
                             || this.command_click(e, window, cx)
                         {
@@ -1531,13 +1574,23 @@ impl Render for EditorPanel {
                     }))
                     // Laid out once the file is read, so the first layout is of its text (the
                     // caret asked for scrolls into view on it).
-                    .when(!self.loading, |d| {
+                    // An earlier revision, annotated, read only.
+                    .when_some(rev_state, |d, rev| {
+                        d.child(
+                            Editor::new(&rev)
+                                .appearance(false)
+                                .pl(px(col + run_gutter::PLAIN_PAD))
+                                .h_full()
+                                .text_size(px(font_size(cx))),
+                        )
+                    })
+                    .when(!self.loading && !revisioning, |d| {
                         d.child(
                             // The gutter's lanes (problems, run icons, Spring marks) take a
                             // strip left of the line numbers.
                             Editor::new(&self.state)
                                 .appearance(false)
-                                .pl(px(self.gutter_pad))
+                                .pl(px(self.gutter_pad + col))
                                 .h_full()
                                 .text_size(px(font_size(cx)))
                                 // The engine's own menu is the system's, which takes no icons:
@@ -1551,12 +1604,25 @@ impl Render for EditorPanel {
                                 }),
                         )
                     })
-                    .children(self.claude_overlay(cx))
-                    .child(self.gutter(cx))
-                    .child(self.problem_marks(cx))
-                    .child(self.run_gutter(cx))
-                    .child(self.spring_gutter(cx))
-                    .child(self.end_of_line_hints(cx))
+                    .when(!revisioning, |d| {
+                        d.children(self.claude_overlay(cx))
+                            .child(self.gutter(cx))
+                            // The gutter's lanes, right of the annotation column.
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .bottom_0()
+                                    .right_0()
+                                    .left(px(col))
+                                    .child(self.problem_marks(cx))
+                                    .child(self.run_gutter(cx))
+                                    .child(self.spring_gutter(cx)),
+                            )
+                            .child(self.end_of_line_hints(cx))
+                            .children(self.blame_hints(cx))
+                    })
+                    .children(self.blame_column(cx))
                     .children(self.spring_tooltip(cx))
                     .children(self.gutter_popup(cx))
                     .children(self.signature_popup(cx))
@@ -1568,6 +1634,8 @@ impl Render for EditorPanel {
                     .children(self.actions_view(cx))
                     .children(chip)
                     .children(self.agent_card_view(cx))
+                    .children(self.blame_card_view(cx))
+                    .children(self.authors_view(cx))
                     .children(self.context.render(cx)),
             )
     }

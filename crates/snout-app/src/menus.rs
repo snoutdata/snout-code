@@ -278,6 +278,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Revert All Claude Changes", Box::new(crate::claude_ide::RevertAllClaude)),
         ("Show Agent Changes", Box::new(crate::claude_ide::ShowAgentChanges)),
         ("Annotate with Agents", Box::new(crate::claude_ide::AnnotateWithAgents)),
+        ("Annotate with Git Blame", Box::new(e::AnnotateWithGitBlame)),
         ("Undo", Box::new(Undo)),
         ("Redo", Box::new(Redo)),
         ("Zoom In", Box::new(ZoomIn)),
@@ -509,7 +510,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::separator(),
             MenuItem::action("Evaluate Expression…", EvaluateExpression),
         ]),
-        Menu::new("Repository").items([
+        Menu::new("Git").items([
             MenuItem::action("Pull", Pull),
             MenuItem::action("Fetch", Fetch),
             MenuItem::action("Push", Push),
@@ -524,6 +525,9 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
             MenuItem::separator(),
             MenuItem::action("Check Out…", Checkout),
             MenuItem::action("New Branch…", NewBranch),
+            MenuItem::separator(),
+            MenuItem::action("Annotate with Git Blame", crate::editor::AnnotateWithGitBlame),
+            MenuItem::action("Annotate with Agents", crate::claude_ide::AnnotateWithAgents),
             MenuItem::separator(),
             MenuItem::action("Open on GitHub", Github),
             MenuItem::action("Reveal in Finder", Reveal),

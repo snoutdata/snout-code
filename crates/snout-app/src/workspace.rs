@@ -880,6 +880,15 @@ impl Workspace {
                 EditorEvent::CaretMoved => this.save_layout_soon(cx),
                 EditorEvent::Claude(r) => crate::claude_ide::bridge::editor_request(this, editor, r, window, cx),
                 EditorEvent::AgentLines => crate::claude_ide::bridge::take_lines(this, editor, cx),
+                EditorEvent::Git(r) => {
+                    use crate::editor::GitRequest;
+                    let action = match r.clone() {
+                        GitRequest::Select(id) => Action::SelectCommit(id),
+                        GitRequest::ShowInLog(id) => Action::ShowCommit(id),
+                        GitRequest::ShowDiff(id, path) => Action::ShowCommitFile(id, path),
+                    };
+                    this.model.update(cx, |m, cx| m.handle(action, cx));
+                }
             }
         }));
     }
@@ -1918,6 +1927,18 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &crate::claude_ide::RevertAllClaude, w, cx| {
                 crate::claude_ide::bridge::revert_all(this, w, cx)
+            }))
+            // Annotate with Git Blame (and with Agents) from the menu bar, the keyboard elsewhere:
+            // the editor in front.
+            .on_action(cx.listener(|this, _: &crate::editor::AnnotateWithGitBlame, w, cx| {
+                if let Some(e) = this.active_editor(w, cx) {
+                    e.update(cx, |e, cx| e.toggle_blame(cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &crate::claude_ide::AnnotateWithAgents, w, cx| {
+                if let Some(e) = this.active_editor(w, cx) {
+                    e.update(cx, |e, cx| e.toggle_annotate(cx));
+                }
             }))
             .on_action(cx.listener(|this, _: &crate::claude_ide::ShowAgentChanges, w, cx| {
                 this.show_tool(crate::workspace::Tool::ClaudeChanges, w, cx)

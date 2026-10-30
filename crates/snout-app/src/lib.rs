@@ -48,6 +48,8 @@ pub mod welcome;
 pub mod workspace;
 
 #[cfg(test)]
+mod blame_tests;
+#[cfg(test)]
 mod code_tests;
 #[cfg(test)]
 mod fix_tests;

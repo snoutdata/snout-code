@@ -139,6 +139,7 @@ These have no key out of the box; the command palette and **View ▸ Tool Window
 | Esc | Leave the commit view | Outside text fields |
 | ↑ ↓ | Previous or next commit, while the Journal shows | Outside text fields |
 | Esc | Close the popup | In the branch popup |
+| ⌥⇧⌘B | Annotate with Git Blame (again: Close Annotations) | In an editor |
 
 See [Git](git.md).
 

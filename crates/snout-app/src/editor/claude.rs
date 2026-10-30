@@ -520,9 +520,7 @@ impl EditorPanel {
             }
         }
         let tint = self.agent_tint(cx);
-        let notes = self.annotations(cx);
-        if notes.is_empty()
-            && self.review.is_none()
+        if self.review.is_none()
             && self.flash.is_none()
             && presence.is_none()
             && written.is_empty()
@@ -640,49 +638,6 @@ impl EditorPanel {
                         window.paint_quad(gpui::fill(rect, color));
                     }
                     let ts = window.text_system().clone();
-                    // Annotate with Agents: who wrote the run, at its first line, on the right.
-                    let mut chips = Vec::new();
-                    {
-                        let s = state.read(cx);
-                        let text = s.text();
-                        let lines = text.lines_len();
-                        let rows = s.visible_row_range();
-                        for (line, label, color) in &notes {
-                            let Some(rows) = rows.clone() else { break };
-                            let map = s.display_map();
-                            let first = map.display_row_to_buffer_line(rows.start);
-                            let last = map.display_row_to_buffer_line(rows.end.saturating_sub(1).max(rows.start)) + 1;
-                            if *line < first || *line >= last.min(lines) {
-                                continue;
-                            }
-                            let at = text.line_start_offset(*line);
-                            let Some(b) = s.range_to_bounds(&(at..at)) else { continue };
-                            let run = TextRun {
-                                len: label.len(),
-                                font: gpui::font(label_font.clone()),
-                                color: *color,
-                                background_color: None,
-                                underline: None,
-                                strikethrough: None,
-                            };
-                            let shaped = ts.shape_line(label.clone().into(), px(10.5), &[run], None);
-                            let (w, h) = (shaped.width + px(12.), px(16.));
-                            let chip =
-                                gpui::Bounds::new(point(bounds.right() - w - px(22.), b.top() + px(1.)), size(w, h));
-                            chips.push((chip, shaped, *color));
-                        }
-                    }
-                    for (chip, shaped, color) in chips {
-                        window.paint_quad(gpui::fill(chip, mix(color, 0.16, panel)).corner_radii(px(8.)));
-                        let _ = shaped.paint(
-                            point(chip.left() + px(6.), chip.top() + px(1.)),
-                            px(14.),
-                            TextAlign::Left,
-                            None,
-                            window,
-                            cx,
-                        );
-                    }
                     for (y, n) in labels {
                         let label = if n == 1 { "1 line removed".to_owned() } else { format!("{n} lines removed") };
                         let run = TextRun {
@@ -1602,7 +1557,8 @@ impl EditorPanel {
                     cx.notify();
                 }
             }
-            None if !self.card_hovered && self.agent_card.is_some() => {
+            // The annotation column decides for its own rows.
+            None if !self.card_hovered && self.agent_card.is_some() && !self.on_column(at) => {
                 self.agent_card = None;
                 cx.notify();
             }
@@ -1783,30 +1739,5 @@ impl EditorPanel {
                 .with_priority(2)
                 .into_any_element(),
         )
-    }
-
-    /// Annotate with Agents: show (or stop showing) who wrote which lines this session.
-    pub fn toggle_annotate(&mut self, cx: &mut Context<Self>) {
-        self.annotate = !self.annotate;
-        cx.notify();
-    }
-
-    /// What Annotate with Agents shows: at the first line of each run, who wrote it and when,
-    /// in the agent's colour.
-    pub fn annotations(&self, cx: &App) -> Vec<(usize, String, gpui::Hsla)> {
-        if !self.annotate {
-            return Vec::new();
-        }
-        let p = palette(cx);
-        let Some(o) = &self.agent_lines else { return Vec::new() };
-        o.runs()
-            .into_iter()
-            .filter_map(|(lines, id)| {
-                let e = self.agent_edits.get(id as usize)?;
-                let agent = crate::agents::by_id(&e.agent, cx);
-                let label = format!("{} \u{00b7} {}", agent.short, crate::claude_ide::ledger::clock(e.time()));
-                Some((lines.start, label, agent.color(&p)))
-            })
-            .collect()
     }
 }

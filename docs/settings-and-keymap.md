@@ -173,6 +173,15 @@ hints, and a long line wrapped or cut at the edge.
 - **Fetch every**: how often SnoutCode fetches your projects in the background, to count what
   there is to pull. From 5 to 120 minutes, in steps of 5. The default is 10.
 
+**Annotations** (see [Annotate with Git Blame](blame.md))
+
+- **Show who wrote each class and method**: after the line of each class and method in Java
+  and Kotlin files, its main author and how many others ("Maya Chen +3"). On by default
+  (`blame_author_hints`).
+- **Show the current line's author and commit after its end**: the caret line's author, how
+  long ago and the commit's message, faint after its end, once the caret rests there for the
+  hover's delay (Editor ▸ Hover). Off by default (`blame_current_line`).
+
 ## Build Tools ▸ Gradle
 
 **JDK per project** (User scope)

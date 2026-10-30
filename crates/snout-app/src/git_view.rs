@@ -147,6 +147,10 @@ pub struct GitView {
     journal_focus: FocusHandle,
     /// Which of them has it, as of this frame: files, commit files, Journal.
     focused: (bool, bool, bool),
+    /// The Journal's scroll, and the commit last brought into sight (from an editor's
+    /// annotations, say).
+    journal_scroll: gpui::UniformListScrollHandle,
+    journal_shown: Option<String>,
 }
 
 fn file_columns(state_w: f32) -> Vec<Column> {
@@ -247,6 +251,8 @@ impl GitView {
             commit_focus: cx.focus_handle(),
             journal_focus: cx.focus_handle(),
             focused: (false, false, false),
+            journal_scroll: gpui::UniformListScrollHandle::new(),
+            journal_shown: None,
         }
     }
 
@@ -1099,6 +1105,13 @@ impl GitView {
         self.journal_columns.update(cx, |c, _| c.fit(0, graph_w));
         let columns = self.journal_columns.read(cx).widths();
         let focused = self.focused.2;
+        // A commit picked elsewhere (an editor's annotations) scrolls into sight.
+        if shown != self.journal_shown {
+            self.journal_shown = shown.clone();
+            if let Some(k) = shown.as_ref().and_then(|id| rows.iter().position(|&i| &log[i].id == id)) {
+                self.journal_scroll.scroll_to_item(k, gpui::ScrollStrategy::Center);
+            }
+        }
         let list = uniform_list("journal", rows.len(), move |range, _, _| {
             range
                 .map(|k| {
@@ -1203,6 +1216,7 @@ impl GitView {
                 })
                 .collect()
         })
+        .track_scroll(&self.journal_scroll)
         .flex_1();
         let focus = self.journal_focus.clone();
         table(table_header("journal-head", &self.journal_columns, None, None, cx), list)

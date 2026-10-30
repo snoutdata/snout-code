@@ -121,11 +121,13 @@ Lines an agent changed keep its mark until the end of the session (and across re
 
 Hover a mark in the lane for its card: **Changed by Claude at 3:39 PM**, the prompt that led to it, and **Accept**, **Revert** and **Show Diff** for that change.
 
-![Claude's lines: the lane, the tint, a mark's card, and Annotate with Agents](images/agents-review.png)
+![Claude's lines: the lane, the tint and a mark's card](images/agents-review.png)
 
-*The lines Claude changed, a mark's card with the prompt behind it, and Annotate with Agents at the right.*
+*The lines Claude changed, and a mark's card with the prompt behind it.*
 
-**Annotate with Agents** (Code ▸ Annotate with Agents, or the command palette) shows, beside each run of lines, which agent wrote it and when. Run it again to hide it.
+**Annotate with Agents** (Code or Git ▸ Annotate with Agents, the gutter's right-click menu, or the command palette) opens the annotation column left of the line numbers, the same one as Annotate with Git Blame: lines an agent wrote that are not committed yet show the agent's mark, name and time, in its colour; lines you changed read **Not committed yet**; the rest show their commit's date and author. Hover an agent's line for its card. Run it again to hide the column. See [Annotate with Git Blame](blame.md).
+
+![An agent's lines in the annotation column](images/blame-agents.png)
 
 Accepting a change takes away its tint and dots; the mark stays, paler, so you can still see who wrote it. Typing over the agent's lines makes them yours. Reverting puts the lines back as they were.
 
@@ -205,7 +207,7 @@ Install it with `npm install -g @openai/codex` (or as its README says) and sign 
 
 ## Draft a commit message
 
-In the Git view's Commit pane, click **Draft** (or choose Repository ▸ Draft Commit Message). Claude Code writes the message from what the commit would record, matching the style of the repository's recent commit subjects and building on anything you already typed. Click **Stop** to cancel.
+In the Git view's Commit pane, click **Draft** (or choose Git ▸ Draft Commit Message). Claude Code writes the message from what the commit would record, matching the style of the repository's recent commit subjects and building on anything you already typed. Click **Stop** to cancel.
 
 Draft runs `claude` on its own in print mode, with its tools turned off, and sends it the patch. It does not touch the console's session. See [Git](git.md).
 

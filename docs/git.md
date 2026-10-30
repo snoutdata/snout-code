@@ -117,13 +117,13 @@ You do not have to stage first. The label beside the Commit button says what the
 
 ### Draft the message with Claude Code
 
-Click **Draft** (or **Repository ▸ Draft Commit Message**) to have Claude Code write the message. It reads exactly what the commit would record, follows the style of your recent commit subjects, and builds on anything you already typed. Click **Stop** to cancel.
+Click **Draft** (or **Git ▸ Draft Commit Message**) to have Claude Code write the message. It reads exactly what the commit would record, follows the style of your recent commit subjects, and builds on anything you already typed. Click **Stop** to cancel.
 
 Draft runs `claude` on its own, with its tools turned off, and does not touch the console's session. It needs Claude Code installed; see [Coding agents](agents.md).
 
 ## Check Out
 
-Press ⇧⌘O (outside an editor), click **Check Out…** on the toolbar, or use **Repository ▸ Check Out…**.
+Press ⇧⌘O (outside an editor), click **Check Out…** on the toolbar, or use **Git ▸ Check Out…**.
 
 1. Type to filter. The list has **Local branches**, **Remote branches** (those without a local branch of the same name) and **Tags**. Type a SHA or an expression such as `HEAD~2` to get that **Commit**.
 2. Pick one with a click, then **Check Out**, or double-click it, or press Return.
@@ -143,7 +143,7 @@ Click the branch name in the title bar for a quick menu: **New Branch…**, **Fe
 
 ## New branch
 
-Click **New Branch** on the toolbar, use **Repository ▸ New Branch…**, or choose **Create branch from here…** on a branch, tag or commit.
+Click **New Branch** on the toolbar, use **Git ▸ New Branch…**, or choose **Create branch from here…** on a branch, tag or commit.
 
 Enter the name. The dialog shows where the branch starts (HEAD, unless you started from a branch, tag or commit) and has **Check out the new branch**. A name Git would not accept cannot be created.
 
@@ -194,10 +194,14 @@ Each dialog shows what Git reported. When Git stops with an error (a push the re
 
 SnoutCode fetches the repositories in the list in the background, to count what there is to pull. It does so every 10 minutes by default. Change it in **Settings ▸ Version Control ▸ Fetch every**, from 5 to 120 minutes. See [Settings and keymap](settings-and-keymap.md).
 
+## Annotate with Git Blame
+
+In an editor, **Git ▸ Annotate with Git Blame** (or a right click in the gutter) shows beside each line when it was last changed and by whom, shaded by age. Click a line's annotation to select its commit here; a line's card has **Show Diff** and **Show in Git Log**, which open the commit in this view. See [Annotate with Git Blame](blame.md).
+
 ## GitHub and Finder
 
-- **GitHub** on the toolbar, or **Repository ▸ Open on GitHub**, opens the repository on github.com. Hover the button to see the address; without a GitHub remote it is greyed out.
-- **Repository ▸ Reveal in Finder** shows the project's folder in Finder.
+- **GitHub** on the toolbar, or **Git ▸ Open on GitHub**, opens the repository on github.com. Hover the button to see the address; without a GitHub remote it is greyed out.
+- **Git ▸ Reveal in Finder** shows the project's folder in Finder.
 
 ## Shortcuts
 
@@ -213,5 +217,6 @@ SnoutCode fetches the repositories in the list in the background, to count what 
 | ↑ ↓ | Previous or next commit, in the commit view |
 | Esc | Leave the commit view |
 | ⌘J | Show or hide the Claude Code console |
+| ⌥⇧⌘B | Annotate with Git Blame, in an editor |
 
 See [Keyboard shortcuts](keyboard-shortcuts.md) for the full list.

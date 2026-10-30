@@ -7,6 +7,7 @@
 //! values, so the same calls can back the desktop GUI and an MCP server.
 
 pub mod art;
+pub mod blame;
 mod branches;
 mod checkout;
 pub mod claude;

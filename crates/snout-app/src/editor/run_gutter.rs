@@ -282,18 +282,24 @@ impl EditorPanel {
             cx.notify();
             return true;
         }
-        if !debuggable(&self.path) {
-            return false;
-        }
-        let Some(runs) = crate::run::runs(cx) else { return false };
+        let runs = crate::run::runs(cx).filter(|_| debuggable(&self.path));
         let path = self.path.clone();
+        // A right click: a breakpoint's condition on its line, else the gutter's menu
+        // (Annotate with Git Blame, a condition for a new breakpoint).
+        if e.button == gpui::MouseButton::Right {
+            let breakpoint =
+                runs.as_ref().is_some_and(|r| r.read(cx).breakpoints_in(&path).iter().any(|b| b.line == line));
+            if breakpoint {
+                self.open_condition(line, e.position, window, cx);
+            } else {
+                self.open_gutter_menu(e.position, Some(line), window, cx);
+            }
+            return true;
+        }
+        let Some(runs) = runs else { return false };
         match e.button {
             gpui::MouseButton::Left => {
                 runs.update(cx, |r, cx| r.toggle_breakpoint(&path, line, cx));
-                true
-            }
-            gpui::MouseButton::Right => {
-                self.open_condition(line, e.position, window, cx);
                 true
             }
             _ => false,
@@ -316,6 +322,15 @@ impl EditorPanel {
             .unwrap_or_else(|| self.lanes.get().bounds.origin);
         self.open_condition(line, at, window, cx);
         true
+    }
+
+    /// The gutter menu's Breakpoint Condition…: the popup beside `line`.
+    pub fn condition_at_line(&mut self, line: u32, window: &mut Window, cx: &mut Context<Self>) {
+        let s = self.state.read(cx);
+        let at = s.text().line_start_offset((line as usize).min(s.text().lines_len().saturating_sub(1)));
+        let at =
+            s.range_to_bounds(&(at..at)).map(|b| b.bottom_left()).unwrap_or_else(|| self.lanes.get().bounds.origin);
+        self.open_condition(line, at, window, cx);
     }
 
     /// Put up the condition of the breakpoint on `line` (none yet: it is set on Done).

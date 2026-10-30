@@ -25,6 +25,7 @@ SnoutCode is a native IDE for Java, Gradle and Spring Boot on macOS, with Git an
 ## Working with others and with agents
 
 - [Git](git.md): the Git view, its panes and dialogs.
+- [Annotate with Git Blame](blame.md): who changed each line and when, beside it; a line's commit, earlier revisions, and who wrote each class and method.
 - [Coding agents](agents.md): Claude Code, Codex or your own agent in the console; watching it write in its colour, sending it the selection, who wrote which lines, and reviewing its changes by prompt in the Agent Changes window.
 - [Terminal](terminal.md): the Terminal tab and the console as terminals: keys, scrollback, find, links, and the terminal engine (Built-in or Ghostty).
 - [Remote SSH](remote-ssh.md): keep the window on your Mac and work on a Linux machine over SSH.

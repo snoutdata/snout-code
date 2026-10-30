@@ -19,6 +19,9 @@ use super::{EditorDefaults, EditorPanel, font_size};
 use crate::lang::text;
 use crate::theme::{mix, palette};
 
+/// A line with hints after its end: the line, where it ends, its chips and its values.
+type Place = (usize, gpui::Bounds<gpui::Pixels>, Vec<String>, Vec<String>);
+
 /// A parameter's name, before the argument passed to it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParamHint {
@@ -212,9 +215,11 @@ impl EditorPanel {
         let ui = crate::look::ui_font(cx);
         let size_pt = font_size(cx);
         let spring = crate::spring::green(&p);
+        let tails = self.blame.tails.clone();
         canvas(
             |_, _, _| {},
             move |_, _, window, cx| {
+                tails.borrow_mut().clear();
                 if params.is_empty() && values.is_empty() {
                     return;
                 }
@@ -232,7 +237,7 @@ impl EditorPanel {
                 lines.sort_unstable();
                 lines.dedup();
                 // Where each line ends, and what goes after it, before anything is drawn.
-                let places: Vec<(gpui::Bounds<gpui::Pixels>, Vec<String>, Vec<String>)> = lines
+                let places: Vec<Place> = lines
                     .into_iter()
                     .filter_map(|line| {
                         let (start, end) = (rope.line_start_offset(line), rope.line_end_offset(line));
@@ -245,13 +250,13 @@ impl EditorPanel {
                             .collect();
                         let notes =
                             values.iter().filter(|(l, _)| *l as usize == line).map(|(_, v)| v.clone()).collect();
-                        Some((b, chips, notes))
+                        Some((line, b, chips, notes))
                     })
                     .collect();
                 let chip_ink = mix(p.fg_dim, 0.85, p.panel);
                 let chip_bg = mix(p.fg_dim, if p.dark { 0.13 } else { 0.10 }, p.panel);
                 let small = px((size_pt * 0.82).max(9.));
-                for (b, chips, notes) in places {
+                for (line, b, chips, notes) in places {
                     let mut x = b.right() + px(16.);
                     for label in chips {
                         let run = gpui::TextRun {
@@ -285,6 +290,8 @@ impl EditorPanel {
                         let _ = shaped.paint(point(x, b.top()), line_height, gpui::TextAlign::Left, None, window, cx);
                         x += shaped.width + px(12.);
                     }
+                    // What comes after (an author hint, the line's blame) starts here.
+                    tails.borrow_mut().insert(line, x + px(6.));
                 }
             },
         )

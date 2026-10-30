@@ -7,7 +7,7 @@
 //!
 //! `scripts/docs-screenshots.sh` sets it all up and writes `docs/images`. `SNOUT_DOCS_JDK`
 //! names the JDK the builds run on; `SNOUT_DOCS_ONLY` takes only the parts it names
-//! (ledger, java, javatools, debug, welcome, wizard, settings, structure, git, claude, palette, remote), separated
+//! (ledger, java, javatools, debug, welcome, wizard, settings, structure, git, blame, claude, palette, remote), separated
 //! by commas. `remote` needs Docker and the Linux server builds; `SNOUT_DOCS_SSH_DIR` is a
 //! short folder for ssh's control sockets.
 
@@ -324,6 +324,10 @@ pub fn run(projects: PathBuf) {
     if wanted("git") {
         git(&projects, ThemeChoice::Light, "light");
         git(&projects, ThemeChoice::Dark, "dark");
+    }
+    if wanted("blame") {
+        blame(ThemeChoice::Light, "light");
+        blame(ThemeChoice::Dark, "dark");
     }
     if wanted("claude") {
         claude(&projects);
@@ -785,7 +789,7 @@ fn claude(projects: &Path) {
         w.with(|_, window, cx| {
             e3.update(cx, |e, cx| match step {
                 Step::Card => {
-                    // The card of the constructor's mark, and Annotate with Agents.
+                    // The card of the constructor's mark.
                     let _ = (&v1c, &v2d);
                     if let Some(run) = e.agent_lane(cx).into_iter().filter(|r| !r.lines.is_empty()).nth(1) {
                         e.agent_card = Some(snout_app::editor::AgentCard {
@@ -794,7 +798,6 @@ fn claude(projects: &Path) {
                             at: gpui::point(gpui::px(600.), gpui::px(250.)),
                         });
                     }
-                    e.toggle_annotate(cx);
                 }
                 Step::Inline => {
                     let first = e.claude_hunks.first().map_or(0, |h| h.new_lines.start);
@@ -1813,4 +1816,262 @@ fn remote(projects: &Path) {
     host.close();
     drop(container);
     let _ = std::fs::remove_dir_all(&ssh_dir);
+}
+
+// ----- Annotate with Git Blame -------------------------------------------------------------
+
+const STOCK: &str = "src/main/java/com/example/inventory/Stock.java";
+
+const STOCK_V1: &str = "package com.example.inventory;
+
+public class Inventory {
+    private int count;
+
+    public void add(int n) {
+        count += n;
+    }
+
+    public int count() {
+        return count;
+    }
+}
+";
+
+const STOCK_V2: &str = "package com.example.inventory;
+
+import java.util.Objects;
+
+public class Stock {
+    private int count;
+    private final String sku;
+
+    public Stock(String sku) {
+        this.sku = Objects.requireNonNull(sku);
+    }
+
+    public void add(int n) {
+        count += n;
+    }
+
+    public int count() {
+        return count;
+    }
+}
+";
+
+const STOCK_V3_REMOVE: &str = "
+    public boolean remove(int n) {
+        if (n > count) {
+            return false;
+        }
+        count -= n;
+        return true;
+    }
+";
+
+const STOCK_V5_TOSTRING: &str = "
+    @Override
+    public String toString() {
+        return sku + \": \" + count + \" in stock\";
+    }
+";
+
+/// The inventory demo: one Java file four people wrote over five years (Maya Chen started
+/// it as Inventory.java; Tomás Rivera renamed it and keyed it by SKU; Priya Natarajan added
+/// `remove`; Sam Okafor refused negative amounts; Maya came back for `toString`).
+fn inventory() -> PathBuf {
+    let dir = home().join("projects/inventory");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src/main/java/com/example/inventory")).unwrap();
+    let old = "src/main/java/com/example/inventory/Inventory.java";
+    let commit = |who: (&str, &str), date: &str, args: &[&str]| {
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .env("GIT_AUTHOR_NAME", who.0)
+            .env("GIT_AUTHOR_EMAIL", who.1)
+            .env("GIT_COMMITTER_NAME", who.0)
+            .env("GIT_COMMITTER_EMAIL", who.1)
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "{args:?}");
+    };
+    let maya = ("Maya Chen", "maya@example.com");
+    let tomas = ("Tom\u{e1}s Rivera", "tomas@example.com");
+    let priya = ("Priya Natarajan", "priya@example.com");
+    let sam = ("Sam Okafor", "sam@example.com");
+    commit(maya, "2021-03-02T10:00:00", &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join(old), STOCK_V1).unwrap();
+    commit(maya, "2021-03-02T10:00:00", &["add", "-A"]);
+    commit(
+        maya,
+        "2021-03-02T10:00:00",
+        &[
+            "commit",
+            "-qm",
+            "Count what is in stock\n\nA first inventory: one count, a way to add to it and to read it.",
+        ],
+    );
+    commit(tomas, "2023-06-14T15:30:00", &["mv", old, STOCK]);
+    std::fs::write(dir.join(STOCK), STOCK_V1.replace("class Inventory", "class Stock")).unwrap();
+    commit(tomas, "2023-06-14T15:30:00", &["commit", "-qam", "Rename Inventory to Stock"]);
+    std::fs::write(dir.join(STOCK), STOCK_V2).unwrap();
+    commit(
+        tomas,
+        "2023-06-15T11:05:00",
+        &["commit", "-qam", "Key stock by SKU\n\nEach stock item now knows its SKU; a null one is refused at once."],
+    );
+    let v3 = STOCK_V2
+        .replace("        return count;\n    }\n", &format!("        return count;\n    }}\n{STOCK_V3_REMOVE}"));
+    std::fs::write(dir.join(STOCK), &v3).unwrap();
+    commit(
+        priya,
+        "2025-01-20T09:12:00",
+        &[
+            "commit",
+            "-qam",
+            "Take items out of stock\n\nremove() says whether there was enough to take, and leaves the count alone when not.",
+        ],
+    );
+    let v4 = v3.replace(
+        "    public void add(int n) {\n",
+        "    public void add(int n) {\n        if (n < 0) {\n            throw new IllegalArgumentException(\"Negative amount: \" + n);\n        }\n",
+    );
+    std::fs::write(dir.join(STOCK), &v4).unwrap();
+    commit(
+        sam,
+        "2026-09-30T17:45:00",
+        &[
+            "commit",
+            "-qam",
+            "Refuse negative amounts in add\n\nA negative amount was taken as a removal that never checked the count.\nNow it is an error, and remove() is the way to take items out.",
+        ],
+    );
+    let v5 = v4.trim_end().strip_suffix('}').unwrap().to_owned() + STOCK_V5_TOSTRING + "}\n";
+    std::fs::write(dir.join(STOCK), &v5).unwrap();
+    commit(maya, "2026-10-26T14:20:00", &["commit", "-qam", "Describe stock in the logs"]);
+    dir
+}
+
+/// The pointer resting on the annotation column's line `line`, until its card shows.
+fn hover_column(w: &mut Win, e: &Entity<EditorPanel>, line: usize) {
+    let e2 = e.clone();
+    let at = w
+        .cx
+        .update(|cx| e2.read(cx).blame.painted.borrow().rows.iter().find(|(l, _)| *l == line).map(|(_, b)| b.center()));
+    let at = at.expect("the line is drawn");
+    for _ in 0..30 {
+        w.with(|_, window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position: at,
+                    pressed_button: None,
+                    modifiers: gpui::Modifiers::none(),
+                }),
+                cx,
+            );
+        });
+        let e3 = e.clone();
+        if w.pump(1, &mut |cx| e3.read(cx).blame.card.is_some()) {
+            return;
+        }
+    }
+    println!("docs: no blame card on line {line}");
+}
+
+fn blame(theme: ThemeChoice, mode: &str) {
+    let repo = inventory();
+    let file = repo.join(STOCK);
+    let mut s = settings(theme, vec![repo.clone()], Some(repo.clone()));
+    s.blame_current_line = true;
+    s.hover_delay_ms = 200;
+    let mut w = Win::new(s, false);
+    w.activity(Activity::Project);
+    let e = w.open(&file, Some((19, 8)));
+    let e2 = e.clone();
+    w.with(|_, _, cx| e2.update(cx, |e, cx| e.toggle_blame(cx)));
+    let e3 = e.clone();
+    w.pump(20, &mut |cx| e3.read(cx).blame.data.is_some() && !e3.read(cx).blame.map.is_empty());
+    w.settle();
+    w.snap(&format!("blame-column-{mode}"));
+    if mode != "light" {
+        return;
+    }
+    // A line's card.
+    hover_column(&mut w, &e, 24);
+    w.settle();
+    w.snap("blame-card-light");
+    // A click on a line: its commit lit.
+    let e2 = e.clone();
+    w.cx.update(|cx| {
+        e2.update(cx, |e, cx| {
+            e.blame.card = None;
+            e.blame.selected = e.blame_commit(24).map(|c| c.id.clone());
+            cx.notify();
+        })
+    });
+    w.settle();
+    w.snap("blame-highlight-light");
+    // Annotate Previous Revision: the file before Priya's commit.
+    let e2 = e.clone();
+    let priya = w.cx.update(|cx| e2.read(cx).blame_commit(24).cloned()).unwrap();
+    w.with(|_, window, cx| {
+        e2.update(cx, |e, cx| {
+            e.blame.selected = None;
+            e.annotate_previous(&priya, window, cx)
+        })
+    });
+    let e3 = e.clone();
+    w.pump(20, &mut |cx| e3.read(cx).blame.revisions.last().is_some_and(|r| r.data.is_some()));
+    w.settle();
+    w.snap("blame-previous-light");
+    let e2 = e.clone();
+    w.cx.update(|cx| e2.update(cx, |e, cx| e.revision_back(0, cx)));
+    // The column closed: the author hints, and the caret line's blame.
+    w.cx.update(|cx| e2.update(cx, |e, cx| e.set_annotations(false, cx)));
+    w.with(|_, window, cx| {
+        e2.update(cx, |e, cx| {
+            e.go_to(14, 12, window, cx);
+        })
+    });
+    let e3 = e.clone();
+    w.pump(5, &mut |cx| e3.read(cx).blame.line == Some(14));
+    w.settle();
+    w.snap("blame-hints-light");
+    // An agent's lines, not committed yet, and one of yours: the agent in its colour.
+    let text = w.text(&e);
+    let agent_text = text.replace(
+        "        count -= n;\n",
+        "        count -= n;\n        if (count == 0) {\n            log.info(\"{} is out of stock\", sku);\n        }\n",
+    );
+    let mine = agent_text.replace("    private int count;\n", "    private int count; // never negative\n");
+    w.set_text(&e, mine.clone());
+    let e2 = e.clone();
+    w.cx.update(|cx| {
+        e2.update(cx, |e, cx| {
+            use snout_app::claude_ide::ledger::{EditRecord, Owners};
+            let first = mine.lines().position(|l| l.contains("if (count == 0)")).unwrap();
+            let mut lines = vec![None; mine.lines().count() + 1];
+            for l in &mut lines[first..first + 3] {
+                *l = Some(0);
+            }
+            e.agent_edits = Arc::new(vec![EditRecord::now(
+                snout_app::agents::CLAUDE,
+                1,
+                Some("Log when an item runs out".into()),
+                "Edit",
+            )]);
+            e.agent_lines = Some(Owners { text: Arc::new(mine.clone()), lines: Arc::new(lines) });
+            e.set_annotations(true, cx);
+        })
+    });
+    w.pump(2, &mut |_| false);
+    w.with(|_, window, cx| e2.update(cx, |e, cx| e.go_to(27, 0, window, cx)));
+    w.settle();
+    w.snap("blame-agents-light");
 }

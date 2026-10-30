@@ -181,6 +181,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "RevertAllClaude" => sf("arrow.uturn.backward.circle", L::Undo2),
         "ShowAgentChanges" => sf("doc.badge.clock", L::FileClock),
         "AnnotateWithAgents" => sf("person.text.rectangle", L::UserPen),
+        "AnnotateWithGitBlame" => sf("text.line.first.and.arrowtriangle.forward", L::ScrollText),
         // Navigate.
         "GoToClass" => sf("c.square", L::SquareCode),
         "GoToSymbol" => sf("at", L::AtSign),

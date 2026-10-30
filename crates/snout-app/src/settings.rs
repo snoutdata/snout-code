@@ -113,6 +113,12 @@ pub struct Settings {
     /// How long the pointer rests before the hover shows, in milliseconds (0 to 3000).
     #[schemars(range(min = 0, max = 3000))]
     pub hover_delay_ms: u64,
+    /// Who wrote each class and method shows after its line ("Ada Lovelace +2": the main
+    /// author and how many others), from Git's blame of the file.
+    pub blame_author_hints: bool,
+    /// The caret line's blame shows faintly after its end ("Ada Lovelace, 3 years ago ·
+    /// message"), once the caret rests there for the hover's delay.
+    pub blame_current_line: bool,
     /// How often the projects are fetched in the background, in minutes (5 to 120).
     #[schemars(range(min = 5, max = 120))]
     pub fetch_minutes: u64,
@@ -274,6 +280,8 @@ impl Default for Settings {
             param_hints: true,
             show_hover: ShowHover::default(),
             hover_delay_ms: HOVER_DELAY_MS,
+            blame_author_hints: true,
+            blame_current_line: false,
             fetch_minutes: snout_core::survey::FETCH_EVERY.as_secs() / 60,
             claude_path: None,
             console_agent: Default::default(),

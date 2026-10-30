@@ -39,6 +39,7 @@ SnoutCode checks open files for changes made elsewhere, such as by Git, a build 
 
 - **Git marks** in the gutter, beside the line numbers: lines added, changed and removed since the last commit. They update as you type.
 - **Matching brackets**: the bracket at the caret and its match are framed.
+- **Annotations**: right-click the gutter and choose **Annotate with Git Blame** for a column, left of the line numbers, of who changed each line and when. Java and Kotlin files show who wrote each class and method after its line. See [Annotate with Git Blame](blame.md).
 - **The status bar**, for the tab in front: where the file sits in the project, the caret's line and column, how much is selected, the line endings (LF or CRLF), the encoding and the indentation (for example `4 spaces` or `Tab, 4`). A lock means the file is read only, such as a library class.
 
 The indentation of a file is read from its own text. A file that shows none gets the tab size from Settings ▸ Editor.

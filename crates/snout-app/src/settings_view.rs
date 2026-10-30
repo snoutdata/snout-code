@@ -148,7 +148,7 @@ impl Page {
             }
             Page::Keymap => "shortcuts keys bindings",
             Page::Editor => "tab size indent soft wrap whitespace font",
-            Page::VersionControl => "git fetch interval background",
+            Page::VersionControl => "git fetch interval background blame annotate annotations author hints line",
             Page::Gradle => "build tools jdk java daemon idle timeout",
             Page::Spring => "frameworks boot profiles active beans",
             Page::Terminal => {
@@ -450,6 +450,8 @@ impl SettingsView {
         next.show_hover = d.show_hover;
         next.hover_delay_ms = d.hover_delay_ms;
         next.fetch_minutes = d.fetch_minutes;
+        next.blame_author_hints = d.blame_author_hints;
+        next.blame_current_line = d.blame_current_line;
         next.daemon_idle_minutes = d.daemon_idle_minutes;
         next.claude_path = d.claude_path.clone();
         next.codex_path = d.codex_path.clone();
@@ -1406,6 +1408,40 @@ impl SettingsView {
                             .text_color(p.fg_dim)
                             .child("The projects are fetched in the background, to count what there is to pull."),
                     )
+                    .child(section("Annotations", &p))
+                    .child(check_line(
+                        look::checkbox(
+                            "settings-author-hints",
+                            "Show who wrote each class and method (\u{201c}Ada Lovelace +2\u{201d})",
+                            d.blame_author_hints,
+                            true,
+                            &p,
+                        )
+                        .debug_selector(|| "settings-author-hints".into())
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.set(cx, |s| s.blame_author_hints = !s.blame_author_hints)),
+                        ),
+                        None,
+                    ))
+                    .child(check_line(
+                        look::checkbox(
+                            "settings-line-blame",
+                            "Show the current line\u{2019}s author and commit after its end",
+                            d.blame_current_line,
+                            true,
+                            &p,
+                        )
+                        .debug_selector(|| "settings-line-blame".into())
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.set(cx, |s| s.blame_current_line = !s.blame_current_line)),
+                        ),
+                        None,
+                    ))
+                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(
+                        "From Git\u{2019}s blame of the file. The line\u{2019}s author shows once the caret rests for the \
+                         hover\u{2019}s delay (Editor \u{25b8} Hover). Annotate with Git Blame is in the gutter\u{2019}s \
+                         right-click menu and the Git menu.",
+                    ))
                     .child(crate::components::tips(
                         "Good to know",
                         &[

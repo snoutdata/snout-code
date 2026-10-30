@@ -146,7 +146,7 @@ Start a debug session with the title bar's Debug button (⌃D), **Debug '…'** 
 Breakpoints go in Java, Scala, Kotlin and Groovy files.
 
 - Click on a line number to set a breakpoint. Click again to remove it. **Toggle Breakpoint** (⌘F8, Run menu) does the same for the caret's line.
-- Right click a line number to give the breakpoint a condition, or press ⌥⇧⌘F8 (**Edit Breakpoint Condition…**) on its line. In the box **Breakpoint on line N**, type an expression such as `i > 3`, then press Enter or click **Done**. The program stops there only when it is true. Leave it empty to stop every time. **Remove** removes the breakpoint.
+- Right click a breakpoint to give it a condition (a right click on a line without one opens the gutter's menu, whose **Breakpoint Condition…** sets one with a condition), or press ⌥⇧⌘F8 (**Edit Breakpoint Condition…**) on its line. In the box **Breakpoint on line N**, type an expression such as `i > 3`, then press Enter or click **Done**. The program stops there only when it is true. Leave it empty to stop every time. **Remove** removes the breakpoint.
 - **Toggle Breakpoint Enabled** (⌥⌘F8) keeps the breakpoint on the caret's line but stops the program there no more; it shows as a ring. Press it again to enable it.
 
 **View Breakpoints…** (⇧⌘F8) lists every breakpoint of the project, by file and line, with its condition. Untick one to disable it, pick one to edit its condition below the list, click its bin to remove it, or **Remove All**. A double click, or **Go to Line**, shows its line.

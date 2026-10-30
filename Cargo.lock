@@ -7468,6 +7468,8 @@ dependencies = [
  "snout-remote",
  "tempfile",
  "tree-sitter",
+ "tree-sitter-java",
+ "tree-sitter-kotlin-sg",
  "tree-sitter-properties",
  "tungstenite",
 ]

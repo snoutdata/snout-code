@@ -1104,10 +1104,12 @@ fn the_lines_an_agent_wrote_keep_its_name(cx: &mut TestAppContext) {
         assert!(!lane.is_empty() && lane.iter().all(|r| !r.unreviewed), "the marks stay, paler: {lane:?}");
         assert!(cx.global::<super::AgentFiles>().0.is_empty() && cx.global::<super::AgentSummary>().files == 0);
     });
+    // Annotate with Agents opens the annotation column: Claude's uncommitted lines say Claude.
     cx.update(|_, cx| editor.update(cx, |e, cx| e.toggle_annotate(cx)));
-    let notes = cx.update(|_, cx| editor.read(cx).annotations(cx));
-    assert_eq!(notes.len(), 2, "{notes:?}");
-    assert!(notes[0].1.starts_with("Claude \u{b7} "), "{:?}", notes[0].1);
+    pump_until(cx, "the blame", |cx| cx.update(|_, cx| editor.read(cx).blame.data.is_some()));
+    pump(cx, 300);
+    let notes = cx.update(|_, cx| editor.read(cx).annotation_labels(cx));
+    assert!(notes.iter().any(|(_, l)| l.contains("Claude \u{b7} ")), "{notes:?}");
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }

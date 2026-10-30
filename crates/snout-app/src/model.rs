@@ -200,6 +200,10 @@ pub enum Action {
     OpenGithub,
     ToggleConsole,
     ShowCommit(String),
+    /// Show a commit with one of its files picked (its path at the commit): the file's diff.
+    ShowCommitFile(String, String),
+    /// Pick a commit for the Git view without bringing the view forward.
+    SelectCommit(String),
     CloseCommit,
     SetTheme(ThemeChoice),
     Reveal(PathBuf),
@@ -1763,28 +1767,46 @@ impl Model {
                     cx.open_url(url);
                 }
             }
-            Action::ShowCommit(rev) => {
-                let repo = repo.unwrap();
-                let read = cx.background_executor().spawn(async move { repo.commit_details(&rev) });
-                self._show_commit = Some(cx.spawn(async move |this, cx| {
-                    let details = read.await.map_err(|e| e.to_string());
-                    let _ = this.update(cx, |m, cx| {
-                        let selected = details.as_ref().ok().and_then(|d| d.files.first()).map(|f| f.path.clone());
-                        if let Ok(d) = &details {
-                            m.message = format!("Commit {} {}", d.short_id, d.summary());
-                        }
-                        m.commit_view = Some(CommitView { details, selected, diff: None });
-                        m.update_commit_diff(cx);
-                        cx.emit(ModelEvent::ShowCommit);
-                        cx.notify();
-                    });
-                }));
+            Action::ShowCommit(rev) => self.show_commit(repo.unwrap(), rev, None, true, cx),
+            Action::ShowCommitFile(rev, path) => {
+                if let Some(repo) = repo {
+                    self.show_commit(repo, rev, Some(path), true, cx);
+                }
+            }
+            Action::SelectCommit(rev) => {
+                if let Some(repo) = repo {
+                    self.show_commit(repo, rev, None, false, cx);
+                }
             }
             Action::CloseCommit => {
                 self.commit_view = None;
                 self.message = "Working tree".into();
             }
         }
+    }
+
+    /// Read commit `rev` off the UI thread and show it in the commit view, `file` picked (else
+    /// its first file); `show` brings the Git view forward.
+    fn show_commit(&mut self, repo: Repo, rev: String, file: Option<String>, show: bool, cx: &mut Context<Self>) {
+        let read = cx.background_executor().spawn(async move { repo.commit_details(&rev) });
+        self._show_commit = Some(cx.spawn(async move |this, cx| {
+            let details = read.await.map_err(|e| e.to_string());
+            let _ = this.update(cx, |m, cx| {
+                let files = details.as_ref().ok().map(|d| d.files.as_slice()).unwrap_or_default();
+                let selected = file
+                    .filter(|f| files.iter().any(|c| &c.path == f))
+                    .or_else(|| files.first().map(|f| f.path.clone()));
+                if let Ok(d) = &details {
+                    m.message = format!("Commit {} {}", d.short_id, d.summary());
+                }
+                m.commit_view = Some(CommitView { details, selected, diff: None });
+                m.update_commit_diff(cx);
+                if show {
+                    cx.emit(ModelEvent::ShowCommit);
+                }
+                cx.notify();
+            });
+        }));
     }
 
     /// Ask for a folder, then run `then` with it.
