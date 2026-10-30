@@ -47,6 +47,10 @@ jobs:
       # The files as the repository has them (LF): the tests compare against them.
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
+      # Which program the firewall stops from taking connections (it then asks the user, the
+      # prompt seen on the arm64 runner): its blocks are logged, and listed at the end.
+      - name: Firewall audit
+        run: auditpol /set /subcategory:"{0CCE9226-69AE-11D9-BED3-505054503030}" /failure:enable
       - name: Rust
         run: scripts/windows/setup-rust.ps1
       - uses: actions/setup-java@v6
@@ -91,6 +95,12 @@ jobs:
           scripts\windows\smoke.ps1 -Bin target\release\snout-code.exe -Out target\windows-check\smoke
           if ($LASTEXITCODE -ne 0) { exit 1 }
           scripts\windows\smoke.ps1 -Bin target\release\snout-code.exe -Out target\windows-check\smoke -Jdk "${{ steps.java.outputs.path }}"
+      - name: What the firewall blocked
+        if: always()
+        run: |
+          $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 5031, 5155 } -ErrorAction SilentlyContinue)
+          if ($events.Count -eq 0) { Write-Host "nothing"; exit 0 }
+          $events | Select-Object -Last 40 | ForEach-Object { Write-Host "$($_.TimeCreated) [$($_.Id)] $($_.Message -replace '\s+', ' ')" }
       - name: Screenshots and logs
         if: always()
         uses: actions/upload-artifact@v7
@@ -141,9 +151,14 @@ jobs:
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
+      # Which program the firewall stops from taking connections (it then asks the user, the
+      # prompt seen on the arm64 runner): its blocks are logged, and listed at the end.
+      - name: Firewall audit
+        run: auditpol /set /subcategory:"{0CCE9226-69AE-11D9-BED3-505054503030}" /failure:enable
       - name: Rust
         run: scripts/windows/setup-rust.ps1
       - uses: actions/setup-java@v6
+        id: java
         with:
           distribution: temurin
           java-version: '21'
@@ -179,12 +194,20 @@ jobs:
           $sign = @()
           if ($env:SIGN_WINDOWS -eq 'true') { $sign = @('-Sign') }
           scripts\package-windows.ps1 -ServerDist target\snout-server-dist @sign
+      # Installed silently, then the installed app opens a project and starts its engine
+      # (screenshots), then it is uninstalled.
       - name: Install it silently, start it, uninstall it
         run: |
           $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
-          scripts\windows\install-test.ps1 -Setup $setup.FullName -Out target\windows-install-test
-      - name: Install log
-        if: failure()
+          scripts\windows\install-test.ps1 -Setup $setup.FullName -Jdk "${{ steps.java.outputs.path }}" -Out target\windows-install-test
+      - name: What the firewall blocked
+        if: always()
+        run: |
+          $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 5031, 5155 } -ErrorAction SilentlyContinue)
+          if ($events.Count -eq 0) { Write-Host "nothing"; exit 0 }
+          $events | Select-Object -Last 40 | ForEach-Object { Write-Host "$($_.TimeCreated) [$($_.Id)] $($_.Message -replace '\s+', ' ')" }
+      - name: Install test screenshots and logs
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: windows-install-test-${{ matrix.arch }}

@@ -155,8 +155,9 @@ It builds `snout-code.exe` and the Java engine with its jlinked Java 21 runtime,
 installer to `target\windows-package\`. `-ServerDist target\snout-server-dist` puts in the Linux
 servers for Remote SSH, which `scripts/build-server-linux.sh` builds (with Docker). The
 [Windows workflow](../.github/workflows/windows.yml) runs clippy, the tests and the app on a
-demo project, builds the installers for x64 and arm64, and installs, starts and uninstalls each
-one silently.
+demo project, builds the installers for x64 and arm64, and installs each one silently, opens a
+project in the installed app (which must start its Java engine), then uninstalls it, checking
+that nothing but the user's settings is left.
 
 ## When something goes wrong
 

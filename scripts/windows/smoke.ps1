@@ -29,6 +29,14 @@ public static class SmokeInput {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
+    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    // Windows lets a process bring a window forward only after it took input: an Alt press.
+    public static void Front(IntPtr hwnd) {
+        keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0x12, 0, 2, UIntPtr.Zero);
+        ShowWindow(hwnd, 3);
+        SetForegroundWindow(hwnd);
+    }
     public static void Click(int x, int y) {
         SetCursorPos(x, y);
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
@@ -37,9 +45,14 @@ public static class SmokeInput {
 }
 "@
 [SmokeInput]::SetProcessDPIAware() | Out-Null
-# The arm64 runner's desktop shows Windows's first-run privacy screen over everything: out of
-# the way, so the app's window can be seen.
+# The arm64 runner's desktop shows Windows's first-run privacy screen over everything, and the
+# Start menu: out of the way, so the app's window can be seen.
 Get-Process WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+function ClearDesktop {
+    Get-Process WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Esc closes the Start menu when it is open (and is nothing to the app at this point).
+    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+}
 
 function Shot([string]$name) {
     $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -126,8 +139,8 @@ WaitFor 'main window painted' "no window after $Wait s"
 Select-String -Path $log -Pattern 'main window painted' | Select-Object -First 1 | ForEach-Object { Write-Host $_.Line }
 # Maximized, so the whole window and its title bar's buttons are on the runner's small screen.
 for ($i = 0; $i -lt 20 -and $app.MainWindowHandle -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 250; $app.Refresh() }
-[SmokeInput]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
-[SmokeInput]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
+ClearDesktop
+[SmokeInput]::Front($app.MainWindowHandle)
 WaitFor '\[project\] read' "the project was not read"
 Select-String -Path $log -Pattern '\[project\] read' | ForEach-Object { Write-Host $_.Line }
 
@@ -135,6 +148,9 @@ if (-not $Jdk) {
     WaitFor '\[java\] no JDK fits' "no JDK download was offered"
     Select-String -Path $log -Pattern '\[java\] no JDK fits' | ForEach-Object { Write-Host $_.Line }
     Start-Sleep -Seconds 2
+    ClearDesktop
+    [SmokeInput]::Front($app.MainWindowHandle)
+    Start-Sleep -Milliseconds 500
     Shot "no-jdk"
 } else {
     WaitFor '\[java\] started the engine' "the Java engine did not start in $Wait s"
@@ -149,11 +165,21 @@ if (-not $Jdk) {
     }
     Select-String -Path $log -Pattern '\[java\] readiness|\[java\] first diagnostics' | Select-Object -Last 2 | ForEach-Object { Write-Host $_.Line }
     # What the Java processes listen on: loopback only, or Windows Firewall asks the user.
-    $java = @(Get-CimInstance Win32_Process -Filter "Name = 'java.exe'" | ForEach-Object { $_.ProcessId })
+    $java = @{}
+    Get-CimInstance Win32_Process -Filter "Name = 'java.exe'" | ForEach-Object { $java[$_.ProcessId] = $_.CommandLine }
+    $loopback = @('127.0.0.1', '::1')
     $open = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-        Where-Object { $java -contains $_.OwningProcess -and $_.LocalAddress -notin @('127.0.0.1', '::1') })
-    foreach ($c in $open) { Write-Host "listening beyond loopback: java pid $($c.OwningProcess) on $($c.LocalAddress):$($c.LocalPort)" }
+        Where-Object { $java.ContainsKey($_.OwningProcess) -and $_.LocalAddress -notin $loopback }) +
+        @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue |
+        Where-Object { $java.ContainsKey($_.OwningProcess) -and $_.LocalAddress -notin $loopback })
+    foreach ($c in $open) {
+        $cl = "$($java[$c.OwningProcess])"
+        Write-Host "listening beyond loopback: java pid $($c.OwningProcess) on $($c.LocalAddress):$($c.LocalPort) ($($c.CimClass.CimClassName)): $($cl.Substring(0, [Math]::Min(300, $cl.Length)))"
+    }
     Start-Sleep -Seconds 3
+    ClearDesktop
+    [SmokeInput]::Front($app.MainWindowHandle)
+    Start-Sleep -Milliseconds 500
     Shot "main"
     # The window is at the screen's top left; File is the first menu of its title bar.
     [SmokeInput]::Click(31, 18)
