@@ -1,0 +1,193 @@
+# SnoutCode on Windows: the checks (clippy, the workspace's tests, the real app started on a
+# demo Java project, with screenshots) and the installer (unsigned for now), for x64 and arm64.
+# The installer is installed, started and uninstalled silently, and kept as the run's artifact;
+# nothing is published.
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Signing is OFF: the Windows builds are unsigned (SmartScreen warns, see docs/windows.md).
+  # To sign with Azure Trusted Signing, set this to 'true' and add the secrets AZURE_TENANT_ID,
+  # AZURE_CLIENT_ID and AZURE_CLIENT_SECRET and the variables AZURE_SIGNING_ACCOUNT and
+  # AZURE_SIGNING_PROFILE (scripts/windows/sign.ps1 says what each is).
+  SIGN_WINDOWS: 'false'
+
+jobs:
+  check:
+    name: Check (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    steps:
+      # The files as the repository has them (LF): the tests compare against them.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+      - name: Rust
+        run: scripts/windows/setup-rust.ps1
+      - uses: actions/setup-java@v6
+        id: java
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: check-${{ matrix.arch }}
+      - name: The Java engine
+        run: |
+          Push-Location engine
+          .\gradlew.bat --no-daemon --quiet :sync-cli:snoutDist "-PsnoutDistDir=$env:RUNNER_TEMP\engine-dist"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Pop-Location
+          "SNOUT_ENGINE_DIST=$env:RUNNER_TEMP\engine-dist" >> $env:GITHUB_ENV
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: |
+          New-Item -ItemType Directory -Force -Path target\windows-check | Out-Null
+          git config --global user.email test@example.com
+          git config --global user.name Test
+          # As on a machine with no Java installed: the tests that need a JDK for their builds
+          # get this one (SNOUT_TEST_JDK); the app finds none of its own.
+          $env:SNOUT_TEST_JDK = $env:JAVA_HOME
+          $env:JAVA_HOME = $null
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'jdk|java' }) -join ';'
+          $log = "target\windows-check\tests.log"
+          cmd /c "cargo test --locked --workspace --no-fail-fast > $log 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content $log
+          Write-Host "== Failures"
+          Select-String -Path $log -Pattern '^test .* FAILED$|^    [a-z_:]+$|panicked at' | ForEach-Object { $_.Line }
+          exit $code
+      - name: The app, on a demo Java project
+        if: success() || failure()
+        run: |
+          cargo build --locked --release -p snout-app
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          scripts\windows\smoke.ps1 -Bin target\release\snout-code.exe -Out target\windows-check\smoke
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          scripts\windows\smoke.ps1 -Bin target\release\snout-code.exe -Out target\windows-check\smoke -Jdk "${{ steps.java.outputs.path }}"
+      - name: Screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-check-${{ matrix.arch }}
+          path: target/windows-check/
+          if-no-files-found: ignore
+      # Whether the Ghostty terminal engine (libghostty-vt, built with Zig 0.15) builds on
+      # Windows; until it does, Windows uses the built-in engine.
+      - uses: mlugg/setup-zig@v2
+        if: matrix.arch == 'x64'
+        continue-on-error: true
+        with:
+          version: 0.15.2
+      - name: Ghostty (trial)
+        if: matrix.arch == 'x64'
+        continue-on-error: true
+        run: cargo clippy --locked -p snout-app --all-targets --features ghostty -- -D warnings
+
+  # The Linux servers Remote SSH installs on remote machines, which the installer carries.
+  servers:
+    name: Remote SSH servers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/build-server-linux.sh
+        shell: bash
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snout-server-dist
+          path: target/snout-server-dist/
+          if-no-files-found: error
+
+  package:
+    name: Installer (${{ matrix.arch }})
+    needs: servers
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+      - name: Rust
+        run: scripts/windows/setup-rust.ps1
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: package-${{ matrix.arch }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: snout-server-dist
+          path: target/snout-server-dist
+      - name: Inno Setup
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+      # SIGNING, TURNED OFF (see SIGN_WINDOWS above): with it on, package-windows.ps1 -Sign signs
+      # snout-code.exe, the installer and its uninstaller through scripts/windows/sign.ps1.
+      - name: Build the installer
+        env:
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          $sign = @()
+          if ($env:SIGN_WINDOWS -eq 'true') { $sign = @('-Sign') }
+          scripts\package-windows.ps1 -ServerDist target\snout-server-dist @sign
+      - name: Install it silently, start it, uninstall it
+        run: |
+          $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
+          scripts\windows\install-test.ps1 -Setup $setup.FullName -Out target\windows-install-test
+      - name: Install log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-install-test-${{ matrix.arch }}
+          path: target/windows-install-test/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snout-code-windows-${{ matrix.arch }}
+          path: |
+            target/windows-package/SnoutCode-*-setup.exe
+            target/windows-package/SHA256SUMS
+          if-no-files-found: error
