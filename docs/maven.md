@@ -21,10 +21,10 @@ It reads what `mvn` would see:
 Each module becomes a module of the project, with:
 
 - its source folders, and those the Build Helper plugin adds (`add-source`, `add-test-source`);
-- the generated sources: what annotation processors write to `target/generated-sources/annotations`, and each folder a generator filled under `target/generated-sources`;
+- the generated sources: what annotation processors write to `target/generated-sources/annotations`, and each folder a generator filled under `target/generated-sources`. When a module's plugins generate sources (a plugin bound to `generate-sources` or `process-sources`, such as Modello, ANTLR, JAXB or protobuf) and nothing has run them yet, the engine runs Maven's `process-sources` in those modules after the sync, then reads the folders. See [Generated sources](java.md#generated-sources);
 - its resources and test resources;
 - its dependencies by scope: `compile`, `provided` and `system` for the main code to compile against, `compile` and `runtime` for it to run with, and every scope for the tests. A dependency on another module of the reactor (a test jar too) is that module, not a jar;
-- its Java level: the compiler plugin's `release`, `source` and `target`, else the `maven.compiler.*` properties; `-parameters` and `--enable-preview` when the plugin sets them;
+- its Java level: the compiler plugin's `release`, `source` and `target`, else the `maven.compiler.*` properties; `-parameters` and `--enable-preview` when the plugin sets them. A module that does not name the compiler plugin gets the configuration a parent's `pluginManagement` gives it, as Maven does;
 - its JDK: a JDK of that level, or the toolchain's when the Toolchains plugin or the compiler's `jdkToolchain` names one.
 
 The modules show in the Project view as Gradle projects do, with `target` excluded, and the POMs, `.mvn/maven.config` and the wrapper's properties under **Maven Files**. See [Projects](projects.md).

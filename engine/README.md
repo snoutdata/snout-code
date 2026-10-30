@@ -69,7 +69,11 @@ SnoutCode supports Gradle 7.0 to 9.x and Maven 3.6 to 3.9 (tested on JDKs 17, 21
 
 The command prints a one line summary on stderr and exits with 1 if a build failed to sync; the model is written all the same.
 
-A sync only configures the builds. No task runs, so nothing is compiled and no `build/` directory appears.
+A sync only configures the builds. No task runs, so nothing is compiled and no `build/` directory appears. Every Gradle run of the engine's (syncs, tasks, the Scala bridge) turns the configuration cache and isolated projects off with `-D` properties, which win over `gradle.properties`: its init scripts reach every project and register listeners, which both forbid.
+
+A build that says it needs a newer Java than its daemon's ("This build requires at least JDK 25", "requires Java 17 to run") syncs once more on the nearest installed JDK of that version or newer that its Gradle runs on; with none installed, `needsJdk` names it.
+
+Each source set lists its `generators`: the tasks its compile depends on (and theirs, one level down), or its source folders' builders, whose outputs are, hold or lie in a Java source folder that does not exist or a file of its compile classpath that does not exist. `snout-engine lsp` runs them after the sync (see [Generated sources](#generated-sources)).
 
 ## Java semantics: `snout-engine lsp`
 
@@ -158,11 +162,16 @@ Each unit and build has a fingerprint of its inputs: its sources' paths, sizes a
 The engine tells the app how far each module is with `snout/readiness` notifications (see [Notifications to the app](#notifications-to-the-app)), one per change, and the whole project's as `module: null`. A module is:
 
 - `syncing`: only the project as a whole, while the Gradle sync runs;
+- `generatingSources`: its build's source generators run (see [Generated sources](#generated-sources));
 - `compilingScala`: its Scala, or a shared folder it compiles, is compiling for jdtls; its percent moves with the time the last compile took;
 - `importing`: jdtls is importing it, or reading its new Scala classes and building;
 - `ready`: jdtls has it all.
 
-A module without Scala is ready when jdtls is (its `ServiceReady`), one with Scala when jdtls has built against its new classes. Until then, jdtls's diagnostics for its files are held back, since they would report the Scala types not compiled yet as missing; the latest go out when it is ready. Shared source folders are modules of their own here, named as in `sharedSourceRoots` and marked `shared`.
+A module without Scala or generators is ready when jdtls is (its `ServiceReady`), one with Scala when jdtls has built against its new classes, one of a build with generators when jdtls has imported what they made. Until then, jdtls's diagnostics for its files are held back, since they would report the Scala types not compiled yet, or the code not generated yet, as missing; the latest go out when it is ready.
+
+### Generated sources
+
+`Generators` runs what the sync found missing and made by the build, after the sync, while jdtls starts, on the Scala bridge's queue (after its first compile): for a Gradle build, the source sets' `generators` tasks in one Gradle run with `--continue` and the build-directory init script (an included build's as `:<build>:<task>`; buildSrc builds itself); for a Maven build, `process-sources` with `--fail-at-end` in the modules whose `generators` say so (a plugin execution bound to `generate-sources` or `process-sources`, or a known generator's goals: Modello, ANTLR, JavaCC, JAXB, CXF, protobuf, OpenAPI, Swagger, Avro, jOOQ, templating, XMLBeans, jsonschema2pojo, JAX-WS, Thrift; not Build Helper), skipping a module whose `target/generated-sources` is filled. The modules of those builds wait in `generatingSources`. Then a Maven build syncs again, to find the folders filled, and jdtls imports the projects again. A run that fails is logged, and the folders stay missing. Shared source folders are modules of their own here, named as in `sharedSourceRoots` and marked `shared`.
 
 ### The importer
 
@@ -175,6 +184,9 @@ Each Gradle project with Java sources becomes one JDT project, the way Buildship
 - Each source set compiles to `bin/<sourceSet>` inside the workspace project. Test source sets, and libraries only they use, carry JDT's `test` attribute.
 - Libraries come from the compile classpaths, with their source jars attached. Project dependencies, including those on included builds, become project references.
 - The JDK is the compile task's toolchain, or the Gradle daemon's, registered with jdtls when it does not know it. Source, target, `--release`, `-parameters`, `--enable-preview` and the encoding come from the main Java compile task.
+- A project whose first main source folder holds a `module-info.java` (and that compiles for Java 9 or newer) is a Java module: its main libraries and project references carry JDT's `module` attribute, as javac puts them on the module path; test-only ones stay on the class path. Every other `module-info.java` is excluded from its folder: a test source set's, a second one, and one beside sources of a level older than 9, which the build compiles apart and JDT would parse as a class.
+- A multi-release overlay (a source set named `java<N>`, or a folder `.../java<N>`) excludes the files the other folders have at the same path: the base version stays, what only the overlay has stays in it.
+- jdtls runs Lombok as a Java agent (`-javaagent`) when a library of the model is `org.projectlombok:lombok`, the newest one, so what it generates resolves.
 - The Scala bridge folders are libraries, with their Scala source root attached, so going to a Scala type shows its Scala source.
 
 #### Source folders that several projects compile
@@ -456,5 +468,5 @@ Parts of `sync-plugin` are adapted from IntelliJ IDEA Community Edition, under t
 - The engine does not watch Scala files itself; the app sends `snout/scalaChanged`.
 - Spring: conditions and profiles are not evaluated; test sources, Kotlin, Lombok-generated constructors and beans that `ImportBeanDefinitionRegistrar`s or `BeanFactoryPostProcessor`s register are not seen; Scala positions come from the text, so a member is found by its name.
 - A `main` configuration runs jdtls's compile of the Java, which does not run annotation processors, with the resource folders as they are: no `processResources` filtering.
-- jdtls does not run annotation processors for these projects. Generated source folders are used when a Gradle build has filled them.
+- jdtls does not run annotation processors for these projects. Generated source folders are used when the build has filled them, or once the engine's run of the build's generators has (see [Generated sources](#generated-sources)).
 - The JDT projects sit outside the root folder, which jdtls treats as an unmanaged project in a few places: if the client changes jdtls's default JDK, their compiler level follows it until the next start.

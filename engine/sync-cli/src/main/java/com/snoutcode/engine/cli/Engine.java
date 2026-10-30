@@ -823,6 +823,54 @@ final class Engine implements GradleRuns.Client {
      * whose inputs changed since their last good compile, open files' builds first. Each one
      * done is refreshed in jdtls and its modules made ready.
      */
+    /**
+     * Runs the builds' source generators (see {@link Generators}) on the Scala queue, ahead of any
+     * Scala compile (which may need the generated code), then has jdtls import the projects again
+     * and build; their modules wait in {@code generatingSources} until then.
+     */
+    void startGenerators(Runnable recordInputs) {
+        List<Generators.Job> jobs = Generators.jobs(model, plans);
+        if (jobs.isEmpty()) {
+            return;
+        }
+        List<String> modules = new ArrayList<>();
+        jobs.forEach(j -> modules.addAll(j.modules()));
+        Readiness r = readiness;
+        if (r != null) {
+            r.generating(modules);
+        }
+        scalaQueue.submit(() -> {
+            try {
+                Generators.runAll(jobs, log, verbose);
+                Readiness now = readiness;
+                if (now != null) {
+                    now.compiled(modules);
+                }
+                // A Maven build learns its generated folders from a sync; a Gradle build's are in
+                // its model already, missing until now.
+                List<JsonObject> resynced = new ArrayList<>();
+                for (Generators.Job job : jobs) {
+                    if (job.plan().maven()) {
+                        resynced.add(ProjectSync.syncOne(job.plan(), log));
+                    }
+                }
+                if (!resynced.isEmpty()) {
+                    merge(resynced, "generating sources", recordInputs);
+                }
+                if (jobs.stream().anyMatch(j -> !j.plan().maven())) {
+                    reimport("sources were generated").get(30, TimeUnit.MINUTES);
+                }
+            } catch (Exception | LinkageError e) {
+                log.println("snout-engine: the source generators failed: " + SnoutEngine.describe(e));
+            } finally {
+                Readiness now = readiness;
+                if (now != null) {
+                    now.ready(modules);
+                }
+            }
+        });
+    }
+
     void startScala(int parallel) {
         scalaQueue.submit(() -> {
             try {

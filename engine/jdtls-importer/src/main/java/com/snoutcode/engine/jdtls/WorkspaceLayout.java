@@ -146,9 +146,15 @@ final class WorkspaceLayout {
         }
         classpath.add(Jdks.containerEntry(spec.java));
         for (ImportPlan.Dependency dependency : spec.dependencies) {
-            IClasspathAttribute[] attributes = dependency.test
-                ? new IClasspathAttribute[] {JavaCore.newClasspathAttribute(IClasspathAttribute.TEST, "true")}
-                : new IClasspathAttribute[0];
+            List<IClasspathAttribute> common = new ArrayList<>();
+            if (dependency.test) {
+                common.add(JavaCore.newClasspathAttribute(IClasspathAttribute.TEST, "true"));
+            } else if (spec.modular) {
+                // The module path: a module reads only modules (a plain jar is an automatic one).
+                // Test-only entries stay on the class path, which the tests read as javac's do.
+                common.add(JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"));
+            }
+            IClasspathAttribute[] attributes = common.toArray(new IClasspathAttribute[0]);
             if (dependency.project != null) {
                 List<IClasspathAttribute> projectAttributes = new ArrayList<>(Arrays.asList(attributes));
                 // Main code of a dependent project must not see this project's test code, nor

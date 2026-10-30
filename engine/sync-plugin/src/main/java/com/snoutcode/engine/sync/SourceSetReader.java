@@ -88,6 +88,8 @@ final class SourceSetReader {
         Roots roots = new Roots();
         List<Object> generated = new ArrayList<>();
         Set<String> annotationProcessorPath = new LinkedHashSet<>();
+        List<Task> compileTasks = new ArrayList<>();
+        Set<File> processorOutputs = new LinkedHashSet<>();
 
         for (String language : LANGUAGES) {
             SourceDirectorySet dirs = languageDirs(sourceSet, language);
@@ -115,10 +117,12 @@ final class SourceSetReader {
                 }
             }
             if (task != null) {
+                compileTasks.add(task);
                 Map<String, Object> taskInfo = compileTask(task);
                 compile.put(language, taskInfo);
                 File gen = generatedSourcesDir(task);
                 if (gen != null) {
+                    processorOutputs.add(gen.getAbsoluteFile());
                     Map<String, Object> g = new LinkedHashMap<>();
                     g.put("dir", gen.getAbsolutePath());
                     g.put("kind", "annotationProcessor");
@@ -164,7 +168,9 @@ final class SourceSetReader {
         configurations.put("runtimeClasspath", runtimeName);
         configurations.put("annotationProcessor", Reflect.string(Reflect.call(sourceSet, "getAnnotationProcessorConfigurationName")));
         out.put("configurations", configurations);
-        out.put("compileClasspath", classpath(sourceSet.getCompileClasspath(), compileClasspath));
+        List<Map<String, Object>> compileEntries = classpath(sourceSet.getCompileClasspath(), compileClasspath);
+        out.put("compileClasspath", compileEntries);
+        out.put("generators", generators(sourceSet, compileTasks, compileEntries, processorOutputs));
         out.put("runtimeClasspath", classpath(sourceSet.getRuntimeClasspath(), runtimeClasspath));
         List<Object> unresolved = new ArrayList<>();
         unresolved.addAll(compileClasspath.unresolved);
@@ -241,6 +247,93 @@ final class SourceSetReader {
             out.add(other);
         }
         return out;
+    }
+
+    /**
+     * The tasks that make what this source set's compile needs and a sync leaves missing: a
+     * source folder a generator fills (Kafka's message classes, an ANTLR parser, a Modello model)
+     * or a jar a task builds (a repackaged library on the class path). They are the compile
+     * tasks' dependencies (and theirs, one level down), or the source folders' builders, whose
+     * outputs are, hold or lie in a missing folder or file. The engine runs them after the sync,
+     * so that the editor sees the code the build compiles. Empty when nothing is missing.
+     */
+    private List<String> generators(SourceSet sourceSet, List<Task> compileTasks, List<Map<String, Object>> classpath,
+                                    Set<File> processorOutputs) {
+        List<File> missing = new ArrayList<>();
+        try {
+            for (File dir : sourceSet.getAllJava().getSrcDirs()) {
+                if (!dir.isDirectory() && !processorOutputs.contains(dir.getAbsoluteFile())) {
+                    missing.add(dir.getAbsoluteFile());
+                }
+            }
+        } catch (Throwable e) {
+            errors.add("generators of " + sourceSet.getName() + ": " + e);
+        }
+        for (Map<String, Object> entry : classpath) {
+            Object file = entry.get("file");
+            if ("file".equals(entry.get("kind")) && file != null && !new File(String.valueOf(file)).exists()) {
+                missing.add(new File(String.valueOf(file)).getAbsoluteFile());
+            }
+        }
+        List<String> out = new ArrayList<>();
+        if (missing.isEmpty()) {
+            return out;
+        }
+        Set<Task> seen = new LinkedHashSet<>();
+        List<Task> level = new ArrayList<>();
+        for (Task task : compileTasks) {
+            level.addAll(dependencies(task));
+        }
+        try {
+            Object dirs = Reflect.call(sourceSet.getAllJava(), "getSourceDirectories");
+            if (dirs instanceof FileCollection) {
+                level.addAll(((FileCollection) dirs).getBuildDependencies().getDependencies(null));
+            }
+        } catch (Throwable e) {
+            // no builders known
+        }
+        for (int depth = 0; depth < 2 && !level.isEmpty(); depth++) {
+            List<Task> next = new ArrayList<>();
+            for (Task task : level) {
+                if (!seen.add(task) || compileTasks.contains(task)) {
+                    continue;
+                }
+                if (makesAny(task, missing)) {
+                    out.add(task.getPath());
+                } else {
+                    next.addAll(dependencies(task));
+                }
+            }
+            level = next;
+        }
+        return out;
+    }
+
+    private Set<? extends Task> dependencies(Task task) {
+        try {
+            return task.getTaskDependencies().getDependencies(task);
+        } catch (Throwable e) {
+            return Collections.emptySet();
+        }
+    }
+
+    private static boolean makesAny(Task task, List<File> missing) {
+        Set<File> outputs;
+        try {
+            outputs = task.getOutputs().getFiles().getFiles();
+        } catch (Throwable e) {
+            return false;
+        }
+        for (File o : outputs) {
+            String output = o.getAbsolutePath();
+            for (File m : missing) {
+                String path = m.getAbsolutePath();
+                if (path.equals(output) || path.startsWith(output + File.separator) || output.startsWith(path + File.separator)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private Configuration configuration(String name) {

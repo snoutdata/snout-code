@@ -11,17 +11,17 @@
 junit-framework                https://github.com/junit-team/junit-framework                8ab6d035eee4f13726c27c148553e188a8989fa8  25   gradle        Gradle 9.8.2, Kotlin DSL; two included builds of convention plugins (gradle/base, gradle/plugins); version catalog; toolchains 17 to 25 from JDK<n> variables
 mockito                        https://github.com/mockito/mockito                           25a1d56d57cd678ab1e4636d184a44e7f001424a  21   gradle        Gradle 9.8.2, Kotlin DSL; convention plugins in an included build-logic; version catalog; foojay toolchains
 caffeine                       https://github.com/ben-manes/caffeine                        10646b00c14a7837fe16a16a2a7b1f82e5fa3155  25   gradle        Gradle 9.8.2, Kotlin DSL; convention plugins in an included gradle/plugins; version catalog; toolchain 25 through foojay
-openrewrite                    https://github.com/openrewrite/rewrite                       4c5f5875194ca487337f3d88c6b298991b78643e  21   gradle        Gradle 9.8.2, Kotlin DSL; buildSrc; about 40 subprojects; plugins from the plugin portal
+opentelemetry-java             https://github.com/open-telemetry/opentelemetry-java         dc3019edfedcb4a0d372590a9d80c180e9eed28e  21   gradle        Gradle 9.8.2, Kotlin DSL; buildSrc; about 50 subprojects; plugins from the plugin portal; foojay toolchains
 
 # Gradle, Groovy DSL, buildSrc and composite builds
 spring-boot                    https://github.com/spring-projects/spring-boot               bcd4641c9b36fb377712fe26c3f1d3472db41e1e  25   gradle        Gradle 9.8.1, Groovy DSL; buildSrc and an included gradle/plugins; a very large multi-project build
 spring-framework-6.1           https://github.com/spring-projects/spring-framework          fa36b342ebafc488f29f7d30c8e69a3d4b988ae6  17   gradle        Gradle 8.14.2 (tag v6.1.21), Groovy DSL; buildSrc; Java and Kotlin subprojects
-hibernate-orm                  https://github.com/hibernate/hibernate-orm                   ac42edc9f6b69912539f0838ee34328d8749536b  21   gradle        Gradle 9.8.2, Groovy DSL; an included local-build-plugins; version catalogs declared in settings; toolchains
+hibernate-orm                  https://github.com/hibernate/hibernate-orm                   ac42edc9f6b69912539f0838ee34328d8749536b  25   gradle        Gradle 9.8.2, Groovy DSL; an included local-build-plugins; version catalogs declared in settings; toolchains
 groovy                         https://github.com/apache/groovy                             396e862eda6c8a2fddaeb3eaf58e86cb5e6f08bc  17   gradle        Gradle 9.8.2; an included build-logic of convention plugins; Groovy and Java sources mixed
 testcontainers                 https://github.com/testcontainers/testcontainers-java        f74d167720038492c13df0ddaa053717ef61706a  17   gradle        Gradle 8.14.3, Groovy DSL; buildSrc; about 60 modules; foojay toolchains
 reactor-core                   https://github.com/reactor/reactor-core                      b9afa1b7e62375b6d3eaaa6fc6e558fbb529a899  21   gradle        Gradle 9.8.2, Groovy DSL; buildSrc; version catalogs in settings; Java 8 toolchain through foojay
 kafka                          https://github.com/apache/kafka                              139306133eab00d3ae347a791fc119b9a05076ac  21   gradle        Gradle 9.8.2, Groovy DSL; Scala and Java modules; an included api-checker build
-resilience4j-2.2               https://github.com/resilience4j/resilience4j                 e77f3536ac9b6c4764b1b8ac3dae0bca540768e4  17   gradle        Gradle 7.4.2 (tag v2.2.0), Groovy DSL; multi-project; version catalog
+resilience4j-2.3               https://github.com/resilience4j/resilience4j                 c2c6575114fc0650177fb21e1ff967f14acde39c  17   gradle        Gradle 7.4.2 (tag v2.3.0), Groovy DSL; multi-project; version catalog
 rxjava-3.1                     https://github.com/ReactiveX/RxJava                          ede5cfcb41a6a1c8f955d77d80883d5d08e843d9  17   gradle        Gradle 7.6.4 (tag v3.1.10), Groovy DSL; a single project
 
 # Spring Boot applications

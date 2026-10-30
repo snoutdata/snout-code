@@ -482,6 +482,9 @@ fn readiness_shows_in_the_status_bar_and_the_editor(cx: &mut TestAppContext) {
     let pending = cx.update(|_, cx| editor.read(cx).module_readiness(cx)).expect("the module is not ready");
     assert_eq!((pending.label(), pending.percent), ("Compiling Scala", Some(40)));
     assert!(cx.debug_bounds("inspections-pending").is_some());
+    say(json!({ "module": "readiness:app", "stage": "generatingSources", "percent": 5, "millis": 1000 }), cx);
+    let pending = cx.update(|_, cx| editor.read(cx).module_readiness(cx)).expect("the module is not ready");
+    assert_eq!((pending.label(), pending.percent), ("Generating sources", Some(5)));
     say(json!({ "module": "readiness:app", "stage": "ready", "percent": 100, "millis": 2000 }), cx);
     say(json!({ "module": null, "stage": "ready", "percent": 100, "modules": 2, "ready": 2, "millis": 2000 }), cx);
     assert!(cx.update(|_, cx| editor.read(cx).module_readiness(cx)).is_none());

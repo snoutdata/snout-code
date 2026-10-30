@@ -250,6 +250,10 @@ final class Lsp {
         command.add("--add-opens");
         command.add("java.base/java.lang=ALL-UNNAMED");
         command.addAll(options.jvmArgs);
+        File lombok = lombokAgent(model);
+        if (lombok != null && options.jvmArgs.stream().noneMatch(a -> a.startsWith("-javaagent:") && a.contains("lombok"))) {
+            command.add("-javaagent:" + lombok.getAbsolutePath());
+        }
         command.add("-jar");
         command.add(launcherJar(jdtls.toPath()).toString());
         command.add("-configuration");
@@ -277,7 +281,6 @@ final class Lsp {
             proxy.attach(spring);
             engine.attach(spring);
         }
-        // The Scala bridge compiles while jdtls starts; a module is ready once jdtls has its classes.
         if (bridge != null) {
             engine.startScala(project.parallel);
         }
@@ -290,6 +293,9 @@ final class Lsp {
                 log.println("snout-engine: could not record the sync's inputs: " + SnoutEngine.describe(e));
             }
         };
+        // Source generators run while jdtls starts (after the Scala bridge's first compile, on
+        // the same queue); their modules are ready once jdtls has imported what they made.
+        engine.startGenerators(recordInputs);
         if (!uncertain.isEmpty()) {
             engine.resyncLater(uncertain, project, recordInputs);
         }
@@ -372,6 +378,53 @@ final class Lsp {
             .append(sync.buildRoot).append('\n').append("maven ").append(MavenHome.VERSION).append(' ')
             .append(options.mavenProfiles).append('\n');
         return Sync.sha256(s.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Lombok for jdtls, when a project compiles with it: the newest {@code org.projectlombok:lombok}
+     * jar of the model's libraries, which jdtls loads as a Java agent (as javac runs it as an
+     * annotation processor), so the getters, constructors and loggers it generates exist in the
+     * editor too. Without it every use of them is an error. Null when no project uses Lombok.
+     */
+    static File lombokAgent(JsonObject model) {
+        File best = null;
+        String bestVersion = null;
+        for (JsonElement e : model.has("libraries") ? model.getAsJsonArray("libraries") : new JsonArray()) {
+            JsonObject lib = e.getAsJsonObject();
+            if (!"org.projectlombok".equals(string(lib, "group")) || !"lombok".equals(string(lib, "name")) || string(lib, "file") == null) {
+                continue;
+            }
+            File file = new File(string(lib, "file"));
+            String version = string(lib, "version");
+            if (file.isFile() && (best == null || compareVersions(version, bestVersion) > 0)) {
+                best = file;
+                bestVersion = version;
+            }
+        }
+        return best;
+    }
+
+    private static String string(JsonObject o, String key) {
+        JsonElement e = o.get(key);
+        return e == null || e.isJsonNull() ? null : e.getAsString();
+    }
+
+    /** Compares dotted versions part by part, numbers as numbers; a missing version is the oldest. */
+    static int compareVersions(String a, String b) {
+        if (a == null || b == null) {
+            return a == null ? (b == null ? 0 : -1) : 1;
+        }
+        String[] x = a.split("[.\\-]");
+        String[] y = b.split("[.\\-]");
+        for (int i = 0; i < Math.max(x.length, y.length); i++) {
+            String p = i < x.length ? x[i] : "0";
+            String q = i < y.length ? y[i] : "0";
+            int c = p.matches("\\d+") && q.matches("\\d+") ? Long.compare(Long.parseLong(p), Long.parseLong(q)) : p.compareTo(q);
+            if (c != 0) {
+                return c;
+            }
+        }
+        return 0;
     }
 
     /**

@@ -1,0 +1,16 @@
+// A source generator, the way some builds make code (Kafka's message classes): a plain folder
+// in the source set that a task the compile depends on fills. The engine runs it after the sync.
+def versionDir = layout.buildDirectory.dir('generated/version')
+def generateVersion = tasks.register('generateVersion') {
+    def out = versionDir
+    outputs.dir(out)
+    doLast {
+        def file = out.get().file('demo/lib/gen/Version.java').asFile
+        file.parentFile.mkdirs()
+        file.text = 'package demo.lib.gen;\n\npublic final class Version {\n    public static final String VALUE = "1.0";\n\n    private Version() {\n    }\n}\n'
+    }
+}
+sourceSets.main.java.srcDir(versionDir.get().asFile)
+tasks.named('compileJava') {
+    dependsOn generateVersion
+}

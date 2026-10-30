@@ -143,6 +143,24 @@ class ProjectSyncTest {
     }
 
     @Test
+    void aBuildThatAsksForANewerJdkGetsOne() {
+        JavaHomes.Jdk j17 = new JavaHomes.Jdk(new File("/jdk17"), 17, "17.0.9");
+        JavaHomes.Jdk j21 = new JavaHomes.Jdk(new File("/jdk21"), 21, "21.0.2");
+        JavaHomes.Jdk j25 = new JavaHomes.Jdk(new File("/jdk25"), 25, "25.0.1");
+        Sync.Options o = new Sync.Options();
+        o.jdks = List.of(j17, j21, j25);
+        ProjectSync.Plan plan = new ProjectSync.Plan("orm", dir.toFile(), "9.8.2", j21, o, null);
+        String error = "Gradle: Failed to apply plugin 'org.hibernate.orm.build.jdks-settings'.\n"
+            + "   > This build requires at least JDK 25, but you are using JDK 21";
+        assertEquals(j25, ProjectSync.newerJdk(error, plan));
+        assertEquals(25, ProjectSync.jdkMismatch(error, "9.8.2", j21), "and says which one when it is missing");
+        assertNull(ProjectSync.newerJdk(error, new ProjectSync.Plan("orm", dir.toFile(), "9.8.2", j25, o, null)));
+        assertNull(ProjectSync.newerJdk("Could not find org.example:missing:1.0.", plan));
+        o.jdks = List.of(j17, j21);
+        assertNull(ProjectSync.newerJdk(error, plan));
+    }
+
+    @Test
     void saysWhichJdkABuildNeeds() {
         JavaHomes.Jdk j17 = new JavaHomes.Jdk(new File("/jdk17"), 17, "17.0.9");
         JavaHomes.Jdk j21 = new JavaHomes.Jdk(new File("/jdk21"), 21, "21.0.2");

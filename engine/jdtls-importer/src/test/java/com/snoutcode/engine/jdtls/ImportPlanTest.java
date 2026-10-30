@@ -291,4 +291,54 @@ class ImportPlanTest {
         assertTrue(lib.testCode, "the tests use the library's test jar");
         assertFalse(lib.test, "the main code uses the library too");
     }
+
+    private ImportPlan.SourceRoot sourceRoot(String relative, String sourceSet, boolean test) throws IOException {
+        ImportPlan.SourceRoot r = new ImportPlan.SourceRoot();
+        r.dir = Files.createDirectories(dir.resolve(relative)).toFile();
+        r.sourceSet = sourceSet;
+        r.test = test;
+        r.link = relative.replace('/', '-');
+        return r;
+    }
+
+    @Test
+    void aModuleInfoInMainSourcesMakesAModuleAndOthersAreLeftOut() throws IOException {
+        ImportPlan.Project p = new ImportPlan.Project();
+        p.java.release = "17";
+        ImportPlan.SourceRoot main = sourceRoot("mod/src/main/java", "main", false);
+        ImportPlan.SourceRoot test = sourceRoot("mod/src/test/java", "test", true);
+        Files.writeString(main.dir.toPath().resolve("module-info.java"), "module demo {}");
+        Files.writeString(test.dir.toPath().resolve("module-info.java"), "open module demo.test {}");
+        p.sources.addAll(List.of(main, test));
+        ImportPlan.findModule(p);
+        assertTrue(p.modular);
+        assertEquals(List.of(), main.exclusions);
+        assertEquals(List.of("module-info.java"), test.exclusions);
+
+        // Java 8 sources with a module-info.java the build compiles apart: not a module.
+        ImportPlan.Project old = new ImportPlan.Project();
+        old.java.source = "1.8";
+        ImportPlan.SourceRoot src = sourceRoot("old/src", "main", false);
+        Files.writeString(src.dir.toPath().resolve("module-info.java"), "module old {}");
+        old.sources.add(src);
+        ImportPlan.findModule(old);
+        assertFalse(old.modular);
+        assertEquals(List.of("module-info.java"), src.exclusions);
+    }
+
+    @Test
+    void aMultiReleaseOverlayKeepsOnlyWhatTheBaseLacks() throws IOException {
+        ImportPlan.Project p = new ImportPlan.Project();
+        ImportPlan.SourceRoot base = sourceRoot("mr/src/main/java", "main", false);
+        ImportPlan.SourceRoot overlay = sourceRoot("mr/src/main/java21", "java21", false);
+        for (Path f : List.of(base.dir.toPath().resolve("a/Same.java"), overlay.dir.toPath().resolve("a/Same.java"),
+            overlay.dir.toPath().resolve("a/New.java"))) {
+            Files.createDirectories(f.getParent());
+            Files.writeString(f, "");
+        }
+        p.sources.addAll(List.of(base, overlay));
+        ImportPlan.excludeReleaseOverlays(p);
+        assertEquals(List.of("a/Same.java"), overlay.exclusions);
+        assertEquals(List.of(), base.exclusions);
+    }
 }

@@ -72,7 +72,7 @@ impl Stage {
 /// How far a module, or the whole project, is (`snout/readiness`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ready {
-    /// `syncing`, `compilingScala`, `importing` or `ready`.
+    /// `syncing`, `generatingSources`, `compilingScala`, `importing` or `ready`.
     pub stage: String,
     pub percent: Option<u32>,
     /// A shared source folder rather than a module.
@@ -94,6 +94,7 @@ impl Ready {
 pub fn readiness_label(stage: &str) -> &'static str {
     match stage {
         "syncing" => "Syncing the build model",
+        "generatingSources" => "Generating sources",
         "compilingScala" => "Compiling Scala",
         "importing" => "Importing",
         "ready" => "Ready",

@@ -55,6 +55,11 @@ public final class Sync {
          * user's, in the Gradle user home.
          */
         public File daemonRegistry;
+        /**
+         * The JDKs installed, for a build that turns out to need a newer Java than the one it got
+         * ("This build requires at least JDK 25"): see {@link ProjectSync#syncOne}.
+         */
+        public List<JavaHomes.Jdk> jdks = List.of();
     }
 
     private Sync() {
@@ -123,9 +128,25 @@ public final class Sync {
         return connector;
     }
 
-    /** The arguments every Gradle run of ours shares: init scripts, project cache, offline. */
+    /**
+     * Turn off the configuration cache and isolated projects, whatever the build's
+     * {@code gradle.properties} says (a {@code -D} on the command line wins over it): our init
+     * scripts reach every project ({@code gradle.allprojects}) and register listeners, which both
+     * forbid, so with either on a build fails before it configures ("Listener registration
+     * 'Gradle.addListener' by build ':' is unsupported"). The names cover Gradle 6.6 to 9.
+     */
+    static final List<String> NO_CONFIGURATION_CACHE = List.of(
+        "-Dorg.gradle.configuration-cache=false",
+        "-Dorg.gradle.unsafe.configuration-cache=false",
+        "-Dorg.gradle.isolated-projects=false",
+        "-Dorg.gradle.unsafe.isolated-projects=false");
+
+    /**
+     * The arguments every Gradle run of ours shares: init scripts, no configuration cache (see
+     * {@link #NO_CONFIGURATION_CACHE}), project cache, offline.
+     */
     static List<String> arguments(List<Path> initScripts, File projectCacheDir, Options options) {
-        List<String> args = new ArrayList<>();
+        List<String> args = new ArrayList<>(NO_CONFIGURATION_CACHE);
         for (Path script : initScripts) {
             args.add("--init-script");
             args.add(script.toAbsolutePath().toString());

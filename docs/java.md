@@ -222,11 +222,12 @@ A module's stage is one of:
 | Stage | What happens |
 |---|---|
 | Syncing the Gradle model | The engine reads the build. This is shown for the project as a whole. |
+| Generating sources | The build's source generators run (see [Generated sources](#generated-sources)). |
 | Compiling Scala | The module's Scala, or a shared Scala folder it uses, is compiling. |
 | Importing | The engine imports the module and builds what uses its classes. |
 | Ready | Every Java feature works in the module's files. |
 
-Until a module is ready, its errors and warnings are held back, so Java that uses Scala classes does not show false errors while the Scala compiles.
+Until a module is ready, its errors and warnings are held back, so Java that uses Scala classes, or generated code, does not show false errors while the Scala compiles or the code is generated.
 
 Once the engine is idle, the status bar says `Java: Ready`, or what it is doing. Click it to open the Problems window.
 
@@ -239,6 +240,22 @@ Once the engine is idle, the status bar says `Java: Ready`, or what it is doing.
 In the last two cases, click **Restart** beside the status, or run **Restart the Java Engine** from the command palette.
 
 If the status bar says **Java support unavailable**, the Java engine is missing. Click it to read why. See [Troubleshooting](troubleshooting.md).
+
+## How the engine reads your code
+
+The engine compiles your code as your build does, so correct code shows no errors:
+
+- **Java modules.** A module with a `module-info.java` in its main sources reads its dependencies as modules, as `javac` does, so what it `requires` resolves. A `module-info.java` in test sources, or beside sources of a Java level older than 9 (which the build compiles apart), is left out.
+- **Lombok.** When a module uses Lombok, the engine runs it, so the getters, constructors, builders and loggers it generates exist in the editor too.
+- **Multi-release sources.** A folder of sources for a newer Java (`src/main/java21` beside `src/main/java`) keeps only the classes the base folder lacks, so a class is never there twice.
+
+### Generated sources
+
+Some builds generate code before they compile it: Kafka's message classes, an ANTLR parser, a Modello model, a jar repackaged from a library. Until it is generated, every use of it would be an error.
+
+When a sync finds a generator whose output is missing, the engine runs it while the editor starts: in a Gradle build, the tasks the compile depends on that make the missing folder or jar; in a Maven build, `process-sources` in the modules whose plugins generate sources. Their modules show **Generating sources** until the code is there, and their problems wait until then. A later start runs the Gradle tasks again (Gradle finds them up to date) and skips Maven modules whose `target/generated-sources` is filled.
+
+A generator that fails leaves the code missing; the engine's log says why.
 
 ## Scala in the build
 

@@ -350,12 +350,14 @@ final class MavenSync {
             org.apache.maven.model.RepositoryPolicy p = new org.apache.maven.model.RepositoryPolicy();
             p.setEnabled(r.getReleases().isEnabled());
             p.setUpdatePolicy(r.getReleases().getUpdatePolicy());
+            p.setChecksumPolicy(r.getReleases().getChecksumPolicy());
             out.setReleases(p);
         }
         if (r.getSnapshots() != null) {
             org.apache.maven.model.RepositoryPolicy p = new org.apache.maven.model.RepositoryPolicy();
             p.setEnabled(r.getSnapshots().isEnabled());
             p.setUpdatePolicy(r.getSnapshots().getUpdatePolicy());
+            p.setChecksumPolicy(r.getSnapshots().getChecksumPolicy());
             out.setSnapshots(p);
         }
         return out;
@@ -364,14 +366,25 @@ final class MavenSync {
     static RemoteRepository remote(org.apache.maven.model.Repository r) {
         RemoteRepository.Builder b = new RemoteRepository.Builder(r.getId(), r.getLayout() == null ? "default" : r.getLayout(), r.getUrl());
         if (r.getReleases() != null) {
-            b.setReleasePolicy(new RepositoryPolicy(r.getReleases().isEnabled(), r.getReleases().getUpdatePolicy(),
-                r.getReleases().getChecksumPolicy()));
+            b.setReleasePolicy(policy(r.getReleases()));
         }
         if (r.getSnapshots() != null) {
-            b.setSnapshotPolicy(new RepositoryPolicy(r.getSnapshots().isEnabled(), r.getSnapshots().getUpdatePolicy(),
-                r.getSnapshots().getChecksumPolicy()));
+            b.setSnapshotPolicy(policy(r.getSnapshots()));
         }
         return b.build();
+    }
+
+    /**
+     * A POM's repository policy for the resolver, with Maven's defaults for what it leaves out
+     * (a daily update, a warning on a bad checksum): the resolver takes a missing policy as an
+     * empty one and fails on it ("Unsupported policy: ").
+     */
+    static RepositoryPolicy policy(org.apache.maven.model.RepositoryPolicy p) {
+        String update = p.getUpdatePolicy() == null || p.getUpdatePolicy().isBlank()
+            ? RepositoryPolicy.UPDATE_POLICY_DAILY : p.getUpdatePolicy().trim();
+        String checksum = p.getChecksumPolicy() == null || p.getChecksumPolicy().isBlank()
+            ? RepositoryPolicy.CHECKSUM_POLICY_WARN : p.getChecksumPolicy().trim();
+        return new RepositoryPolicy(p.isEnabled(), update, checksum);
     }
 
     // ---- one module
@@ -384,7 +397,7 @@ final class MavenSync {
         Path target = path(dir, build.getDirectory(), "target");
         Path classes = path(dir, build.getOutputDirectory(), "target/classes");
         Path testClasses = path(dir, build.getTestOutputDirectory(), "target/test-classes");
-        Plugin compiler = plugin(model, COMPILER);
+        Plugin compiler = lifecyclePlugin(model, COMPILER);
         Xpp3Dom main = config(compiler, "default-compile");
         Xpp3Dom test = config(compiler, "default-testCompile");
         Properties props = model.getProperties();
@@ -476,6 +489,13 @@ final class MavenSync {
         sourceSets.add(sourceSet("test", dir, testRoots, testGenerated, build.getTestResources(), testClasses, classes,
             compile("compiler:testCompile", testRelease, testSource, testTarget, test, props, toolchain),
             resolved, true, model, session, system, reactor, options, buildErrors));
+        JsonArray generators = new JsonArray();
+        String generator = generator(model);
+        if (generator != null) {
+            generators.add(generator);
+        }
+        sourceSets.get(0).getAsJsonObject().add("generators", generators);
+        sourceSets.get(1).getAsJsonObject().add("generators", new JsonArray());
         project.add("sourceSets", sourceSets);
 
         JsonArray testTasks = new JsonArray();
@@ -768,7 +788,7 @@ final class MavenSync {
     /** The annotation processor path the compiler plugin declares ({@code annotationProcessorPaths}), resolved. */
     private static List<File> processorPath(Model model, boolean test, RepositorySystemSession session, RepositorySystem system,
                                             Reactor reactor, Options options, List<String> errors) {
-        Plugin compiler = plugin(model, COMPILER);
+        Plugin compiler = lifecyclePlugin(model, COMPILER);
         Xpp3Dom config = config(compiler, test ? "default-testCompile" : "default-compile");
         Xpp3Dom paths = child(config, "annotationProcessorPaths");
         List<File> out = new ArrayList<>();
@@ -1209,6 +1229,42 @@ final class MavenSync {
         return artifactId;
     }
 
+    /** Phases in which plugins generate sources for the compile. */
+    static final Set<String> GENERATE_PHASES = Set.of("generate-sources", "process-sources");
+
+    /** Plugins that generate sources in {@code generate-sources} by default, without a phase in the POM. */
+    static final Set<String> GENERATORS = Set.of("modello-maven-plugin", "antlr4-maven-plugin", "antlr3-maven-plugin",
+        "maven-antlr-plugin", "javacc-maven-plugin", "ph-javacc-maven-plugin", "jaxb2-maven-plugin", "maven-jaxb2-plugin",
+        "jaxb-maven-plugin", "cxf-codegen-plugin", "protobuf-maven-plugin", "protoc-jar-maven-plugin",
+        "openapi-generator-maven-plugin", "swagger-codegen-maven-plugin", "avro-maven-plugin", "jooq-codegen-maven",
+        "templating-maven-plugin", "xmlbeans-maven-plugin", "jsonschema2pojo-maven-plugin", "wsimport-maven-plugin",
+        "jaxws-maven-plugin", "thrift-maven-plugin");
+
+    /**
+     * The phase to run for a module whose plugins generate sources for its compile, else null:
+     * a plugin execution bound to {@code generate-sources} or {@code process-sources}, or a known
+     * generator (Modello, ANTLR, JAXB, protobuf, OpenAPI...) whose goals default to them. The
+     * engine runs it after the sync (see {@link Generators}). Build Helper's {@code add-source}
+     * generates nothing.
+     */
+    static String generator(Model model) {
+        if (model.getBuild() == null) {
+            return null;
+        }
+        for (Plugin p : model.getBuild().getPlugins()) {
+            if ("build-helper-maven-plugin".equals(p.getArtifactId())) {
+                continue;
+            }
+            for (PluginExecution e : p.getExecutions()) {
+                String phase = e.getPhase();
+                if (phase != null ? GENERATE_PHASES.contains(phase) : GENERATORS.contains(p.getArtifactId()) && !e.getGoals().isEmpty()) {
+                    return "process-sources";
+                }
+            }
+        }
+        return null;
+    }
+
     // ---- the POM's plugin configuration
 
     static Plugin plugin(Model model, String key) {
@@ -1216,6 +1272,25 @@ final class MavenSync {
             return null;
         }
         for (Plugin p : model.getBuild().getPlugins()) {
+            if (key.equals(p.getGroupId() + ":" + p.getArtifactId())) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A plugin the default lifecycle binds (the compiler), as it runs: the build's own entry, or
+     * when the POM leaves it to the lifecycle, its {@code pluginManagement} entry, whose
+     * configuration then applies. (Maven injects lifecycle plugins in maven-core; the model builder
+     * alone leaves them out, and with them a parent's managed {@code <source>21</source>}.)
+     */
+    static Plugin lifecyclePlugin(Model model, String key) {
+        Plugin own = plugin(model, key);
+        if (own != null || model.getBuild() == null || model.getBuild().getPluginManagement() == null) {
+            return own;
+        }
+        for (Plugin p : model.getBuild().getPluginManagement().getPlugins()) {
             if (key.equals(p.getGroupId() + ":" + p.getArtifactId())) {
                 return p;
             }

@@ -6,6 +6,10 @@ SnoutCode reads your Gradle build to know your modules, source folders, librarie
 
 When you open a project, SnoutCode's Java engine starts and syncs the Gradle model. A sync only configures the builds: no task runs, nothing is compiled, and no `build/` folder appears in your project. The engine keeps Gradle's build output and project caches in its own cache folder, `~/Library/Caches/SnoutCode`.
 
+A build with the configuration cache or isolated projects turned on in `gradle.properties` syncs with both off: the engine's sync could not run under them. Your own Gradle runs outside SnoutCode keep them.
+
+Some builds generate code before they compile it: a task that writes Java sources into a folder of a source set (Kafka's message classes, an ANTLR parser), or builds a jar the compile uses. The sync finds these tasks, the ones the compile depends on whose output is missing, and the engine runs them once the sync is done, while the editor starts. See [Generated sources](java.md#generated-sources).
+
 The next time you open the project, the engine reuses the last model when nothing it was read from has changed (settings and build scripts, version catalogs, `gradle.properties`, `buildSrc`, the wrapper's properties). Opening is then much faster.
 
 The status bar shows what the engine is doing while it syncs and imports.
@@ -82,6 +86,8 @@ Each build runs Gradle on a JDK that its Gradle version supports. SnoutCode look
 
 - When the build's scripts ask for a Java level (a source compatibility, a toolchain, a release), that JDK if it is installed, else the oldest newer one the build's Gradle version runs on.
 - When they ask for none, the newest JDK the build's Gradle version runs on.
+
+A build that checks the Java it runs on and asks for a newer one ("This build requires at least JDK 25") syncs again on a JDK of that version when one is installed, else asks for it as below.
 
 SnoutCode remembers the JDK it picked for the build.
 

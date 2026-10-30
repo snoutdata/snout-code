@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * What to create in the JDT workspace for one model written by {@code snout-engine sync}: one Java
@@ -57,6 +59,12 @@ public final class ImportPlan {
         /** Libraries and project references, in Gradle's classpath order. */
         public final List<Dependency> dependencies = new ArrayList<>();
         public final JavaSettings java = new JavaSettings();
+        /**
+         * A Java module: its main sources hold a {@code module-info.java}. Its main classpath
+         * then goes on the module path, as javac has it, or nothing the module requires is
+         * readable ("The type ... is not accessible"). See {@link #findModule}.
+         */
+        public boolean modular;
         /**
          * For a project made for shared source folders, the projects that compile them; empty for
          * a project made from a Gradle project.
@@ -196,6 +204,8 @@ public final class ImportPlan {
             addResources(out, sourceSets, testSets);
             addDependencies(out, sourceSets, testSets, gradleBuildOf.get(project), byBuildAndPath, byOutputDir, testOutputDirs);
             readJavaSettings(out, project, sourceSets, javaHomeOf.get(project));
+            findModule(out);
+            excludeReleaseOverlays(out);
             plan.projects.add(out);
         }
         shareDuplicateRoots(plan, names);
@@ -532,6 +542,75 @@ public final class ImportPlan {
                 Path innerPath = inner.dir.toPath().toAbsolutePath().normalize();
                 if (inner != outer && innerPath.startsWith(outerPath) && !innerPath.equals(outerPath)) {
                     outer.exclusions.add(outerPath.relativize(innerPath).toString().replace(File.separatorChar, '/') + "/");
+                }
+            }
+        }
+    }
+
+    static final String MODULE_INFO = "module-info.java";
+
+    /**
+     * Whether the project is a Java module: the first main source folder (main source sets come
+     * first) with a {@code module-info.java} makes it one, when the project compiles for Java 9
+     * or newer. Every other {@code module-info.java} is left out of its folder: a test source
+     * set's (Gradle and Maven compile tests on the class path unless told otherwise; JDT would
+     * take it for the project's module), a second one, and one in sources of an older level,
+     * which the build compiles apart (Guava's {@code src/module-info.java} beside Java 8 code)
+     * and which JDT would read as a class, full of syntax errors.
+     */
+    static void findModule(Project out) {
+        int level = level(out.java);
+        boolean modern = level == 0 || level >= 9;
+        for (SourceRoot root : out.sources) {
+            if (!new File(root.dir, MODULE_INFO).isFile()) {
+                continue;
+            }
+            if (!out.modular && modern && !root.test && !root.generated) {
+                out.modular = true;
+            } else if (!root.exclusions.contains(MODULE_INFO)) {
+                root.exclusions.add(MODULE_INFO);
+            }
+        }
+    }
+
+    /** A multi-release jar's sources for a newer Java: a {@code java11} source set, {@code src/main/java21}. */
+    private static final Pattern RELEASE_DIR = Pattern.compile("java\\d+");
+
+    /**
+     * Leaves out of a multi-release overlay ({@code src/main/java11}, beside {@code src/main/java})
+     * the classes that the base folder has too: the jar carries both, one per Java release, but
+     * in one JDT project they would be the same class twice ("The type ... is already defined").
+     * The base version stays; what only the overlay has stays in it.
+     */
+    static void excludeReleaseOverlays(Project out) {
+        List<SourceRoot> bases = new ArrayList<>();
+        List<SourceRoot> overlays = new ArrayList<>();
+        for (SourceRoot root : out.sources) {
+            boolean overlay = !root.generated && (root.sourceSet != null && RELEASE_DIR.matcher(root.sourceSet).matches()
+                || RELEASE_DIR.matcher(root.dir.getName()).matches());
+            (overlay ? overlays : bases).add(root);
+        }
+        for (SourceRoot overlay : overlays) {
+            Path dir = overlay.dir.toPath();
+            List<Path> files;
+            try (Stream<Path> walk = Files.walk(dir)) {
+                files = walk.filter(f -> f.getFileName().toString().endsWith(".java")).toList();
+            } catch (IOException | RuntimeException e) {
+                continue;
+            }
+            for (Path f : files) {
+                Path relative = dir.relativize(f);
+                if (relative.toString().equals(MODULE_INFO)) {
+                    continue;
+                }
+                for (SourceRoot base : bases) {
+                    if (base.test == overlay.test && Files.isRegularFile(base.dir.toPath().resolve(relative))) {
+                        String pattern = relative.toString().replace(File.separatorChar, '/');
+                        if (!overlay.exclusions.contains(pattern)) {
+                            overlay.exclusions.add(pattern);
+                        }
+                        break;
+                    }
                 }
             }
         }

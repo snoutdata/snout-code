@@ -100,6 +100,49 @@ class MavenSyncTest {
         String roots = module("maven-multi:app").getAsJsonArray("sourceRoots").toString();
         assertTrue(roots.contains("target/generated-sources/annotations"), roots);
         assertTrue(module("maven-multi:app").getAsJsonArray("excludedDirs").toString().contains("app/target"));
+        // core leaves the compiler to the lifecycle: the parent's pluginManagement configures it.
+        JsonObject coreJavac = sourceSet(project(":core"), "main").getAsJsonObject("compile").getAsJsonObject("java");
+        assertTrue(coreJavac.getAsJsonArray("compilerArgs").toString().contains("-parameters"), coreJavac.toString());
+    }
+
+    @Test
+    void modulesWhosePluginsGenerateSourcesSaySo() {
+        org.apache.maven.model.Model model = new org.apache.maven.model.Model();
+        model.setBuild(new org.apache.maven.model.Build());
+        assertEquals(null, MavenSync.generator(model));
+        org.apache.maven.model.Plugin helper = new org.apache.maven.model.Plugin();
+        helper.setArtifactId("build-helper-maven-plugin");
+        org.apache.maven.model.PluginExecution addSource = new org.apache.maven.model.PluginExecution();
+        addSource.setPhase("generate-sources");
+        addSource.addGoal("add-source");
+        helper.addExecution(addSource);
+        model.getBuild().addPlugin(helper);
+        assertEquals(null, MavenSync.generator(model), "adding a folder generates nothing");
+        org.apache.maven.model.Plugin modello = new org.apache.maven.model.Plugin();
+        modello.setGroupId("org.codehaus.modello");
+        modello.setArtifactId("modello-maven-plugin");
+        org.apache.maven.model.PluginExecution velocity = new org.apache.maven.model.PluginExecution();
+        velocity.addGoal("velocity");
+        modello.addExecution(velocity);
+        model.getBuild().addPlugin(modello);
+        assertEquals("process-sources", MavenSync.generator(model));
+        assertTrue(sourceSet(project(":app"), "main").getAsJsonArray("generators").isEmpty());
+    }
+
+    @Test
+    void aRepositoryWithoutPoliciesGetsMavensDefaults() {
+        org.apache.maven.model.Repository r = new org.apache.maven.model.Repository();
+        r.setId("snapshots");
+        r.setUrl("https://example.org/snapshots");
+        org.apache.maven.model.RepositoryPolicy releases = new org.apache.maven.model.RepositoryPolicy();
+        releases.setEnabled(false);
+        r.setReleases(releases);
+        r.setSnapshots(new org.apache.maven.model.RepositoryPolicy());
+        org.eclipse.aether.repository.RemoteRepository remote = MavenSync.remote(r);
+        assertEquals("warn", remote.getPolicy(true).getChecksumPolicy());
+        assertEquals("daily", remote.getPolicy(true).getUpdatePolicy());
+        assertFalse(remote.getPolicy(false).isEnabled());
+        assertEquals("warn", remote.getPolicy(false).getChecksumPolicy());
     }
 
     @Test

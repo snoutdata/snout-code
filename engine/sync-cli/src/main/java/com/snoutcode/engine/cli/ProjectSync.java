@@ -227,6 +227,7 @@ public final class ProjectSync {
             Integer needs = JavaHomes.needs(version, level, jdk);
             // Never a JDK the build's Gradle cannot run on: with none installed, it needs one.
             o.javaHome = jdk != null ? jdk.home() : needs != null ? null : options.sync.javaHome;
+            o.jdks = List.copyOf(installed);
             if (options.sync.projectCacheDir != null) {
                 o.projectCacheDir = new File(options.sync.projectCacheDir, key(root));
             }
@@ -302,7 +303,23 @@ public final class ProjectSync {
                 // fail on a JDK that cannot work.
                 throw new MissingJdk(plan.needsJdk(), plan.gradleVersion());
             }
-            entry = Sync.run(plan.options());
+            try {
+                entry = Sync.run(plan.options());
+            } catch (RuntimeException | IOException first) {
+                // A build that checks the Java it runs on ("This build requires at least JDK 25,
+                // but you are using JDK 21") syncs again on an installed JDK that is new enough.
+                JavaHomes.Jdk newer = newerJdk(SnoutEngine.describe(first), plan);
+                if (newer == null) {
+                    throw first;
+                }
+                if (log != null) {
+                    log.println("snout-engine: " + plan.id() + " needs a newer Java; syncing it again on Java " + newer.feature());
+                }
+                Sync.Options o = copy(plan.options());
+                o.javaHome = newer.home();
+                plan = new Plan(plan.id(), plan.rootDir(), plan.gradleVersion(), newer, o, null, false, null);
+                entry = Sync.run(o);
+            }
             entry.remove("modelVersion");
             entry.addProperty("status", "synced");
         } catch (Exception | LinkageError e) {
@@ -452,6 +469,7 @@ public final class ProjectSync {
         o.buildRoot = from.buildRoot;
         o.bridgeRoot = from.bridgeRoot;
         o.daemonRegistry = from.daemonRegistry;
+        o.jdks = from.jdks;
         return o;
     }
 
@@ -491,7 +509,37 @@ public final class ProjectSync {
         return mismatch ? JavaHomes.lts(gradleVersion, JavaHomes.wantedJava(gradleVersion, null)) : null;
     }
 
-    private static final Pattern PLUGIN_NEEDS_JAVA = Pattern.compile("requires Java (\\d+) to run");
+    private static final Pattern PLUGIN_NEEDS_JAVA = Pattern.compile(
+        "(?:requires|needs) (?:at least )?(?:Java|JDK) ?(\\d+)(?: to run| or (?:newer|later|higher)|[,.:;]|\\s*$)",
+        Pattern.MULTILINE);
+
+    /**
+     * When a Gradle sync failed because the build wants a newer Java than its daemon's ("This
+     * build requires at least JDK 25, but you are using JDK 21", "requires Java 17 to run"), the
+     * installed JDK nearest above it that the build's Gradle runs on; else null.
+     */
+    static JavaHomes.Jdk newerJdk(String error, Plan plan) {
+        if (error == null || plan.jdk() == null || plan.options().jdks == null) {
+            return null;
+        }
+        Matcher m = PLUGIN_NEEDS_JAVA.matcher(error);
+        if (!m.find()) {
+            return null;
+        }
+        int wanted = Integer.parseInt(m.group(1));
+        if (plan.jdk().feature() >= wanted) {
+            return null;
+        }
+        int max = JavaHomes.maxJava(plan.gradleVersion());
+        JavaHomes.Jdk best = null;
+        for (JavaHomes.Jdk jdk : plan.options().jdks) {
+            if (jdk.feature() >= wanted && jdk.feature() <= max && (best == null || jdk.feature() < best.feature()
+                || jdk.feature() == best.feature() && jdk.version().compareTo(best.version()) > 0)) {
+                best = jdk;
+            }
+        }
+        return best;
+    }
     private static final Pattern CLASS_VERSION = Pattern.compile("class file (?:major )?version (\\d+)");
     private static final Pattern PLUGIN_NOT_FOUND = Pattern.compile("Plugin \\[id: '([^']+)'(?:, version: '([^']+)')?[^]]*\\] was not found");
     private static final Pattern REQUIRES_GRADLE = Pattern.compile("[^\\n.]*requires Gradle [^\\n]*");

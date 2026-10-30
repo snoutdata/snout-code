@@ -144,7 +144,7 @@ final class MavenRuns {
         return out;
     }
 
-    private static List<String> base(Invocation inv, PrintStream progress) throws IOException {
+    static List<String> base(Invocation inv, PrintStream progress) throws IOException {
         File root = inv.plan.rootDir();
         MavenEnv env = MavenEnv.load(inv.offline || inv.plan.options().offline);
         List<String> c = new ArrayList<>(MavenHome.command(root, progress));

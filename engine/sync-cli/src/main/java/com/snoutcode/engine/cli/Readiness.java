@@ -23,6 +23,7 @@ import java.util.function.Consumer;
  * <ul>
  *   <li>{@code syncing}: the Gradle sync runs (only the project as a whole, {@code module: null},
  *       before the modules are known);</li>
+ *   <li>{@code generatingSources}: its build's source generators run (see {@link Generators});</li>
  *   <li>{@code compilingScala}: its Scala, or the shared Scala it uses, compiles for jdtls;</li>
  *   <li>{@code importing}: jdtls imports it, or reads its new Scala classes and builds;</li>
  *   <li>{@code ready}: everything works.</li>
@@ -31,13 +32,14 @@ import java.util.function.Consumer;
  * The project as a whole ({@code module: null}) is at the least advanced stage of its modules,
  * and its percent is theirs on average.
  *
- * <p>While a module with Scala is not ready, jdtls's diagnostics for its files are held back:
- * they would report the Scala types not compiled yet as missing. The latest ones go out when it
- * is ready.
+ * <p>While a module with Scala or generated sources is not ready, jdtls's diagnostics for its
+ * files are held back: they would report the Scala types not compiled yet, or the code not
+ * generated yet, as missing. The latest ones go out when it is ready.
  */
 final class Readiness {
     enum Stage {
-        SYNCING("syncing", 0), COMPILING_SCALA("compilingScala", 10), IMPORTING("importing", 80), READY("ready", 100);
+        SYNCING("syncing", 0), GENERATING_SOURCES("generatingSources", 5), COMPILING_SCALA("compilingScala", 10),
+        IMPORTING("importing", 80), READY("ready", 100);
 
         final String wire;
         final int percent;
@@ -54,6 +56,8 @@ final class Readiness {
         Stage stage = Stage.IMPORTING;
         int percent = Stage.IMPORTING.percent;
         boolean scala;
+        /** It waits for generated sources (see {@link Generators}). */
+        boolean generated;
         long compileStart;
         long expectedMillis = -1;
 
@@ -139,11 +143,25 @@ final class Readiness {
         startTicker();
     }
 
-    /** Their Scala compiled: jdtls reads the classes next. */
+    /** These modules wait for their build's source generators. */
+    synchronized void generating(Collection<String> ids) {
+        for (String id : ids) {
+            Module m = module(id);
+            m.generated = true;
+            if (m.stage != Stage.GENERATING_SOURCES) {
+                m.stage = Stage.GENERATING_SOURCES;
+                m.percent = Stage.GENERATING_SOURCES.percent;
+                send(m);
+            }
+        }
+        sendProject();
+    }
+
+    /** Their Scala compiled, or their sources were generated: jdtls reads them next. */
     synchronized void compiled(Collection<String> ids) {
         for (String id : ids) {
             Module m = module(id);
-            m.scala = true;
+            m.scala |= !m.generated;
             if (m.stage != Stage.IMPORTING) {
                 m.stage = Stage.IMPORTING;
                 m.percent = Stage.IMPORTING.percent;
@@ -172,7 +190,7 @@ final class Readiness {
         jdtlsReady = true;
         List<String> ready = new ArrayList<>();
         for (Module m : modules.values()) {
-            if (m.stage == Stage.IMPORTING && !m.scala) {
+            if (m.stage == Stage.IMPORTING && !m.scala && !m.generated) {
                 ready.add(m.id);
             }
         }
@@ -209,7 +227,7 @@ final class Readiness {
         Path file = path(uri);
         String id = file == null ? null : moduleOf(file);
         Module m = id == null ? null : modules.get(id);
-        if (m != null && m.scala && m.stage != Stage.READY) {
+        if (m != null && (m.scala || m.generated) && m.stage != Stage.READY) {
             held.put(uri, message);
             return null;
         }
