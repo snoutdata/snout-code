@@ -341,4 +341,103 @@ class ImportPlanTest {
         assertEquals(List.of("a/Same.java"), overlay.exclusions);
         assertEquals(List.of(), base.exclusions);
     }
+
+    @Test
+    void mainSeesOnlyTheSourceSetsItCompilesAgainst() {
+        JsonObject project = JsonParser.parseString("""
+            { "sourceSets": [
+                { "name": "main", "compileClasspath": [ { "kind": "sourceSetOutput", "sourceSet": "api", "files": [] } ] },
+                { "name": "api" }, { "name": "test" }, { "name": "testFixtures" }, { "name": "jmh" }, { "name": "java21" } ] }""")
+            .getAsJsonObject();
+        assertEquals(java.util.Set.of("test", "testFixtures", "jmh", "java21"), ImportPlan.testSourceSets(project));
+    }
+
+    private File moduleJar(String file, String automaticName) throws IOException {
+        Path jar = dir.resolve("repo").resolve(file);
+        Files.createDirectories(jar.getParent());
+        java.util.jar.Manifest manifest = new java.util.jar.Manifest();
+        manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0");
+        if (automaticName != null) {
+            manifest.getMainAttributes().putValue("Automatic-Module-Name", automaticName);
+        }
+        try (java.util.jar.JarOutputStream out = new java.util.jar.JarOutputStream(Files.newOutputStream(jar), manifest)) {
+            out.putNextEntry(new java.util.zip.ZipEntry("demo/A.class"));
+            out.closeEntry();
+        }
+        return jar.toFile();
+    }
+
+    @Test
+    void aModuleReadsWhatItRequiresFromTheModulePath() throws IOException {
+        ImportPlan.Project p = new ImportPlan.Project();
+        p.name = "mod";
+        p.modular = true;
+        Path info = dir.resolve("mod/src/main/java/module-info.java");
+        Files.createDirectories(info.getParent());
+        Files.writeString(info, "/* requires nope; */ module demo.mod {\n  requires static org.example.alpha; // comment\n  requires transitive beta;\n}\n");
+        p.moduleInfo = info.toFile();
+        ImportPlan.Dependency alpha = new ImportPlan.Dependency();
+        alpha.file = moduleJar("alpha-1.0.jar", "org.example.alpha");
+        ImportPlan.Dependency beta = new ImportPlan.Dependency();
+        beta.file = moduleJar("beta-2.1.jar", null);
+        ImportPlan.Dependency gamma = new ImportPlan.Dependency();
+        gamma.file = moduleJar("gamma-1.0.jar", null);
+        ImportPlan.Dependency testOnly = new ImportPlan.Dependency();
+        testOnly.file = moduleJar("delta-1.0.jar", "org.example.alpha.tests");
+        testOnly.test = true;
+        p.dependencies.addAll(List.of(alpha, beta, gamma, testOnly));
+        ImportPlan plan = ImportPlan.from(JsonParser.parseString("{ \"rootDir\": \"/w\", \"gradleBuilds\": [] }").getAsJsonObject());
+        plan.projects.add(p);
+        ImportPlan.resolveModulePath(plan);
+        assertTrue(alpha.module, "required, by its Automatic-Module-Name");
+        assertTrue(beta.module, "required, by its file name");
+        assertFalse(gamma.module, "not required: the class path, which the tests read");
+        assertFalse(testOnly.module);
+    }
+
+    @Test
+    void readsTheModelWithoutWhatItNeverUses() throws IOException {
+        Path model = dir.resolve("model.json");
+        Files.writeString(model, """
+            { "rootDir": "/w", "syncMillis": 12, "ratio": 1.5, "modules": [ { "id": "big" } ], "libraries": [ 1, 2 ],
+              "gradleBuilds": [ { "id": "w", "ok": true, "none": null, "builds": [ { "name": "w", "projects": [
+                { "path": ":", "projectDir": "/w", "sourceSets": [ { "name": "main", "dependencyGraph": { "huge": [] },
+                  "runtimeClasspath": [ { "file": "/x.jar" } ], "compileClasspath": [] } ] } ] } ] } ] }""");
+        JsonObject read;
+        try (com.google.gson.stream.JsonReader in = new com.google.gson.stream.JsonReader(Files.newBufferedReader(model))) {
+            read = ImportPlan.readUsed(in, 0).getAsJsonObject();
+        }
+        assertFalse(read.has("modules"));
+        assertFalse(read.has("libraries"));
+        assertEquals(12, read.get("syncMillis").getAsInt());
+        assertEquals(1.5, read.get("ratio").getAsDouble());
+        JsonObject build = read.getAsJsonArray("gradleBuilds").get(0).getAsJsonObject();
+        assertTrue(build.get("ok").getAsBoolean());
+        assertTrue(build.get("none").isJsonNull());
+        JsonObject main = build.getAsJsonArray("builds").get(0).getAsJsonObject().getAsJsonArray("projects").get(0).getAsJsonObject()
+            .getAsJsonArray("sourceSets").get(0).getAsJsonObject();
+        assertFalse(main.has("dependencyGraph"));
+        assertFalse(main.has("runtimeClasspath"));
+        assertTrue(main.has("compileClasspath"));
+        assertEquals("/w", ImportPlan.read(model).rootDir.getPath());
+    }
+
+    @Test
+    void aJarListedTwiceIsOneEntry() {
+        ImportPlan.Project p = new ImportPlan.Project();
+        ImportPlan.Dependency a = new ImportPlan.Dependency();
+        a.file = dir.resolve("repo/guava.jar").toFile();
+        a.coordinates = "com.google.guava:guava";
+        a.test = true;
+        ImportPlan.Dependency b = new ImportPlan.Dependency();
+        b.file = dir.resolve("repo/guava.jar").toFile();
+        b.sources = dir.resolve("repo/guava-sources.jar").toFile();
+        p.dependencies.addAll(List.of(a, b));
+        ImportPlan plan = ImportPlan.from(JsonParser.parseString("{ \"rootDir\": \"/w\", \"gradleBuilds\": [] }").getAsJsonObject());
+        plan.projects.add(p);
+        ImportPlan.mergeDuplicateEntries(plan);
+        assertEquals(List.of(a), p.dependencies);
+        assertFalse(a.test, "the main code uses it too");
+        assertEquals(b.sources, a.sources);
+    }
 }

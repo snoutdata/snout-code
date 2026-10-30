@@ -295,7 +295,7 @@ final class SourceSetReader {
         for (int depth = 0; depth < 2 && !level.isEmpty(); depth++) {
             List<Task> next = new ArrayList<>();
             for (Task task : level) {
-                if (!seen.add(task) || compileTasks.contains(task)) {
+                if (!seen.add(task) || compileTasks.contains(task) || compilesOrCopies(task)) {
                     continue;
                 }
                 if (makesAny(task, missing)) {
@@ -307,6 +307,20 @@ final class SourceSetReader {
             level = next;
         }
         return out;
+    }
+
+    /**
+     * A compile or a resource copy: what it makes is another source set's output, which the editor
+     * has as that project's sources already, so it is no generator (running every compile the
+     * classpath leads to would build most of a large build).
+     */
+    private static boolean compilesOrCopies(Task task) {
+        if (Reflect.isInstance(task, "org.gradle.api.tasks.compile.AbstractCompile")
+            || Reflect.isInstance(task, "org.gradle.language.jvm.tasks.ProcessResources")) {
+            return true;
+        }
+        String type = Reflect.declaredType(task).getName();
+        return type.contains("KotlinCompile") || type.contains("KotlinJvmCompile");
     }
 
     private Set<? extends Task> dependencies(Task task) {

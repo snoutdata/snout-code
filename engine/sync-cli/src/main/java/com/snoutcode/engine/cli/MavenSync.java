@@ -481,8 +481,9 @@ final class MavenSync {
         List<String> testRoots = new ArrayList<>(build.getTestSourceDirectory() == null ? List.of() : List.of(build.getTestSourceDirectory()));
         addHelperSources(model, "add-source", mainRoots);
         addHelperSources(model, "add-test-source", testRoots);
-        List<String> mainGenerated = generated(target, main, "generatedSourcesDirectory", "generated-sources", "annotations");
-        List<String> testGenerated = generated(target, test, "generatedTestSourcesDirectory", "generated-test-sources", "test-annotations");
+        List<String> mainGenerated = inside(generated(target, main, "generatedSourcesDirectory", "generated-sources", "annotations"), dir, mainRoots);
+        List<String> testGenerated = inside(generated(target, test, "generatedTestSourcesDirectory", "generated-test-sources", "test-annotations"),
+            dir, testRoots);
         sourceSets.add(sourceSet("main", dir, mainRoots, mainGenerated, build.getResources(), classes, null,
             compile("compiler:compile", release, source, targetLevel, main, props, toolchain),
             resolved, false, model, session, system, reactor, options, buildErrors));
@@ -568,6 +569,24 @@ final class MavenSync {
             }
         }
         return new ArrayList<>(out);
+    }
+
+    /**
+     * The generated folders, less those inside a source folder the POM declares: a generator that
+     * writes its packages straight into {@code target/generated-sources}, which Build Helper adds
+     * as a whole (jackson-databind's PackageVersion), would otherwise give a root per package.
+     */
+    private static List<String> inside(List<String> generated, File dir, List<String> declared) {
+        List<Path> roots = new ArrayList<>();
+        declared.forEach(d -> roots.add(path(dir, d, d)));
+        List<String> out = new ArrayList<>();
+        for (String g : generated) {
+            Path p = Path.of(g).normalize();
+            if (roots.stream().noneMatch(r -> p.startsWith(r) && !p.equals(r))) {
+                out.add(g);
+            }
+        }
+        return out;
     }
 
     private static JsonObject compile(String task, String release, String source, String target, Xpp3Dom config,

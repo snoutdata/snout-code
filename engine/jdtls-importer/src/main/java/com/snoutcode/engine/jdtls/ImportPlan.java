@@ -3,15 +3,20 @@ package com.snoutcode.engine.jdtls;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.stream.JsonReader;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.Reader;
+import java.lang.module.ModuleFinder;
+import java.lang.module.ModuleReference;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -19,6 +24,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -60,11 +66,13 @@ public final class ImportPlan {
         public final List<Dependency> dependencies = new ArrayList<>();
         public final JavaSettings java = new JavaSettings();
         /**
-         * A Java module: its main sources hold a {@code module-info.java}. Its main classpath
-         * then goes on the module path, as javac has it, or nothing the module requires is
-         * readable ("The type ... is not accessible"). See {@link #findModule}.
+         * A Java module: its main sources hold a {@code module-info.java}. What it requires then
+         * goes on the module path, as javac has it, or nothing the module requires is readable
+         * ("The type ... is not accessible"). See {@link #findModule}.
          */
         public boolean modular;
+        /** The {@code module-info.java} that makes it a module, when {@link #modular}. */
+        public File moduleInfo;
         /**
          * For a project made for shared source folders, the projects that compile them; empty for
          * a project made from a Gradle project.
@@ -92,6 +100,11 @@ public final class ImportPlan {
         public boolean test;
         /** Re-exported to projects that depend on this one (the Scala class folders). */
         public boolean exported;
+        /**
+         * On the module path of a Java module (see {@link #resolveModulePath}): a module its
+         * {@code module-info.java} requires, or one those require.
+         */
+        public boolean module;
         /**
          * For a project reference: the tests see the other project's test code too (a Maven
          * test jar, Gradle's test output on the classpath).
@@ -123,8 +136,63 @@ public final class ImportPlan {
     }
 
     public static ImportPlan read(Path modelFile) throws IOException {
-        try (Reader reader = Files.newBufferedReader(modelFile, StandardCharsets.UTF_8)) {
-            return from(JsonParser.parseReader(reader).getAsJsonObject());
+        try (JsonReader reader = new JsonReader(Files.newBufferedReader(modelFile, StandardCharsets.UTF_8))) {
+            return from(readUsed(reader, 0).getAsJsonObject());
+        }
+    }
+
+    /** Parts of the model a plan never reads, at any depth. */
+    private static final Set<String> UNUSED = Set.of("dependencyGraph", "runtimeClasspath", "unresolved", "springBoot", "maven",
+        "appliedScripts", "plugins", "configurations");
+    /** Parts of the model a plan never reads, at its top: the app's view of it. */
+    private static final Set<String> UNUSED_AT_TOP = Set.of("modules", "libraries", "gradleScripts", "sharedSourceRoots",
+        "failedBuilds", "unsupportedBuilds");
+
+    /**
+     * The model without what a plan never reads: a large build's model is hundreds of megabytes,
+     * mostly dependency graphs, runtime classpaths and the app's view of the modules, and as one
+     * JSON tree it would not fit in jdtls's heap.
+     */
+    static JsonElement readUsed(JsonReader in, int depth) throws IOException {
+        switch (in.peek()) {
+            case BEGIN_OBJECT -> {
+                JsonObject o = new JsonObject();
+                in.beginObject();
+                while (in.hasNext()) {
+                    String name = in.nextName();
+                    if (UNUSED.contains(name) || depth == 0 && UNUSED_AT_TOP.contains(name)) {
+                        in.skipValue();
+                    } else {
+                        o.add(name, readUsed(in, depth + 1));
+                    }
+                }
+                in.endObject();
+                return o;
+            }
+            case BEGIN_ARRAY -> {
+                JsonArray a = new JsonArray();
+                in.beginArray();
+                while (in.hasNext()) {
+                    a.add(readUsed(in, depth + 1));
+                }
+                in.endArray();
+                return a;
+            }
+            case STRING -> {
+                return new JsonPrimitive(in.nextString());
+            }
+            case NUMBER -> {
+                String n = in.nextString();
+                return new JsonPrimitive(n.matches("-?\\d{1,18}") ? (Number) Long.parseLong(n) : (Number) new java.math.BigDecimal(n));
+            }
+            case BOOLEAN -> {
+                return new JsonPrimitive(in.nextBoolean());
+            }
+            case NULL -> {
+                in.nextNull();
+                return JsonNull.INSTANCE;
+            }
+            default -> throw new IOException("unexpected " + in.peek() + " at " + in.getPath());
         }
     }
 
@@ -209,6 +277,8 @@ public final class ImportPlan {
             plan.projects.add(out);
         }
         shareDuplicateRoots(plan, names);
+        mergeDuplicateEntries(plan);
+        resolveModulePath(plan);
         return plan;
     }
 
@@ -304,6 +374,31 @@ public final class ImportPlan {
             p.sources.forEach(r -> own.add(normalize(r.dir)));
             p.dependencies.removeIf(d -> d.exported && d.file != null && d.sources != null
                 && users.containsKey(normalize(d.sources)) && !own.contains(normalize(d.sources)));
+        }
+    }
+
+    /**
+     * One classpath entry per jar or project: a shared project's merged classpath can list a jar
+     * twice (as a module and as a file), which JDT refuses ("Build path contains duplicate
+     * entry"). The first stays, test only when every copy is, with sources when any has them.
+     */
+    static void mergeDuplicateEntries(ImportPlan plan) {
+        for (Project p : plan.projects) {
+            Map<String, Dependency> seen = new HashMap<>();
+            p.dependencies.removeIf(d -> {
+                String key = d.project != null ? "project:" + d.project : "file:" + normalize(d.file);
+                Dependency first = seen.putIfAbsent(key, d);
+                if (first == null) {
+                    return false;
+                }
+                first.test &= d.test;
+                first.testCode |= d.testCode;
+                first.exported |= d.exported;
+                if (first.sources == null) {
+                    first.sources = d.sources;
+                }
+                return true;
+            });
         }
     }
 
@@ -567,6 +662,7 @@ public final class ImportPlan {
             }
             if (!out.modular && modern && !root.test && !root.generated) {
                 out.modular = true;
+                out.moduleInfo = new File(root.dir, MODULE_INFO);
             } else if (!root.exclusions.contains(MODULE_INFO)) {
                 root.exclusions.add(MODULE_INFO);
             }
@@ -612,6 +708,108 @@ public final class ImportPlan {
                         break;
                     }
                 }
+            }
+        }
+    }
+
+    private static final Pattern MODULE_NAME = Pattern.compile("\\bmodule\\s+([\\w.]+)\\s*\\{");
+    private static final Pattern REQUIRES = Pattern.compile("\\brequires\\s+(?:(?:static|transitive)\\s+)*([\\w.]+)\\s*;");
+
+    /** A module's name and what it requires, from a {@code module-info.java} or a jar. */
+    record ModuleInfo(String name, Set<String> requires) {
+    }
+
+    /** The name and requires of a {@code module-info.java}; null when it cannot be read. */
+    static ModuleInfo parseModuleInfo(File file) {
+        String text;
+        try {
+            text = Files.readString(file.toPath());
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+        text = text.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("(?m)//.*$", " ");
+        Matcher name = MODULE_NAME.matcher(text);
+        if (!name.find()) {
+            return null;
+        }
+        Set<String> requires = new LinkedHashSet<>();
+        Matcher r = REQUIRES.matcher(text);
+        while (r.find()) {
+            requires.add(r.group(1));
+        }
+        return new ModuleInfo(name.group(1), requires);
+    }
+
+    /**
+     * A jar's or class folder's module, as the module system sees it: its {@code module-info.class},
+     * else its {@code Automatic-Module-Name}, else the name its file name gives it (an automatic
+     * module requires nothing). Null when it is no module (a folder without a module-info.class,
+     * a name that is not one).
+     */
+    static ModuleInfo libraryModule(File file) {
+        try {
+            for (ModuleReference ref : ModuleFinder.of(file.toPath()).findAll()) {
+                Set<String> requires = new LinkedHashSet<>();
+                ref.descriptor().requires().forEach(q -> requires.add(q.name()));
+                return new ModuleInfo(ref.descriptor().name(), requires);
+            }
+        } catch (RuntimeException e) {
+            // not a module
+        }
+        return null;
+    }
+
+    /**
+     * The module path of each Java module of the plan: the libraries and projects its
+     * {@code module-info.java} requires, and those they require in turn, as javac resolves them.
+     * The rest of its classpath stays on the class path, where javac and Gradle leave it: the
+     * module cannot read it (so its main code sees what javac sees), and its tests can (JDT
+     * compiles them reading the class path, as Gradle compiles tests without a module-info.java
+     * on the class path). Putting every library on the module path instead would leave the
+     * tests unable to read what the module does not require, such as AssertJ.
+     */
+    static void resolveModulePath(ImportPlan plan) {
+        Map<String, ModuleInfo> projectModules = new HashMap<>();
+        for (Project p : plan.projects) {
+            if (p.modular && p.moduleInfo != null) {
+                ModuleInfo info = parseModuleInfo(p.moduleInfo);
+                if (info != null) {
+                    projectModules.put(p.name, info);
+                }
+            }
+        }
+        for (Project p : plan.projects) {
+            ModuleInfo own = projectModules.get(p.name);
+            if (own == null) {
+                continue;
+            }
+            Map<String, List<Dependency>> byModule = new HashMap<>();
+            Map<String, Set<String>> requiresOf = new HashMap<>();
+            for (Dependency d : p.dependencies) {
+                if (d.test) {
+                    continue;
+                }
+                ModuleInfo info = d.project != null ? projectModules.get(d.project) : d.file != null ? libraryModule(d.file) : null;
+                if (info != null) {
+                    byModule.computeIfAbsent(info.name(), k -> new ArrayList<>()).add(d);
+                    requiresOf.merge(info.name(), info.requires(), (a, b) -> {
+                        Set<String> all = new LinkedHashSet<>(a);
+                        all.addAll(b);
+                        return all;
+                    });
+                }
+            }
+            Deque<String> queue = new ArrayDeque<>(own.requires());
+            Set<String> seen = new LinkedHashSet<>();
+            while (!queue.isEmpty()) {
+                String name = queue.poll();
+                if (!seen.add(name)) {
+                    continue;
+                }
+                for (Dependency d : byModule.getOrDefault(name, List.of())) {
+                    d.module = true;
+                }
+                queue.addAll(requiresOf.getOrDefault(name, Set.of()));
             }
         }
     }
@@ -795,29 +993,51 @@ public final class ImportPlan {
 
     // ---- compiler settings
 
+    /**
+     * The project's compiler settings: the main Java compile's, at the Java level of the source
+     * set that compiles for the newest (tests on Java 21 beside main code for 17, a multi-release
+     * {@code java21} source set), since one JDT project holds them all: its newer code would
+     * otherwise be errors, where an older level only misses the odd API main code may not use.
+     */
     private static void readJavaSettings(Project out, JsonObject project, List<JsonObject> sourceSets, String gradleJavaHome) {
         JavaSettings java = out.java;
         JsonObject projectJava = object(project, "java");
         java.source = string(projectJava, "sourceCompatibility");
         java.target = string(projectJava, "targetCompatibility");
+        boolean first = true;
         for (JsonObject sourceSet : sourceSets) {
             JsonObject compile = object(object(sourceSet, "compile"), "java");
-            if (compile == null) {
+            if (compile == null || strings(sourceSet, "javaSourceDirs").isEmpty() && !first) {
                 continue;
             }
-            java.source = firstNonNull(string(compile, "sourceCompatibility"), java.source);
-            java.target = firstNonNull(string(compile, "targetCompatibility"), java.target);
-            java.release = string(compile, "release");
-            java.encoding = string(compile, "encoding");
+            JavaSettings these = new JavaSettings();
+            these.source = firstNonNull(string(compile, "sourceCompatibility"), java.source);
+            these.target = firstNonNull(string(compile, "targetCompatibility"), java.target);
+            these.release = string(compile, "release");
             List<String> args = strings(compile, "compilerArgs");
-            java.parameters = args.contains("-parameters");
-            java.preview = args.contains("--enable-preview");
             int release = args.indexOf("--release");
-            if (java.release == null && release >= 0 && release + 1 < args.size()) {
-                java.release = args.get(release + 1);
+            if (these.release == null && release >= 0 && release + 1 < args.size()) {
+                these.release = args.get(release + 1);
             }
-            java.javaHome = string(object(compile, "toolchain"), "javaHome");
-            break;
+            these.javaHome = string(object(compile, "toolchain"), "javaHome");
+            if (first) {
+                java.source = these.source;
+                java.target = these.target;
+                java.release = these.release;
+                java.javaHome = these.javaHome;
+                java.encoding = string(compile, "encoding");
+                java.parameters = args.contains("-parameters");
+                java.preview = args.contains("--enable-preview");
+                first = false;
+            } else if (level(these) > level(java)) {
+                java.source = these.source;
+                java.target = these.target;
+                java.release = these.release;
+                if (these.javaHome != null) {
+                    java.javaHome = these.javaHome;
+                }
+                java.preview |= args.contains("--enable-preview");
+            }
         }
         if (java.javaHome == null) {
             java.javaHome = gradleJavaHome;
@@ -839,19 +1059,36 @@ public final class ImportPlan {
         return out;
     }
 
-    /** Source sets that a test task runs, plus {@code test} and names ending in Test or Tests. */
-    private static Set<String> testSourceSets(JsonObject project) {
-        Set<String> out = new LinkedHashSet<>();
-        for (JsonElement t : array(project, "testTasks")) {
-            out.addAll(strings(t.getAsJsonObject(), "sourceSets"));
+    /**
+     * The source sets the main code cannot see, which JDT's {@code test} attribute keeps from it:
+     * every one but {@code main} and those whose output main compiles against. In Gradle only
+     * those are visible to main; the others (tests, {@code testFixtures}, {@code jmh}, a code
+     * generator's own source set, a multi-release {@code java21}) each compile on their own
+     * classpath, which as test code they keep: in a Java module, main code is the module's, and
+     * reads only what it requires, while test code also reads the class path.
+     */
+    static Set<String> testSourceSets(JsonObject project) {
+        Set<String> seenByMain = new LinkedHashSet<>();
+        seenByMain.add("main");
+        for (JsonElement s : array(project, "sourceSets")) {
+            JsonObject sourceSet = s.getAsJsonObject();
+            if (!"main".equals(string(sourceSet, "name"))) {
+                continue;
+            }
+            for (JsonElement e : array(sourceSet, "compileClasspath")) {
+                JsonObject entry = e.getAsJsonObject();
+                if ("sourceSetOutput".equals(string(entry, "kind")) && string(entry, "sourceSet") != null) {
+                    seenByMain.add(string(entry, "sourceSet"));
+                }
+            }
         }
+        Set<String> out = new LinkedHashSet<>();
         for (JsonElement s : array(project, "sourceSets")) {
             String name = string(s.getAsJsonObject(), "name");
-            if (name != null && (name.equals("test") || name.endsWith("Test") || name.endsWith("Tests"))) {
+            if (name != null && !seenByMain.contains(name)) {
                 out.add(name);
             }
         }
-        out.remove("main");
         return out;
     }
 

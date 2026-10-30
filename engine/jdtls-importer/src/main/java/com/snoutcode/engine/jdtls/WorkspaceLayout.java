@@ -23,6 +23,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -145,13 +146,20 @@ final class WorkspaceLayout {
                 exclusions, output, attributes.toArray(new IClasspathAttribute[0])));
         }
         classpath.add(Jdks.containerEntry(spec.java));
+        // JDT refuses a classpath that names a jar or project twice ("Build path contains
+        // duplicate entry"), which a shared project's merged classpath can.
+        Set<IPath> added = new HashSet<>();
         for (ImportPlan.Dependency dependency : spec.dependencies) {
+            IPath key = dependency.project != null ? IPath.fromOSString("/" + dependency.project)
+                : IPath.fromOSString(dependency.file.getAbsolutePath());
+            if (!added.add(key)) {
+                continue;
+            }
             List<IClasspathAttribute> common = new ArrayList<>();
             if (dependency.test) {
                 common.add(JavaCore.newClasspathAttribute(IClasspathAttribute.TEST, "true"));
-            } else if (spec.modular) {
-                // The module path: a module reads only modules (a plain jar is an automatic one).
-                // Test-only entries stay on the class path, which the tests read as javac's do.
+            } else if (dependency.module) {
+                // The module path, for what the module requires (see ImportPlan#resolveModulePath).
                 common.add(JavaCore.newClasspathAttribute(IClasspathAttribute.MODULE, "true"));
             }
             IClasspathAttribute[] attributes = common.toArray(new IClasspathAttribute[0]);
