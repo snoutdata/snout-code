@@ -1,0 +1,40 @@
+# The corpus: real public Gradle and Maven builds that scripts/corpus.sh syncs through the engine
+# (.github/workflows/corpus.yml runs it on GitHub Actions; never on a developer's machine).
+#
+# One project per line: a name, the repository, the commit it is pinned to, the JDK the build
+# expects (the engine's --java-home; the other JDKs are offered too), the build tool, and the
+# build's shape, for people. Android builds are left out.
+#
+# name                         repository                                                   commit                                    jdk  tool          shape
+
+# Gradle, Kotlin DSL, convention plugins and version catalogs
+junit-framework                https://github.com/junit-team/junit-framework                8ab6d035eee4f13726c27c148553e188a8989fa8  25   gradle        Gradle 9.8.2, Kotlin DSL; two included builds of convention plugins (gradle/base, gradle/plugins); version catalog; toolchains 17 to 25 from JDK<n> variables
+mockito                        https://github.com/mockito/mockito                           25a1d56d57cd678ab1e4636d184a44e7f001424a  21   gradle        Gradle 9.8.2, Kotlin DSL; convention plugins in an included build-logic; version catalog; foojay toolchains
+caffeine                       https://github.com/ben-manes/caffeine                        10646b00c14a7837fe16a16a2a7b1f82e5fa3155  25   gradle        Gradle 9.8.2, Kotlin DSL; convention plugins in an included gradle/plugins; version catalog; toolchain 25 through foojay
+openrewrite                    https://github.com/openrewrite/rewrite                       4c5f5875194ca487337f3d88c6b298991b78643e  21   gradle        Gradle 9.8.2, Kotlin DSL; buildSrc; about 40 subprojects; plugins from the plugin portal
+
+# Gradle, Groovy DSL, buildSrc and composite builds
+spring-boot                    https://github.com/spring-projects/spring-boot               bcd4641c9b36fb377712fe26c3f1d3472db41e1e  25   gradle        Gradle 9.8.1, Groovy DSL; buildSrc and an included gradle/plugins; a very large multi-project build
+spring-framework-6.1           https://github.com/spring-projects/spring-framework          fa36b342ebafc488f29f7d30c8e69a3d4b988ae6  17   gradle        Gradle 8.14.2 (tag v6.1.21), Groovy DSL; buildSrc; Java and Kotlin subprojects
+hibernate-orm                  https://github.com/hibernate/hibernate-orm                   ac42edc9f6b69912539f0838ee34328d8749536b  21   gradle        Gradle 9.8.2, Groovy DSL; an included local-build-plugins; version catalogs declared in settings; toolchains
+groovy                         https://github.com/apache/groovy                             396e862eda6c8a2fddaeb3eaf58e86cb5e6f08bc  17   gradle        Gradle 9.8.2; an included build-logic of convention plugins; Groovy and Java sources mixed
+testcontainers                 https://github.com/testcontainers/testcontainers-java        f74d167720038492c13df0ddaa053717ef61706a  17   gradle        Gradle 8.14.3, Groovy DSL; buildSrc; about 60 modules; foojay toolchains
+reactor-core                   https://github.com/reactor/reactor-core                      b9afa1b7e62375b6d3eaaa6fc6e558fbb529a899  21   gradle        Gradle 9.8.2, Groovy DSL; buildSrc; version catalogs in settings; Java 8 toolchain through foojay
+kafka                          https://github.com/apache/kafka                              139306133eab00d3ae347a791fc119b9a05076ac  21   gradle        Gradle 9.8.2, Groovy DSL; Scala and Java modules; an included api-checker build
+resilience4j-2.2               https://github.com/resilience4j/resilience4j                 e77f3536ac9b6c4764b1b8ac3dae0bca540768e4  17   gradle        Gradle 7.4.2 (tag v2.2.0), Groovy DSL; multi-project; version catalog
+rxjava-3.1                     https://github.com/ReactiveX/RxJava                          ede5cfcb41a6a1c8f955d77d80883d5d08e843d9  17   gradle        Gradle 7.6.4 (tag v3.1.10), Groovy DSL; a single project
+
+# Spring Boot applications
+spring-petclinic               https://github.com/spring-projects/spring-petclinic          500158f732419217507c7656904b8e6aa1bcc0d6  17   gradle+maven  Spring Boot; a Gradle build (9.5.1) and a Maven build (mvnw 3.9.16) in the same folder
+jhipster-sample-gradle         https://github.com/jhipster/jhipster-sample-app-gradle       8bdbaacecdb91cf3bef693e01294e82e00c2ac06  21   gradle        Spring Boot (JHipster), Gradle 9.7.1; a web front end beside it
+spring-petclinic-microservices https://github.com/spring-petclinic/spring-petclinic-microservices e8b747ab522721076cacb5cf688eb8a54ba8c5c9  17   maven         Spring Boot and Spring Cloud; Maven multi-module; mvnw 3.9.8
+spring-data-examples           https://github.com/spring-projects/spring-data-examples      7747029e6157cb780862826b6ae87c88d7a4df3c  17   maven         Spring Boot; about 100 Maven modules in nested aggregators; mvnw 3.8.4
+
+# Maven
+guava                          https://github.com/google/guava                              3443bf72c1bd1933fcd8b10b81ce0ab0e96badd4  21   maven         Maven multi-module; mvnw 3.9.12; toolchains plugin; error-prone
+java-design-patterns           https://github.com/iluwatar/java-design-patterns             4cabb204f240240bea319605a5ffa46ded728001  21   maven         Maven, about 190 modules; mvnw 3.9.6
+logging-log4j2                 https://github.com/apache/logging-log4j2                     d1e96def1d4b1fd89e4f6cc4014a9db869fa242c  17   maven         Maven, about 40 modules with a separate parent; mvnw 3.9.16; bnd
+jackson-databind               https://github.com/FasterXML/jackson-databind                c5034d9bd1931df84c7d53345f7d4ff9c6773658  17   maven         Maven, a single module (3.x); mvnw 3.9.11
+jenkins                        https://github.com/jenkinsci/jenkins                         e0c87d73ae77bc5559803da3299613b3be7706d7  21   maven         Maven multi-module; Maven extensions in .mvn; no wrapper
+maven                          https://github.com/apache/maven                              6ba724bb54103558ef55ad81b21b60cb9db042cd  17   maven         Maven's own sources (Maven 4); multi-module; no wrapper
+commons-lang                   https://github.com/apache/commons-lang                       61837eb4472dac790a69f5f34b7b89ddfaf43db0  17   maven         Maven, a single module with the Apache Commons parent; no wrapper

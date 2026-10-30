@@ -1,0 +1,135 @@
+# The corpus: real public Gradle and Maven builds (engine/corpus/projects.txt), each pinned to a
+# commit, synced through the Java engine by scripts/corpus.sh, one job per project. The results
+# (a table and JSON) are the run's summary and its artifact `corpus-results`. Weekly and by hand
+# only: it runs third-party builds, takes long, and gates nothing.
+name: Corpus
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      projects:
+        description: Projects to run (names from engine/corpus/projects.txt, separated by spaces; empty for all)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corpus
+  cancel-in-progress: false
+
+jobs:
+  engine:
+    name: The engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      projects: ${{ steps.projects.outputs.projects }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: The projects
+        id: projects
+        env:
+          PROJECTS: ${{ inputs.projects }}
+        run: |
+          # shellcheck disable=SC2086 # the names are words
+          echo "projects=$(python3 -I scripts/corpus/report.py names engine/corpus/projects.txt $PROJECTS)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Build the engine and the headless client
+        run: |
+          cd engine
+          ./gradlew --no-daemon --quiet :sync-cli:snoutDist "-PsnoutDistDir=$RUNNER_TEMP/engine/dist" :lsp-driver:installDist
+          cp -R lsp-driver/build/install/lsp-driver "$RUNNER_TEMP/engine/lsp-driver"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/engine.tgz" engine
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corpus-engine
+          path: ${{ runner.temp }}/engine.tgz
+          retention-days: 3
+
+  project:
+    name: ${{ matrix.project }}
+    needs: engine
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.engine.outputs.projects) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - name: Room on the disk
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: |
+            11
+            17
+            25
+            21
+      - uses: actions/download-artifact@v8
+        with:
+          name: corpus-engine
+          path: ${{ runner.temp }}
+      - name: Sync ${{ matrix.project }}
+        env:
+          JDK11: ${{ env.JAVA_HOME_11_X64 }}
+          JDK17: ${{ env.JAVA_HOME_17_X64 }}
+          JDK21: ${{ env.JAVA_HOME_21_X64 }}
+          JDK25: ${{ env.JAVA_HOME_25_X64 }}
+          PROJECT: ${{ matrix.project }}
+        run: |
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/engine.tgz"
+          export SNOUT_ENGINE_DIST="$RUNNER_TEMP/engine/dist"
+          export SNOUT_LSP_DRIVER="$RUNNER_TEMP/engine/lsp-driver/bin/lsp-driver"
+          scripts/corpus.sh --out "$RUNNER_TEMP/corpus" --timeout 55 "$PROJECT"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: corpus-project-${{ matrix.project }}
+          path: ${{ runner.temp }}/corpus/projects/${{ matrix.project }}/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  report:
+    name: Results
+    needs: [engine, project]
+    if: always() && needs.engine.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: corpus-project-*
+          path: results
+      - name: The table
+        env:
+          PROJECTS: ${{ needs.engine.outputs.projects }}
+        run: |
+          results=()
+          while IFS=$'\t' read -r name repo commit jdk tool shape; do
+            dir="results/corpus-project-$name"
+            if [[ ! -f "$dir/result.json" ]]; then
+              mkdir -p "$dir"
+              python3 -I scripts/corpus/report.py result "$dir" missing 0 "$name" "$repo" "$commit" "$jdk" "$tool" "$shape"
+            fi
+            results+=("$dir/result.json")
+          done < <(python3 -I -c 'import json, sys; print("\n".join(json.loads(sys.argv[1])))' "$PROJECTS" \
+                   | xargs python3 -I scripts/corpus/report.py select engine/corpus/projects.txt)
+          python3 -I scripts/corpus/report.py table results.md results.json "${results[@]}"
+          cat results.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corpus-results
+          path: |
+            results.md
+            results.json
+          retention-days: 90
