@@ -34,14 +34,10 @@ for step in $STEPS; do
       ;;
     tests)
       echo "== tests ($ARCH)"
-      # Two tests of snout-server's daemon that fail in this container and are still to be
-      # looked into: an idle timeout of one second ends the daemon before the client's first
-      # answer, and a pty reattached after a dropped connection gets no input (the test hangs).
-      SKIP="--skip the_daemon_stops_when_idle_and_takes_its_processes --skip processes_outlive_a_dropped_connection_and_attach_again"
       # As on a machine with no Java installed: the tests that need a JDK for their builds get
       # the image's (SNOUT_TEST_JDK); the app finds none of its own.
       PATH="${PATH//\/opt\/jdk21\/bin:/}" SNOUT_TEST_JDK=/opt/jdk21 JAVA_HOME= \
-        cargo test --locked --workspace --no-fail-fast -- $SKIP 2>&1 | tee "$OUT/tests-$ARCH.log"
+        cargo test --locked --workspace --no-fail-fast 2>&1 | tee "$OUT/tests-$ARCH.log"
       [[ "${PIPESTATUS[0]}" == 0 ]]
       ;;
     smoke)

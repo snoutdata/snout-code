@@ -272,7 +272,10 @@ fn processes_outlive_a_dropped_connection_and_attach_again() {
     read_until(&mut out, "tick 2");
     let pty = c.spawn_pty(PtyRequest { program: "/bin/sh".into(), ..Default::default() }).unwrap();
     let mut io = pty.io.clone();
-    io.write_all(b"X=remembered\n").unwrap();
+    // Wait for the shell to have run the line: bytes still on their way when the link drops
+    // are lost with it.
+    io.write_all(b"X=remembered; echo set-$((40+2))\n").unwrap();
+    read_until(&mut io, "set-42");
     let (ticker_id, pty_id, daemon) = (ticker.id, pty.id, host.daemon_pid().unwrap());
 
     // The link drops: ssh (here the proxy) dies.

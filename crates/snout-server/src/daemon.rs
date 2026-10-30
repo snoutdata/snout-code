@@ -66,6 +66,10 @@ pub fn run(opts: &Options) -> io::Result<()> {
         let _ = std::fs::write(&log_file, b"");
     }
     let signals = catch_signals()?;
+    // Hash this executable before listening: every handshake sends it, and the first one
+    // must not wait for it (a large unoptimized build takes seconds, longer than a short
+    // idle timeout).
+    let _ = build_hash();
     let sock = socket_path(&opts.dir);
     let _ = std::fs::remove_file(&sock);
     let listener = UnixListener::bind(&sock)?;
@@ -92,13 +96,16 @@ pub fn run(opts: &Options) -> io::Result<()> {
     std::thread::spawn(move || d.wait_for_signal(signals));
     let d = daemon.clone();
     std::thread::spawn(move || d.watch_idle());
-    let _ = build_hash();
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
+                // A client counts from its accept, so the idle timeout cannot end the
+                // daemon in the middle of a handshake.
+                daemon.count_client(1);
                 let d = daemon.clone();
                 std::thread::spawn(move || {
-                    if let Err(e) = d.serve(s) {
+                    if let Err(e) = d.clone().serve(s) {
+                        d.count_client(-1);
                         log(format!("a client failed to connect: {e}"));
                     }
                 });
@@ -173,15 +180,19 @@ impl Daemon {
         }
     }
 
+    /// Count a client in (1) or out (-1); returns the count now.
+    fn count_client(&self, delta: isize) -> usize {
+        let mut c = self.clients.lock().unwrap();
+        *c = (c.0.saturating_add_signed(delta), Instant::now());
+        c.0
+    }
+
+    /// Serve an accepted connection, already counted; on an error the caller counts it out.
     fn serve(self: Arc<Self>, stream: UnixStream) -> io::Result<()> {
         let mut r = stream.try_clone()?;
         let mut w = stream.try_clone()?;
         server_handshake(&mut r, &mut w, build_hash())?;
-        {
-            let mut c = self.clients.lock().unwrap();
-            *c = (c.0 + 1, Instant::now());
-            log(format!("a client connected ({} now)", c.0));
-        }
+        log(format!("a client connected ({} now)", self.clients.lock().unwrap().0));
         let handler: Arc<dyn Handler> = Arc::new(ServerHandler { daemon: self.clone(), local: self.local.clone() });
         let closer = stream.try_clone()?;
         let mux = Mux::start(r, w, Role::Server, Some(handler), move || {
@@ -190,9 +201,8 @@ impl Daemon {
         let d = self.clone();
         let m = mux.clone();
         mux.on_close(move || {
-            let mut c = d.clients.lock().unwrap();
-            *c = (c.0.saturating_sub(1), Instant::now());
-            log(format!("a client left ({} now): {}", c.0, m.dead_reason().unwrap_or_default()));
+            let n = d.count_client(-1);
+            log(format!("a client left ({n} now): {}", m.dead_reason().unwrap_or_default()));
         });
         Ok(())
     }
