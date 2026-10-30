@@ -380,7 +380,7 @@ mod tests {
     fn project_settings_save_and_load() {
         let dir = std::env::temp_dir().join(format!("snout-project-settings-{}", std::process::id()));
         let file = project_file(&dir, Path::new("/w/shop"));
-        assert!(file.to_string_lossy().contains("/projects/shop-"));
+        assert!(file.to_string_lossy().replace('\\', "/").contains("/projects/shop-"));
         let s = ProjectSettings {
             selected: Some("a".into()),
             breakpoints: vec![Breakpoint::new("/w/A.java", 3, Some("i > 2".into()))],

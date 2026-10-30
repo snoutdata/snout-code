@@ -43,8 +43,9 @@ pub fn write_project_fixture(root: &std::path::Path, jars: &std::path::Path) -> 
     write_fixture_jar(&jars.join("junit-4.13.2.jar"), &["org/junit/Test.class", "org/junit/Assert.class"]);
     write_fixture_jar(&jars.join("slf4j-api-2.0.9.jar"), &["org/slf4j/Logger.class"]);
     include_str!("project-model.json")
-        .replace("$ROOT", &root.to_string_lossy())
-        .replace("$JARS", &jars.to_string_lossy())
+        // As JSON writes them: a Windows path's backslashes escaped.
+        .replace("$ROOT", &root.to_string_lossy().replace('\\', "\\\\"))
+        .replace("$JARS", &jars.to_string_lossy().replace('\\', "\\\\"))
 }
 
 /// A zip of empty entries, stored: enough for a reader of the central directory.

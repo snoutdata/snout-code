@@ -54,7 +54,7 @@ mod tests {
         }
         let found: Vec<String> = find_repos(&*snout_host::local(), &root, 3)
             .iter()
-            .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().into_owned())
+            .map(|p| snout_host::slash_path(p.strip_prefix(&root).unwrap()))
             .collect();
         assert_eq!(found, ["a", "group/b"]);
         fs::remove_dir_all(&root).unwrap();

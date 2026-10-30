@@ -41,7 +41,7 @@ pub fn list_files(host: &dyn Host, root: &Path) -> Vec<String> {
         .walk(root, &options)
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|e| e.path.strip_prefix(root).ok().map(|p| p.to_string_lossy().into_owned()))
+        .filter_map(|e| e.path.strip_prefix(root).ok().map(snout_host::slash_path))
         .collect();
     out.sort();
     out
@@ -277,7 +277,7 @@ impl SearchView {
                     .recent_files
                     .iter()
                     .filter_map(|p| p.strip_prefix(&root).ok())
-                    .map(|p| p.to_string_lossy().into_owned())
+                    .map(snout_host::slash_path)
                     .filter(|p| q.is_empty() || p.to_lowercase().contains(&q))
                     .map(|path| Item { path, ..Default::default() })
                     .collect();

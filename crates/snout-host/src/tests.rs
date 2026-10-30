@@ -76,12 +76,8 @@ fn walks_as_gitignore_says_and_finds_text() {
     std::fs::write(dir.join("bin.dat"), b"Hello\0\x01").unwrap();
 
     let options = WalkOptions { hidden: true, gitignore: true, skip: vec![".git".into()], ..Default::default() };
-    let mut all: Vec<String> = host
-        .walk(&dir, &options)
-        .unwrap()
-        .iter()
-        .map(|e| e.path.strip_prefix(&dir).unwrap().to_string_lossy().into_owned())
-        .collect();
+    let mut all: Vec<String> =
+        host.walk(&dir, &options).unwrap().iter().map(|e| slash_path(e.path.strip_prefix(&dir).unwrap())).collect();
     all.sort();
     assert_eq!(all, [".gitignore", "bin.dat", "src", "src/deep", "src/deep/A.java"]);
     let top = host.walk(&dir, &WalkOptions { max_depth: Some(1), files_only: true, ..options.clone() }).unwrap();
@@ -408,7 +404,8 @@ mod windows {
     #[test]
     fn runs_a_terminal() {
         let host = LocalHost::new();
-        let mut pty = host.spawn_pty(&cmd("set /p x= & echo got %x%"), 24, 80).unwrap();
+        // No spaces in what is looked for: the console may draw them as cursor moves.
+        let mut pty = host.spawn_pty(&cmd("set /p x= & call echo got:%x%"), 24, 80).unwrap();
         let mut reader = pty.take_reader().unwrap();
         let mut writer = pty.take_writer().unwrap();
         writer.write_all(b"it\r\n").unwrap();
@@ -421,14 +418,14 @@ mod windows {
                     break;
                 }
                 all.extend_from_slice(&buf[..n]);
-                if String::from_utf8_lossy(&all).contains("got it") {
+                if String::from_utf8_lossy(&all).contains("got:it") {
                     break;
                 }
             }
             let _ = tx.send(String::from_utf8_lossy(&all).into_owned());
         });
         let text = rx.recv_timeout(Duration::from_secs(20)).expect("the terminal answered");
-        assert!(text.contains("got it"), "{text}");
+        assert!(text.contains("got:it"), "{text}");
         pty.resize(30, 100).unwrap();
         assert!(pty.wait().unwrap().success());
     }

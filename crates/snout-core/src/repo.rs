@@ -52,7 +52,10 @@ impl Repo {
         if !out.success {
             return Err(Error::NotARepo(path.to_owned()));
         }
-        Ok(Self { root: PathBuf::from(out.stdout_str().trim_end()), host: host.clone() })
+        let root = out.stdout_str().trim_end().to_owned();
+        // Git for Windows writes the folder with slashes: backslashes, like every other path there.
+        let root = if host.info().is_windows() { root.replace('/', "\\") } else { root };
+        Ok(Self { root: PathBuf::from(root), host: host.clone() })
     }
 
     /// Create a new repository in the existing directory `path` on `host`.

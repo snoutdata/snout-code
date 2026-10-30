@@ -34,6 +34,8 @@ for arch in "${ARCHES[@]}"; do
   esac
 done
 
+# target/ made here, so it is this user's and not the container's root's (a fresh clone has none).
+mkdir -p "$ROOT/target"
 docker run --rm \
   -v "$ROOT":/src \
   -v snout-server-build-cargo:/usr/local/cargo/registry \

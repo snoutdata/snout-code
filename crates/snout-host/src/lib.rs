@@ -605,6 +605,13 @@ pub fn which(host: &dyn Host, names: &[&str], extra: &[PathBuf]) -> Option<PathB
     dirs.iter().chain(extra).flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| host.is_file(p))
 }
 
+/// `path` as text with `/` between its parts on every system (Windows's `\\` too): how the
+/// app writes paths within a project (`src/main/A.java`), as Git does.
+pub fn slash_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) { text.replace('\\', "/") } else { text.into_owned() }
+}
+
 /// The user's home folder on this machine: `HOME`, else (Windows) `USERPROFILE`.
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
@@ -616,6 +623,8 @@ pub fn home_dir() -> PathBuf {
 
 /// A time (seconds since 1970) in this machine's time zone: year, month (1 to 12), day, hour,
 /// minute, second.
+// `time_t` is deprecated on musl (it is to become 64-bit there); it is what `localtime_r` takes.
+#[allow(deprecated)]
 pub fn local_time(secs: i64) -> Option<[i32; 6]> {
     // SAFETY: `tm` is plain data, valid all zeros.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };

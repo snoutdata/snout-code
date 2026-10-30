@@ -101,12 +101,12 @@ jobs:
       # Whether the Ghostty terminal engine (libghostty-vt, built with Zig 0.15) builds on
       # Windows; until it does, Windows uses the built-in engine.
       - uses: mlugg/setup-zig@v2
-        if: matrix.arch == 'x64'
+        if: (success() || failure()) && matrix.arch == 'x64'
         continue-on-error: true
         with:
           version: 0.15.2
       - name: Ghostty (trial)
-        if: matrix.arch == 'x64'
+        if: (success() || failure()) && matrix.arch == 'x64'
         continue-on-error: true
         run: cargo clippy --locked -p snout-app --all-targets --features ghostty -- -D warnings
 
@@ -156,10 +156,16 @@ jobs:
           path: target/snout-server-dist
       - name: Inno Setup
         run: |
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+          if (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe") { exit 0 }
+          if (Get-Command choco -ErrorAction SilentlyContinue) {
             choco install innosetup -y --no-progress
-            if ($LASTEXITCODE -ne 0) { exit 1 }
+            if ($LASTEXITCODE -eq 0) { exit 0 }
           }
+          # No Chocolatey (the arm64 image): Inno Setup's own installer.
+          $is = Join-Path $env:RUNNER_TEMP "innosetup.exe"
+          Invoke-WebRequest "https://jrsoftware.org/download.php/is.exe" -OutFile $is
+          $p = Start-Process -FilePath $is -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/ALLUSERS"
+          exit $p.ExitCode
       # SIGNING, TURNED OFF (see SIGN_WINDOWS above): with it on, package-windows.ps1 -Sign signs
       # snout-code.exe, the installer and its uninstaller through scripts/windows/sign.ps1.
       - name: Build the installer

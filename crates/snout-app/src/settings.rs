@@ -349,7 +349,8 @@ impl Default for Settings {
     }
 }
 
-/// Where the files live; `home` is `$HOME`, so a scratch `HOME` gives a clean start.
+/// Where the files live; `home` is `$HOME`, so a scratch `HOME` gives a clean start (on
+/// Windows, a scratch `APPDATA`).
 #[derive(Debug, Clone)]
 pub struct Store {
     pub file: PathBuf,
@@ -391,7 +392,11 @@ impl Store {
 
     /// The store for this user, or none without a home folder (then nothing is saved).
     pub fn for_user() -> Option<Self> {
-        let home = PathBuf::from(std::env::var_os("HOME")?);
+        // `HOME`, else (Windows) the user's profile folder.
+        let home = snout_host::home_dir();
+        if home.as_os_str().is_empty() {
+            return None;
+        }
         Some(Self::in_config(snout_host::dirs::AppDirs::local().config, &home))
     }
 

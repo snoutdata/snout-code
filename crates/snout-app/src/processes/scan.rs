@@ -342,6 +342,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_registry_is_named_as_the_engine_names_it() {
         // sha256("/") starts 8a5edab282632443.

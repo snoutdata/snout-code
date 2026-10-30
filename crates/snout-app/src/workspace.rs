@@ -1280,7 +1280,7 @@ impl Workspace {
                 .filter(|e| !e.read(cx).loading && e.read(cx).class_file.is_none())
                 .filter_map(|e| {
                     let e = e.read(cx);
-                    let rel = e.path.strip_prefix(&open_root).ok()?.to_string_lossy().into_owned();
+                    let rel = snout_host::slash_path(e.path.strip_prefix(&open_root).ok()?);
                     Some((rel, Arc::new(e.text(cx))))
                 })
                 .collect()

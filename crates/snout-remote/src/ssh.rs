@@ -393,6 +393,8 @@ mod tests {
         assert_eq!(pick("Linux", "x86_64").unwrap_err().kind(), io::ErrorKind::NotFound);
     }
 
+    // Windows's OpenSSH has no shared connections (no ControlMaster).
+    #[cfg(unix)]
     #[test]
     fn a_terminal_session_shares_the_apps_connection() {
         let mut t = SshTarget::new("devbox");
@@ -406,6 +408,8 @@ mod tests {
         assert_eq!(argv[argv.len() - 3..], ["-t", "devbox", "cd /srv; exec $SHELL -l"]);
     }
 
+    // Windows's OpenSSH has no shared connections (no ControlMaster).
+    #[cfg(unix)]
     #[test]
     fn the_control_socket_name_is_short_and_per_target() {
         let a = SshTarget::new("devbox");

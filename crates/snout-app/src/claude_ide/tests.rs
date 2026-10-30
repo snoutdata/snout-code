@@ -945,9 +945,10 @@ fn codex_in_the_console_gets_its_turns_and_its_edits(cx: &mut TestAppContext) {
     });
     let notify = cx.update(|_, cx| cx.global::<super::CodexArgs>().0.clone());
     assert_eq!(notify[0], "-c");
-    assert!(notify[1].starts_with("notify=[\"/bin/sh\",\"-c\","), "{}", notify[1]);
+    let shell = if cfg!(windows) { "notify=[\"curl.exe\"," } else { "notify=[\"/bin/sh\",\"-c\"," };
+    assert!(notify[1].starts_with(shell), "{}", notify[1]);
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
-    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some("/bin/cat".into())));
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(crate::tests::unix_tool("/bin/cat"))));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
     pump_until(cx, "the session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
     cx.update(|_, cx| {
@@ -1127,7 +1128,7 @@ fn the_console_says_its_agent_and_state_and_stays_ended(cx: &mut TestAppContext)
     // console still hidden, so it starts nothing by itself).
     hook_command(&ws, cx);
     cx.update(|_, cx| cx.set_global(super::IdeArgs::default()));
-    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some("/usr/bin/tail".into())));
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(crate::tests::unix_tool("/usr/bin/tail"))));
     let args = ["-f".to_owned(), "/dev/null".to_owned()];
     // Under the whole suite's load a process can fail to start now and then: a few tries.
     let mut status = Status::NotRunning;

@@ -28,6 +28,7 @@ public static class SmokeInput {
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
     public static void Click(int x, int y) {
         SetCursorPos(x, y);
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
@@ -36,6 +37,9 @@ public static class SmokeInput {
 }
 "@
 [SmokeInput]::SetProcessDPIAware() | Out-Null
+# The arm64 runner's desktop shows Windows's first-run privacy screen over everything: out of
+# the way, so the app's window can be seen.
+Get-Process WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 function Shot([string]$name) {
     $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -120,6 +124,10 @@ function WaitFor([string]$pattern, [string]$why) {
 
 WaitFor 'main window painted' "no window after $Wait s"
 Select-String -Path $log -Pattern 'main window painted' | Select-Object -First 1 | ForEach-Object { Write-Host $_.Line }
+# Maximized, so the whole window and its title bar's buttons are on the runner's small screen.
+for ($i = 0; $i -lt 20 -and $app.MainWindowHandle -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 250; $app.Refresh() }
+[SmokeInput]::ShowWindow($app.MainWindowHandle, 3) | Out-Null
+[SmokeInput]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
 WaitFor '\[project\] read' "the project was not read"
 Select-String -Path $log -Pattern '\[project\] read' | ForEach-Object { Write-Host $_.Line }
 
@@ -140,6 +148,11 @@ if (-not $Jdk) {
         Start-Sleep -Seconds 1
     }
     Select-String -Path $log -Pattern '\[java\] readiness|\[java\] first diagnostics' | Select-Object -Last 2 | ForEach-Object { Write-Host $_.Line }
+    # What the Java processes listen on: loopback only, or Windows Firewall asks the user.
+    $java = @(Get-CimInstance Win32_Process -Filter "Name = 'java.exe'" | ForEach-Object { $_.ProcessId })
+    $open = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $java -contains $_.OwningProcess -and $_.LocalAddress -notin @('127.0.0.1', '::1') })
+    foreach ($c in $open) { Write-Host "listening beyond loopback: java pid $($c.OwningProcess) on $($c.LocalAddress):$($c.LocalPort)" }
     Start-Sleep -Seconds 3
     Shot "main"
     # The window is at the screen's top left; File is the first menu of its title bar.

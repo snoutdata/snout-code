@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 /// The user's ssh config: `~/.ssh/config`.
 pub fn user_config() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| Path::new(&h).join(".ssh/config"))
+    let home = snout_host::home_dir();
+    (!home.as_os_str().is_empty()).then(|| home.join(".ssh").join("config"))
 }
 
 /// The hosts `config` names, in the order they come, each once.
@@ -40,7 +41,7 @@ fn read(file: &Path, ssh_dir: &Path, out: &mut Vec<String>, depth: u32) {
         } else if key.eq_ignore_ascii_case("include") {
             for w in words {
                 let w = match w.strip_prefix("~/") {
-                    Some(rest) => std::env::var_os("HOME").map(|h| Path::new(&h).join(rest)).unwrap_or_default(),
+                    Some(rest) => snout_host::home_dir().join(rest),
                     None => PathBuf::from(w),
                 };
                 // Relative names are under ~/.ssh.
@@ -77,8 +78,13 @@ fn split_words(s: &str) -> Vec<String> {
 
 /// The files a pattern names; `*` and `?` match within one path component.
 fn glob(pattern: &Path) -> Vec<PathBuf> {
-    let mut found = vec![PathBuf::from("/")];
-    for part in pattern.components().skip(1) {
+    use std::path::Component;
+    // From its root: `/`, or on Windows the drive's (`C:\\`).
+    let root: PathBuf =
+        pattern.components().take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir)).collect();
+    let skip = pattern.components().take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir)).count();
+    let mut found = vec![if root.as_os_str().is_empty() { PathBuf::from("/") } else { root }];
+    for part in pattern.components().skip(skip) {
         let part = part.as_os_str().to_string_lossy().into_owned();
         let mut next = Vec::new();
         for base in &found {

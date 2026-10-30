@@ -78,7 +78,14 @@ fn mode_of(m: &std::fs::Metadata) -> u32 {
 
 fn command(cmd: &Cmd) -> io::Result<std::process::Command> {
     let mut c = std::process::Command::new(&cmd.program);
-    crate::default_signals(&mut c).args(&cmd.args);
+    crate::default_signals(&mut c);
+    if is_batch_file(Path::new(&cmd.program)) {
+        // A batch file (npm's `claude.cmd`) gets its arguments through the Command Prompt,
+        // which cannot take a line break in one: each becomes a space.
+        c.args(cmd.args.iter().map(|a| a.to_string_lossy().replace("\r\n", " ").replace(['\r', '\n'], " ")));
+    } else {
+        c.args(&cmd.args);
+    }
     if let Some(dir) = &cmd.cwd {
         c.current_dir(dir);
     }
@@ -98,6 +105,11 @@ fn command(cmd: &Cmd) -> io::Result<std::process::Command> {
     };
     c.stdin(stdio(&cmd.stdin)?).stdout(stdio(&cmd.stdout)?).stderr(stdio(&cmd.stderr)?);
     Ok(c)
+}
+
+/// Whether `program` is a Windows batch file (`.cmd`, `.bat`).
+fn is_batch_file(program: &Path) -> bool {
+    cfg!(windows) && program.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
 }
 
 /// A process this Mac runs. On Windows it is in a job object of its own, so stopping it
@@ -177,8 +189,12 @@ impl Process for LocalProcess {
 }
 
 /// A process on one of this Mac's pseudo-terminals.
+///
+/// On Windows the pseudo console keeps its output open after the process ends, so a reader
+/// would wait forever: once the process has ended, the console is closed (the master
+/// dropped), and the reader sees the end.
 struct LocalPty {
-    master: Box<dyn portable_pty::MasterPty + Send>,
+    master: std::sync::Arc<Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
@@ -192,15 +208,28 @@ impl PtyProcess for LocalPty {
     }
 
     fn take_reader(&mut self) -> io::Result<Box<dyn Read + Send>> {
-        self.master.try_clone_reader().map_err(io::Error::other)
+        let reader = self.with_master(|m| m.try_clone_reader().map_err(io::Error::other))?;
+        #[cfg(windows)]
+        if let Some(pid) = self.child.process_id() {
+            let master = self.master.clone();
+            std::thread::Builder::new().name("pty-exit".into()).spawn(move || {
+                crate::win::wait_for_exit(pid);
+                drop(master.lock().unwrap_or_else(|e| e.into_inner()).take());
+            })?;
+        }
+        Ok(reader)
     }
 
     fn take_writer(&mut self) -> io::Result<Box<dyn Write + Send>> {
-        self.master.take_writer().map_err(io::Error::other)
+        self.with_master(|m| m.take_writer().map_err(io::Error::other))
     }
 
     fn resize(&self, rows: u16, cols: u16) -> io::Result<()> {
-        self.master.resize(pty_size(rows, cols)).map_err(io::Error::other)
+        match self.with_master(|m| m.resize(pty_size(rows, cols)).map_err(io::Error::other)) {
+            // The process has ended: nothing to resize.
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+            r => r,
+        }
     }
 
     fn kill(&mut self) -> io::Result<()> {
@@ -213,6 +242,16 @@ impl PtyProcess for LocalPty {
 
     fn wait(&mut self) -> io::Result<ExitStatus> {
         Ok(pty_status(self.child.wait()?))
+    }
+}
+
+impl LocalPty {
+    fn with_master<T>(&self, f: impl FnOnce(&dyn portable_pty::MasterPty) -> io::Result<T>) -> io::Result<T> {
+        let guard = self.master.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.as_deref() {
+            Some(m) => f(m),
+            None => Err(io::Error::new(io::ErrorKind::BrokenPipe, "the terminal has ended")),
+        }
     }
 }
 
@@ -491,7 +530,7 @@ impl Host for LocalHost {
         }
         let child = pair.slave.spawn_command(c).map_err(io::Error::other)?;
         drop(pair.slave);
-        Ok(Box::new(LocalPty { master: pair.master, child }))
+        Ok(Box::new(LocalPty { master: std::sync::Arc::new(Mutex::new(Some(pair.master))), child }))
     }
 
     fn connect_tcp(&self, port: u16, timeout: Duration) -> io::Result<Box<dyn Stream>> {

@@ -607,7 +607,7 @@ impl FindInFiles {
 
     /// The files the scope takes.
     fn within(&self, cx: &App) -> Within {
-        let rel = |p: &Path| p.strip_prefix(&self.root).ok().map(|p| p.to_string_lossy().into_owned());
+        let rel = |p: &Path| p.strip_prefix(&self.root).ok().map(snout_host::slash_path);
         match self.scope {
             Scope::Project => Within::All,
             Scope::Directory => {

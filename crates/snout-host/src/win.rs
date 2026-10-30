@@ -23,7 +23,8 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Threading::{
     CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS, GetCurrentProcess,
-    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
+    GetExitCodeProcess, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{
     FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW, SHFileOperationW,
@@ -187,7 +188,16 @@ pub fn process_alive(pid: u32) -> bool {
     let mut code = 0u32;
     // SAFETY: a valid handle and a place for the code.
     let ok = unsafe { GetExitCodeProcess(p.0, &mut code) } != 0;
-    !ok || code != STILL_ACTIVE as u32
+    // Still running, or not to be asked: taken as running.
+    !ok || code == STILL_ACTIVE as u32
+}
+
+/// Wait until the process `pid` has ended (at once if it has, or cannot be asked about).
+pub fn wait_for_exit(pid: u32) {
+    if let Some(p) = Proc::open(pid, PROCESS_SYNCHRONIZE) {
+        // SAFETY: a valid handle with SYNCHRONIZE.
+        unsafe { WaitForSingleObject(p.0, INFINITE) };
+    }
 }
 
 /// End the process `pid` now.

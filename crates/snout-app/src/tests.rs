@@ -69,6 +69,17 @@ pub fn fake_program(dir: &Path, name: &str, sh: &str, cmd: &str) -> PathBuf {
     }
 }
 
+/// A Unix tool at `unix` (`/bin/sh`), or on Windows the one Git for Windows carries
+/// (`C:\\Program Files\\Git\\usr\\bin\\sh.exe`), as the tests use them.
+pub fn unix_tool(unix: &str) -> PathBuf {
+    if cfg!(windows) {
+        let name = Path::new(unix).file_name().unwrap().to_string_lossy().into_owned();
+        PathBuf::from(r"C:\Program Files\Git\usr\bin").join(format!("{name}.exe"))
+    } else {
+        PathBuf::from(unix)
+    }
+}
+
 /// A process that waits about 30 seconds and does nothing else, on every system.
 pub fn sleeper() -> std::process::Command {
     if cfg!(windows) {
@@ -974,7 +985,9 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     let repo = demo_repo(&format!("terminal-{}", engine.label().to_lowercase()));
     // The shell and a variable from the settings; text copied as soon as it is selected.
     let mut settings = Settings { terminal_engine: engine, ..with_repo(&repo) };
-    settings.terminal_shell = "/bin/sh".into();
+    // On Windows, Git for Windows's bash.
+    settings.terminal_shell =
+        if cfg!(windows) { r"C:\Program Files\Git\bin\bash.exe".into() } else { "/bin/sh".into() };
     settings.terminal_shell_args = Vec::new();
     settings.terminal_env.insert("SNOUT_TERM_VAR".into(), "from-the-settings".into());
     // The prompt the test waits for, as root too.

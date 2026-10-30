@@ -81,6 +81,7 @@ impl AppDirs {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn a_mac_keeps_them_in_library_and_linux_in_the_xdg_folders() {
         let home = Path::new("/home/ann");

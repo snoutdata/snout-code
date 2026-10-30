@@ -71,7 +71,7 @@ impl Workspace {
             .map(|e| {
                 let e = e.read(cx);
                 let root = self.model.read(cx).project_root();
-                root.and_then(|r| e.path.strip_prefix(&r).ok().map(|p| p.to_string_lossy().into_owned()))
+                root.and_then(|r| e.path.strip_prefix(&r).ok().map(snout_host::slash_path))
                     .unwrap_or_else(|| e.name().to_string())
             })
             .collect();

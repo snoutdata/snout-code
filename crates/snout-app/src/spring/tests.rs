@@ -10,9 +10,12 @@ use super::window::{BeanFilter, BeanRow, Column, EndpointFilter, Grouping, Profi
 use super::*;
 use crate::editor::{SpringItem, spring_items};
 
-/// The recorded answers, with the folder `root` in their URIs.
+/// The recorded answers, with the folder `root` in their URIs (`file://{ROOT}/…`; a Windows
+/// folder as `/C:/…`).
 pub fn fixture(root: &Path) -> Value {
-    let text = include_str!("../../tests/fixtures/spring-app.json").replace("{ROOT}", &root.to_string_lossy());
+    let root = root.to_string_lossy().replace('\\', "/");
+    let root = if root.starts_with('/') { root } else { format!("/{root}") };
+    let text = include_str!("../../tests/fixtures/spring-app.json").replace("{ROOT}", &root);
     serde_json::from_str(&text).unwrap()
 }
 

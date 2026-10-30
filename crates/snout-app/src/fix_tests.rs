@@ -294,7 +294,8 @@ fn ask_to_fix_types_the_file_lines_and_problem_into_the_agents_prompt(cx: &mut T
         &bin,
         "claude",
         "#!/bin/sh\necho ready\nsleep 30\n",
-        "@echo off\necho ready\nping -n 30 127.0.0.1 >nul\n",
+        // Windows's console shows what is typed only to a program reading it.
+        "@echo off\necho ready\nset /p line=\nping -n 30 127.0.0.1 >nul\n",
     );
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).expect("the console is docked");
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));

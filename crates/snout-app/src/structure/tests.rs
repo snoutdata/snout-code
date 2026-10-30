@@ -12,7 +12,8 @@ use crate::settings::Settings;
 use crate::tests::{demo_repo, scratch_dir, with_repo};
 
 fn fixture(root: &Path) -> Structure {
-    let text = include_str!("../../tests/fixtures/structure-model.json").replace("$ROOT", &root.to_string_lossy());
+    let text = include_str!("../../tests/fixtures/structure-model.json")
+        .replace("$ROOT", &root.to_string_lossy().replace('\\', "\\\\"));
     parse(&serde_json::from_str(&text).unwrap()).unwrap()
 }
 

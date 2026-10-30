@@ -898,7 +898,7 @@ mod tests {
 
     pub fn fixture(root: &Path) -> Value {
         let text = include_str!("../tests/fixtures/project-model.json");
-        serde_json::from_str(&text.replace("$ROOT", &root.to_string_lossy())).unwrap()
+        serde_json::from_str(&text.replace("$ROOT", &root.to_string_lossy().replace('\\', "\\\\"))).unwrap()
     }
 
     #[test]
