@@ -1,6 +1,7 @@
 //! The machine a SnoutCode workspace lives on, behind one interface: its files, a watch on
 //! them, the processes and terminals that run there, connections to its ports, and what it
-//! is (system, home, environment). [`LocalHost`] is this Mac; a remote host (a server on
+//! is (system, home, environment). [`LocalHost`] is the machine the app runs on (a Mac or a
+//! Linux PC, called "this Mac" below); a remote host (a server on
 //! another machine, spoken to over SSH: `snout_remote::RemoteHost`) implements the same
 //! [`Host`].
 //!
@@ -48,9 +49,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
+pub mod dirs;
 mod latency;
 mod local;
 mod signals;
+pub mod trash;
 
 pub use latency::LatencyHost;
 pub use local::LocalHost;

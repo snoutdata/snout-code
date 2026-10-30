@@ -1,4 +1,4 @@
-//! This Mac as a [`Host`]: `std::fs`, `std::process`, `notify`, `portable-pty` and `sysinfo`.
+//! This machine as a [`Host`]: `std::fs`, `std::process`, `notify`, `portable-pty` and `sysinfo`.
 
 use std::io::{self, Read, Seek as _, SeekFrom, Write};
 use std::net::{TcpStream, ToSocketAddrs as _};
@@ -11,12 +11,11 @@ use crate::{
     Stream, TextHit, WalkEntry, WalkOptions, WatchEvent, WatchKind, Watcher,
 };
 
-/// macOS's command that moves files to the Trash (macOS 15 and later).
-const TRASH: &str = "/usr/bin/trash";
-
-/// This Mac.
+/// This machine.
 pub struct LocalHost {
     info: HostInfo,
+    /// How files go to the Trash here, if they can (see [`crate::trash`]).
+    trash: Option<crate::trash::Method>,
     /// The process listing, kept for measuring CPU use between two listings.
     system: Mutex<(sysinfo::System, Option<Instant>)>,
 }
@@ -29,6 +28,8 @@ impl Default for LocalHost {
 
 impl LocalHost {
     pub fn new() -> Self {
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let trash = crate::trash::method(&|name| std::env::var(name).ok(), &home);
         let info = HostInfo {
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
@@ -39,9 +40,9 @@ impl LocalHost {
                 .collect(),
             exe: std::env::current_exe().ok(),
             pid: std::process::id(),
-            can_trash: Path::new(TRASH).exists(),
+            can_trash: trash.is_some(),
         };
-        Self { info, system: Mutex::new((sysinfo::System::new(), None)) }
+        Self { info, trash, system: Mutex::new((sysinfo::System::new(), None)) }
     }
 }
 
@@ -305,14 +306,9 @@ impl Host for LocalHost {
     }
 
     fn trash(&self, paths: &[PathBuf]) -> io::Result<()> {
-        if !self.info.can_trash {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, "this Mac has no trash command"));
-        }
-        let out = crate::default_signals(&mut std::process::Command::new(TRASH)).args(paths).output()?;
-        if out.status.success() {
-            Ok(())
-        } else {
-            Err(io::Error::other(String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+        match &self.trash {
+            Some(method) => crate::trash::trash(method, paths),
+            None => Err(io::Error::new(io::ErrorKind::Unsupported, "this machine has no Trash")),
         }
     }
 

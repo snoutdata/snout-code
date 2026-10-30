@@ -26,6 +26,8 @@ serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
 anyhow.workspace = true
+# GPUI's and wgpu's messages (which GPU, why a window could not draw), on stderr.
+log = "0.4"
 # Shared futures: one hover request answers every ask for the same word.
 futures = "0.3"
 gpui.workspace = true
