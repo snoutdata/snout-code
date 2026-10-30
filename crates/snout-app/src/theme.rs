@@ -502,6 +502,21 @@ pub fn system_changed(appearance: WindowAppearance, window: Option<&mut Window>,
 /// Kit's theme. A forced Light or Dark also sets the windows' own frames to match; System
 /// lets them follow the Mac again.
 pub fn apply(theme: ColorTheme, choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
+    force_appearance(choice, cx);
+    let dark = is_dark(choice, window.as_deref(), cx);
+    lay(theme, choice, dark, window, cx);
+}
+
+/// The palette alone, before the Kit is ready: what the splash paints with. [`apply`] lays
+/// the rest on once the Kit is there.
+pub fn preset(theme: ColorTheme, choice: ThemeChoice, cx: &mut App) {
+    force_appearance(choice, cx);
+    let dark = is_dark(choice, None, cx);
+    cx.set_global(Current { palette: Palette::new(theme, dark), theme, choice });
+}
+
+/// Light or dark as `choice` says, unless it said so already.
+fn force_appearance(choice: ThemeChoice, cx: &mut App) {
     let forced = match choice {
         ThemeChoice::System => None,
         ThemeChoice::Dark => Some(WindowAppearance::Dark),
@@ -510,8 +525,6 @@ pub fn apply(theme: ColorTheme, choice: ThemeChoice, window: Option<&mut Window>
     if cx.try_global::<Current>().map(|c| c.choice) != Some(choice) {
         cx.set_window_appearance(forced);
     }
-    let dark = is_dark(choice, window.as_deref(), cx);
-    lay(theme, choice, dark, window, cx);
 }
 
 fn lay(theme: ColorTheme, choice: ThemeChoice, dark: bool, window: Option<&mut Window>, cx: &mut App) {

@@ -6,6 +6,11 @@
 #   ./snout.sh --pick          choose an existing repository with a folder dialog
 #   ./snout.sh --fg [...]      stay in the foreground (logs go to the terminal)
 #
+# When nothing changed since the last build, the app starts at once, without asking cargo
+# (whose check can wait behind another build's lock). Otherwise "Building SnoutCode…" says
+# why it waits, and cargo's progress follows. SNOUT_STARTUP_TRACE=1 times the way to the
+# first window, here and in the app's log.
+#
 # The Java engine (engine/build/dist) is built when it is missing or older than its sources,
 # beside the app, which starts first and shows the build's progress; with JDK 21:
 # SNOUT_JDK21=<path>, else JAVA_HOME if it is 21, else one that /usr/libexec/java_home finds,
@@ -14,9 +19,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PKG="snout-app"
-BIN="$ROOT/target/release/snout-code"
+TARGET="${CARGO_TARGET_DIR:-$ROOT/target}"
+[[ "$TARGET" == /* ]] || TARGET="$PWD/$TARGET"
+BIN="$TARGET/release/snout-code"
 LOG="${TMPDIR:-/tmp}"; LOG="${LOG%/}/snout-code.log"
+
+trace=false
+[[ -n "${SNOUT_STARTUP_TRACE:-}" && "${SNOUT_STARTUP_TRACE}" != 0 ]] && trace=true
+now_ms() { perl -MTime::HiRes=time -e 'printf "%d", time() * 1000'; }
+$trace && started_ms="$(now_ms)"
+step() { $trace && echo "snout.sh $(( $(now_ms) - started_ms )) ms  $1" >&2; return 0; }
 
 usage() { sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -105,7 +117,7 @@ build_engine() {
 # status file (`stage …`, then `done` or `failed …`), which the app shows as a background task;
 # its Java servers start once the build is done.
 STATUS=""
-if [[ "$PKG" == "snout-app" ]] && engine_stale; then
+if engine_stale; then
   STATUS="${TMPDIR:-/tmp}"; STATUS="${STATUS%/}/snout-engine-build.$$.status"
   echo "stage Building snout-engine" >"$STATUS"
 fi
@@ -122,21 +134,71 @@ build_in_background() {
   } >>"$STATUS"
 }
 
+step "engine checked"
+
 # The Ghostty terminal engine needs Zig 0.15 (SNOUT_ZIG, zig on PATH, or Homebrew's zig@0.15);
 # without one the app builds with the built-in engine only. SNOUT_NO_GHOSTTY=1 skips it.
+# A zig found to be 0.15 is remembered (by its file) so later starts need not run it.
+ZIG_SEEN="$TARGET/.snout-zig"
+file_id() { stat -L -f '%i:%m:%z' "$1" 2>/dev/null; }
+is_zig015() {
+  local id
+  [[ -n "$1" && -x "$1" ]] || return 1
+  id="$(file_id "$1")"
+  grep -qxF "$1 $id" "$ZIG_SEEN" 2>/dev/null && return 0
+  [[ "$("$1" version 2>/dev/null)" == 0.15.* ]] || return 1
+  mkdir -p "$TARGET" && echo "$1 $id" >>"$ZIG_SEEN"
+}
 features=()
-if [[ "$PKG" == snout-app && "${SNOUT_NO_GHOSTTY:-}" != 1 ]]; then
-  for c in "${SNOUT_ZIG:-}" "$(command -v zig || true)" "$(brew --prefix zig@0.15 2>/dev/null || true)/bin/zig"; do
-    if [[ -n "$c" && -x "$c" && "$("$c" version 2>/dev/null)" == 0.15.* ]]; then
+if [[ "${SNOUT_NO_GHOSTTY:-}" != 1 ]]; then
+  # Homebrew's keg, where it would be (no `brew` run: it is slow to start).
+  for c in "${SNOUT_ZIG:-}" "$(command -v zig || true)" \
+           "${HOMEBREW_PREFIX:-/opt/homebrew}/opt/zig@0.15/bin/zig" /usr/local/opt/zig@0.15/bin/zig; do
+    if is_zig015 "$c"; then
       export PATH="$(dirname "$c"):$PATH"
       features=(--features ghostty)
       break
     fi
   done
 fi
+step "zig checked"
 
-# Incremental: a no-op when nothing changed.
-cargo build --release --quiet -p "$PKG" "${features[@]}" --manifest-path "$ROOT/Cargo.toml"
+# The build is skipped when the binary is the one the last build here made, with the same
+# features, and nothing it is built from (the crates, the manifests, the files they include
+# from assets/ and engine/) changed since that build began. Otherwise cargo builds; it puts
+# the new binary in place as a new file, never writing over the old one, so a SnoutCode
+# running from it carries on.
+STAMP="$TARGET/release/.snout-code.stamp"
+want="features:${features[*]:-none}"
+# The binary by its time and size (cargo copies it in again, as a new file, on each build).
+bin_id() { stat -f '%Fm:%z' "$BIN" 2>/dev/null; }
+built_from() {
+  local p
+  for p in "$ROOT/crates" "$ROOT/Cargo.toml" "$ROOT/Cargo.lock" "$ROOT/assets" "$ROOT/.cargo" \
+           "$ROOT/engine/gradlew" "$ROOT/engine/gradlew.bat" "$ROOT/engine/gradle/wrapper"; do
+    [[ -e "$p" ]] && echo "$p"
+  done
+}
+up_to_date() {
+  [[ -x "$BIN" && -f "$STAMP" ]] || return 1
+  [[ "$(cat "$STAMP")" == "$want $(bin_id)" ]] || return 1
+  local paths=()
+  while IFS= read -r p; do paths+=("$p"); done < <(built_from)
+  [[ -z "$(find "${paths[@]}" -newer "$STAMP" -print -quit 2>/dev/null)" ]]
+}
+if up_to_date; then
+  step "up to date, no build"
+else
+  echo "Building SnoutCode…"
+  mkdir -p "$TARGET/release"
+  mark="$STAMP.began"
+  touch "$mark"
+  cargo build --release -p snout-app "${features[@]+"${features[@]}"}" --manifest-path "$ROOT/Cargo.toml"
+  echo "$want $(bin_id)" >"$STAMP"
+  touch -r "$mark" "$STAMP"
+  rm -f "$mark"
+  step "built"
+fi
 
 args=()
 [[ -n "$repo" ]] && args+=("$repo")
@@ -145,6 +207,7 @@ if [[ -n "$STATUS" ]]; then
   build_in_background &
 fi
 
+step "starting the app"
 if $foreground; then
   exec "$BIN" "${args[@]+"${args[@]}"}"
 else

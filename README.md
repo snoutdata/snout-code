@@ -52,7 +52,7 @@ cd snout-code
 ./snout.sh --fg             # stay in the foreground, with logs in the terminal
 ```
 
-`snout.sh` builds the release binary (`target/release/snout-code`) and the Java engine when they are missing or older than their sources. In the background, logs go to `$TMPDIR/snout-code.log`.
+`snout.sh` builds the release binary (`target/release/snout-code`) and the Java engine when they are missing or older than their sources. When nothing changed it starts the app at once, without running cargo; when something did, it says "Building SnoutCode…" and shows cargo's progress before the app starts. In the background, logs go to `$TMPDIR/snout-code.log`. `SNOUT_STARTUP_TRACE=1 ./snout.sh` times the way to the first window (see [Troubleshooting](docs/troubleshooting.md#slow-start)).
 
 ### The Ghostty terminal engine
 

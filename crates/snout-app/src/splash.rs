@@ -41,6 +41,37 @@ impl Render for Splash {
     }
 }
 
+/// Run `then` once `splash` is on the screen (at once without one): the work that would hold
+/// up its first frame waits for it. A frame that never comes (a display asleep) holds
+/// nothing up for long.
+pub fn once_shown(
+    splash: Option<WindowHandle<Splash>>,
+    cx: &mut App,
+    then: impl FnOnce(Option<WindowHandle<Splash>>, &mut App) + 'static,
+) {
+    let then = std::rc::Rc::new(std::cell::Cell::new(Some(then)));
+    let run = move |cx: &mut App| {
+        if let Some(then) = then.take() {
+            then(splash, cx);
+        }
+    };
+    let Some(handle) = splash else {
+        run(cx);
+        return;
+    };
+    let shown = run.clone();
+    // A window's first frame is drawn as it opens and shown at the next frame; the frame
+    // after that comes once it is on the screen.
+    let _ = handle.update(cx, |_, window, _| {
+        window.on_next_frame(move |window, _| window.on_next_frame(move |_, cx| shown(cx)));
+    });
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
+        cx.update(run);
+    })
+    .detach();
+}
+
 /// Open the splash, centred on the screen.
 pub fn open(cx: &mut App) -> Option<WindowHandle<Splash>> {
     let bounds = Bounds::centered(None, size(px(SPLASH_W), px(SPLASH_H)), cx);

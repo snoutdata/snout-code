@@ -38,6 +38,7 @@ pub mod settings_json;
 pub mod settings_view;
 pub mod splash;
 pub mod spring;
+pub mod startup;
 pub mod status;
 pub mod structure;
 pub mod tabs;
@@ -93,17 +94,35 @@ const FONTS: [&[u8]; 5] = [
     epaint_default_fonts::HACK_REGULAR,
 ];
 
-/// Everything the app needs before its first window: the Kit, theme, keys, menus.
+/// Everything the app needs before its first window: the look, the Kit, keys, menus.
 pub fn init(settings: &Settings, cx: &mut App) {
-    gpui_component::init(cx);
+    init_look(settings, cx);
+    init_kit(settings, cx);
+    install_menus(settings, cx);
+}
+
+/// What the splash needs to paint: the typefaces and the palette (not the Kit).
+pub fn init_look(settings: &Settings, cx: &mut App) {
     if let Err(e) = cx.text_system().add_fonts(FONTS.map(std::borrow::Cow::Borrowed).to_vec()) {
         eprintln!("Could not load the fonts: {e}");
     }
     theme::set_fonts(settings, cx);
+    theme::preset(settings.colors, settings.theme, cx);
+}
+
+/// What the main window needs: the Kit and its theme, the keys, the languages, the actions.
+pub fn init_kit(settings: &Settings, cx: &mut App) {
+    gpui_component::init(cx);
+    startup::mark("kit ready");
     theme::apply(settings.colors, settings.theme, None, cx);
     keymap::init(&settings.keymap, cx);
     editor::register_languages();
     workspace::app_actions(cx);
+}
+
+/// The menu bar. The app puts it up once its window has painted (see [`after_first_paint`]):
+/// its first install is slow (AppKit loads the items' images).
+pub fn install_menus(settings: &Settings, cx: &mut App) {
     let bar = menus::bar(settings, &model::recent_projects(settings), &remote::recents(cx).projects);
     menu_icons::install(bar, cx);
 }
@@ -111,6 +130,17 @@ pub fn init(settings: &Settings, cx: &mut App) {
 /// The model over the settings in `store`, opening `open` (a path from the command line).
 pub fn model(store: Option<Store>, open: Option<std::path::PathBuf>, cx: &mut App) -> Entity<Model> {
     let settings = store.as_ref().map(Store::load).unwrap_or_default();
+    model_with(store, settings, open, cx)
+}
+
+/// The model over `settings` (read from `store`), opening `open`. The project's repository
+/// opens off the UI thread: nothing here waits for Git.
+fn model_with(
+    store: Option<Store>,
+    settings: Settings,
+    open: Option<std::path::PathBuf>,
+    cx: &mut App,
+) -> Entity<Model> {
     let model = cx.new(|cx| Model::new(settings, store, cx));
     if let Some(path) = open {
         model.update(cx, |m, cx| {
@@ -124,6 +154,7 @@ pub fn model(store: Option<Store>, open: Option<std::path::PathBuf>, cx: &mut Ap
 
 /// Start the app: one window on the saved repositories.
 pub fn run() {
+    startup::mark("main");
     // ssh runs this program to ask for a password or a passphrase (see `remote::askpass`).
     if std::env::var_os(snout_remote::ASKPASS_ENV).is_some() {
         remote::askpass::run();
@@ -136,13 +167,19 @@ pub fn run() {
     }
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut App| {
+        startup::mark("app running");
+        startup::watch_ui_thread(cx);
         // The workspace's host, made here: this thread is the UI thread.
         cx.set_global(host::HostGlobal(snout_host::from_env()));
         // Quitting hides the app and exits it (the tests keep their process).
         cx.set_global(workspace::quit::RealQuit);
         let store = Store::for_user();
         let settings = store.as_ref().map(Store::load).unwrap_or_default();
-        init(&settings, cx);
+        // The splash first, with no more than it needs to paint: everything else waits until
+        // it shows, so nothing holds up the first window.
+        init_look(&settings, cx);
+        let splash = splash::open(cx);
+        startup::mark("splash opened");
         quit_on_signals(cx);
         // One window is the app: closing it quits, so the engines stop with it rather than
         // run on behind an app with no window to show.
@@ -153,14 +190,11 @@ pub fn run() {
         if let Some(lock_dir) = claude_ide::lockfile::default_dir(&*host::host(cx)) {
             cx.set_global(claude_ide::IdeConfig { lock_dir });
         }
-        // The splash covers the moment until the window can paint; it goes on its first frame.
-        let splash = splash::open(cx);
-        cx.spawn(async move |cx| {
-            // Let the splash paint before the work of opening the project.
-            cx.background_executor().timer(std::time::Duration::from_millis(16)).await;
-            cx.update(|cx| open_main(store, open, splash, cx));
-        })
-        .detach();
+        splash::once_shown(splash, cx, move |splash, cx| {
+            startup::mark("splash shown");
+            init_kit(&settings, cx);
+            open_main(store, settings, open, splash, cx);
+        });
     });
 }
 
@@ -198,12 +232,14 @@ fn quit_on_signals(cx: &mut App) {
 /// once it has painted.
 fn open_main(
     store: Option<Store>,
+    settings: Settings,
     open: Option<std::path::PathBuf>,
     splash: Option<gpui::WindowHandle<splash::Splash>>,
     cx: &mut App,
 ) {
+    startup::mark("opening the main window");
     remote::init(store.clone(), cx);
-    let model = model(store, open, cx);
+    let model = model_with(store, settings, open, cx);
     if open_window(model, splash, cx).is_none() {
         cx.quit();
         return;
@@ -211,8 +247,8 @@ fn open_main(
     cx.activate(true);
 }
 
-/// A main window on `model`; `splash` closes once it has painted, and the background fetch
-/// starts then.
+/// A main window on `model`. What can wait waits until the window has painted (see
+/// [`after_first_paint`]); `splash` closes then.
 pub fn open_window(
     model: Entity<Model>,
     splash: Option<gpui::WindowHandle<splash::Splash>>,
@@ -238,19 +274,21 @@ pub fn open_window(
             ..gpui_component::TitleBar::window_options()
         },
         |window, cx| {
-            let started = model.clone();
-            window.on_next_frame(move |_, cx| {
-                if let Some(splash) = splash {
-                    let _ = splash.update(cx, |_, window, _| window.remove_window());
-                }
-                // SNOUT_NO_FETCH=1 keeps the app from fetching on its own (a read only look
-                // at a repository).
-                if std::env::var_os("SNOUT_NO_FETCH").is_none() {
-                    let every = std::time::Duration::from_secs(started.read(cx).settings.fetch_minutes.max(1) * 60);
-                    started.update(cx, |m, cx| m.start_background_fetch(every, cx));
-                }
-            });
+            startup::mark("main window opened");
             let view = cx.new(|cx| workspace::Workspace::new(model, window, cx));
+            view.update(cx, |ws, _| ws.hold_menus());
+            // A window's first frame is drawn as it opens and shown at the next frame; what
+            // runs at the frame after that runs once it is on the screen.
+            let painted = view.clone();
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |_, cx| {
+                    startup::mark("main window painted");
+                    if let Some(splash) = splash {
+                        let _ = splash.update(cx, |_, window, _| window.remove_window());
+                    }
+                    after_first_paint(&painted, cx);
+                })
+            });
             cx.new(|cx| gpui_component::Root::new(view, window, cx))
         },
     );
@@ -260,5 +298,20 @@ pub fn open_window(
             eprintln!("Could not open the window: {e}");
             None
         }
+    }
+}
+
+/// The work a main window leaves until it has painted: the menu bar, and the background
+/// fetch. (The language servers, and with them the engine and the build tools' sync, start
+/// from the window's first frame; the repository opens off the UI thread from the start.)
+pub fn after_first_paint(ws: &Entity<workspace::Workspace>, cx: &mut App) {
+    ws.update(cx, |ws, cx| ws.release_menus(cx));
+    startup::mark("menus installed");
+    // SNOUT_NO_FETCH=1 keeps the app from fetching on its own (a read only look at a
+    // repository).
+    if std::env::var_os("SNOUT_NO_FETCH").is_none() {
+        let model = ws.read(cx).model.clone();
+        let every = std::time::Duration::from_secs(model.read(cx).settings.fetch_minutes.max(1) * 60);
+        model.update(cx, |m, cx| m.start_background_fetch(every, cx));
     }
 }

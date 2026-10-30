@@ -86,6 +86,45 @@ pub fn act(model: &Entity<Model>, cx: &mut VisualTestContext, action: Action) {
     cx.run_until_parked();
 }
 
+/// The app's way to its first window waits for nothing slow: the project's repository opens
+/// off the UI thread, and the menu bar and the background fetch wait until the window has
+/// painted (`after_first_paint`, which the app runs at the frame after the first).
+#[gpui::test]
+fn the_first_window_opens_before_the_slow_work(cx: &mut TestAppContext) {
+    let dir = scratch_dir("startup");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join("README.md"), "# startup\n").unwrap();
+    let settings = with_repo(&dir);
+    let window = cx.update(|cx| {
+        crate::init_look(&settings, cx);
+        crate::init_kit(&settings, cx);
+        let model = cx.new(|cx| Model::new(settings.clone(), None, cx));
+        let window = crate::open_window(model.clone(), None, cx).expect("a window");
+        // The window is open and has drawn its first frame; nothing slow has run yet.
+        let m = model.read(cx);
+        assert_eq!(m.project.as_deref(), Some(dir.as_path()), "the project is known at once");
+        assert!(m.repo.is_none(), "its repository opens off the UI thread");
+        assert!(m.fetch_every.is_none(), "the background fetch waits for the first paint");
+        assert!(cx.get_menus().unwrap_or_default().is_empty(), "the menu bar waits for the first paint");
+        window
+    });
+    cx.run_until_parked();
+    let ws = cx.update(|cx| {
+        let root = window.downcast::<gpui_component::Root>().expect("the app's root");
+        root.read(cx).expect("the window").view().clone().downcast::<Workspace>().expect("the workspace")
+    });
+    cx.update(|cx| {
+        let model = ws.read(cx).model.clone();
+        assert!(model.read(cx).repo.is_some(), "the repository has opened");
+        assert!(cx.get_menus().unwrap_or_default().is_empty(), "no frame yet, so no menu bar");
+        crate::after_first_paint(&ws, cx);
+        assert!(!cx.get_menus().unwrap_or_default().is_empty(), "the menu bar is up once painted");
+        if std::env::var_os("SNOUT_NO_FETCH").is_none() {
+            assert!(model.read(cx).fetch_every.is_some(), "the background fetch starts once painted");
+        }
+    });
+}
+
 #[gpui::test]
 fn the_window_opens_on_the_welcome_page_without_a_repository(cx: &mut TestAppContext) {
     let (model, ws, cx) = open(cx, Settings::default());

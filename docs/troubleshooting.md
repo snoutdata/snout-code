@@ -102,6 +102,29 @@ When a build script changes, the bar says "Gradle files changed. Sync?". Click *
 
 The Notifications tool window, on the right stripe, lists the errors from Git and the tools.
 
+## Slow start
+
+The splash should show within a fraction of a second, and the window right after it; the
+project, the engine and the build tools' sync follow in the status bar. To see where a slow
+start spends its time, start SnoutCode with `SNOUT_STARTUP_TRACE=1`:
+
+```sh
+SNOUT_STARTUP_TRACE=1 ./snout.sh --fg
+SNOUT_STARTUP_TRACE=1 /Applications/SnoutCode.app/Contents/MacOS/snout-code
+```
+
+Each step prints how long after the start it was reached: `snout.sh` lines for the script
+(checking the engine and Zig, building, starting the app), then `startup` lines from the
+app, counted from the moment the process started: the splash opened and shown, the main
+window opened and painted, the menus. A line saying the UI thread was busy marks work that
+held up the window.
+
+- The first start of a new build takes longer, around half a second more: macOS checks a
+  program it has not run before.
+- When `snout.sh` says "Building SnoutCode…", the sources changed since the last build (or
+  another build changed the binary), and cargo builds before the app starts. If cargo says it
+  is waiting for a lock, another build in the same folder runs; it goes on when that is done.
+
 ## Logs
 
 SnoutCode writes its log to standard error. To read it:
@@ -140,7 +163,7 @@ The Java engine keeps its files under `~/Library/Caches/SnoutCode`, one folder p
 
 Settings ▸ Tools ▸ Terminal shows **Ghostty is unavailable**, with its card dimmed, in a build
 of SnoutCode made without the Ghostty terminal engine. Release builds (the `.dmg`) include it;
-a development build (`./snout.sh`, `cargo build`) does not, unless it is built with the
+`./snout.sh` includes it when it finds Zig 0.15, and a plain `cargo build` only with the
 `ghostty` feature. Terminals then run on the built-in engine, also when `settings.json` says
 `"terminal_engine": "Ghostty"`.
 

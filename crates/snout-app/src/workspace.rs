@@ -70,6 +70,8 @@ pub struct Workspace {
     pub git: Entity<GitView>,
     pub tabs: Tabs,
     menu_checks: Option<menus::MenuState>,
+    /// The menu bar waits until the window has painted (see [`Workspace::hold_menus`]).
+    menus_held: bool,
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
     focus: gpui::FocusHandle,
     title: String,
@@ -464,6 +466,7 @@ impl Workspace {
             git,
             tabs,
             menu_checks: None,
+            menus_held: false,
             focus: cx.focus_handle(),
             title: String::new(),
             search: None,
@@ -1818,6 +1821,14 @@ impl Workspace {
             window.set_window_title(&title);
             self.title = title;
         }
+        if !self.menus_held {
+            self.sync_menus(cx);
+        }
+    }
+
+    /// The menu bar, made again when what it shows (checks, recent projects) changed.
+    fn sync_menus(&mut self, cx: &mut Context<Self>) {
+        let m = self.model.read(cx);
         let recent = m.recent_projects();
         let remote = crate::remote::recents(cx).projects;
         let checks = menus::checks(&m.settings, &recent, &remote);
@@ -1825,6 +1836,18 @@ impl Workspace {
             crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote), cx);
             self.menu_checks = Some(checks);
         }
+    }
+
+    /// Leave the menu bar as it is until [`Workspace::release_menus`]: the app puts it up
+    /// once its window has painted, since its first install is slow.
+    pub fn hold_menus(&mut self) {
+        self.menus_held = true;
+    }
+
+    /// Put the menu bar up, and keep it in step from now on.
+    pub fn release_menus(&mut self, cx: &mut Context<Self>) {
+        self.menus_held = false;
+        self.sync_menus(cx);
     }
 }
 
@@ -1834,6 +1857,7 @@ impl Render for Workspace {
         // The first frame is drawn: the heavy work may start.
         if self.hub.read(cx).paused {
             cx.defer_in(window, |this, _, cx| {
+                crate::startup::mark("language servers start");
                 this.hub.update(cx, |h, cx| h.resume(cx));
                 this.ensure_project_server(cx);
             });

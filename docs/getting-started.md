@@ -43,13 +43,20 @@ sources changed, and starts the app:
 ./snout.sh --fg                # stay in the foreground, with the log in the terminal
 ```
 
+When nothing changed since the last build, the app starts at once. When something did,
+`snout.sh` prints "Building SnoutCode…" and cargo's progress, and starts the app once the build
+is done: it never starts an older build than the sources. A SnoutCode already running carries on
+while the new one builds.
+
 When no JDK 21 is installed, `snout.sh` downloads one to build the engine with. The app starts
 first and shows the engine build as a background task in the status bar.
 
 ## First launch
 
-A small splash shows while the window gets ready. The first time, no project is open, and the
-Welcome page shows:
+A small splash shows at once, and the window follows it a moment later. What takes longer
+comes after the window, with its progress in the status bar: opening the project's
+repository, the Java engine, reading the Gradle or Maven build, indexing. The first time, no
+project is open, and the Welcome page shows:
 
 - **Open Project…** opens a folder on this Mac.
 - **Clone Repository…** copies a repository from a Git URL and opens it.
