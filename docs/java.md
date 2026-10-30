@@ -38,7 +38,9 @@ To turn them off or on, choose View ▸ Parameter Name Hints, run **Toggle Param
 
 ## Hover
 
-Rest the pointer on a name to see its type and documentation. On a squiggle, you see the problem's message.
+Rest the pointer on a name to see its type and documentation. On a squiggle, the card shows the problem first, with its fix (see [Quick fixes](#quick-fixes)), then what the name is.
+
+By default the card shows once the pointer rests for half a second. Hold ⌘ to see it at once, along with the link to the declaration. Settings ▸ Editor ▸ **Show hover** can keep it for ⌘ only, and set the delay (see [Settings and keymap](settings-and-keymap.md#editor)).
 
 ![Hover on a method call](images/java-hover.png)
 
@@ -131,11 +133,31 @@ When the refactoring is not possible with what is selected, nothing changes, and
 
 ## Quick fixes
 
-Press ⌘. (Code ▸ Quick Fix…) to list the fixes and actions the engine offers at the caret, such as adding a missing import. Choose one to apply it. Quick Fix… is also in the editor's right click menu.
+Rest the pointer on a squiggle, or on the problem's dot in the gutter. The card shows the problem with its severity icon and message, and the engine's best fix as a button, such as **Import 'LocalDate' (java.time)**. Click it, or press ⌥⇧↩ with the caret on the problem, to apply it. While the engine looks, the card says `Looking for fixes…`. When the engine has no fix, the button is **Ask Claude to fix** instead (see [Ask the agent to fix a problem](agents.md#ask-the-agent-to-fix-a-problem)).
 
-![Quick fixes for a class that is not imported](images/java-quick-fix.png)
+![The card of an error: the problem, its fix and More actions](images/java-problem-hover.png)
 
-*The fixes for `LocalDate`, which the file does not import: first, the import.*
+*The pointer on `LocalDate`, which the file does not import: the import is the best fix.*
+
+**More actions…** (⌥↩) lists everything that can be done there. The list is also what you get with:
+
+- ⌥↩ (Code ▸ Show Context Actions…), as in IntelliJ, and ⌘.;
+- the bulb in the gutter: when the line the caret is on has fixes, its dot becomes a bulb (red for an error). Click it;
+- Show Context Actions… in the editor's right click menu.
+
+The list has, in order:
+
+1. the engine's best fix for the problem, with ⌥⇧↩ beside it;
+2. **Fix all ‘…’ in file**, when the file has more problems of the same kind and the same fix applies to each, such as the import of a class used on several lines, or removing every unused import. The fixes are made at once;
+3. **Ask Claude to fix** (or the agent the console runs);
+4. the engine's other fixes, such as creating the class, or another name it could be;
+5. the other actions the engine offers there, such as refactorings and generating code.
+
+Use ↑ and ↓ to move, ↩ to apply and Esc to close.
+
+![The context actions on an error, and the bulb in the gutter](images/java-quick-fix.png)
+
+*⌥↩ on `LocalDate`, used on two lines: the import, Fix all for both, Ask Claude to fix, then the engine's other fixes. The bulb marks the caret's line.*
 
 ## Organize imports
 
@@ -157,11 +179,20 @@ The engine checks the files as you type.
 
 ### The Problems window
 
-Press ⇧⌘M (Code ▸ Show Problems) to open the **Problems** window in the bottom dock. It lists every error and warning in the project, errors first, then by file and line. Its header counts them, such as `2 errors, 5 warnings`. Click a row to go there.
+Press ⇧⌘M (Code ▸ Show Problems) to open the **Problems** window in the bottom dock. It lists every problem in the project, grouped by file. Files with errors come first; within a file, errors come first, then by line.
+
+- Each file's row shows its counts of errors, warnings and information. Click it to collapse or expand it. The button at the right collapses or expands every file.
+- The toggles at the top show or hide errors, warnings and information, each with its count.
+- The filter box narrows the list to the problems whose message, file or source contains what you type.
+- Double-click a problem, or select it and press ↩, to go there.
+- Right-click a problem, or select it and press ⌥↩, for its fixes, **Fix all ‘…’ in file** and **Ask Claude to fix**, as in the editor.
+- ↑ and ↓ move through the list; ← and → collapse and expand a file.
+
+The list stays quick with hundreds of warnings: only the rows in view are drawn.
 
 ![The Problems window](images/java-problems.png)
 
-*Two errors in the Problems window, underlined in the code, and counted at the top right of the editor.*
+*The errors of a class not imported, grouped under their file, counted by the toggles and at the top right of the editor.*
 
 The Problems window also lists what the last Gradle compile reported, when you build, run or test. A compile with errors brings the Problems window forward. See [Run and debug](run-and-debug.md).
 

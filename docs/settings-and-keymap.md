@@ -55,6 +55,8 @@ A project can set these, by their names in the file:
 | Editor ▸ Soft wrap long lines | `soft_wrap` | `true` or `false` |
 | Editor ▸ Show whitespace | `show_whitespace` | `true` or `false` |
 | Editor ▸ Show parameter names of literal arguments | `param_hints` | `true` or `false` |
+| Editor ▸ Show hover | `show_hover` | `"after_delay"` or `"while_command_held"` |
+| Editor ▸ Hover delay | `hover_delay_ms` | 0 to 3000 |
 | Version Control ▸ Fetch every | `fetch_minutes` | 5 to 120 |
 | Gradle ▸ JDK, every build | `jdk` | the JDK's home folder |
 | Gradle ▸ Stop idle daemons after | `daemon_idle_minutes` | 1 to 240 |
@@ -146,6 +148,19 @@ and warnings differ in lightness as well as colour.
 - **Show whitespace**: editors show spaces and tabs.
 - **Show parameter names of literal arguments (Java)**: on by default. See
   [Java](java.md#parameter-name-hints). View ▸ Parameter Name Hints switches it too.
+
+**Hover**
+
+- **Show hover**: **After a delay** (the default) shows the hover card once the pointer rests
+  on a name or a problem; **Only while ⌘ is held** shows it only with ⌘. Holding ⌘ always shows
+  it at once, with the link to the declaration. See [Editor](editor.md#hover).
+- **Delay**: how long the pointer rests first, in milliseconds, from 0 to 3000. The default is
+  500.
+
+Both can be set for a project too (`show_hover`, `hover_delay_ms`; see
+[Your settings and the project's](#your-settings-and-the-projects)).
+
+![Settings ▸ Editor](images/settings-and-keymap-editor.png)
 
 **Preview** shows a few lines of Java as the editor shows them with the settings on the page:
 the indentation at the tab size, dots for the spaces when whitespace shows, the parameter name

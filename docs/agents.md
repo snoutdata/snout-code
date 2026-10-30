@@ -80,6 +80,21 @@ The lines sent light up in the agent's colour for a moment, and a note by the co
 
 You do not need to send the selection for Claude Code to see it: while connected, it hears your selection as it changes.
 
+## Ask the agent to fix a problem
+
+For any problem in the code, **Ask Claude to fix** is in the context actions (⌥↩ on the problem, or the bulb in the gutter), and in the Problems window's (right-click a problem). When the engine has no fix for a problem, it is also the button of the problem's hover card. With another agent in the console, it says that agent's name, such as **Ask Codex to fix**.
+
+SnoutCode puts the file, the problem's lines and what is wrong in the agent's prompt, and brings the console forward:
+
+```
+@src/main/java/com/example/shop/service/OrderService.java#L27 Fix this error: LocalDate cannot be resolved to a type
+```
+
+- Claude Code, connected: the file and lines arrive as a mention, and the words are typed after it.
+- Any other agent (Codex, a command of your own, or Claude Code not connected): SnoutCode types all of it into the console.
+
+Nothing is sent until you press ↩, so you can add to it first. The lines light up in the agent's colour for a moment, and a note by the console says what went: **Asked Claude to fix OrderService.java line 27**.
+
 ## Watch the agent write
 
 With **Follow** on (the default), the editor follows the files the agent changes:

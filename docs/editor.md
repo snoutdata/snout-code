@@ -62,9 +62,22 @@ The indentation of a file is read from its own text. A file that shows none gets
 
 Each of these is one step that Undo takes back.
 
-Right click in the editor for a menu with Cut, Copy, Paste, Select All and Send Selection to Claude. In a Java file it also has Go to Definition, Quick Fix… and a **Refactor** submenu (Rename Symbol…, Extract Method, Extract Variable, Extract Constant, Extract Field and Inline), and Run and Debug for what the caret is in. Each item shows its icon and, on the right, its shortcut. The arrow keys move through the menu (→ opens a submenu), ↩ picks an item and Esc closes it.
+Right click in the editor for a menu with Cut, Copy, Paste, Select All and Send Selection to Claude. In a Java file it also has Go to Definition, Show Context Actions… and a **Refactor** submenu (Rename Symbol…, Extract Method, Extract Variable, Extract Constant, Extract Field and Inline), and Run and Debug for what the caret is in. Each item shows its icon and, on the right, its shortcut. The arrow keys move through the menu (→ opens a submenu), ↩ picks an item and Esc closes it.
 
 ![The editor's right-click menu](images/editor-context-menu.png)
+
+## Hover
+
+Rest the pointer on a name or a problem for its card: the problem with its fix first, then what the name is (see [Java](java.md#hover) and [Quick fixes](java.md#quick-fixes)). In a settings file, the card describes the setting.
+
+Settings ▸ Editor ▸ Hover says when the card shows:
+
+- **After a delay** (the default): once the pointer rests on the name for the delay, 500 ms unless you change it.
+- **Only while ⌘ is held**: resting shows nothing.
+
+Either way, holding ⌘ shows the card at once, with the name underlined as a link to its declaration (⌘-click goes there). The card stays while the pointer moves onto it, so you can click its buttons. It goes when you type, scroll or move away. ⌥↩ shows the actions at the caret whatever the setting.
+
+![Settings ▸ Editor, with the hover's settings](images/settings-and-keymap-editor.png)
 
 ## Find and replace in a file
 

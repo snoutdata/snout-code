@@ -79,7 +79,8 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌥⌘C | Extract Constant | Editor |
 | ⌥⇧⌘F | Extract Field (⌥⌘F is Replace in File) | Editor |
 | ⌥⌘N | Inline | Editor |
-| ⌘. | Quick Fix… | Editor |
+| ⌥↩, ⌘. | Show Context Actions… (fixes, Fix all in file, Ask Claude to fix) | Editor, Problems window |
+| ⌥⇧↩ | Apply Top Fix (the best fix of the problem at the caret) | Editor |
 | ⌥⇧F | Format Document | Editor |
 | ⌥⌘L | Format Selection (the whole file when nothing is selected) | Editor |
 | ⌥⇧O | Organize Imports | Editor |

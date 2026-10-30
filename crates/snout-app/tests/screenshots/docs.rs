@@ -253,7 +253,7 @@ impl Win {
                     cx,
                 );
             });
-            if self.pump(1, &mut |cx| e3.read(cx).state.read(cx).hover_popover().is_some()) {
+            if self.pump(1, &mut |cx| e3.read(cx).hover.card.as_ref().is_some_and(|c| c.ready())) {
                 return;
             }
         }
@@ -1073,20 +1073,56 @@ fn shop(projects: &Path) {
     w.caret(&e, "package", 0);
     w.pump(1, &mut |_| false);
 
-    // An error and its quick fix: a type not imported.
+    // Errors and their quick fix: a type not imported, used on two lines.
     w.caret(&e, "        int items = 0;\n", 0);
-    w.insert(&e, "        LocalDate placed = LocalDate.now();\n");
+    w.insert(&e, "        LocalDate placed = LocalDate.now();\n        LocalDate due = placed.plusDays(3);\n");
     let e2 = e.clone();
-    let ok = w.pump(120, &mut |cx| !e2.read(cx).problems.is_empty());
-    println!("docs: problems {ok}");
+    let ok = w.pump(120, &mut |cx| e2.read(cx).problems.len() >= 3);
+    println!(
+        "docs: problems {ok} {:?}",
+        w.cx.update(|cx| e.read(cx).problems.iter().map(|d| d.message.clone()).collect::<Vec<_>>())
+    );
     w.with(|ws, window, cx| ws.update(cx, |ws, cx| ws.show_problems(window, cx)));
     w.pump(2, &mut |_| false);
     w.snap("java-problems-light");
-    w.caret(&e, "LocalDate placed", 2);
-    w.key("cmd-.");
+    // The pointer resting on the error: the card with its best fix.
+    w.hover(&e, "LocalDate placed", 3);
     let e2 = e.clone();
-    let ok = w.pump(60, &mut |cx| !e2.read(cx).state.read(cx).code_action_menu_state().items.is_empty());
-    println!("docs: quick fixes {ok}");
+    let ok = w.pump(60, &mut |cx| {
+        e2.read(cx).hover.card.as_ref().is_some_and(|c| matches!(c.fixes, snout_app::editor::Fixes::Found(_)))
+    });
+    println!("docs: problem hover {ok}");
+    w.pump(1, &mut |_| false);
+    w.snap("java-problem-hover-light");
+    let e2 = e.clone();
+    w.with(|_, _, cx| e2.update(cx, |e, cx| e.hide_card(cx)));
+    w.with(|_, window, cx| {
+        window.dispatch_event(
+            gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                position: gpui::point(px(W - 20.), px(H - 10.)),
+                pressed_button: None,
+                modifiers: gpui::Modifiers::none(),
+            }),
+            cx,
+        );
+    });
+    // The caret on it: the bulb, and ⌥↩ lists the context actions.
+    w.caret(&e, "LocalDate placed", 2);
+    let e2 = e.clone();
+    let ok = w.pump(30, &mut |cx| e2.read(cx).hover.bulb.is_some());
+    println!("docs: bulb {ok}");
+    w.key("alt-enter");
+    let e2 = e.clone();
+    let ok = w.pump(60, &mut |cx| e2.read(cx).hover.actions.as_ref().is_some_and(|l| !l.loading));
+    let labels: Vec<String> = w.cx.update(|cx| {
+        e.read(cx)
+            .hover
+            .actions
+            .as_ref()
+            .map(|l| l.entries.iter().map(|x| x.label("Claude")).collect())
+            .unwrap_or_default()
+    });
+    println!("docs: quick fixes {ok} {labels:?}");
     w.pump(1, &mut |_| false);
     w.snap("java-quick-fix-light");
     w.key("escape");
