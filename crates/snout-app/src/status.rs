@@ -174,8 +174,8 @@ impl StatusBar {
         )
     }
 
-    /// What the Java server of the editor in front (or of the project) is doing, and
-    /// whether it is busy.
+    /// What the language server of the editor in front (or of the project) is doing, and
+    /// whether it is busy: the Java engine's, or a TypeScript server's.
     pub fn java_status(&self, cx: &gpui::App) -> Option<(String, bool)> {
         let hub = self.hub.as_ref()?.read(cx);
         let path = self.editor().map(|e| {
@@ -183,7 +183,13 @@ impl StatusBar {
             e.class_file.as_ref().map(|(_, root)| root.clone()).unwrap_or_else(|| e.path.clone())
         });
         let path = path.or_else(|| self.model.read(cx).project_root());
-        hub.server_for(path.as_deref()).map(|s| (s.status(), s.busy()))
+        let ts = || hub.ts_server_for(path.as_deref()).map(|s| (s.status(), s.busy()));
+        // A TypeScript file in front speaks of its TypeScript server; anything else of the
+        // Java engine, else (a Playwright project) of the TypeScript server.
+        if path.as_deref().and_then(crate::lang::typescript::language_id).is_some() {
+            return ts().or_else(|| hub.server_for(path.as_deref()).map(|s| (s.status(), s.busy())));
+        }
+        hub.server_for(path.as_deref()).map(|s| (s.status(), s.busy())).or_else(ts)
     }
 
     /// Follow `editor` (the tab in front), or no editor.

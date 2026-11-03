@@ -32,7 +32,8 @@ impl EditorPanel {
         if self.attach_settings_lang(cx) || self.attach_pom_lang(cx) {
             return;
         }
-        let served = language_for(&self.path) == "java" || crate::spring::is_config_file(&self.path);
+        let ts = crate::lang::typescript::language_id(&self.path).is_some();
+        let served = ts || language_for(&self.path) == "java" || crate::spring::is_config_file(&self.path);
         if self.class_file.is_some() || !served {
             return;
         }
@@ -40,7 +41,13 @@ impl EditorPanel {
         let weak = cx.weak_entity();
         let rope = self.state.read(cx).text().clone();
         let (path, build) = (self.path.clone(), self.build_root.clone());
-        let Some((uri, root, diags)) = hub.update(cx, |h, cx| h.open_doc(&weak, &path, build, rope, cx)) else {
+        let opened = if ts {
+            let Some(root) = build else { return };
+            hub.update(cx, |h, cx| h.open_ts_doc(&weak, &path, &root, rope, cx))
+        } else {
+            hub.update(cx, |h, cx| h.open_doc(&weak, &path, build, rope, cx))
+        };
+        let Some((uri, root, diags)) = opened else {
             return;
         };
         let link = Rc::new(DocLink {

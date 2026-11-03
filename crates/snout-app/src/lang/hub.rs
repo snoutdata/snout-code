@@ -236,17 +236,20 @@ impl Server {
 }
 
 /// A document the servers know: a file open in one or more editor tabs.
-struct Doc {
-    root: PathBuf,
-    uri: Uri,
+pub(super) struct Doc {
+    pub(super) root: PathBuf,
+    pub(super) uri: Uri,
     /// The text the server has, as last sent.
-    text: Rope,
-    version: i32,
-    editors: Vec<WeakEntity<EditorPanel>>,
+    pub(super) text: Rope,
+    pub(super) version: i32,
+    pub(super) editors: Vec<WeakEntity<EditorPanel>>,
     /// A class file (`jdt://`): read only, never opened on the server.
-    virtual_doc: bool,
-    /// The language the server is told it is: `java`, or a Spring Boot configuration file's.
-    language: &'static str,
+    pub(super) virtual_doc: bool,
+    /// The language the server is told it is: `java`, a Spring Boot configuration file's,
+    /// or `typescript`, `typescriptreact`, `javascript`.
+    pub(super) language: &'static str,
+    /// Served by a TypeScript server (of [`LangHub::ts`]) rather than a Java engine.
+    pub(super) ts: bool,
 }
 
 /// The bar asking to download a JDK, and how the download goes.
@@ -281,7 +284,11 @@ pub struct LangHub {
     /// Servers start only when this is set (the app sets it; most tests do not).
     pub enabled: bool,
     pub servers: HashMap<PathBuf, Server>,
-    docs: HashMap<String, Doc>,
+    /// The TypeScript servers, one per TypeScript or Playwright project, by its folder.
+    pub ts: HashMap<PathBuf, super::typescript::TsServer>,
+    /// Where vtsls is installed, when not SnoutCode's data folder (tests).
+    pub ts_install_dir: Option<PathBuf>,
+    pub(super) docs: HashMap<String, Doc>,
     pub jdk_prompt: Option<JdkPrompt>,
     /// The JDKs the user said no to, this session.
     dismissed_jdks: Vec<u32>,
@@ -327,7 +334,7 @@ fn next_generation() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-fn uri_key(uri: &Uri) -> String {
+pub(super) fn uri_key(uri: &Uri) -> String {
     uri.as_str().to_owned()
 }
 
@@ -352,6 +359,8 @@ impl LangHub {
             model,
             enabled,
             servers: HashMap::new(),
+            ts: HashMap::new(),
+            ts_install_dir: None,
             docs: HashMap::new(),
             jdk_prompt: None,
             dismissed_jdks: Vec::new(),
@@ -468,6 +477,15 @@ impl LangHub {
     /// jdtls and Gradle daemons, and forget what they said.
     fn keep_project_servers(&mut self, cx: &mut Context<Self>) {
         let keep = |root: &Path, project: &Option<PathBuf>| project.as_deref().is_some_and(|p| root.starts_with(p));
+        let gone_ts: Vec<PathBuf> = self.ts.keys().filter(|r| !keep(r, &self.project)).cloned().collect();
+        for root in &gone_ts {
+            self.stop_ts_server(root);
+        }
+        if !gone_ts.is_empty() {
+            self.docs.retain(|_, d| !(d.ts && gone_ts.contains(&d.root)));
+            cx.emit(HubEvent::Changed);
+            cx.notify();
+        }
         let gone: Vec<PathBuf> = self.servers.keys().filter(|r| !keep(r, &self.project)).cloned().collect();
         let project = self.project.clone();
         self.pending.retain(|r| keep(r, &project));
@@ -480,7 +498,7 @@ impl LangHub {
         for root in &gone {
             self.stop_server(root);
         }
-        self.docs.retain(|_, d| !gone.contains(&d.root));
+        self.docs.retain(|_, d| d.ts || !gone.contains(&d.root));
         self.build_problems.clear();
         cx.emit(HubEvent::Changed);
         cx.notify();
@@ -994,7 +1012,8 @@ impl LangHub {
 
     /// The workspace applied (or could not apply) an edit the server asked for.
     pub fn reply_apply(&self, root: &Path, id: Value, applied: bool) {
-        if let Some(client) = self.servers.get(root).and_then(|s| s.client.clone()) {
+        let client = self.servers.get(root).and_then(|s| s.client.clone()).or_else(|| self.ts_client(root));
+        if let Some(client) = client {
             client.respond(id, Ok(json!({ "applied": applied })));
         }
     }
@@ -1046,7 +1065,8 @@ impl LangHub {
 
     /// The process ids of the running engines.
     pub fn server_pids(&self) -> Vec<u32> {
-        self.servers.values().filter_map(|s| s.client.as_ref().map(Client::pid)).collect()
+        let ts = self.ts.values().filter_map(|s| s.client.as_ref().map(Client::pid));
+        self.servers.values().filter_map(|s| s.client.as_ref().map(Client::pid)).chain(ts).collect()
     }
 
     /// Stop every server: `shutdown` and `exit`, then a moment for them to go, then
@@ -1055,7 +1075,11 @@ impl LangHub {
         for s in self.servers.values_mut() {
             s.stopped = true;
         }
-        let clients: Vec<Client> = self.servers.values_mut().filter_map(|s| s.client.take()).collect();
+        for s in self.ts.values_mut() {
+            s.stopped = true;
+        }
+        let ts: Vec<Client> = self.ts.values_mut().filter_map(|s| s.client.take()).collect();
+        let clients: Vec<Client> = self.servers.values_mut().filter_map(|s| s.client.take()).chain(ts).collect();
         for c in &clients {
             drop(c.request_raw("shutdown", Value::Null));
         }
@@ -1114,6 +1138,7 @@ impl LangHub {
                 editors: vec![editor.clone()],
                 virtual_doc: false,
                 language,
+                ts: false,
             },
         );
         Some((uri, root, Vec::new()))
@@ -1129,6 +1154,7 @@ impl LangHub {
             editors: Vec::new(),
             virtual_doc: true,
             language: "java",
+            ts: false,
         });
         if let Some(doc) = self.docs.get_mut(&uri_key(uri)) {
             doc.editors.push(editor.clone());
@@ -1146,7 +1172,11 @@ impl LangHub {
         let lsp_range = text::range_to_lsp(&doc.text, &range);
         doc.text = now.clone();
         doc.version += 1;
-        let client = self.servers.get(&doc.root).filter(|s| s.ready()).and_then(|s| s.client.clone());
+        let client = if doc.ts {
+            self.ts.get(&doc.root).filter(|s| s.ready()).and_then(|s| s.client.clone())
+        } else {
+            self.servers.get(&doc.root).filter(|s| s.ready()).and_then(|s| s.client.clone())
+        };
         if let Some(client) = client {
             client.notify_raw(
                 "textDocument/didChange",
@@ -1161,7 +1191,7 @@ impl LangHub {
 
     pub fn saved(&mut self, uri: &Uri) {
         let Some(doc) = self.docs.get(&uri_key(uri)) else { return };
-        if let Some(client) = self.client(&doc.root) {
+        if let Some(client) = self.doc_client(doc) {
             client.notify_raw("textDocument/didSave", json!({ "textDocument": { "uri": uri.as_str() } }));
         }
     }
@@ -1176,7 +1206,7 @@ impl LangHub {
         }
         let doc = self.docs.remove(&key).expect("present");
         if !doc.virtual_doc
-            && let Some(client) = self.client(&doc.root)
+            && let Some(client) = self.doc_client(&doc)
         {
             client.notify_raw("textDocument/didClose", json!({ "textDocument": { "uri": uri.as_str() } }));
         }
@@ -1206,7 +1236,38 @@ impl LangHub {
     /// The diagnostics of one document.
     pub fn diagnostics_of(&self, uri: &Uri) -> Vec<Diagnostic> {
         let key = uri_key(uri);
-        self.servers.values().find_map(|s| s.diagnostics.get(&key)).cloned().unwrap_or_default()
+        let ts = self.ts.values().map(|s| &s.diagnostics);
+        self.servers.values().map(|s| &s.diagnostics).chain(ts).find_map(|d| d.get(&key)).cloned().unwrap_or_default()
+    }
+
+    /// The server a document goes to, once it answers requests.
+    pub(super) fn doc_client(&self, doc: &Doc) -> Option<Client> {
+        if doc.ts { self.ts_client(&doc.root) } else { self.client(&doc.root) }
+    }
+
+    /// Ask the server of the document `uri`: its TypeScript server when it went to one,
+    /// else the Java engine of `root`.
+    pub fn request_doc(
+        &self,
+        uri: &Uri,
+        root: &Path,
+        method: &str,
+        params: Value,
+    ) -> impl std::future::Future<Output = anyhow::Result<Value>> + Send + 'static + use<> {
+        let ts = self.docs.get(&uri_key(uri)).filter(|d| d.ts).map(|d| d.root.clone());
+        let client = match &ts {
+            Some(r) => self.ts_client(r),
+            None => self.client(root),
+        };
+        let call = client.map(|c| c.request_raw(method, params));
+        let method = method.to_owned();
+        let what = if ts.is_some() { "TypeScript" } else { "Java" };
+        async move {
+            match call {
+                Some(call) => call.await.map_err(|e| anyhow::anyhow!("{method}: {e}")),
+                None => Err(anyhow::anyhow!("the {what} server is not ready")),
+            }
+        }
     }
 
     /// The server the status bar speaks of: the one of `path`'s build, else any.
@@ -1350,7 +1411,8 @@ impl LangHub {
     /// Find the references of the symbol at `at` in `uri`, for the References panel.
     pub fn find_references(&mut self, uri: Uri, at: Position, name: String, cx: &mut Context<Self>) {
         let Some(root) = self.root_of(&uri) else { return };
-        let call = self.request(
+        let call = self.request_doc(
+            &uri,
             &root,
             "textDocument/references",
             json!({ "textDocument": { "uri": uri.as_str() }, "position": at, "context": { "includeDeclaration": true } }),
@@ -1383,7 +1445,8 @@ impl LangHub {
             return;
         }
         let Some(root) = self.root_of(uri) else { return };
-        let call = self.request(
+        let call = self.request_doc(
+            uri,
             &root,
             "workspace/executeCommand",
             json!({ "command": command.command, "arguments": command.arguments.unwrap_or_default() }),
@@ -1414,6 +1477,13 @@ impl LangHub {
             .values()
             .flat_map(|s| s.diagnostics.iter().map(move |(uri, list)| (s.root.clone(), uri, list)))
             .flat_map(|(root, uri, list)| list.iter().map(move |d| (uri.clone(), d.clone(), Some(root.clone()))))
+            // A TypeScript server's, with no build (its fixes are not the engine's).
+            .chain(
+                self.ts
+                    .values()
+                    .flat_map(|s| s.diagnostics.iter())
+                    .flat_map(|(uri, list)| list.iter().map(move |d| (uri.clone(), d.clone(), None))),
+            )
             .chain(self.build_problems.iter().map(|(u, d)| (u.clone(), d.clone(), None)))
             .collect()
     }
@@ -1435,6 +1505,7 @@ impl LangHub {
             .servers
             .values()
             .flat_map(|s| s.diagnostics.iter())
+            .chain(self.ts.values().flat_map(|s| s.diagnostics.iter()))
             .flat_map(|(uri, list)| list.iter().map(move |d| (uri.clone(), d.clone())))
             .chain(self.build_problems.iter().cloned())
             .filter(|(_, d)| {

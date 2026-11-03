@@ -662,7 +662,9 @@ impl EditorPanel {
         }
         let host = crate::host::host(cx);
         let project = crate::lang::hub(cx).and_then(|h| h.read(cx).model.read(cx).project_root());
-        let served = language_for(&path) == "java" || crate::spring::is_config_file(&path);
+        let served = language_for(&path) == "java"
+            || crate::spring::is_config_file(&path)
+            || crate::lang::typescript::language_id(&path).is_some();
         let read = cx.background_executor().spawn(async move { Loaded::read(&*host, &path, project, served) });
         self._load = Some(cx.spawn_in(window, async move |this, cx| {
             let loaded = read.await;
@@ -1426,7 +1428,12 @@ impl Loaded {
         let text = host.read_to_string(path);
         let root = path.ancestors().skip(1).find(|d| host.exists(&d.join(".git"))).map(Path::to_owned);
         let disk = disk_stamp(host, path);
-        let build = served.then(|| crate::lang::java::gradle_root(host, path, project.as_deref())).flatten();
+        // The build of a Java file; the TypeScript project of a TypeScript or JavaScript file.
+        let build = if crate::lang::typescript::language_id(path).is_some() {
+            served.then(|| crate::lang::typescript::project_root(host, path, project.as_deref())).flatten()
+        } else {
+            served.then(|| crate::lang::java::gradle_root(host, path, project.as_deref())).flatten()
+        };
         Loaded { path: path.to_owned(), text, root, disk, build }
     }
 }

@@ -50,7 +50,7 @@ impl DocLink {
     pub fn ask(&self, text: &Rope, method: &str, params: Value, cx: &mut App) -> Task<Result<Value>> {
         let Some(hub) = self.hub.upgrade() else { return Task::ready(Err(anyhow::anyhow!("no hub"))) };
         hub.update(cx, |h, _| h.sync(&self.uri, text));
-        let call = hub.read(cx).request(&self.root, method, params);
+        let call = hub.read(cx).request_doc(&self.uri, &self.root, method, params);
         cx.background_executor().spawn(call)
     }
 

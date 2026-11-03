@@ -2,6 +2,7 @@
 //! which install is chosen.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::lang::node::{self, Node, PackageManager, Wanted};
 use crate::playwright;
@@ -123,4 +124,78 @@ fn this_machines_node_is_found_when_it_has_one() {
         assert!(node.bin.is_file() && node.major > 0, "{node:?}");
     }
     assert!(all.windows(2).all(|w| w[0].major >= w[1].major), "newest first");
+}
+
+#[gpui::test]
+fn typescript_files_get_vtsls_and_no_java(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::{TestWorkspace, caret_at, editor_of, pump_until};
+    use crate::model::Action;
+    use crate::tests::{act, open, with_repo};
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("typescript features: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-ts");
+    write(&repo, "package.json", r#"{ "name": "shop-e2e", "devDependencies": { "@playwright/test": "^1.48.0" } }"#);
+    write(
+        &repo,
+        "tsconfig.json",
+        r#"{ "compilerOptions": { "strict": true, "target": "ES2022", "module": "ESNext" } }"#,
+    );
+    write(&repo, "tests/cart.spec.ts", "export const count: number = 'three';\nconst label = 'cart';\n\n");
+    cx.update(|cx| cx.set_global(crate::lang::hub::LangEnabled(true)));
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|_, cx| cx.set_global(TestWorkspace(ws.clone())));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    // vtsls goes into a folder of its own that runs share, never the app's data folder.
+    let install = std::env::temp_dir().join("snout-test-vtsls").join(crate::lang::typescript::VTSLS_VERSION);
+    cx.update(|_, cx| hub.update(cx, |h, _| h.ts_install_dir = Some(install)));
+    let spec = repo.join("tests/cart.spec.ts");
+    act(&model, cx, Action::OpenFile(spec.clone(), None));
+    let editor = editor_of(&ws, &spec, cx).expect("the spec opens");
+
+    let started = Instant::now();
+    let flagged = pump_until(cx, 180, |cx| cx.update(|_, cx| !editor.read(cx).problems.is_empty()));
+    let stage = cx.update(|_, cx| hub.read(cx).ts.get(&repo).map(|s| s.stage.label()));
+    assert!(flagged, "vtsls reports the type error within three minutes ({stage:?})");
+    println!("typescript features: first diagnostics after {:.1} s", started.elapsed().as_secs_f32());
+    let message = cx.update(|_, cx| editor.read(cx).problems.first().map(|d| d.message.clone()).unwrap_or_default());
+    assert!(message.contains("not assignable to type 'number'"), "{message}");
+    let status = cx.update(|_, cx| ws.read(cx).status.read(cx).java_status(cx)).expect("a status");
+    assert!(status.0.starts_with("TypeScript: "), "{status:?}");
+    assert!(cx.update(|_, cx| hub.read(cx).servers.is_empty()), "no Java engine started");
+    let problems = cx.update(|_, cx| hub.read(cx).all_problems());
+    assert!(problems.iter().any(|(uri, _)| uri.ends_with("cart.spec.ts")), "the Problems window lists it");
+
+    // Completion on a string.
+    caret_at(&editor, "\n\n", 0, 2, cx);
+    cx.simulate_input("label.toUpper");
+    let completed = pump_until(cx, 60, |cx| {
+        cx.update(|_, cx| {
+            editor
+                .read(cx)
+                .state
+                .read(cx)
+                .completion_menu_state()
+                .items
+                .iter()
+                .any(|i| i.label.starts_with("toUpperCase"))
+        })
+    });
+    assert!(completed, "completion offers toUpperCase");
+    cx.simulate_keystrokes("escape");
+
+    // Quick fixes from the Problems window go to the TypeScript server too.
+    let uri = snout_lang::uri::from_path(&spec);
+    let call = cx.update(|_, cx| {
+        let d = editor.read(cx).problems.first().cloned().expect("a problem");
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri.as_str() }, "range": d.range, "context": { "diagnostics": [d] }
+        });
+        hub.read(cx).request_doc(&uri, &repo, "textDocument/codeAction", params)
+    });
+    assert!(futures::executor::block_on(call).is_ok(), "vtsls answers code actions");
+    cx.update(|_, cx| hub.update(cx, |h, _| h.shutdown_all()));
+    let _ = std::fs::remove_dir_all(repo);
 }

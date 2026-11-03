@@ -385,13 +385,15 @@ impl ProblemsPanel {
             return Task::ready((c.actions)(&path, &d.range));
         }
         let hub = self.hub.read(cx);
-        let Some(root) = root.or_else(|| hub.engine_root_for(uri)) else { return Task::ready(Vec::new()) };
+        let Some(root) = root.or_else(|| hub.root_of(uri)).or_else(|| hub.engine_root_for(uri)) else {
+            return Task::ready(Vec::new());
+        };
         let params = json!({
             "textDocument": { "uri": uri.as_str() },
             "range": d.range,
             "context": { "diagnostics": [d], "triggerKind": 1 }
         });
-        let call = hub.request(&root, "textDocument/codeAction", params);
+        let call = hub.request_doc(uri, &root, "textDocument/codeAction", params);
         cx.background_executor().spawn(async move {
             match call.await {
                 Ok(v) => serde_json::from_value::<Vec<CodeActionOrCommand>>(v)
