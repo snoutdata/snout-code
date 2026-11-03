@@ -288,6 +288,8 @@ pub struct LangHub {
     pub ts: HashMap<PathBuf, super::typescript::TsServer>,
     /// Where vtsls is installed, when not SnoutCode's data folder (tests).
     pub ts_install_dir: Option<PathBuf>,
+    /// The bar offering to download the Node a TypeScript project needs.
+    pub node_prompt: Option<super::typescript::NodePrompt>,
     pub(super) docs: HashMap<String, Doc>,
     pub jdk_prompt: Option<JdkPrompt>,
     /// The JDKs the user said no to, this session.
@@ -361,6 +363,7 @@ impl LangHub {
             servers: HashMap::new(),
             ts: HashMap::new(),
             ts_install_dir: None,
+            node_prompt: None,
             docs: HashMap::new(),
             jdk_prompt: None,
             dismissed_jdks: Vec::new(),

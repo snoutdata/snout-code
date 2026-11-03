@@ -57,6 +57,19 @@ impl TsStage {
     }
 }
 
+/// The bar asking to download the Node a TypeScript project needs, and how it goes.
+#[derive(Clone)]
+pub struct NodePrompt {
+    pub root: PathBuf,
+    pub wanted: node::Wanted,
+    /// What the project asks for, as the bar says it (`22`, `20 or newer`).
+    pub label: String,
+    pub progress: Option<super::java::DownloadProgress>,
+    pub error: Option<String>,
+    /// Said no to, this session.
+    pub dismissed: bool,
+}
+
 /// One TypeScript server.
 pub struct TsServer {
     pub root: PathBuf,
@@ -348,7 +361,18 @@ impl LangHub {
                     .or(wanted.min_major.map(|m| format!("{m} or newer")))
                     .unwrap_or_default();
                 eprintln!("[ts] no Node fits {} (asks for {what:?})", root.display());
-                server.stage = TsStage::NeedsNode(what);
+                server.stage = TsStage::NeedsNode(what.clone());
+                if !self.node_prompt.as_ref().is_some_and(|p| p.dismissed || p.progress.is_some()) {
+                    let label = if what.is_empty() { node::LTS_MAJOR.to_string() } else { what };
+                    self.node_prompt = Some(NodePrompt {
+                        root: root.to_owned(),
+                        wanted,
+                        label,
+                        progress: None,
+                        error: None,
+                        dismissed: false,
+                    });
+                }
             }
         }
         cx.emit(HubEvent::Changed);
@@ -560,6 +584,75 @@ impl LangHub {
             }
         }
         cx.emit(HubEvent::Changed);
+        cx.notify();
+    }
+
+    /// Download the Node the bar offers, then start the TypeScript servers that waited for it.
+    pub fn download_node(&mut self, cx: &mut Context<Self>) {
+        let Some(prompt) = self.node_prompt.as_mut() else { return };
+        if prompt.progress.is_some() {
+            return;
+        }
+        let progress = super::java::DownloadProgress::default();
+        prompt.progress = Some(progress.clone());
+        prompt.error = None;
+        let (host, wanted) = (self.host.clone(), prompt.wanted.clone());
+        let dir = node::downloads_dir(host.info());
+        let watch = progress.clone();
+        let fetch = cx.background_executor().spawn(async move { node::download(&*host, &wanted, &dir, &watch) });
+        cx.spawn(async move |this, cx| {
+            // Repaint the bar as the bytes come in, until the download ends.
+            let ticker = cx.spawn({
+                let this = this.clone();
+                async move |cx| {
+                    loop {
+                        cx.background_executor().timer(Duration::from_millis(250)).await;
+                        if this.update(cx, |_, cx| cx.notify()).is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+            let result = fetch.await;
+            drop(ticker);
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(n) => {
+                        eprintln!("[ts] downloaded Node {} to {}", n.version, n.bin.display());
+                        this.node_prompt = None;
+                        let waiting: Vec<PathBuf> = this
+                            .ts
+                            .values()
+                            .filter(|s| matches!(s.stage, TsStage::NeedsNode(_)))
+                            .map(|s| s.root.clone())
+                            .collect();
+                        for root in waiting {
+                            this.restart_ts(&root, cx);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[ts] Node could not be downloaded: {e:#}");
+                        if let Some(p) = this.node_prompt.as_mut() {
+                            p.progress = None;
+                            p.error = Some(format!("{e:#}"));
+                        }
+                    }
+                }
+                cx.emit(HubEvent::Changed);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Not now: hide the Node bar for this session.
+    pub fn dismiss_node(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = self.node_prompt.as_mut()
+            && p.progress.is_none()
+        {
+            p.dismissed = true;
+        }
         cx.notify();
     }
 

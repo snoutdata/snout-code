@@ -512,6 +512,71 @@ impl Workspace {
         )
     }
 
+    /// The bar offering to download the Node a TypeScript project needs, while it downloads,
+    /// and when the download failed.
+    pub(super) fn node_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let prompt = self.hub.read(cx).node_prompt.clone().filter(|p| !p.dismissed)?;
+        let p = palette(cx);
+        let text = match (&prompt.progress, &prompt.error) {
+            (Some(progress), _) => match progress.percent() {
+                Some(pct) => format!("Downloading Node {}… {pct}%", prompt.label),
+                None => format!("Downloading Node {}…", prompt.label),
+            },
+            (None, Some(error)) => format!("Node {} could not be downloaded: {error}", prompt.label),
+            (None, None) => format!(
+                "This project needs Node {}, which is not on this machine. Download it for SnoutCode?",
+                prompt.label
+            ),
+        };
+        let busy = prompt.progress.is_some();
+        let hub = self.hub.clone();
+        let hub2 = self.hub.clone();
+        Some(
+            div()
+                .id("node-bar")
+                .debug_selector(|| "node-bar".into())
+                .flex_none()
+                .mx(px(6.))
+                .mt(px(6.))
+                .px(px(10.))
+                .py(px(5.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(8.))
+                .bg(p.wash(p.accent))
+                .border_1()
+                .border_color(mix(p.accent, 0.4, p.panel))
+                .text_size(px(12.5))
+                .map(|d| {
+                    if prompt.error.is_some() {
+                        d.child(crate::components::icon(crate::components::IconName::TriangleAlert, 14., p.warn))
+                    } else {
+                        d.child(crate::art::drawing_on(snout_core::art::spots::terminal(), 48., 32., p.wash(p.accent)))
+                    }
+                })
+                .child(div().flex_1().min_w_0().child(text))
+                .when(busy, |d| {
+                    use gpui_component::Sizable as _;
+                    d.child(gpui_component::spinner::Spinner::new().xsmall())
+                })
+                .when(!busy, |d| {
+                    let label = if prompt.error.is_some() { "Try again" } else { "Download" };
+                    d.child(
+                        look::small_button("node-download", crate::components::IconName::Download, label, &p)
+                            .debug_selector(|| "node-download".into())
+                            .on_click(move |_, _, cx| hub.update(cx, |h, cx| h.download_node(cx))),
+                    )
+                    .child(
+                        look::small_button("node-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
+                            .debug_selector(|| "node-dismiss".into())
+                            .on_click(move |_, _, cx| hub2.update(cx, |h, cx| h.dismiss_node(cx))),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
     /// The bar saying the build files (Gradle scripts, POMs) changed since the model was read,
     /// offering to sync.
     pub(super) fn gradle_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

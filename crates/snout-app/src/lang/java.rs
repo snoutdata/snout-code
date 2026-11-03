@@ -444,7 +444,7 @@ pub fn is_remote(host: &dyn Host) -> bool {
 }
 
 /// The text at `url`, fetched on `host` with curl (else wget).
-fn fetch_text(host: &dyn Host, url: &str) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn fetch_text(host: &dyn Host, url: &str) -> anyhow::Result<Vec<u8>> {
     let curl = Cmd::new("curl").args(["-fsSL", "--max-time", "60", url]);
     let wget = Cmd::new("wget").args(["-q", "-T", "60", "-O", "-", url]);
     let mut last = anyhow::anyhow!("neither curl nor wget is installed");
@@ -461,7 +461,7 @@ fn fetch_text(host: &dyn Host, url: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 /// Fetch `url` into `out` on `host` with curl (else wget), counting its bytes in `progress`.
-fn fetch_file(host: &dyn Host, url: &str, out: &Path, progress: &DownloadProgress) -> anyhow::Result<()> {
+pub(crate) fn fetch_file(host: &dyn Host, url: &str, out: &Path, progress: &DownloadProgress) -> anyhow::Result<()> {
     let curl = Cmd::new("curl").args(["-fsSL", "-o"]).arg(out).arg(url);
     let wget = Cmd::new("wget").args(["-q", "-O"]).arg(out).arg(url);
     let mut last = anyhow::anyhow!("neither curl nor wget is installed");

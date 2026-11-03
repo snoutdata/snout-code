@@ -259,3 +259,90 @@ impl PackageManager {
         }
     }
 }
+
+/// The platform part of Node's file names on `host` (`darwin-arm64`, `linux-x64`,
+/// `win-x64`), and whether its archive is a zip file.
+fn dist_platform(host: &dyn Host) -> (String, bool) {
+    let info = host.info();
+    let arch = match info.arch.as_str() {
+        "aarch64" => "arm64",
+        _ => "x64",
+    };
+    let os = if info.is_mac() {
+        "darwin"
+    } else if info.is_windows() {
+        "win"
+    } else {
+        "linux"
+    };
+    (format!("{os}-{arch}"), info.is_windows())
+}
+
+/// The release of nodejs.org's `index.json` (newest first) to download for `wanted` on
+/// `platform`: the exact version asked for, else the newest of the major it names.
+pub fn pick_release(index: &Value, wanted: &Wanted, platform: &str) -> Option<String> {
+    // How `index.json` names the files: `osx-arm64-tar`, `linux-x64`, `win-x64-zip`.
+    let file = match platform.split_once('-') {
+        Some(("darwin", arch)) => format!("osx-{arch}-tar"),
+        Some(("win", arch)) => format!("win-{arch}-zip"),
+        _ => platform.to_owned(),
+    };
+    let major = wanted.download_major();
+    index.as_array()?.iter().find_map(|r| {
+        let v = r.get("version")?.as_str()?.trim_start_matches('v');
+        let has = r.get("files")?.as_array()?.iter().any(|f| f.as_str() == Some(file.as_str()));
+        let fits = match &wanted.exact {
+            Some(e) => v == e,
+            None => major_of(v) == Some(major),
+        };
+        (has && fits).then(|| v.to_owned())
+    })
+}
+
+/// Download Node for `wanted` from nodejs.org into `dir` on `host`, check it against the
+/// release's SHA-256 sums, unpack it, and return it. Blocking; run it off the main thread.
+pub fn download(
+    host: &dyn Host,
+    wanted: &Wanted,
+    dir: &Path,
+    progress: &super::java::DownloadProgress,
+) -> anyhow::Result<Node> {
+    use std::sync::atomic::Ordering;
+
+    use anyhow::{Context as _, bail};
+    let (platform, zip) = dist_platform(host);
+    let index = super::java::fetch_text(host, "https://nodejs.org/dist/index.json").context("ask nodejs.org")?;
+    let index: Value = serde_json::from_slice(&index).context("read nodejs.org's list")?;
+    let version = pick_release(&index, wanted, &platform).context("no Node release fits")?;
+    let name = format!("node-v{version}-{platform}");
+    let file = format!("{name}.{}", if zip { "zip" } else { "tar.gz" });
+    let base = format!("https://nodejs.org/dist/v{version}");
+    let sums = super::java::fetch_text(host, &format!("{base}/SHASUMS256.txt")).context("fetch the checksums")?;
+    let sha = String::from_utf8_lossy(&sums)
+        .lines()
+        .find_map(|l| l.split_once("  ").filter(|(_, f)| *f == file).map(|(h, _)| h.to_ascii_lowercase()))
+        .context("no checksum for the download")?;
+    host.create_dir_all(dir)?;
+    let part = dir.join(format!(".{file}.part"));
+    progress.total.store(0, Ordering::Relaxed);
+    super::java::fetch_file(host, &format!("{base}/{file}"), &part, progress)?;
+    if super::java::sha256_on(host, &part)? != sha {
+        let _ = host.remove_file(&part);
+        bail!("the download is damaged (its checksum does not match)");
+    }
+    let unpack = dir.join(format!(".{name}.unpack"));
+    let _ = host.remove_dir_all(&unpack);
+    host.create_dir_all(&unpack)?;
+    let flags = if zip { "-xf" } else { "-xzf" };
+    let ok = host.run(&Cmd::new("tar").arg(flags).arg(&part).arg("-C").arg(&unpack), None)?.status.success();
+    let _ = host.remove_file(&part);
+    if !ok {
+        bail!("the download could not be unpacked");
+    }
+    let dest = dir.join(&name);
+    let _ = host.remove_dir_all(&dest);
+    host.rename(&unpack.join(&name), &dest)?;
+    let _ = host.remove_dir_all(&unpack);
+    let bin = if zip { dest.join("node.exe") } else { dest.join("bin/node") };
+    node_at(host, &bin).context("the download holds no Node")
+}

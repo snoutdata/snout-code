@@ -164,6 +164,7 @@ mod shots {
         Connecting,
         /// The bar offering a JDK the project needs.
         JdkBar,
+        NodeBar,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -1461,6 +1462,23 @@ sleep 30
                             resync: false,
                             progress: None,
                             error: None,
+                        });
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::NodeBar) => {
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let hub = ws.read(cx).hub.clone();
+                    hub.update(cx, |h, cx| {
+                        h.node_prompt = Some(snout_app::lang::typescript::NodePrompt {
+                            root: repo.clone(),
+                            wanted: snout_app::lang::node::parse_spec("22"),
+                            label: "22".into(),
+                            progress: None,
+                            error: None,
+                            dismissed: false,
                         });
                         cx.notify();
                     });
@@ -2918,6 +2936,7 @@ sleep 30
             shot(&format!("ui-empty-search-{mode}"), theme, Activity::Project, Some(Select::NoResults));
             shot(&format!("ui-remote-connecting-{mode}"), theme, Activity::Project, Some(Select::Connecting));
             shot(&format!("ui-jdk-bar-{mode}"), theme, Activity::Project, Some(Select::JdkBar));
+            shot(&format!("ui-node-bar-{mode}"), theme, Activity::Project, Some(Select::NodeBar));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(

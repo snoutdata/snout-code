@@ -199,3 +199,66 @@ fn typescript_files_get_vtsls_and_no_java(cx: &mut gpui::TestAppContext) {
     cx.update(|_, cx| hub.update(cx, |h, _| h.shutdown_all()));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[test]
+fn the_node_download_is_the_release_asked_for() {
+    let index = serde_json::json!([
+        { "version": "v24.13.0", "files": ["osx-arm64-tar", "linux-x64", "win-x64-zip"] },
+        { "version": "v22.12.0", "files": ["osx-arm64-tar", "linux-x64", "win-x64-zip"] },
+        { "version": "v22.11.0", "files": ["osx-arm64-tar", "linux-x64", "win-x64-zip"] },
+        { "version": "v20.18.1", "files": ["linux-x64"] }
+    ]);
+    let pick = |spec: &str, platform: &str| node::pick_release(&index, &node::parse_spec(spec), platform);
+    assert_eq!(pick("22", "darwin-arm64").as_deref(), Some("22.12.0"), "the newest of the major");
+    assert_eq!(pick("22.11.0", "darwin-arm64").as_deref(), Some("22.11.0"));
+    assert_eq!(pick("", "linux-x64").as_deref(), Some("22.12.0"), "nothing asked: the long-term support major");
+    assert_eq!(pick("20", "darwin-arm64"), None, "no build for this machine");
+    assert_eq!(pick("20", "linux-x64").as_deref(), Some("20.18.1"));
+    assert_eq!(pick("24", "win-x64").as_deref(), Some("24.13.0"));
+}
+
+/// Downloads Node from nodejs.org (about 50 MB): run by hand with `--ignored`.
+#[test]
+#[ignore]
+fn node_downloads_from_nodejs_org() {
+    let host = snout_host::local();
+    let dir = scratch_dir("pw-node-download");
+    let progress = crate::lang::java::DownloadProgress::default();
+    let n = node::download(&*host, &node::parse_spec("22"), &dir, &progress).expect("Node downloads");
+    assert_eq!(n.major, 22);
+    assert!(n.bin.starts_with(&dir), "{n:?}");
+    assert!(crate::lang::typescript::npm_cli(&*host, &n).is_some(), "npm comes with it");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn a_project_asking_for_a_node_this_machine_lacks_offers_to_download_it(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::{editor_of, pump_until};
+    use crate::model::Action;
+    use crate::tests::{act, open, with_repo};
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-needs-node");
+    // A version no one has.
+    write(&repo, ".nvmrc", "v3.1.4\n");
+    write(&repo, "package.json", r#"{ "devDependencies": { "@playwright/test": "^1.48.0" } }"#);
+    write(&repo, "tests/a.spec.ts", "export {};\n");
+    cx.update(|cx| cx.set_global(crate::lang::hub::LangEnabled(true)));
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    let spec = repo.join("tests/a.spec.ts");
+    act(&model, cx, Action::OpenFile(spec.clone(), None));
+    assert!(editor_of(&ws, &spec, cx).is_some());
+    let offered = pump_until(cx, 30, |cx| cx.update(|_, cx| hub.read(cx).node_prompt.is_some()));
+    assert!(offered, "the Node bar shows");
+    let (label, stage) = cx.update(|_, cx| {
+        let h = hub.read(cx);
+        (h.node_prompt.as_ref().unwrap().label.clone(), h.ts.get(&repo).map(|s| s.status()))
+    });
+    assert_eq!(label, "3.1.4");
+    assert_eq!(stage.as_deref(), Some("TypeScript: Needs Node 3.1.4"));
+    assert!(cx.debug_bounds("node-bar").is_some(), "the bar is drawn");
+    cx.update(|_, cx| hub.update(cx, |h, cx| h.dismiss_node(cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("node-bar").is_none(), "Not now hides it");
+    let _ = std::fs::remove_dir_all(repo);
+}

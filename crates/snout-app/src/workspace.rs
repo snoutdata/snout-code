@@ -2304,6 +2304,7 @@ impl Render for Workspace {
                 .flex()
                 .flex_col()
                 .children(self.jdk_bar(cx))
+                .children(self.node_bar(cx))
                 .children(self.gradle_bar(cx))
                 .child(self.dock_area(cx))
                 .into_any_element()

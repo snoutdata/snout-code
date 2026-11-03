@@ -22,7 +22,7 @@ The server runs on Node. SnoutCode never needs Node on your `PATH`: it looks for
 
 It then picks the newest Node that fits from the ones on your machine: the one on your login shell's `PATH`, and those installed with nvm, Volta, fnm, asdf, mise or Homebrew. A project that asks for nothing gets the newest Node found.
 
-When none fits, the status bar says **TypeScript: Needs Node** with the version the project asks for. Install that version with your version manager, then reopen the file.
+When none fits, a bar above the editor says which version the project needs and offers **Download**. SnoutCode then downloads that Node from nodejs.org, checks it against the release's checksums, keeps it in its own data folder, and starts the TypeScript server on it. Your shell, your `PATH` and your version manager are left as they are. **Not now** hides the bar until SnoutCode starts again; the status bar keeps saying **TypeScript: Needs Node** with the version. A Node you install yourself later is found the next time the server starts.
 
 The first time it runs, SnoutCode installs the language server into its own data folder with that Node's npm. This takes a few seconds and needs a network connection. Your project's `node_modules` is never changed.
 
@@ -30,8 +30,8 @@ The first time it runs, SnoutCode installs the language server into its own data
 
 - **Completion** as you type a name or a `.`, with auto imports. Press ⌃Space to open it anywhere.
 - **Hover** over a name for its type and its documentation.
-- **Go to Definition** (⌘B, or ⌘-click) and **Find References**.
-- **Rename** a symbol across the project.
+- **Go to Definition** (F12) and **Find References** (⇧F12).
+- **Rename** a symbol across the project (F2).
 - **Quick fixes** (⌥↩), such as adding a missing import.
 - **Problems**: type errors and warnings show as squiggles, in the inspections widget at the editor's top right, and in the Problems window.
 
