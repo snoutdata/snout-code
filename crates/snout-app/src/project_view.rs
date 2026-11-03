@@ -355,6 +355,9 @@ impl ProjectView {
         cx.observe(&files, |_, _, cx| cx.notify()).detach();
         cx.observe(&store, |_, _, cx| cx.notify()).detach();
         cx.observe_global::<crate::claude_ide::AgentFiles>(|_, cx| cx.notify()).detach();
+        if let Some(setup) = cx.try_global::<crate::playwright::setup::SetupHandle>().map(|h| h.0.clone()) {
+            cx.observe(&setup, |_, _, cx| cx.notify()).detach();
+        }
         Self { model, files, store, expanded: HashSet::from([NodeId::Root]), jars: HashMap::new(), root: None }
     }
 
@@ -468,13 +471,20 @@ impl Render for ProjectView {
             // The plain tree until the model is read, with a note saying so.
             let store = self.store.read(cx);
             let failed = store.sync_error.is_some();
+            // A Playwright project has no build model: a line about its Playwright and Node.
+            let playwright = cx
+                .try_global::<crate::playwright::setup::SetupHandle>()
+                .and_then(|h| h.0.read(cx).summary.clone())
+                .filter(|_| !failed);
             let note = match (&store.sync_error, root.is_some()) {
                 (Some(e), true) => Some(format!("The build model could not be read: {e}")),
                 (None, true) if root.as_deref().is_some_and(|r| crate::project_model::project_has_gradle(r, cx)) => {
                     Some("Reading the build model".to_owned())
                 }
+                (None, true) if playwright.is_some() => playwright.clone(),
                 _ => None,
             };
+            let busy = !failed && playwright.is_none();
             return div()
                 .size_full()
                 .flex()
@@ -499,7 +509,8 @@ impl Render for ProjectView {
                                     p.warn,
                                 ))
                             })
-                            .when(!failed, |d| d.child(gpui_component::spinner::Spinner::new().xsmall()))
+                            .when(busy, |d| d.child(gpui_component::spinner::Spinner::new().xsmall()))
+                            .when(playwright.is_some(), |d| d.child(icon(Icon::TestFolder, 13., p.fg_dim)))
                             .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(note)),
                     )
                 })

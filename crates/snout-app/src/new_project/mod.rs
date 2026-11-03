@@ -1,7 +1,8 @@
 //! The New Project dialog (File ▸ New Project…, and the Welcome page): a Gradle project,
 //! either plain Java, written here and so made without the network, or Spring Boot, from
 //! start.spring.io with its versions and dependencies (and, should start.spring.io not
-//! answer, from a template of our own). The new project then opens.
+//! answer, from a template of our own); or a Playwright project of end-to-end tests in
+//! TypeScript, written here. The new project then opens.
 
 pub mod generate;
 pub mod initializr;
@@ -29,15 +30,17 @@ use initializr::Catalog;
 pub enum Kind {
     Java,
     SpringBoot,
+    Playwright,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 2] = [Kind::Java, Kind::SpringBoot];
+    pub const ALL: [Kind; 3] = [Kind::Java, Kind::SpringBoot, Kind::Playwright];
 
     pub fn title(self) -> &'static str {
         match self {
             Kind::Java => "Java",
             Kind::SpringBoot => "Spring Boot",
+            Kind::Playwright => "Playwright",
         }
     }
 
@@ -45,6 +48,7 @@ impl Kind {
         match self {
             Kind::Java => "Gradle or Maven",
             Kind::SpringBoot => "From start.spring.io",
+            Kind::Playwright => "End-to-end tests in TypeScript",
         }
     }
 }
@@ -65,6 +69,8 @@ pub struct NewProjectView {
     pub group: Entity<InputState>,
     pub artifact: Entity<InputState>,
     pub package: Entity<InputState>,
+    /// A Playwright project's application address.
+    pub base_url: Entity<InputState>,
     pub dep_search: Entity<InputState>,
     pub dsl: Dsl,
     /// The Java level of a plain Java project, and of a Spring Boot one (none: the default).
@@ -129,6 +135,7 @@ impl NewProjectView {
         let group = input("com.example", "com.example", window, cx);
         let artifact = input("", "", window, cx);
         let package = input("", "", window, cx);
+        let base_url = input("", "http://localhost:8080", window, cx);
         let dep_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search dependencies"));
         cx.subscribe(&dep_search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -144,6 +151,7 @@ impl NewProjectView {
             group,
             artifact,
             package,
+            base_url,
             dep_search,
             dsl: Dsl::Kotlin,
             java: 21,
@@ -213,6 +221,7 @@ impl NewProjectView {
         let java = match self.kind {
             Kind::Java => self.java,
             Kind::SpringBoot => self.boot_java.or(self.catalog.as_ref().map(|c| c.java_default)).unwrap_or(17),
+            Kind::Playwright => self.java,
         };
         Basics { name: self.text(&self.name, cx), group, artifact, package, java, dsl: self.dsl }
     }
@@ -261,6 +270,10 @@ impl NewProjectView {
         let location = PathBuf::from(expand_home(&self.text(&self.location, cx), cx));
         let target = self.target(cx);
         let occupied = self.occupied.as_ref().filter(|(t, _)| *t == target).map(|(_, taken)| *taken);
+        if self.kind == Kind::Playwright {
+            let (name, url) = (self.text(&self.name, cx), self.text(&self.base_url, cx));
+            return generate::playwright_problem(&name, &location, &url, occupied);
+        }
         if let Some(p) = generate::problem(&self.basics(cx), &location, occupied) {
             return Some(p);
         }
@@ -313,6 +326,7 @@ impl NewProjectView {
             return;
         }
         let (kind, basics, boot, dir, git) = (self.kind, self.basics(cx), self.boot(), self.target(cx), self.git);
+        let (name, base_url) = (self.text(&self.name, cx), self.text(&self.base_url, cx));
         let offline = offline || self.catalog.as_ref().is_some_and(|c| c.offline);
         let service = self.service.clone();
         let host = crate::host::host(cx);
@@ -329,6 +343,7 @@ impl NewProjectView {
                     Kind::Java => generate::write_java(&*host, &dir, &basics),
                     Kind::SpringBoot if offline => generate::write_boot_offline(&*host, &dir, &basics, &boot),
                     Kind::SpringBoot => generate::download_boot(&*host, &service, &dir, &basics, &boot),
+                    Kind::Playwright => generate::write_playwright(&*host, &dir, &name, &base_url),
                 }?;
                 if git && snout_core::Repo::open(&host, &dir).is_err() {
                     snout_core::Repo::init(&host, &dir).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -443,6 +458,31 @@ impl NewProjectView {
                 .child(div().pt(px(24.)).text_color(p.fg_dim).child("Asking start.spring.io what it offers…"))
                 .into_any_element();
         }
+        if self.kind == Kind::Playwright {
+            return body
+                .child(section("Tests", &p))
+                .child(row(
+                    "Application URL",
+                    div().w(px(360.)).child(look::field(&self.base_url, false, None, &p)),
+                    &p,
+                ))
+                .child(
+                    div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
+                        "The address the tests open. A BASE_URL environment variable replaces it when it is set.",
+                    ),
+                )
+                .child(
+                    div().pt(px(14.)).child(
+                        look::checkbox("new-project-git", "Create a Git repository", self.git, true, &p)
+                            .debug_selector(|| "new-project-git".into())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.git = !this.git;
+                                cx.notify();
+                            })),
+                    ),
+                )
+                .into_any_element();
+        }
         // The build: Gradle (its script's language) or Maven.
         let dsl = |d: Dsl, label: &'static str, id: &'static str, cx: &mut Context<Self>| {
             let ico = if d == Dsl::Maven {
@@ -485,6 +525,7 @@ impl NewProjectView {
                         match kind {
                             Kind::Java => this.java = j,
                             Kind::SpringBoot => this.boot_java = Some(j),
+                            Kind::Playwright => {}
                         }
                         cx.notify();
                     })
@@ -713,7 +754,15 @@ impl Render for NewProjectView {
                     .cursor_pointer()
                     .when(on, |d| d.bg(p.row_selected()))
                     .when(!on, |d| d.hover(move |s| s.bg(hover)))
-                    .child(icon(if k == Kind::Java { Icon::Module } else { Icon::Leaf }, 16., p.fg_dim))
+                    .child(icon(
+                        match k {
+                            Kind::Java => Icon::Module,
+                            Kind::SpringBoot => Icon::Leaf,
+                            Kind::Playwright => Icon::TestFolder,
+                        },
+                        16.,
+                        p.fg_dim,
+                    ))
                     .child(
                         div()
                             .flex()

@@ -73,7 +73,7 @@ windows and their sizes, and the view (Project or Git) you were on.
 ## Create a new project
 
 Choose File ▸ New Project…, or **New Project…** on the Welcome page. The dialog makes a Gradle
-or Maven project and opens it.
+or Maven project, or a Playwright project of end-to-end tests, and opens it.
 
 ![The New Project dialog for a Spring Boot project](images/projects-new-spring.png)
 
@@ -83,6 +83,8 @@ or Maven project and opens it.
    - **Java**: an application built by Gradle or Maven. SnoutCode writes it itself, so it needs
      no network.
    - **Spring Boot**: from start.spring.io, with the versions and dependencies it offers.
+   - **Playwright**: end-to-end tests in TypeScript for an application you reach by its
+     address. SnoutCode writes it itself; see [below](#a-playwright-project).
 2. Fill in the **Name** and the **Location**. **Choose…** picks the folder. The dialog shows
    the folder the project goes in. By default it goes beside the project you opened last, or
    in your home folder.
@@ -114,6 +116,21 @@ SnoutCode knows itself. **Try Again** asks start.spring.io again. The project is
 SnoutCode's own template; Gradle downloads Spring Boot once there is a network. If creating
 fails while start.spring.io is unreachable, **Create Without the Network** makes it from the
 template.
+
+### A Playwright project
+
+A Playwright project asks for its **Name**, **Location** and the **Application URL**: the address
+the tests open, such as `https://staging.example.com`. It has no build or coordinates. Left empty,
+the address is `http://localhost:8080`.
+
+It gets a `package.json` that depends on `@playwright/test`, a `playwright.config.ts` that tests
+in Chromium, Firefox and WebKit and keeps a trace, a screenshot and a video of each failure, a
+first test in `tests/home.spec.ts`, a `tsconfig.json` and a `.gitignore`. The config reads the
+address from the `BASE_URL` environment variable when it is set, so the same tests can run
+against another environment.
+
+It opens with a bar offering to install its packages, then its browsers. See
+[Playwright projects](playwright.md).
 
 ## The Project tool window
 

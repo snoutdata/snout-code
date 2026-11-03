@@ -6,6 +6,8 @@ SnoutCode opens a repository of Playwright tests as a project of its own: TypeSc
 
 A folder is a Playwright project when it has a `playwright.config.ts` (or `.js`, `.mjs`, `.cjs`, `.mts`, `.cts`), or a `package.json` that depends on `@playwright/test`. Open it as any project: **File ▸ Open…**, or from the welcome page.
 
+The Project view shows the project's folders and files. A line at its top says which Playwright the project has, its package manager and the Node it runs on, such as `Playwright 1.64.1 · npm · Node 22.11.0`, or `not installed` until its packages are.
+
 A Playwright project never starts the Java engine. Its TypeScript files get completion, navigation, rename and problems from the TypeScript server; see [TypeScript and JavaScript](typescript.md).
 
 ## Getting it ready to run

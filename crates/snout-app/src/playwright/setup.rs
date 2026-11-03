@@ -80,6 +80,24 @@ pub fn missing_browsers(host: &dyn Host, manifest: &Value, browsers: &Path) -> V
     missing
 }
 
+/// A line about the Playwright project at `root` for the Project view: its Playwright, its
+/// package manager and the Node it runs on (`Playwright 1.64.1 · npm · Node 24.13.0`).
+pub fn summary(host: &dyn Host, root: &Path, stop: Option<&Path>) -> Option<String> {
+    let project = super::project_at(host, root)?;
+    let playwright = match (&project.installed, &project.declared) {
+        (Some(v), _) => format!("Playwright {v}"),
+        (None, Some(v)) => format!("Playwright {v}, not installed"),
+        (None, None) => "Playwright".to_owned(),
+    };
+    let wanted = node::wanted(host, root, stop);
+    let all = node::discover(host);
+    let node = match node::choose(&wanted, &all) {
+        Some(n) => format!("Node {}", n.version),
+        None => "no Node fits".to_owned(),
+    };
+    Some(format!("{playwright} · {} · {node}", project.package_manager.name()))
+}
+
 /// What the Playwright project at `root` needs, if anything.
 pub fn check(host: &dyn Host, root: &Path) -> Option<Need> {
     let project = super::project_at(host, root)?;
@@ -146,6 +164,8 @@ pub struct Setup {
     /// The Playwright project looked at (the open project, when it is one).
     pub root: Option<PathBuf>,
     pub need: Option<Need>,
+    /// What the Project view says of the project (see [`summary`]).
+    pub summary: Option<String>,
     /// The install running, as its session.
     pub installing: Option<u64>,
     /// Why the install could not start.
@@ -188,6 +208,7 @@ impl Setup {
             runs,
             root,
             need: None,
+            summary: None,
             installing: None,
             error: None,
             dismissed: None,
@@ -207,15 +228,20 @@ impl Setup {
     pub fn look(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.root.clone() else {
             self.need = None;
+            self.summary = None;
             return;
         };
         let host = crate::host::host(cx);
-        let task = cx.background_executor().spawn(async move { check(&*host, &root) });
+        let task = cx.background_executor().spawn(async move {
+            let need = check(&*host, &root);
+            (need, summary(&*host, &root, Some(&root)))
+        });
         self.looking = Some(cx.spawn(async move |this, cx| {
-            let need = task.await;
+            let (need, summary) = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.need != need {
+                if this.need != need || this.summary != summary {
                     this.need = need;
+                    this.summary = summary;
                     cx.notify();
                 }
             });

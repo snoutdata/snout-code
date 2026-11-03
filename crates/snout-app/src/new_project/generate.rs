@@ -662,6 +662,117 @@ pub fn download_boot(host: &dyn Host, base: &str, dir: &Path, b: &Basics, boot: 
     result
 }
 
+/// The version of `@playwright/test` a new Playwright project asks for.
+pub const PLAYWRIGHT_VERSION: &str = "^1.64.1";
+
+/// The npm package name for a project called `name`: lower case, dashes for the rest.
+pub fn npm_name(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.trim().to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() || c == '.' || c == '_' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches(['-', '.', '_']).to_owned();
+    if out.is_empty() { "e2e-tests".into() } else { out }
+}
+
+/// Why a Playwright project cannot go in `location`, if it cannot.
+pub fn playwright_problem(name: &str, location: &Path, base_url: &str, occupied: Option<bool>) -> Option<String> {
+    let b = Basics {
+        name: name.to_owned(),
+        group: "e2e".into(),
+        artifact: "e2e".into(),
+        package: "e2e".into(),
+        java: 21,
+        dsl: Dsl::Kotlin,
+    };
+    if let Some(p) = problem(&b, location, occupied) {
+        return Some(p);
+    }
+    let url = base_url.trim();
+    if !url.is_empty() && !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Some("The application's address starts with http:// or https://.".into());
+    }
+    None
+}
+
+/// A Playwright project in TypeScript: its config (the application's address from
+/// `BASE_URL`, else `base_url`; Chromium, Firefox and WebKit; traces, screenshots and videos
+/// kept for failures), a first test, `tsconfig.json` and `.gitignore`. Its packages are
+/// installed afterwards, from the bar the project opens with.
+pub fn write_playwright(host: &dyn Host, dir: &Path, name: &str, base_url: &str) -> anyhow::Result<()> {
+    host.create_dir_all(dir)?;
+    let url = if base_url.trim().is_empty() { "http://localhost:8080" } else { base_url.trim() };
+    let package = serde_json::json!({
+        "name": npm_name(name),
+        "private": true,
+        "scripts": {
+            "test": "playwright test",
+            "test:headed": "playwright test --headed",
+            "report": "playwright show-report"
+        },
+        "engines": { "node": ">=20" },
+        "devDependencies": { "@playwright/test": PLAYWRIGHT_VERSION, "@types/node": "^22.10.0" }
+    });
+    write(host, dir, "package.json", &(serde_json::to_string_pretty(&package)? + "\n"))?;
+    let config = format!(
+        "import {{ defineConfig, devices }} from '@playwright/test';\n\n\
+         // The application under test: BASE_URL when it is set, else this address.\n\
+         const baseURL = process.env.BASE_URL ?? '{url}';\n\n\
+         export default defineConfig({{\n  \
+         testDir: './tests',\n  \
+         fullyParallel: true,\n  \
+         forbidOnly: !!process.env.CI,\n  \
+         retries: process.env.CI ? 2 : 0,\n  \
+         reporter: [['html', {{ open: 'never' }}], ['list']],\n  \
+         use: {{\n    \
+         baseURL,\n    \
+         trace: 'retain-on-failure',\n    \
+         screenshot: 'only-on-failure',\n    \
+         video: 'retain-on-failure',\n  \
+         }},\n  \
+         projects: [\n    \
+         {{ name: 'chromium', use: {{ ...devices['Desktop Chrome'] }} }},\n    \
+         {{ name: 'firefox', use: {{ ...devices['Desktop Firefox'] }} }},\n    \
+         {{ name: 'webkit', use: {{ ...devices['Desktop Safari'] }} }},\n  \
+         ],\n\
+         }});\n"
+    );
+    write(host, dir, "playwright.config.ts", &config)?;
+    write(
+        host,
+        dir,
+        "tests/home.spec.ts",
+        "import { test, expect } from '@playwright/test';\n\n\
+         test('the home page loads', async ({ page }) => {\n  \
+         await page.goto('/');\n  \
+         await expect(page).toHaveTitle(/.+/);\n\
+         });\n",
+    )?;
+    let tsconfig = serde_json::json!({
+        "compilerOptions": {
+            "target": "ES2022",
+            "module": "ESNext",
+            "moduleResolution": "Bundler",
+            "strict": true,
+            "noEmit": true,
+            "skipLibCheck": true,
+            "types": ["node"]
+        },
+        "include": ["tests", "playwright.config.ts"]
+    });
+    write(host, dir, "tsconfig.json", &(serde_json::to_string_pretty(&tsconfig)? + "\n"))?;
+    write(
+        host,
+        dir,
+        ".gitignore",
+        "node_modules/\ntest-results/\nplaywright-report/\nblob-report/\nplaywright/.cache/\n.env\n",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -299,6 +299,9 @@ fn a_playwright_project_without_its_packages_offers_to_install_them(cx: &mut gpu
     let need = cx.update(|_, cx| setup.read(cx).need.clone());
     assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm }));
     assert!(cx.debug_bounds("playwright-bar").is_some() && cx.debug_bounds("playwright-install").is_some());
+    let summary = cx.update(|_, cx| setup.read(cx).summary.clone()).unwrap_or_default();
+    assert!(summary.starts_with("Playwright 1.64.1, not installed · npm · "), "{summary}");
+    assert!(cx.debug_bounds("project-model-note").is_some(), "the Project view says it");
 
     // Installed, with browsers of revisions no machine has: the browsers are next.
     write(&repo, "node_modules/@playwright/test/package.json", r#"{ "version": "1.64.1" }"#);
@@ -354,4 +357,96 @@ fn the_bar_installs_the_packages_in_the_build_window(cx: &mut gpui::TestAppConte
     assert!(next, "the packages are there now");
     assert!(repo.join("node_modules/@playwright/test/cli.js").is_file());
     let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_new_project_dialog_makes_a_playwright_project(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::playwright::setup::Need;
+    use crate::tests::{open, with_repo};
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-new-from");
+    let place = scratch_dir("pw-new-into");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let click = |cx: &mut gpui::VisualTestContext, id: &'static str| {
+        let at = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id} is drawn")).center();
+        cx.simulate_click(at, gpui::Modifiers::none());
+        cx.run_until_parked();
+    };
+    cx.dispatch_action(crate::menus::NewProject);
+    cx.run_until_parked();
+    click(cx, "new-project-kind-playwright");
+    assert!(cx.debug_bounds("new-project-groovy").is_none(), "no build tool to pick");
+    let set = |cx: &mut gpui::VisualTestContext, url: &str| {
+        let (url, place) = (url.to_owned(), place.display().to_string());
+        cx.update(|w, cx| {
+            let view = ws.read(cx).new_project.clone().unwrap();
+            let v = view.read(cx);
+            let (n, l, u) = (v.name.clone(), v.location.clone(), v.base_url.clone());
+            n.update(cx, |i, cx| i.set_value("Shop E2E", w, cx));
+            l.update(cx, |i, cx| i.set_value(place, w, cx));
+            u.update(cx, |i, cx| i.set_value(url, w, cx));
+        });
+        cx.run_until_parked();
+    };
+    set(cx, "staging.shop.test");
+    let problem = cx.update(|_, cx| ws.read(cx).new_project.as_ref().unwrap().read(cx).problem(cx));
+    assert!(problem.is_some_and(|p| p.contains("http")), "an address without its scheme");
+    set(cx, "https://staging.shop.test");
+    let problem = cx.update(|_, cx| ws.read(cx).new_project.as_ref().unwrap().read(cx).problem(cx));
+    assert_eq!(problem, None);
+    click(cx, "new-project-create");
+    let dir = place.join("Shop E2E");
+    let opened =
+        pump_until(cx, 30, |cx| cx.update(|_, cx| model.read(cx).project_root().as_deref() == Some(dir.as_path())));
+    assert!(opened, "the new project opens");
+    let package: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("package.json")).unwrap()).unwrap();
+    assert_eq!(package["name"], "shop-e2e");
+    assert!(package["devDependencies"]["@playwright/test"].is_string());
+    let config = std::fs::read_to_string(dir.join("playwright.config.ts")).unwrap();
+    assert!(config.contains("process.env.BASE_URL ?? 'https://staging.shop.test'"), "{config}");
+    assert!(dir.join("tests/home.spec.ts").is_file() && dir.join("tsconfig.json").is_file());
+    assert!(std::fs::read_to_string(dir.join(".gitignore")).unwrap().contains("playwright-report/"));
+    assert!(dir.join(".git").exists());
+    assert!(playwright::is_root(&*snout_host::local(), &dir));
+    // It opens offering to install its packages.
+    let setup = cx.update(|_, cx| ws.read(cx).pw_setup.clone());
+    let offered = pump_until(cx, 10, |cx| {
+        cx.update(|_, cx| matches!(setup.read(cx).need, Some(Need::Packages { manager: PackageManager::Npm })))
+    });
+    assert!(offered);
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(place);
+}
+
+/// The new project's files work with the real Playwright (network): run by hand with `--ignored`.
+#[test]
+#[ignore]
+fn a_new_playwright_project_lists_its_tests_in_every_browser() {
+    let host = snout_host::local();
+    let dir = scratch_dir("pw-new-real");
+    crate::new_project::generate::write_playwright(&*host, &dir, "shop-e2e", "https://example.com").unwrap();
+    let node = node::discover(&*host).into_iter().next().expect("Node");
+    let npm = crate::lang::typescript::npm_cli(&*host, &node).unwrap();
+    let path = crate::lang::typescript::path_with(&*host, &node);
+    let run = |args: &[&str]| {
+        let out =
+            std::process::Command::new(&node.bin).args(args).current_dir(&dir).env("PATH", &path).output().unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
+        )
+    };
+    let (ok, text) = run(&[npm.to_str().unwrap(), "install", "--no-audit", "--no-fund", "typescript@5"]);
+    assert!(ok, "{text}");
+    let (ok, text) = run(&["node_modules/@playwright/test/cli.js", "test", "--list"]);
+    assert!(ok, "{text}");
+    println!("{text}");
+    for project in ["[chromium]", "[firefox]", "[webkit]"] {
+        assert!(text.contains(project) && text.contains("the home page loads"), "{text}");
+    }
+    let (ok, text) = run(&["node_modules/typescript/bin/tsc", "-p", "."]);
+    assert!(ok, "the files type-check: {text}");
+    let _ = std::fs::remove_dir_all(dir);
 }
