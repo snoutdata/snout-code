@@ -244,6 +244,11 @@ fn a_dropped_connection_fails_calls_and_streams() {
     assert!(!p.client.is_alive());
     assert_eq!(p.client.call(&req(json!({"op": "echo"}))).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
     assert!(p.client.open_channel().is_err());
+    // The close callback runs on the reader thread, which may still be on its way to it.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while closed.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert_eq!(closed.load(Ordering::SeqCst), 1);
 }
 
