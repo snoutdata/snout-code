@@ -1814,7 +1814,8 @@ impl Workspace {
             m.reload = Some((stage(0), Some(0)));
             cx.notify();
         });
-        let started = std::time::Instant::now();
+        // On the executor's clock, as the timers below are (a test's stands still).
+        let started = cx.background_executor().now();
         // The tabs not looking now (one was already) count as done.
         let skipped = total - looks.len();
         cx.spawn(async move |_, cx| {
@@ -1828,7 +1829,8 @@ impl Workspace {
                     cx.notify();
                 });
             }
-            cx.background_executor().timer(SHOWN.saturating_sub(started.elapsed())).await;
+            let elapsed = cx.background_executor().now().saturating_duration_since(started);
+            cx.background_executor().timer(SHOWN.saturating_sub(elapsed)).await;
             let outcome = match changed {
                 0 => "Nothing changed on disk".to_owned(),
                 1 => "1 file changed on disk".to_owned(),
