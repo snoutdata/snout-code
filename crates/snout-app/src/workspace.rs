@@ -116,6 +116,8 @@ pub struct Workspace {
     pub processes_window: Entity<crate::processes::window::ProcessesWindow>,
     /// Runs, tests and the debugger, and their tool windows.
     pub runs: Entity<crate::run::Runs>,
+    /// What the open Playwright project still needs (its packages, its browsers).
+    pub pw_setup: Entity<crate::playwright::setup::Setup>,
     pub run_window: Entity<crate::run::windows::RunWindow>,
     pub debug_window: Entity<crate::run::windows::RunWindow>,
     pub build_window: Entity<crate::run::windows::RunWindow>,
@@ -288,6 +290,9 @@ impl Workspace {
         hub.update(cx, |h, _| h.paused = true);
         let runs = cx.new(|cx| crate::run::Runs::new(model.clone(), hub.clone(), cx));
         cx.set_global(crate::run::RunsHandle(runs.clone()));
+        let pw_setup = cx.new(|cx| crate::playwright::setup::Setup::new(model.clone(), runs.clone(), cx));
+        cx.set_global(crate::playwright::setup::SetupHandle(pw_setup.clone()));
+        cx.observe(&pw_setup, |_, _, cx| cx.notify()).detach();
         let marks = runs.read(cx).marks.clone();
         cx.set_global(crate::run::MarksHandle(marks));
         let processes = cx.new(|cx| crate::processes::Processes::new(model.clone(), hub.clone(), runs.clone(), cx));
@@ -498,6 +503,7 @@ impl Workspace {
             processes,
             processes_window,
             runs,
+            pw_setup,
             run_window,
             debug_window,
             build_window,
@@ -2305,6 +2311,7 @@ impl Render for Workspace {
                 .flex_col()
                 .children(self.jdk_bar(cx))
                 .children(self.node_bar(cx))
+                .children(self.playwright_bar(cx))
                 .children(self.gradle_bar(cx))
                 .child(self.dock_area(cx))
                 .into_any_element()

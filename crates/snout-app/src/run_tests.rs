@@ -940,3 +940,62 @@ fn opening_another_project_drops_the_engines_outside_it(cx: &mut TestAppContext)
     let _ = std::fs::remove_dir_all(a);
     let _ = std::fs::remove_dir_all(b);
 }
+
+#[gpui::test]
+fn a_process_run_streams_its_output_and_ends_with_its_exit_code(cx: &mut TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::run::process::ProcessLaunch;
+    if cfg!(windows) {
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = demo_repo("run-process");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = runs_of(&ws, cx);
+    let launch = |title: &str, script: &str| {
+        Launch::Process(ProcessLaunch {
+            title: title.into(),
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            cwd: repo.clone(),
+            env: vec![("SNOUT_GREETING".into(), "hello there".into())],
+            place: Place::Build,
+        })
+    };
+    let id = cx
+        .update(|_, cx| {
+            runs.update(cx, |r, cx| r.start(launch("Greet", "echo $SNOUT_GREETING; pwd; echo oops >&2; exit 3"), cx))
+        })
+        .expect("a session");
+    let ended = pump_until(cx, 20, |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| !s.running())));
+    assert!(ended, "the process ends");
+    cx.update(|_, cx| {
+        let s = runs.read(cx).session(id).unwrap();
+        let text = s.console_text();
+        assert!(text.contains("sh -c "), "the command line first: {text}");
+        assert!(text.contains("hello there"), "stdout, with the environment set: {text}");
+        assert!(
+            text.contains(&format!("{}", repo.canonicalize().unwrap().display()))
+                || text.contains(&format!("{}", repo.display())),
+            "its folder: {text}"
+        );
+        assert!(s.lines.iter().any(|l| l.stream == crate::run::Stream::Err && l.text() == "oops"), "stderr");
+        let e = s.ended.as_ref().unwrap();
+        assert_eq!((e.outcome, e.exit_code), (Outcome::Failed, Some(3)));
+        assert!(text.contains("exit code 3"), "{text}");
+        assert_eq!(s.place(), Place::Build);
+    });
+
+    // Stop ends a long one, as a cancel.
+    let id = cx.update(|_, cx| runs.update(cx, |r, cx| r.start(launch("Wait", "echo waiting; sleep 30"), cx))).unwrap();
+    let printed = pump_until(cx, 20, |cx| {
+        cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| s.console_text().contains("waiting")))
+    });
+    assert!(printed);
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+    let stopped = pump_until(cx, 20, |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| !s.running())));
+    assert!(stopped, "Stop ends it");
+    let outcome = cx.update(|_, cx| runs.read(cx).session(id).unwrap().ended.as_ref().unwrap().outcome);
+    assert_eq!(outcome, Outcome::Cancelled);
+    let _ = std::fs::remove_dir_all(repo);
+}

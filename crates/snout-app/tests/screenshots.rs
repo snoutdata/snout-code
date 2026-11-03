@@ -165,6 +165,7 @@ mod shots {
         /// The bar offering a JDK the project needs.
         JdkBar,
         NodeBar,
+        PlaywrightBar,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -1462,6 +1463,19 @@ sleep 30
                             resync: false,
                             progress: None,
                             error: None,
+                        });
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::PlaywrightBar) => {
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let setup = ws.read(cx).pw_setup.clone();
+                    setup.update(cx, |s, cx| {
+                        s.need = Some(snout_app::playwright::setup::Need::Browsers {
+                            version: "1.64.1".into(),
+                            missing: vec!["Chromium".into(), "Firefox".into(), "WebKit".into()],
                         });
                         cx.notify();
                     });
@@ -2937,6 +2951,7 @@ sleep 30
             shot(&format!("ui-remote-connecting-{mode}"), theme, Activity::Project, Some(Select::Connecting));
             shot(&format!("ui-jdk-bar-{mode}"), theme, Activity::Project, Some(Select::JdkBar));
             shot(&format!("ui-node-bar-{mode}"), theme, Activity::Project, Some(Select::NodeBar));
+            shot(&format!("ui-playwright-bar-{mode}"), theme, Activity::Project, Some(Select::PlaywrightBar));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(

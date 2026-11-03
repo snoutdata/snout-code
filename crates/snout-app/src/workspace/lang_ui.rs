@@ -577,6 +577,78 @@ impl Workspace {
         )
     }
 
+    /// The bar saying what the Playwright project still needs before its tests run (its
+    /// packages, its browsers), offering to install it.
+    pub(super) fn playwright_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::playwright::setup::Need;
+        let setup = self.pw_setup.read(cx);
+        let need = setup.shown()?.clone();
+        let (installing, error) = (setup.installing.is_some(), setup.error.clone());
+        let p = palette(cx);
+        let (text, button) = match (&need, installing) {
+            (Need::Packages { .. }, true) => {
+                ("Installing the project's packages… The Build window shows how it goes.".to_owned(), None)
+            }
+            (Need::Browsers { .. }, true) => {
+                ("Installing Playwright's browsers… The Build window shows how it goes.".to_owned(), None)
+            }
+            (Need::Packages { manager }, false) => (
+                "This Playwright project's packages are not installed, so its tests cannot run yet.".to_owned(),
+                Some(format!(
+                    "Install packages ({} {})",
+                    manager.name(),
+                    if *manager == crate::lang::node::PackageManager::Npm { "ci" } else { "install" }
+                )),
+            ),
+            (Need::Browsers { version, missing }, false) => (
+                format!("Playwright {version} needs browsers that are not downloaded: {}.", missing.join(", ")),
+                Some("Install browsers".to_owned()),
+            ),
+        };
+        let text = match error {
+            Some(e) if !installing => format!("{text} {e}"),
+            _ => text,
+        };
+        let (install, dismiss) = (self.pw_setup.clone(), self.pw_setup.clone());
+        Some(
+            div()
+                .id("playwright-bar")
+                .debug_selector(|| "playwright-bar".into())
+                .flex_none()
+                .mx(px(6.))
+                .mt(px(6.))
+                .px(px(10.))
+                .py(px(5.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(8.))
+                .bg(p.wash(p.accent))
+                .border_1()
+                .border_color(mix(p.accent, 0.4, p.panel))
+                .text_size(px(12.5))
+                .child(crate::art::drawing_on(snout_core::art::spots::no_tests(), 48., 32., p.wash(p.accent)))
+                .child(div().flex_1().min_w_0().child(text))
+                .when(installing, |d| {
+                    use gpui_component::Sizable as _;
+                    d.child(gpui_component::spinner::Spinner::new().xsmall())
+                })
+                .when_some(button, |d, label| {
+                    d.child(
+                        look::small_button("playwright-install", crate::components::IconName::Download, &label, &p)
+                            .debug_selector(|| "playwright-install".into())
+                            .on_click(move |_, _, cx| install.update(cx, |s, cx| s.install(cx))),
+                    )
+                    .child(
+                        look::small_button("playwright-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
+                            .debug_selector(|| "playwright-dismiss".into())
+                            .on_click(move |_, _, cx| dismiss.update(cx, |s, cx| s.dismiss(cx))),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
     /// The bar saying the build files (Gradle scripts, POMs) changed since the model was read,
     /// offering to sync.
     pub(super) fn gradle_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

@@ -14,6 +14,7 @@ pub mod debug;
 pub mod debug_dialogs;
 pub mod gradle_window;
 pub mod maven_window;
+pub mod process;
 pub mod test_tree;
 pub mod windows;
 
@@ -63,6 +64,8 @@ pub enum Launch {
         module: String,
         goals: String,
     },
+    /// A program SnoutCode starts itself, without the Java engine (npm, Playwright).
+    Process(process::ProcessLaunch),
 }
 
 impl Launch {
@@ -77,6 +80,7 @@ impl Launch {
             Launch::Tests { label, .. } => label.clone(),
             Launch::Task { task, .. } => task.clone(),
             Launch::Maven { module, goals, .. } => format!("{module} [{goals}]"),
+            Launch::Process(p) => p.title.clone(),
         }
     }
 
@@ -88,6 +92,7 @@ impl Launch {
     pub fn place(&self) -> Place {
         match self {
             Launch::Task { .. } | Launch::Maven { .. } => Place::Build,
+            Launch::Process(p) => p.place,
             l if l.debug() => Place::Debug,
             _ => Place::Run,
         }
@@ -182,6 +187,8 @@ pub struct Session {
     pub pid: Option<u32>,
     /// The engine it was sent to: should that one stop, the run ends with it.
     pub engine: Option<u32>,
+    /// The process SnoutCode started itself, while it runs (a [`Launch::Process`]).
+    pub process: Option<process::Handle>,
 }
 
 impl Session {
@@ -535,6 +542,8 @@ pub enum RunsEvent {
     EditConfigurations,
     /// Show the Problems tool window.
     ShowProblems,
+    /// Session `id` ended (a process run).
+    Ended(u64),
 }
 
 pub struct Runs {
@@ -1008,7 +1017,11 @@ impl Runs {
     /// Before the engine is ready the session waits for it; when nothing can run, the
     /// session says why. Either way the window shows it.
     pub fn start(&mut self, launch: Launch, cx: &mut Context<Self>) -> Option<u64> {
-        let state = self.engine_state(launch.needs_classes(), cx);
+        let state = if matches!(launch, Launch::Process(_)) {
+            EngineState::Ready
+        } else {
+            self.engine_state(launch.needs_classes(), cx)
+        };
         if state == EngineState::Waiting("starting".into())
             && let Some(project) = self.model.read(cx).project_root()
         {
@@ -1038,6 +1051,7 @@ impl Runs {
             waiting: false,
             pid: None,
             engine: None,
+            process: None,
         };
         let what = match &launch {
             Launch::Config { config, .. } => match (config.kind, &config.main_class, &config.task) {
@@ -1048,6 +1062,7 @@ impl Runs {
             Launch::Tests { label, .. } => format!("Testing {label}"),
             Launch::Task { task, .. } => format!("Running {task}"),
             Launch::Maven { goals, module, .. } => format!("Running mvn {goals} in {module}"),
+            Launch::Process(p) => p.command_line(),
         };
         session.lines.push(ConsoleLine::system(what));
         if matches!(&launch, Launch::Tests { .. })
@@ -1090,6 +1105,12 @@ impl Runs {
         let engine = self.engine(cx).map(|(_, pid)| pid);
         let Some(s) = self.session_mut(id) else { return };
         s.waiting = false;
+        if let Launch::Process(p) = &s.launch {
+            let p = p.clone();
+            s.push(Stream::System, &format!("Working directory: {}", p.cwd.display()));
+            self.spawn_process(id, p, cx);
+            return;
+        }
         s.engine = engine;
         let (method, params) = match &s.launch {
             Launch::Config { config, debug } => {
@@ -1123,6 +1144,7 @@ impl Runs {
             Launch::Maven { build, project, goals, .. } => {
                 ("snout/runTask", json!({ "build": build, "project": project, "task": goals }))
             }
+            Launch::Process(_) => unreachable!("started above"),
         };
         let mut params = params;
         if method == "snout/runTask" || method == "snout/runTests" || method == "snout/run" {
@@ -1205,6 +1227,7 @@ impl Runs {
             waiting: false,
             pid: None,
             engine: None,
+            process: None,
         };
         s.lines.push(ConsoleLine::system(format!("Running {}", launch.title())));
         if matches!(launch, Launch::Tests { .. }) {
@@ -1288,6 +1311,11 @@ impl Runs {
             d.disconnect();
         }
         s.waiting = false;
+        if let Some(p) = &s.process {
+            p.stop();
+            cx.notify();
+            return;
+        }
         match s.run_id.clone() {
             Some(run_id) => {
                 let call = self.request("snout/cancelTask", json!({ "runId": run_id }), cx);

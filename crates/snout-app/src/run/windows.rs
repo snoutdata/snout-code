@@ -1101,6 +1101,7 @@ impl SessionView {
             waiting: s.waiting,
             pid: s.pid,
             engine: s.engine,
+            process: s.process.clone(),
         })
     }
 }

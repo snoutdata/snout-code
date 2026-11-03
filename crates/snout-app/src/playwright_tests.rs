@@ -262,3 +262,96 @@ fn a_project_asking_for_a_node_this_machine_lacks_offers_to_download_it(cx: &mut
     assert!(cx.debug_bounds("node-bar").is_none(), "Not now hides it");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[test]
+fn browsers_count_as_installed_by_their_revision_folders() {
+    let host = snout_host::local();
+    let dir = scratch_dir("pw-browsers");
+    let manifest = serde_json::json!({ "browsers": [
+        { "name": "chromium", "revision": "1248", "installByDefault": true },
+        { "name": "chromium-headless-shell", "revision": "1248", "installByDefault": true },
+        { "name": "webkit", "revision": "2370", "installByDefault": true, "revisionOverrides": { "mac14": "2251" } },
+        { "name": "android", "revision": "1001", "installByDefault": false }
+    ]});
+    let missing = |cx: &Path| crate::playwright::setup::missing_browsers(&*host, &manifest, cx);
+    assert_eq!(missing(&dir), ["Chromium", "Chromium Headless Shell", "WebKit"]);
+    std::fs::create_dir_all(dir.join("chromium-1248")).unwrap();
+    std::fs::create_dir_all(dir.join("chromium_headless_shell-1248")).unwrap();
+    std::fs::create_dir_all(dir.join("webkit-2251")).unwrap();
+    std::fs::create_dir_all(dir.join("chromium-1100")).unwrap();
+    assert!(missing(&dir).is_empty(), "an override's revision counts; an older one is no harm");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn a_playwright_project_without_its_packages_offers_to_install_them(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::playwright::setup::Need;
+    use crate::tests::{open, with_repo};
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-setup");
+    write(&repo, "package.json", r#"{ "devDependencies": { "@playwright/test": "1.64.1" } }"#);
+    write(&repo, "playwright.config.ts", "export default {};\n");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let setup = cx.update(|_, cx| ws.read(cx).pw_setup.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).need.is_some()));
+    assert!(found, "the project is looked at");
+    let need = cx.update(|_, cx| setup.read(cx).need.clone());
+    assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm }));
+    assert!(cx.debug_bounds("playwright-bar").is_some() && cx.debug_bounds("playwright-install").is_some());
+
+    // Installed, with browsers of revisions no machine has: the browsers are next.
+    write(&repo, "node_modules/@playwright/test/package.json", r#"{ "version": "1.64.1" }"#);
+    write(&repo, "node_modules/playwright-core/package.json", r#"{ "version": "1.64.1" }"#);
+    write(
+        &repo,
+        "node_modules/playwright-core/browsers.json",
+        r#"{ "browsers": [{ "name": "firefox", "revision": "999999", "installByDefault": true }] }"#,
+    );
+    cx.update(|_, cx| setup.update(cx, |s, cx| s.look(cx)));
+    let next = pump_until(cx, 10, |cx| cx.update(|_, cx| matches!(setup.read(cx).need, Some(Need::Browsers { .. }))));
+    assert!(next, "{:?}", cx.update(|_, cx| setup.read(cx).need.clone()));
+    let need = cx.update(|_, cx| setup.read(cx).need.clone());
+    assert_eq!(need, Some(Need::Browsers { version: "1.64.1".into(), missing: vec!["Firefox".into()] }));
+    cx.update(|_, cx| setup.update(cx, |s, cx| s.dismiss(cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("playwright-bar").is_none(), "Not now hides it");
+
+    // A folder that is not a Playwright project needs nothing.
+    std::fs::remove_file(repo.join("package.json")).unwrap();
+    std::fs::remove_file(repo.join("playwright.config.ts")).unwrap();
+    cx.update(|_, cx| setup.update(cx, |s, cx| s.look(cx)));
+    let none = pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).need.is_none()));
+    assert!(none);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Installs @playwright/test from npm through the bar (network): run by hand with `--ignored`.
+#[gpui::test]
+#[ignore]
+fn the_bar_installs_the_packages_in_the_build_window(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::playwright::setup::Need;
+    use crate::tests::{open, with_repo};
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-setup-install");
+    write(
+        &repo,
+        "package.json",
+        r#"{ "name": "e2e", "private": true, "devDependencies": { "@playwright/test": "1.64.1" } }"#,
+    );
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let (setup, runs) = cx.update(|_, cx| (ws.read(cx).pw_setup.clone(), ws.read(cx).runs.clone()));
+    assert!(pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).need.is_some())));
+    cx.update(|_, cx| setup.update(cx, |s, cx| s.install(cx)));
+    assert!(pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).installing.is_some())), "it starts");
+    let id = cx.update(|_, cx| setup.read(cx).installing.unwrap());
+    let done = pump_until(cx, 240, |cx| cx.update(|_, cx| setup.read(cx).installing.is_none()));
+    let text = cx.update(|_, cx| runs.read(cx).session(id).map(|s| s.console_text()).unwrap_or_default());
+    assert!(done, "{text}");
+    println!("{text}");
+    let next = pump_until(cx, 10, |cx| cx.update(|_, cx| !matches!(setup.read(cx).need, Some(Need::Packages { .. }))));
+    assert!(next, "the packages are there now");
+    assert!(repo.join("node_modules/@playwright/test/cli.js").is_file());
+    let _ = std::fs::remove_dir_all(repo);
+}

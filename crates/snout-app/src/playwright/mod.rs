@@ -9,6 +9,8 @@ use snout_host::Host;
 
 use crate::lang::node::PackageManager;
 
+pub mod setup;
+
 /// The names Playwright looks for its configuration under, in its order.
 pub const CONFIG_NAMES: [&str; 6] = [
     "playwright.config.ts",
