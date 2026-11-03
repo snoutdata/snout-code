@@ -27,6 +27,7 @@ pub mod model;
 pub mod new_project;
 pub mod panels;
 pub mod platform;
+pub mod playwright;
 pub mod processes;
 pub mod project_model;
 pub mod project_settings;
@@ -62,6 +63,8 @@ mod java_tools_tests;
 mod lang_tests;
 #[cfg(test)]
 mod maven_tests;
+#[cfg(test)]
+mod playwright_tests;
 #[cfg(test)]
 mod project_settings_tests;
 #[cfg(test)]

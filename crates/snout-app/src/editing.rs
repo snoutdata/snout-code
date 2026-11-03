@@ -194,7 +194,7 @@ pub fn matching_bracket(text: &str, caret: usize, limit: usize) -> Option<(usize
 /// How a language writes a line comment.
 pub fn comment_prefix(language: &str) -> Option<&'static str> {
     match language {
-        "java" | "kotlin" | "groovy" | "rust" | "javascript" | "typescript" | "go" | "c" | "cpp" | "scala" => {
+        "java" | "kotlin" | "groovy" | "rust" | "javascript" | "typescript" | "tsx" | "go" | "c" | "cpp" | "scala" => {
             Some("//")
         }
         "yaml" | "properties" | "python" | "bash" | "toml" | "ruby" => Some("#"),

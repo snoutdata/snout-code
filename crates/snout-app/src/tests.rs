@@ -863,8 +863,13 @@ fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext
         ("application.yml", "server:\n  port: 8080\n", "yaml"),
         ("gradle.properties", "org.gradle.jvmargs=-Xmx2g\n", "properties"),
         ("pom.xml", "<project>\n  <artifactId>demo</artifactId>\n</project>\n", "html"),
+        ("tests/login.spec.ts", "test('signs in', async ({ page }) => {});\n", "typescript"),
+        ("src/App.tsx", "export const App = () => <main />;\n", "tsx"),
+        ("playwright.config.mjs", "export default {};\n", "javascript"),
+        ("package.json", "{ \"name\": \"e2e\" }\n", "json"),
     ];
     for (name, text, _) in files {
+        std::fs::create_dir_all(repo.join(name).parent().unwrap()).unwrap();
         std::fs::write(repo.join(name), text).unwrap();
     }
     let (model, ws, cx) = open(cx, with_repo(&repo));

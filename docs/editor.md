@@ -8,7 +8,7 @@ How to open, edit, find and move around files in SnoutCode.
 - Double click the preview tab, or edit the file, to keep it open.
 - Press ⌘P (File ▸ Go to File…) and type part of the file's path. See [Go to File](#go-to-file).
 
-SnoutCode highlights Java, Kotlin, Groovy (Gradle scripts and `Jenkinsfile`), YAML and `.properties` files. Other files open as plain text.
+SnoutCode highlights Java, Kotlin, Groovy (Gradle scripts and `Jenkinsfile`), TypeScript (`.ts`, `.tsx`), JavaScript (`.js`, `.mjs`, `.cjs`), JSON, YAML, XML and `.properties` files. Other files open as plain text.
 
 Java files of a Gradle build also get the language features described in [Java](java.md).
 
@@ -60,7 +60,7 @@ The indentation of a file is read from its own text. A file that shows none gets
 | Indent, Outdent | ⌘], ⌘[ | |
 | Add a caret above, below | ⌥⌘↑, ⌥⌘↓ | |
 
-- **Toggle Comment** comments the selected lines out with the language's line comment (`//` in Java, Kotlin and Groovy, `#` in YAML and properties files), or back in when they all are.
+- **Toggle Comment** comments the selected lines out with the language's line comment (`//` in Java, Kotlin, Groovy, TypeScript and JavaScript, `#` in YAML and properties files), or back in when they all are.
 - **Duplicate Line** copies the selection after itself, or the caret's line below it.
 - **Move Line Up** and **Move Line Down** move the selected lines, and the selection with them.
 

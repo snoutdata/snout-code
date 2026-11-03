@@ -191,6 +191,10 @@ pub fn language_for(path: &Path) -> &'static str {
         "groovy" | "gradle" | "gvy" => "groovy",
         "yml" | "yaml" => "yaml",
         "properties" => "properties",
+        "ts" | "mts" | "cts" => "typescript",
+        "tsx" => "tsx",
+        "js" | "mjs" | "cjs" | "jsx" => "javascript",
+        "json" | "jsonc" => "json",
         // A POM and other XML: the HTML grammar reads its tags, attributes and comments.
         "xml" | "pom" | "xsd" | "html" | "htm" => "html",
         // A class file of a library, shown as the source the server gives.
