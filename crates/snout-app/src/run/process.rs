@@ -72,15 +72,27 @@ impl Handle {
 
 type Sender = futures::channel::mpsc::UnboundedSender<Event>;
 
+/// Counts a reader as at its end when it goes, however it goes.
+struct Done(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for Done {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 enum Event {
     Line(Stream, String),
     Exit(Option<i32>),
     Failed(String),
 }
 
-/// Read `from` a line at a time into `tx` as `stream`, until it ends.
-fn pump(from: Box<dyn Read + Send>, stream: Stream, tx: Sender) {
+/// Read `from` a line at a time into `tx` as `stream`, until it ends; `open` counts the
+/// readers not at their end yet.
+fn pump(from: Box<dyn Read + Send>, stream: Stream, tx: Sender, open: Arc<std::sync::atomic::AtomicUsize>) {
+    open.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     std::thread::spawn(move || {
+        let _done = Done(open);
         let mut reader = BufReader::new(from);
         let mut buf = Vec::new();
         loop {
@@ -114,11 +126,12 @@ impl Runs {
         match host.spawn(&cmd) {
             Ok(mut child) => {
                 let pid = child.pid();
+                let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
                 if let Some(out) = child.take_stdout() {
-                    pump(out, Stream::Out, tx.clone());
+                    pump(out, Stream::Out, tx.clone(), open.clone());
                 }
                 if let Some(err) = child.take_stderr() {
-                    pump(err, Stream::Err, tx.clone());
+                    pump(err, Stream::Err, tx.clone(), open.clone());
                 }
                 let handle = Handle { child: Arc::new(Mutex::new(child)), pid, stopping: Default::default() };
                 let waiter = handle.child.clone();
@@ -127,8 +140,15 @@ impl Runs {
                         let status = waiter.lock().map(|mut c| c.try_wait());
                         match status {
                             Ok(Ok(Some(status))) => {
-                                // What it printed last comes before its end.
-                                std::thread::sleep(Duration::from_millis(50));
+                                // What it printed last comes before its end: the readers reach
+                                // the end of its output first (unless something it started
+                                // keeps the pipes open: then not for long).
+                                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                                while open.load(std::sync::atomic::Ordering::SeqCst) > 0
+                                    && std::time::Instant::now() < deadline
+                                {
+                                    std::thread::sleep(Duration::from_millis(10));
+                                }
                                 let _ = tx.unbounded_send(Event::Exit(status.code));
                                 return;
                             }
