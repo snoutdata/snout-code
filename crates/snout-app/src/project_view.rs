@@ -509,8 +509,8 @@ impl Render for ProjectView {
         let rows = self.rows(cx);
         let home = crate::host::host(cx).info().home.clone();
         let m = self.model.read(cx);
-        let marks = match m.repo_root() {
-            Some(repo) => git_marks(&repo, &m.status.files),
+        let marks = match m.project_git() {
+            Some((repo, status)) => git_marks(&repo, &status.files),
             None => HashMap::new(),
         };
         let active = self.files.read(cx).active.clone();
@@ -923,6 +923,12 @@ impl ProjectView {
                     PopupMenuItem::new("Copy path")
                         .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                         .on_click(send(Action::Copy(path.display().to_string()))),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("Reload from Disk")
+                        .icon(crate::components::menu_icon(crate::components::IconName::RefreshCw))
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ReloadFromDisk), cx)),
                 )
             })
             .into_any_element()

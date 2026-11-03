@@ -347,6 +347,8 @@ pub struct EditorPanel {
     pub nav: navigation::NavState,
     /// An agent changed the file while the editor did not follow: a dot on the tab.
     pub touched: bool,
+    /// Pinned to the front of the tab bar: the bulk closes (others, left, right) pass it by.
+    pub pinned: bool,
     /// The agent behind the changes waiting for review here, for their colour.
     pub claude_agent: Option<crate::agents::Agent>,
     /// The agent writing here (or that just stopped): its caret and flag.
@@ -559,6 +561,7 @@ impl EditorPanel {
             review: None,
             queue: VecDeque::new(),
             touched: false,
+            pinned: false,
             agent_lines: None,
             agent_edits: Arc::new(Vec::new()),
             agent_painted: Default::default(),
@@ -846,6 +849,22 @@ impl EditorPanel {
         self.pending_caret = Some((at, false));
     }
 
+    /// Reload from Disk: look at the file now, whatever its time and length say. A tab
+    /// without changes takes the text on disk; one with changes shows the bar that asks.
+    /// The task ends with whether the file had changed; `None` when a look is on its way
+    /// already (or there is nothing to look at).
+    pub fn reload_from_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<gpui::Task<bool>> {
+        if self.checking {
+            return None;
+        }
+        let known = self.disk.take();
+        let look = self.look_at_disk(window, cx);
+        if look.is_none() {
+            self.disk = known;
+        }
+        look
+    }
+
     /// Note the file's modification time and length as they are now (asked of the host off
     /// the UI thread; the disk check waits for it).
     pub(crate) fn take_disk_stamp(&mut self, cx: &mut Context<Self>) {
@@ -885,15 +904,24 @@ impl EditorPanel {
     /// If the file changed on disk: take the new text when this tab has no changes, or
     /// say so when it has. The host is asked off the UI thread.
     pub fn check_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(look) = self.look_at_disk(window, cx) {
+            look.detach();
+        }
+    }
+
+    /// [`Self::check_disk`], as a task that ends with whether the file had changed (the tab
+    /// took the new text, or shows the bar that asks). `None` when there is nothing to look
+    /// at now.
+    fn look_at_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<gpui::Task<bool>> {
         if self.class_file.is_some() || self.loading || self.checking || self.conflict || self.live.is_some() {
-            return;
+            return None;
         }
         // Claude is changing the file: its report shows the change (for a while at most).
         if self.claude_hold.is_some_and(|t| t.elapsed() < claude::HOLD) {
-            return;
+            return None;
         }
         if self.path.as_os_str().is_empty() {
-            return;
+            return None;
         }
         self.checking = true;
         let (host, path, known) = (crate::host::host(cx), self.path.clone(), self.disk);
@@ -903,22 +931,22 @@ impl EditorPanel {
             (now, text)
         });
         let path = self.path.clone();
-        cx.spawn_in(window, async move |this, cx| {
+        Some(cx.spawn_in(window, async move |this, cx| {
             let (now, text) = look.await;
-            let _ = this.update_in(cx, |this, window, cx| {
+            this.update_in(cx, |this, window, cx| {
                 this.checking = false;
                 if this.path != path || this.loading || this.conflict || now.is_none() || now == this.disk {
-                    return;
+                    return false;
                 }
                 this.disk = now;
-                let Some(text) = text else { return };
+                let Some(text) = text else { return false };
                 if text == this.saved {
-                    return;
+                    return false;
                 }
                 if this.dirty {
                     this.conflict = true;
                     cx.notify();
-                    return;
+                    return true;
                 }
                 // Only what changed goes into the tab: setting the whole text afresh would drop
                 // its highlighting and the language server's colours and marks, and repaint
@@ -937,9 +965,10 @@ impl EditorPanel {
                 }
                 this.disk = now;
                 cx.emit(EditorEvent::Reloaded(before));
-            });
-        })
-        .detach();
+                true
+            })
+            .unwrap_or(false)
+        }))
     }
 
     /// Frame the bracket at the caret and its match, once per caret move or edit.
@@ -1185,6 +1214,15 @@ impl EditorPanel {
         }
     }
 
+    /// Pin the tab to the front of the bar, or unpin it. A pinned tab is kept, never a preview.
+    pub fn set_pinned(&mut self, pinned: bool, cx: &mut Context<Self>) {
+        self.pinned = pinned;
+        if pinned {
+            self.preview = false;
+        }
+        cx.notify();
+    }
+
     /// Put the caret on `line` (from 0), at `column`, and give the editor the keyboard.
     /// Put the caret on `line` and `column` (from 0) and the view's top `scroll` pixels down,
     /// as a saved session had them, without taking the keyboard.
@@ -1412,6 +1450,9 @@ impl gpui_component::dock::BasePanel for EditorPanel {
         info["column"] = at.character.into();
         let scroll = self.pending_scroll.unwrap_or(f32::from(-s.scroll_offset().y));
         info["scroll"] = scroll.max(0.).round().into();
+        if self.pinned {
+            info["pinned"] = true.into();
+        }
         state.info = PanelInfo::panel(info);
         state
     }
@@ -1457,6 +1498,14 @@ pub fn saved_view(state: &PanelState) -> Option<(u32, u32, f32)> {
             Some((n("line")?, n("column").unwrap_or(0), scroll.max(0.)))
         }
         _ => None,
+    }
+}
+
+/// Whether an editor tab in a saved layout was pinned.
+pub fn saved_pinned(state: &PanelState) -> bool {
+    match &state.info {
+        PanelInfo::Panel(v) => v.get("pinned").and_then(|p| p.as_bool()).unwrap_or(false),
+        _ => false,
     }
 }
 

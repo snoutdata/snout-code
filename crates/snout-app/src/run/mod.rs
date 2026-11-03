@@ -207,6 +207,30 @@ impl Session {
         }
     }
 
+    /// Clear All: the console empties; what the program prints next still shows.
+    pub fn clear_console(&mut self) {
+        self.dropped += self.lines.len();
+        self.lines.clear();
+    }
+
+    /// The console as text, a line each.
+    pub fn console_text(&self) -> String {
+        let mut text = String::new();
+        for line in &self.lines {
+            text += &line.text();
+            text.push('\n');
+        }
+        text
+    }
+
+    /// The name Save Output to File offers: the session's title, as a file name.
+    pub fn log_name(&self) -> String {
+        let name: String =
+            self.title.chars().map(|c| if c.is_alphanumeric() || "-_. ".contains(c) { c } else { '_' }).collect();
+        let name = name.trim();
+        format!("{}.log", if name.is_empty() { "output" } else { name })
+    }
+
     /// The console's lines as text.
     pub fn clone_lines(&self) -> Vec<String> {
         self.lines.iter().map(ConsoleLine::text).collect()
@@ -859,6 +883,46 @@ impl Runs {
 
     pub fn session_mut(&mut self, id: u64) -> Option<&mut Session> {
         self.sessions.iter_mut().find(|s| s.id == id)
+    }
+
+    /// Clear All in a console's context menu.
+    pub fn clear_console(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some(s) = self.session_mut(id) {
+            s.clear_console();
+            cx.notify();
+        }
+    }
+
+    /// Save Output to File in a console's context menu: the console as it is now, to a file
+    /// on this computer that the user names.
+    pub fn save_console(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(s) = self.session(id) else { return };
+        let (text, name) = (s.console_text(), s.log_name());
+        // The project's folder when it is on this computer, else the home folder.
+        let dir = self
+            .project_root
+            .clone()
+            .filter(|p| !crate::remote::is_remote(cx) && p.is_dir())
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .unwrap_or_default();
+        let rx = cx.prompt_for_new_path(&dir, Some(&name));
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(path))) = rx.await else { return };
+            let written = cx.background_executor().spawn({
+                let path = path.clone();
+                async move { std::fs::write(&path, text) }
+            });
+            if let Err(e) = written.await {
+                let _ = this.update(cx, |r, cx| {
+                    if let Some(s) = r.session_mut(id) {
+                        s.lines
+                            .push(ConsoleLine::system(format!("Could not save the output to {}: {e}", path.display())));
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
     }
 
     /// The session `place`'s window shows.

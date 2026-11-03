@@ -103,6 +103,71 @@ fn sessions_take_the_engines_notifications(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(repo);
 }
 
+/// A right click in a console offers Clear All, Copy All and Save Output to File.
+#[gpui::test]
+fn the_console_clears_copies_and_saves_from_its_context_menu(cx: &mut TestAppContext) {
+    let repo = demo_repo("run-console-menu");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = runs_of(&ws, cx);
+    let launch = Launch::Task { build: None, task: "build/all".into() };
+    let id = cx.update(|_, cx| runs.update(cx, |r, cx| r.adopt(launch, "run-1", cx)));
+    for line in ["first line", "\u{1b}[31msecond\u{1b}[0m line"] {
+        cx.update(|_, cx| {
+            runs.update(cx, |r, cx| {
+                r.engine_notification(
+                    "snout/taskOutput",
+                    json!({ "runId": "run-1", "stream": "stdout", "line": line }),
+                    cx,
+                )
+            })
+        });
+    }
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_tool(crate::workspace::Tool::Build, w, cx)));
+    cx.run_until_parked();
+    let text = cx.update(|_, cx| runs.read(cx).session(id).unwrap().console_text());
+    assert!(text.ends_with("first line\nsecond line\n"), "{text:?}");
+    assert_eq!(cx.update(|_, cx| runs.read(cx).session(id).unwrap().log_name()), "build_all.log");
+
+    let right_click = |pick: &str, cx: &mut VisualTestContext| {
+        let at = cx.debug_bounds("run-console").expect("the console is drawn").center();
+        cx.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::none());
+        cx.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.simulate_keystrokes(pick);
+        cx.run_until_parked();
+    };
+
+    // Copy All (the second item).
+    right_click("down down enter", cx);
+    let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default();
+    assert_eq!(copied, text);
+
+    // Save Output to File (the third), to the file named in the dialog.
+    let saved = scratch_dir("run-console-menu-log").join("out.log");
+    std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+    right_click("down down down enter", cx);
+    assert!(cx.did_prompt_for_new_path(), "Save asks where");
+    cx.simulate_new_path_selection(|_| Some(saved.clone()));
+    cx.run_until_parked();
+    assert_eq!(std::fs::read_to_string(&saved).unwrap(), text);
+
+    // Clear All (the first): the console empties, and goes on with what comes next.
+    right_click("down enter", cx);
+    cx.update(|_, cx| assert!(runs.read(cx).session(id).unwrap().lines.is_empty()));
+    cx.update(|_, cx| {
+        runs.update(cx, |r, cx| {
+            r.engine_notification(
+                "snout/taskOutput",
+                json!({ "runId": "run-1", "stream": "stdout", "line": "after" }),
+                cx,
+            )
+        })
+    });
+    cx.update(|_, cx| assert_eq!(runs.read(cx).session(id).unwrap().console_text(), "after\n"));
+    let _ = std::fs::remove_dir_all(saved.parent().unwrap());
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 #[gpui::test]
 fn breakpoints_are_kept_and_drawn_and_the_gutter_offers_runs(cx: &mut TestAppContext) {
     let repo = demo_repo("run-breakpoints");

@@ -48,7 +48,8 @@ impl BranchPopup {
 
     /// Do `action`, then go away.
     fn run(&mut self, action: Action, cx: &mut Context<Self>) {
-        self.model.update(cx, |m, cx| m.handle(action, cx));
+        // The title bar's menu is the project's: it acts on the project's repository.
+        self.model.update(cx, |m, cx| m.handle(Action::OnProject(Box::new(action)), cx));
         cx.emit(Dismiss);
     }
 
@@ -58,14 +59,14 @@ impl BranchPopup {
         let keep = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
         let m = self.model.read(cx);
         let mut local: Vec<(String, bool)> = m
-            .branches
+            .project_branches()
             .iter()
             .filter(|b| b.kind == BranchKind::Local && keep(&b.name))
             .map(|b| (b.name.clone(), b.is_head))
             .collect();
         local.sort_by_key(|(_, head)| !*head);
         let remote = m
-            .branches
+            .project_branches()
             .iter()
             .filter(|b| b.kind == BranchKind::Remote && !b.name.ends_with("/HEAD") && keep(&b.name))
             .map(|b| b.name.clone())
@@ -112,7 +113,7 @@ impl Render for BranchPopup {
         let p = palette(cx);
         let m = self.model.read(cx);
         let idle = m.job.is_none();
-        let ahead = m.status.branch.ahead;
+        let ahead = m.project_status().branch.ahead;
         let (local, remote) = self.branches(cx);
         let mut rows: Vec<AnyElement> = Vec::new();
         let action_row = |id: &'static str, g: Icon, text: &str, action: Action, cx: &mut Context<Self>| {

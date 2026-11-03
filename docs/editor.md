@@ -17,7 +17,8 @@ Java files of a Gradle build also get the language features described in [Java](
 - **Save** with ⌘S (File ▸ Save). A dot on the tab means the file has unsaved changes.
 - **Close** a tab with ⌘W (File ▸ Close Tab), with the × that shows when the pointer is over the tab, or with a middle click. A tab with unsaved changes asks first: Save, Don't Save or Cancel.
 - **Reorder** tabs by dragging them. Drop a tab on another tab group to move it there.
-- **Right click** a tab for **Close**, **Close Others**, **Close Tabs to the Right** and **Close All**, **Keep Open** for a preview tab, and **Copy Path**, **Reveal in Finder** and **Open in External Terminal** (at the file's folder).
+- **Right click** a tab for **Pin Tab**, **Close**, **Close Others**, **Close Tabs to the Left**, **Close Tabs to the Right** and **Close All**, **Keep Open** for a preview tab, and **Reload from Disk**, **Copy Path**, **Reveal in Finder** and **Open in External Terminal** (at the file's folder).
+- **Pin** a tab (right click ▸ Pin Tab) to keep it at the front of the tab bar. A pinned tab shows a pin where the × would be; click the pin, or choose **Unpin Tab**, to unpin it. Close Others and Close Tabs to the Left or Right leave pinned tabs open; **Close All** closes them too, and **Close All but Pinned** (shown while a tab is pinned) closes the rest. Pinned tabs stay pinned when the project opens again.
 - **Split** with ⌘\ (View ▸ Split Editor Right). The file in front opens a second time in a new group to the right. Both views show the same text: what you type in one shows in the other.
 
 The tab bar also shows what an agent is doing with a file: a badge with the number of changes Claude Code proposes, the agent's dot (pulsing while it writes there), or a dot in its colour while its changes wait for review. See [Coding agents](agents.md).
@@ -34,6 +35,8 @@ SnoutCode checks open files for changes made elsewhere, such as by Git, a build 
 
 - A tab without unsaved changes takes the new text at once, and the caret stays where it was.
 - A tab with unsaved changes shows a bar: "This file changed on disk, and this tab has unsaved changes." Choose **Reload from disk** to take the new text, or **Keep my changes** to keep yours. Saving then writes your text.
+
+SnoutCode looks every few seconds. To look now, choose **File ▸ Reload All from Disk**, or **Reload from Disk** on the right-click menu of a tab or of the Project view. Every open tab looks at its file at once (as above), the Project and Files views read their folders again, and the Git state of the files is read again. While it runs, the status bar shows it at the bottom right as a background task with a thin progress bar, then says for a moment how many files changed on disk. It is in the command palette too.
 
 ## What the editor shows
 

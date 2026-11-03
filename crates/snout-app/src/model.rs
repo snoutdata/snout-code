@@ -33,6 +33,15 @@ pub fn split_line_suffix(arg: &str) -> Option<(PathBuf, (u32, u32))> {
 }
 
 /// The projects opened lately, most recent first.
+/// A branch as the title and the panels name it.
+fn branch_label(b: &snout_core::BranchInfo) -> String {
+    match (&b.head, &b.oid) {
+        (Some(head), _) => head.clone(),
+        (None, Some(oid)) => format!("detached at {}", &oid[..oid.len().min(7)]),
+        (None, None) => "detached HEAD".into(),
+    }
+}
+
 pub fn recent_projects(settings: &crate::settings::Settings) -> Vec<PathBuf> {
     match &settings.recent {
         Some(recent) => recent.clone(),
@@ -148,6 +157,11 @@ pub struct QuitChoice {
 pub enum Action {
     Refresh,
     OpenRepo(PathBuf),
+    /// Show the repository in the Git panel, leaving the project as it is.
+    ShowRepo(PathBuf),
+    /// Run the action on the project's repository (from the title bar's branch menu, the
+    /// status bar), whichever one the Git panel shows.
+    OnProject(Box<Action>),
     PickFolder,
     OpenPath(PathBuf),
     InitRepo(PathBuf),
@@ -357,13 +371,77 @@ struct GitJob {
     work: Box<dyn FnOnce(&Repo) -> Then + Send>,
 }
 
+/// A repository's Git state as the model keeps it: the Git panel's in the model's own
+/// fields, the project's set aside in one of these while the panel shows another repository.
+#[derive(Default)]
+struct GitSide {
+    repo: Option<Repo>,
+    status: Status,
+    branches: Vec<Branch>,
+    tags: Vec<Tag>,
+    log: Vec<Commit>,
+    graph: Vec<GraphRow>,
+    github_url: Option<String>,
+    dirs: Vec<String>,
+    dir_filter: Option<String>,
+    selected: BTreeSet<String>,
+    anchor: Option<String>,
+    diff: Option<Result<std::rc::Rc<DiffLayout>, String>>,
+    diff_key: Option<(String, snout_core::DiffBase, bool)>,
+    commit_msg: String,
+    amend: bool,
+    draft: Option<Draft>,
+    journal_filter: String,
+    commit_view: Option<CommitView>,
+    refresh_queued: bool,
+}
+
+impl GitSide {
+    /// Trade places with the model's own fields.
+    fn swap(&mut self, m: &mut Model) {
+        use std::mem::swap;
+        swap(&mut self.repo, &mut m.repo);
+        swap(&mut self.status, &mut m.status);
+        swap(&mut self.branches, &mut m.branches);
+        swap(&mut self.tags, &mut m.tags);
+        swap(&mut self.log, &mut m.log);
+        swap(&mut self.graph, &mut m.graph);
+        swap(&mut self.github_url, &mut m.github_url);
+        swap(&mut self.dirs, &mut m.dirs);
+        swap(&mut self.dir_filter, &mut m.dir_filter);
+        swap(&mut self.selected, &mut m.selected);
+        swap(&mut self.anchor, &mut m.anchor);
+        swap(&mut self.diff, &mut m.diff);
+        swap(&mut self.diff_key, &mut m.diff_key);
+        swap(&mut self.commit_msg, &mut m.commit_msg);
+        swap(&mut self.amend, &mut m.amend);
+        swap(&mut self.draft, &mut m.draft);
+        swap(&mut self.journal_filter, &mut m.journal_filter);
+        swap(&mut self.commit_view, &mut m.commit_view);
+        swap(&mut self.refresh_queued, &mut m.refresh_queued);
+    }
+}
+
 pub struct Model {
     pub settings: Settings,
     store: Option<Store>,
     /// The files opened this session, the latest first (the empty editor and Recent Files).
     pub recent_files: Vec<PathBuf>,
     saved: Settings,
+    /// The repository the Git panel shows: the project's, or another one picked in the
+    /// panel's list.
     pub repo: Option<Repo>,
+    /// The repository the project is in.
+    project_repo: Option<Repo>,
+    /// The project's repository's Git state, set aside while the Git panel shows another
+    /// repository (the fields above are then that one's).
+    project_side: Option<GitSide>,
+    /// The fields above are the project's side, swapped in for a while ([`Model::with_project`]).
+    on_project_side: bool,
+    /// The dialog open was asked on the project's side: what it sends goes there too.
+    dialog_on_project: bool,
+    /// The slow operation running was started on the project's side.
+    job_on_project: bool,
     /// The folder opened as the project, as it was opened: the repository's root or any
     /// folder inside it. Git works on the repository found at or above it.
     pub project: Option<PathBuf>,
@@ -393,6 +471,9 @@ pub struct Model {
     pub message: String,
     /// The label of the slow operation running, if any.
     pub job: Option<String>,
+    /// Reload from Disk while it runs, and its outcome for a moment after: what the
+    /// status bar's background task says, and how far it is.
+    pub reload: Option<(String, Option<u32>)>,
     _job_task: Option<Task<()>>,
     pub dialog: Option<Dialog>,
     pub tracking: HashMap<PathBuf, Option<Tracking>>,
@@ -477,6 +558,11 @@ impl Model {
             settings,
             store,
             repo: None,
+            project_repo: None,
+            project_side: None,
+            on_project_side: false,
+            dialog_on_project: false,
+            job_on_project: false,
             project: None,
             status: Status::default(),
             branches: Vec::new(),
@@ -502,6 +588,7 @@ impl Model {
             output: Vec::new(),
             message: "Ready".into(),
             job: None,
+            reload: None,
             _job_task: None,
             dialog: None,
             tracking: HashMap::new(),
@@ -537,9 +624,57 @@ impl Model {
         self.project.clone().or_else(|| self.repo.as_ref().map(|r| r.root().to_owned()))
     }
 
-    /// The root of the repository the project is in.
+    /// The root of the repository the Git panel shows.
     pub fn repo_root(&self) -> Option<PathBuf> {
         self.repo.as_ref().map(|r| r.root().to_owned())
+    }
+
+    /// The Git panel shows a repository other than the project's.
+    pub fn shows_other_repo(&self) -> bool {
+        self.project_side.is_some()
+    }
+
+    /// The repository the project is in, whichever one the Git panel shows.
+    pub fn project_repo(&self) -> Option<&Repo> {
+        self.project_repo.as_ref()
+    }
+
+    /// The project's repository's status: what the title bar, the status bar and the
+    /// project's trees show.
+    pub fn project_status(&self) -> &Status {
+        self.project_side.as_ref().map_or(&self.status, |s| &s.status)
+    }
+
+    /// The project's repository's branches, for the title bar's branch menu.
+    pub fn project_branches(&self) -> &[Branch] {
+        self.project_side.as_ref().map_or(&self.branches, |s| &s.branches)
+    }
+
+    /// The status a dialog is about: the project's when the dialog was asked from there.
+    pub fn dialog_status(&self) -> &Status {
+        if self.dialog_on_project { self.project_status() } else { &self.status }
+    }
+
+    /// The project's repository's root and its status, for the marks in the project's trees.
+    pub fn project_git(&self) -> Option<(PathBuf, &Status)> {
+        let repo = self.project_repo.as_ref()?;
+        Some((repo.root().to_owned(), self.project_status()))
+    }
+
+    /// Run `f` with the project's side in the model's own fields (as they are when the Git
+    /// panel shows the project's repository).
+    fn with_project<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let Some(mut side) = self.project_side.take() else { return f(self) };
+        side.swap(self);
+        self.on_project_side = true;
+        let r = f(self);
+        self.on_project_side = false;
+        side.swap(self);
+        // Unless the project closed meanwhile.
+        if self.project_repo.is_some() && self.project_side.is_none() {
+            self.project_side = Some(side);
+        }
+        r
     }
 
     pub fn selected_entries(&self) -> Vec<FileEntry> {
@@ -565,20 +700,21 @@ impl Model {
         self.status.files.iter().any(|f| !f.is_untracked())
     }
 
+    /// The Git panel's repository's branch.
     pub fn head_label(&self) -> String {
-        let b = &self.status.branch;
-        match (&b.head, &b.oid) {
-            (Some(head), _) => head.clone(),
-            (None, Some(oid)) => format!("detached at {}", &oid[..oid.len().min(7)]),
-            (None, None) => "detached HEAD".into(),
-        }
+        branch_label(&self.status.branch)
     }
 
-    /// The status bar's branch summary: `main → origin/main  ↑1  ↓2`.
+    /// The project's repository's branch, for the title bar.
+    pub fn project_head_label(&self) -> String {
+        branch_label(&self.project_status().branch)
+    }
+
+    /// The status bar's branch summary, of the project's repository: `main → origin/main  ↑1  ↓2`.
     pub fn branch_summary(&self) -> Option<String> {
-        self.repo.as_ref()?;
-        let b = &self.status.branch;
-        let mut s = self.head_label();
+        self.project_repo.as_ref()?;
+        let b = &self.project_status().branch;
+        let mut s = self.project_head_label();
         if let Some(up) = &b.upstream {
             s += &format!(" → {up}");
             if b.ahead > 0 {
@@ -594,8 +730,10 @@ impl Model {
     }
 
     pub fn title(&self) -> String {
-        match (&self.repo, self.project_root()) {
-            (Some(_), Some(project)) => format!("{} ({}) · SnoutCode", dir_name(&project), self.head_label()),
+        match (&self.project_repo, self.project_root()) {
+            (Some(_), Some(project)) => {
+                format!("{} ({}) · SnoutCode", dir_name(&project), self.project_head_label())
+            }
             _ => "SnoutCode".into(),
         }
     }
@@ -781,9 +919,20 @@ impl Model {
         self.remember(&root, &o.project);
         self.settings.current = Some(o.project.clone());
         self.project = Some(o.project);
-        self.github_url = o.github_url;
-        self.repo = Some(o.repo);
+        self.project_repo = Some(o.repo.clone());
+        self.project_side = None;
         self.git_jobs.clear();
+        self.show_opened(o.repo, o.github_url, o.snapshot, cx);
+        self.message = format!("Opened {}", o.asked.display());
+        cx.emit(ModelEvent::Message);
+        // Whatever follows the project (its engine, runs, models) sees the change now.
+        cx.notify();
+    }
+
+    /// Show `repo` in the Git panel, as `snapshot` read it.
+    fn show_opened(&mut self, repo: Repo, github_url: Option<String>, snapshot: Snapshot, cx: &mut Context<Self>) {
+        self.github_url = github_url;
+        self.repo = Some(repo);
         self.refresh_queued = false;
         self.selected.clear();
         self.anchor = None;
@@ -793,11 +942,72 @@ impl Model {
         self.commit_msg.clear();
         self.amend = false;
         self.draft = None;
-        self.apply_snapshot(o.snapshot, cx);
-        self.message = format!("Opened {}", o.asked.display());
-        cx.emit(ModelEvent::Message);
-        // Whatever follows the project (its engine, runs, models) sees the change now.
-        cx.notify();
+        self.apply_snapshot(snapshot, cx);
+    }
+
+    /// Show the repository at `path` in the Git panel, off the UI thread; the project stays.
+    /// Without a project, it opens as the project.
+    fn show_repo(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if self.project_repo.is_none() {
+            self.open_repo(path, cx);
+            return;
+        }
+        let host = self.host.clone();
+        let load = cx.background_executor().spawn({
+            let path = path.to_owned();
+            async move {
+                let repo = Repo::open(&host, &path).map_err(|e| e.to_string())?;
+                let github_url = repo.github_url();
+                let snapshot = Snapshot::read(&repo);
+                Ok::<_, String>((repo, github_url, snapshot))
+            }
+        });
+        self._open = Some(cx.spawn(async move |this, cx| {
+            let loaded = load.await;
+            let _ = this.update(cx, |m, cx| {
+                match loaded {
+                    // The project closed meanwhile: nothing to show it beside.
+                    Ok(_) if m.project_repo.is_none() => {}
+                    Ok((repo, github_url, snapshot)) => {
+                        let root = repo.root().to_owned();
+                        if !m.settings.repos.contains(&root) {
+                            m.settings.repos.push(root.clone());
+                        }
+                        m.show_in_panel(repo, github_url, snapshot, cx);
+                        m.message = format!("Showing {} in Git", dir_name(&root));
+                        cx.emit(ModelEvent::Message);
+                    }
+                    Err(e) => m.fail(e, cx),
+                }
+                m.persist();
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Make `repo` the one the Git panel shows: the project's comes back as it was left;
+    /// another sets the project's aside.
+    fn show_in_panel(&mut self, repo: Repo, github_url: Option<String>, snapshot: Snapshot, cx: &mut Context<Self>) {
+        if self.repo.as_ref() == Some(&repo) {
+            self.refresh(cx);
+            return;
+        }
+        // The jobs for the repository the panel leaves go; the project's stay.
+        let project = self.project_repo.clone();
+        self.git_jobs.retain(|j| Some(&j.repo) == project.as_ref());
+        if self.project_repo.as_ref() == Some(&repo) {
+            if let Some(mut side) = self.project_side.take() {
+                side.swap(self);
+            }
+            self.refresh(cx);
+            return;
+        }
+        if self.project_side.is_none() {
+            let mut side = GitSide::default();
+            side.swap(self);
+            self.project_side = Some(side);
+        }
+        self.show_opened(repo, github_url, snapshot, cx);
     }
 
     /// The file asked for with the project opens in a tab of it.
@@ -912,7 +1122,9 @@ impl Model {
 
     /// Close the open project.
     fn close_repo(&mut self, cx: &mut Context<Self>) {
-        let Some(repo) = self.repo.take() else { return };
+        let Some(repo) = self.project_repo.take() else { return };
+        self.repo = None;
+        self.project_side = None;
         self.project = None;
         self.settings.current = None;
         self.github_url = None;
@@ -939,12 +1151,18 @@ impl Model {
 
     /// Start the next Git job, unless one runs.
     fn pump(&mut self, cx: &mut Context<Self>) {
-        if self.git_busy {
+        // Not while the project's side is swapped in: what [`Model::with_project`] runs
+        // queues its jobs, and they start once the fields are the panel's again.
+        if self.git_busy || self.on_project_side {
             return;
         }
         let Some(job) = self.git_jobs.pop_front() else { return };
         if job.refresh {
-            self.refresh_queued = false;
+            // The flag of the side the job is for.
+            match self.project_side.as_mut().filter(|s| s.repo.as_ref() == Some(&job.repo)) {
+                Some(side) => side.refresh_queued = false,
+                None => self.refresh_queued = false,
+            }
         }
         self.git_busy = true;
         let repo = job.repo.clone();
@@ -955,6 +1173,9 @@ impl Model {
                 m.git_busy = false;
                 if m.repo.as_ref() == Some(&repo) {
                     then(m, cx);
+                    m.persist();
+                } else if m.project_side.as_ref().is_some_and(|s| s.repo.as_ref() == Some(&repo)) {
+                    m.with_project(|m| then(m, cx));
                     m.persist();
                 }
                 m.pump(cx);
@@ -967,6 +1188,15 @@ impl Model {
     /// Read the repository again, off the UI thread (once, however often it is asked while
     /// it waits).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.refresh_this(cx);
+        if !self.on_project_side && self.project_side.is_some() {
+            self.with_project(|m| m.refresh_this(cx));
+            self.pump(cx);
+        }
+    }
+
+    /// Read the repository in the model's own fields again.
+    fn refresh_this(&mut self, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else {
             self.diff_key = None;
             self.status = Status::default();
@@ -1029,6 +1259,9 @@ impl Model {
 
     /// Show the selected file's diff: read off the UI thread, the one shown stays until it is in.
     fn update_diff(&mut self, cx: &mut Context<Self>) {
+        if self.on_project_side {
+            return;
+        }
         let entry = (self.selected.len() == 1)
             .then(|| self.status.files.iter().find(|f| self.selected.contains(&f.path)))
             .flatten();
@@ -1061,6 +1294,9 @@ impl Model {
 
     /// Show the diff of the commit view's file, read off the UI thread.
     fn update_commit_diff(&mut self, cx: &mut Context<Self>) {
+        if self.on_project_side {
+            return;
+        }
         let compact = self.settings.compact;
         let Some(view) = &mut self.commit_view else { return };
         let Some(file) = view.selected_file().cloned() else {
@@ -1139,6 +1375,7 @@ impl Model {
     }
 
     fn ask(&mut self, dialog: Dialog, cx: &mut Context<Self>) {
+        self.dialog_on_project = self.on_project_side;
         self.dialog = Some(dialog);
         cx.emit(ModelEvent::Dialog);
     }
@@ -1319,12 +1556,20 @@ impl Model {
         }
         self.message = format!("{label}…");
         self.job = Some(label.to_owned());
+        self.job_on_project = self.on_project_side;
         self.survey_hold.store(true, Ordering::Relaxed);
         let label = label.to_owned();
         let work = cx.background_executor().spawn(async move { f().map_err(|e| e.to_string()) });
         self._job_task = Some(cx.spawn(async move |this, cx| {
             let result = work.await;
-            let _ = this.update(cx, |m, cx| m.finish_job(&label, result, cx));
+            let _ = this.update(cx, |m, cx| {
+                if std::mem::take(&mut m.job_on_project) {
+                    m.with_project(|m| m.finish_job(&label, result, cx));
+                    m.refresh(cx);
+                } else {
+                    m.finish_job(&label, result, cx);
+                }
+            });
         }));
         cx.notify();
     }
@@ -1491,6 +1736,14 @@ impl Model {
 
     // ----- Actions --------------------------------------------------------------------
 
+    /// The dialog's answer: `action`, on the side the dialog was asked from.
+    pub fn answer_dialog(&mut self, action: Action, cx: &mut Context<Self>) {
+        self.dialog = None;
+        let action =
+            if std::mem::take(&mut self.dialog_on_project) { Action::OnProject(Box::new(action)) } else { action };
+        self.handle(action, cx);
+    }
+
     pub fn handle(&mut self, action: Action, cx: &mut Context<Self>) {
         self.run(action, cx);
         self.persist();
@@ -1519,6 +1772,15 @@ impl Model {
             }
             Action::OpenRepo(path) => {
                 self.open_repo(&path, cx);
+            }
+            Action::ShowRepo(path) => self.show_repo(&path, cx),
+            Action::OnProject(action) => {
+                if self.on_project_side {
+                    self.run(*action, cx);
+                } else {
+                    self.with_project(|m| m.run(*action, cx));
+                    self.pump(cx);
+                }
             }
             Action::CloseRepo => self.close_repo(cx),
             Action::ClearRecent => self.settings.recent = Some(Vec::new()),
@@ -1552,9 +1814,14 @@ impl Model {
             Action::RemoveRepo(path) => {
                 self.settings.repos.retain(|p| p != &path);
                 move_to_group(&mut self.settings.groups, &path, None);
-                // The open project goes as Close Project would close it, tabs and all.
-                if self.repo.as_ref().is_some_and(|r| r.root() == path) {
+                // The project's repository goes as Close Project would close it, tabs and
+                // all; another one shown in the Git panel gives way to the project's.
+                if self.project_repo.as_ref().is_some_and(|r| r.root() == path) {
                     self.close_repo(cx);
+                } else if self.repo.as_ref().is_some_and(|r| r.root() == path)
+                    && let Some(root) = self.project_repo.as_ref().map(|r| r.root().to_owned())
+                {
+                    self.show_repo(&root, cx);
                 }
             }
             Action::ShowNewGroup(repo) => self.ask(Dialog::GroupName { rename: None, repo }, cx),

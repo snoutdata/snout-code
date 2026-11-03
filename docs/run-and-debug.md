@@ -107,6 +107,14 @@ The console shows:
 
 File places in the output are links. Click a stack trace line such as `at demo.App.main(App.java:12)`, or a file path followed by a line number as compilers print it, to open that line.
 
+Right-click the console, in Run, Debug or Build, for:
+
+- **Clear All**, which empties the console. What the program prints next still shows.
+- **Copy All**, which copies the whole console as plain text.
+- **Save Output to File…**, which saves the console as plain text to a file you name, `<run name>.log` by default, in the project's folder.
+
+A test's output, shown beside the test results, offers **Copy All**.
+
 The buttons down the window's left edge:
 
 - **Rerun** (⌘R) stops the run and starts it again.

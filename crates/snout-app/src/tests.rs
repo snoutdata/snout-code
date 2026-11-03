@@ -234,7 +234,78 @@ fn projects_groups_hold_repositories_and_the_tree_narrows_the_files(cx: &mut Tes
     act(&model, cx, Action::FilterDir(None));
     cx.update(|_, cx| assert_eq!(model.read(cx).visible_files().len(), 3));
 
-    // Opening the other repository from the list.
+    // Picking the other repository in the Git panel shows it there; the project stays.
+    std::fs::write(a.join("project-only.txt"), "new\n").unwrap();
+    act(&model, cx, Action::Refresh);
+    act(&model, cx, Action::ShowRepo(b.clone()));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.repo_root().as_deref(), Some(b.as_path()));
+        assert_eq!(m.project.as_deref(), Some(a.as_path()));
+        assert_eq!(m.settings.current.as_deref(), Some(a.as_path()));
+        assert_eq!(m.recent_projects().first(), Some(&a), "the panel's pick is not a recent project");
+        assert!(m.shows_other_repo());
+        // The project's trees keep the project's own marks.
+        let (root, status) = m.project_git().expect("the project's repository");
+        assert_eq!(root, a);
+        assert!(status.files.iter().any(|f| f.path == "project-only.txt"));
+        assert!(!m.status.files.iter().any(|f| f.path == "project-only.txt"));
+        assert_eq!(m.title(), format!("{} (main) · SnoutCode", Model::dir_name(&a)));
+        assert_eq!(m.project_repo().map(|r| r.root().to_owned()), Some(a.clone()));
+    });
+
+    // The title bar's branch menu is the project's. Checking out a branch from it, through
+    // the dialog about the local changes, happens in the project's repository.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.toggle_branches(w, cx)));
+    cx.run_until_parked();
+    let row = cx.debug_bounds("branch-local-1").expect("the other local branch is listed").center();
+    cx.simulate_click(row, gpui::Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(
+            matches!(m.dialog, Some(crate::model::Dialog::ConfirmCheckout(_))),
+            "the local changes are asked about"
+        );
+        assert!(m.dialog_status().files.iter().any(|f| f.path == "project-only.txt"), "of the project's repository");
+    });
+    let target = snout_core::CheckoutTarget::Branch("feature/diff-view".into());
+    cx.update(|_, cx| {
+        model.update(cx, |m, cx| m.answer_dialog(Action::Checkout(target, snout_core::LocalChanges::Keep), cx))
+    });
+    cx.run_until_parked();
+    let head = |dir: &Path| {
+        let out = Command::new("git").args(["branch", "--show-current"]).current_dir(dir).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    assert_eq!(head(&a), "feature/diff-view", "the project's repository checked out");
+    assert_eq!(head(&b), "main", "the panel's is untouched");
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.project_head_label(), "feature/diff-view");
+        assert_eq!(m.head_label(), "main", "the panel still shows the other repository");
+        assert_eq!(m.repo_root().as_deref(), Some(b.as_path()));
+    });
+
+    // Back to the project's repository, as it is now.
+    act(&model, cx, Action::ShowRepo(a.clone()));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.repo_root().as_deref(), Some(a.as_path()));
+        assert!(!m.shows_other_repo());
+        assert_eq!(m.head_label(), "feature/diff-view");
+    });
+    // Removing the repository the panel shows gives the panel back to the project's.
+    act(&model, cx, Action::ShowRepo(b.clone()));
+    act(&model, cx, Action::RemoveRepo(b.clone()));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.repo_root().as_deref(), Some(a.as_path()));
+        assert_eq!(m.project.as_deref(), Some(a.as_path()));
+    });
+    act(&model, cx, Action::Scan(b.clone()));
+
+    // Opening the other repository as the project.
     act(&model, cx, Action::OpenRepo(b.clone()));
     cx.update(|_, cx| assert_eq!(model.read(cx).settings.current.as_deref(), Some(b.as_path())));
     act(&model, cx, Action::RemoveRepo(b.clone()));
@@ -245,6 +316,41 @@ fn projects_groups_hold_repositories_and_the_tree_narrows_the_files(cx: &mut Tes
     for dir in [a, b] {
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// The open repository's chevron folds its folders away and back, without narrowing the
+/// files or touching the project.
+#[gpui::test]
+fn the_open_repository_folds_at_its_chevron(cx: &mut TestAppContext) {
+    let a = demo_repo("fold-a");
+    let (model, ws, cx) = open(cx, with_repo(&a));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    let chevron: &'static str = format!("chevron:repo:{}", a.display()).leak();
+    let folder: &'static str = format!("row:dir:{}:src", a.display()).leak();
+    assert!(cx.debug_bounds(folder).is_some(), "the open repository shows its folders");
+
+    let at = cx.debug_bounds(chevron).expect("the chevron is drawn").center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds(folder).is_none(), "the chevron folds the folders away");
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(m.dir_filter.is_none());
+        assert_eq!(m.project.as_deref(), Some(a.as_path()));
+    });
+
+    let at = cx.debug_bounds(chevron).expect("the chevron is drawn").center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds(folder).is_some(), "and back");
+
+    // A click on the folder itself narrows the files to it.
+    let at = cx.debug_bounds(folder).unwrap().center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(model.read(cx).dir_filter.as_deref(), Some("src")));
+    let _ = std::fs::remove_dir_all(a);
 }
 
 #[gpui::test]

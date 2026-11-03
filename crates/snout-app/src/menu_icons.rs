@@ -144,6 +144,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "ShowStructure" => sf("list.bullet.indent", L::ListTree),
         "ShowHierarchy" => sf("point.3.connected.trianglepath.dotted", L::Network),
         "LocateFile" => sf("scope", L::LocateFixed),
+        "ReloadFromDisk" => sf("arrow.clockwise", L::RefreshCw),
         "CollapseAll" | "CollapseGradle" | "CollapseMaven" | "CollapseSpring" => {
             sf("rectangle.compress.vertical", L::ChevronsDownUp)
         }

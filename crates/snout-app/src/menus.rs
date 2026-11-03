@@ -74,6 +74,7 @@ actions!(
         HideSide,
         LocateFile,
         CollapseAll,
+        ReloadFromDisk,
         CollapseGradle,
         CollapseMaven,
         ClearOutput,
@@ -301,6 +302,7 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         ("Go to Spring Bean or Usages…", Box::new(SpringAtCaret)),
         ("Spring Active Profiles…", Box::new(SpringProfiles)),
         ("Collapse the Spring Window", Box::new(CollapseSpring)),
+        ("Reload All from Disk", Box::new(ReloadFromDisk)),
         ("Select Opened File", Box::new(LocateFile)),
         ("Collapse the Project Tree", Box::new(CollapseAll)),
         ("Hide the Side Panel", Box::new(HideSide)),
@@ -452,6 +454,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
                 MenuItem::action("Command Palette…", CommandPalette),
                 MenuItem::separator(),
                 MenuItem::action("Save", crate::editor::Save),
+                MenuItem::action("Reload All from Disk", ReloadFromDisk),
                 MenuItem::action("Close Tab", CloseTab),
             ]
             .into_iter()

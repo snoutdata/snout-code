@@ -321,8 +321,8 @@ impl Render for FileTree {
         let name = self.root.as_ref().map(|r| Model::dir_name(r));
         let rows = self.rows(cx);
         // Git's paths are relative to the repository, which may be above the project.
-        let marks = match self.model.read(cx).repo_root() {
-            Some(repo) => git_marks(&repo, &self.model.read(cx).status.files),
+        let marks = match self.model.read(cx).project_git() {
+            Some((repo, status)) => git_marks(&repo, &status.files),
             None => HashMap::new(),
         };
         let model = self.model.clone();
@@ -462,6 +462,14 @@ impl Render for FileTree {
                             PopupMenuItem::new("Copy path")
                                 .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                 .on_click(send(Action::Copy(path.display().to_string()))),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Reload from Disk")
+                                .icon(crate::components::menu_icon(crate::components::IconName::RefreshCw))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(crate::menus::ReloadFromDisk), cx)
+                                }),
                         )
                     })
                     .into_any_element()

@@ -13,7 +13,7 @@ use gpui::{
 };
 use gpui_component::button::ButtonVariants as _;
 use gpui_component::input::{InputEvent, InputState};
-use gpui_component::menu::DropdownMenu as _;
+use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
 
@@ -118,6 +118,45 @@ impl gpui_component::dock::Panel for RunWindow {
 
     fn zoom_control(&self, _: &App) -> Option<gpui_component::dock::PanelControl> {
         None
+    }
+}
+
+/// A console's context menu: Clear All (a live console only), Copy All, and Save Output to
+/// File. `lines` stands in for the session's console, as [`RunWindow::console`] takes it.
+fn console_menu(menu: PopupMenu, runs: &Entity<Runs>, id: u64, lines: Option<Rc<Vec<ConsoleLine>>>) -> PopupMenu {
+    let text = {
+        let (runs, lines) = (runs.clone(), lines.clone());
+        move |cx: &App| match &lines {
+            Some(lines) => lines.iter().map(|l| l.text() + "\n").collect::<String>(),
+            None => runs.read(cx).session(id).map(super::Session::console_text).unwrap_or_default(),
+        }
+    };
+    let menu = if lines.is_none() {
+        let runs = runs.clone();
+        menu.item(
+            PopupMenuItem::new("Clear All")
+                .icon(crate::components::menu_icon(crate::components::IconName::Eraser))
+                .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.clear_console(id, cx))),
+        )
+        .separator()
+    } else {
+        menu
+    };
+    let copy = text.clone();
+    let menu = menu.item(
+        PopupMenuItem::new("Copy All")
+            .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+            .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy(cx)))),
+    );
+    if lines.is_none() {
+        let runs = runs.clone();
+        menu.item(
+            PopupMenuItem::new("Save Output to File…")
+                .icon(crate::components::menu_icon(crate::components::IconName::Save))
+                .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.save_console(id, cx))),
+        )
+    } else {
+        menu
     }
 }
 
@@ -361,7 +400,16 @@ impl RunWindow {
         let runs = self.runs.clone();
         let id = s.id;
         let mono = look::mono_font(cx);
+        let menu = {
+            let runs = runs.clone();
+            let lines = lines.clone();
+            move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+                console_menu(menu, &runs, id, lines.clone())
+            }
+        };
         div()
+            .id("run-console-area")
+            .debug_selector(|| "run-console".into())
             .size_full()
             .font_family(mono)
             .text_size(px(12.5))
@@ -380,6 +428,7 @@ impl RunWindow {
                 .px(px(8.))
                 .py(px(4.)),
             )
+            .context_menu(menu)
             .into_any_element()
     }
 

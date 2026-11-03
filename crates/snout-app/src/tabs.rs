@@ -2,7 +2,8 @@
 //! on the ground colour, as the Git view's panes do, and the center's tab groups get the
 //! editor's own tab bar: a file icon, the name (in italics for the preview tab), a dot
 //! while the file has unsaved changes, a close button on hover, a double click to keep a
-//! preview, and a middle click to close. A tab with changes Claude Code proposes carries a
+//! preview, and a middle click to close. Pinned tabs stay at the front, a pin in place of
+//! their close button. A tab with changes Claude Code proposes carries a
 //! badge with their count; one Claude changed while the editor did not follow, a small
 //! accent dot.
 
@@ -188,8 +189,30 @@ fn close(group: &TabGroupContext, panel: &Arc<dyn BasePanelView>, window: &mut W
     crate::editor::confirm_close(editor_of(panel), window, cx, move |window, cx| group.close(id, window, cx));
 }
 
-/// A tab's right-click menu: closing it, the others, those to its right or all of them;
-/// keeping a preview open; its file's path and place in the Finder.
+/// Whether the tab is a pinned editor.
+fn is_pinned(panel: &Arc<dyn BasePanelView>, cx: &App) -> bool {
+    editor_of(panel).is_some_and(|e| e.read(cx).pinned)
+}
+
+/// Pin the editor tab at `ix` to the front of the bar, or unpin it: either way it moves to
+/// just after the other pinned tabs, so the pinned ones stay together at the front.
+pub fn set_pinned(group: &TabGroupContext, ix: usize, pinned: bool, window: &mut Window, cx: &mut App) {
+    let Some(panel) = group.panels().get(ix).cloned() else { return };
+    let Some(editor) = editor_of(&panel) else { return };
+    editor.update(cx, |e, cx| e.set_pinned(pinned, cx));
+    let id = panel.panel_id(cx);
+    let slot = group.panels().iter().filter(|q| q.panel_id(cx) != id && is_pinned(q, cx)).count();
+    if slot != ix
+        && let Some(drag) = group.drag_panel(ix, cx)
+    {
+        let front = group.active_ix() == ix;
+        group.drop_panel(drag, Some(slot), front, window, cx);
+    }
+}
+
+/// A tab's right-click menu: pinning it; closing it, the others, those to its left or
+/// right, or all of them (the bulk closes pass pinned tabs by, but Close All); keeping a
+/// preview open; its file's path and place in the Finder.
 fn tab_menu(
     menu: PopupMenu,
     group: &TabGroupContext,
@@ -202,8 +225,12 @@ fn tab_menu(
     use crate::components::{IconName as I, menu_item};
     let panels: Vec<Arc<dyn BasePanelView>> = group.panels().to_vec();
     let id = panel.panel_id(cx);
-    let others: Vec<_> = panels.iter().filter(|q| q.panel_id(cx) != id).cloned().collect();
-    let right: Vec<_> = panels.iter().skip(ix + 1).cloned().collect();
+    let loose = |q: &&Arc<dyn BasePanelView>| !is_pinned(q, cx);
+    let others: Vec<_> = panels.iter().filter(|q| q.panel_id(cx) != id).filter(loose).cloned().collect();
+    let left: Vec<_> = panels.iter().take(ix).filter(loose).cloned().collect();
+    let right: Vec<_> = panels.iter().skip(ix + 1).filter(loose).cloned().collect();
+    let unpinned: Vec<_> = panels.iter().filter(loose).cloned().collect();
+    let any_pinned = unpinned.len() < panels.len();
     let close_all = |which: Vec<Arc<dyn BasePanelView>>| {
         let group = group.clone();
         move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
@@ -212,14 +239,31 @@ fn tab_menu(
             }
         }
     };
-    let mut menu = crate::components::styled(menu)
+    let mut menu = crate::components::styled(menu);
+    if editor_of(panel).is_some() {
+        let pinned = is_pinned(panel, cx);
+        let (label, icon) = if pinned { ("Unpin Tab", I::PinOff) } else { ("Pin Tab", I::Pin) };
+        let group = group.clone();
+        menu = menu
+            .item(menu_item(label, icon, move |_, window, cx| set_pinned(&group, ix, !pinned, window, cx)))
+            .separator();
+    }
+    menu = menu
         .item(menu_item("Close", I::X, close_all(vec![panel.clone()])))
         .item(menu_item("Close Others", I::ListX, close_all(others.clone())).disabled(others.is_empty()))
+        .item(
+            menu_item("Close Tabs to the Left", I::ArrowLeftToLine, close_all(left.clone())).disabled(left.is_empty()),
+        )
         .item(
             menu_item("Close Tabs to the Right", I::ArrowRightToLine, close_all(right.clone()))
                 .disabled(right.is_empty()),
         )
         .item(menu_item("Close All", I::CircleX, close_all(panels)));
+    if any_pinned {
+        menu = menu.item(
+            menu_item("Close All but Pinned", I::CircleX, close_all(unpinned.clone())).disabled(unpinned.is_empty()),
+        );
+    }
     if let Some(editor) = editor_of(panel).filter(|_| preview) {
         menu = menu.separator().item(menu_item("Keep Open", I::Pin, move |_, _, cx| {
             editor.update(cx, |e, cx| e.pin(cx));
@@ -229,6 +273,9 @@ fn tab_menu(
         let (copy, reveal, terminal) = (path.to_owned(), path.to_owned(), path.to_owned());
         menu = menu
             .separator()
+            .item(menu_item("Reload from Disk", I::RefreshCw, |_, window, cx| {
+                window.dispatch_action(Box::new(crate::menus::ReloadFromDisk), cx)
+            }))
             .item(menu_item("Copy Path", I::Copy, move |_, _, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.display().to_string()));
             }))
@@ -301,10 +348,10 @@ fn tab(
 ) -> AnyElement {
     let p = palette(cx);
     let editor = editor_of(panel);
-    let (name, dirty, preview, path, reviews, agent_dot) = match &editor {
+    let (name, dirty, preview, path, reviews, agent_dot, pinned) = match &editor {
         Some(e) => {
             let e = e.read(cx);
-            (e.name(), e.dirty, e.preview, Some(e.path.clone()), e.review_count(), e.agent_dot(cx))
+            (e.name(), e.dirty, e.preview, Some(e.path.clone()), e.review_count(), e.agent_dot(cx), e.pinned)
         }
         None => (
             PanelHandle::of(panel).and_then(|h| h.tab_name(cx)).unwrap_or_else(|| panel.panel_name(cx).into()),
@@ -313,6 +360,7 @@ fn tab(
             None,
             0,
             None,
+            false,
         ),
     };
     // Every editor tab closes, the last one too (the dock would keep its last panel).
@@ -340,8 +388,30 @@ fn tab(
                 close(&group, &panel, window, cx);
             }
         });
+    // A pinned tab shows its pin in place of the close button; a click on it unpins.
+    let pin_button = div()
+        .id(("unpin-tab", ix))
+        .debug_selector(move || format!("unpin-tab-{ix}"))
+        .flex_none()
+        .size(px(16.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover_bg))
+        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Unpin Tab").build(w, cx))
+        .child(crate::components::icon(crate::components::IconName::Pin, 12., p.fg_dim))
+        .on_click({
+            let group = group.clone();
+            move |_, window, cx| {
+                cx.stop_propagation();
+                set_pinned(&group, ix, false, window, cx);
+            }
+        });
+    let closable = closable && !pinned;
     // The slot after the name: the dot while unsaved, the close button under the pointer
-    // (and always on the tab in front).
+    // (and always on the tab in front), or the pin of a pinned tab.
     let trailing = div()
         .flex_none()
         .size(px(16.))
@@ -365,6 +435,15 @@ fn tab(
                     .inset_0()
                     .when(dirty || !selected, |d| d.opacity(0.).group_hover(group_name.clone(), |s| s.opacity(1.)))
                     .child(close_button),
+            )
+        })
+        .when(pinned, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .when(dirty, |d| d.opacity(0.).group_hover(group_name.clone(), |s| s.opacity(1.)))
+                    .child(pin_button),
             )
         });
     let ink = if selected { p.fg } else { p.fg_dim };

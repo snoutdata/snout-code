@@ -4,7 +4,7 @@ The Git view is where you see what changed, read the diff, commit, switch branch
 
 Show it with **View ▸ Git**, ⌘2, or the Git icon in the activity bar. ⌘1 goes back to the Project view. The Git commands are also in the **Repository** menu and in the command palette (⇧⌘P).
 
-The project you open is a Git repository, or a folder inside one. The Git view always shows that repository. See [Projects](projects.md) for opening and closing projects.
+The project you open is a Git repository, or a folder inside one. The Git view shows that repository until you pick another one in the Repositories list. See [Projects](projects.md) for opening and closing projects.
 
 ## The layout
 
@@ -25,11 +25,11 @@ SnoutCode reads the repository again when the window comes forward, when you pre
 
 The Repositories list holds the repositories you have opened, and lets you file them in groups.
 
-- **Open** a repository: click it. This opens it as the project.
+- **Show** a repository: click it. The Git view shows it, and everything in the Git view acts on it. The project stays as it is: the title bar's branch menu, the status bar's branch and the project's trees keep showing, and acting on, the project's own repository. Click the project's repository to show it in the Git view again, as you left it.
 - **See its state:** the open repository shows its branch with ↑ and ↓ counts and its number of changed files. Others show what there is to pull, once the background fetch has counted it. A repository that is no longer on disk is marked **missing**.
 - **Narrow the files to a folder:** the open repository expands into its folders, each with its number of changed files. Click a folder to show only the changes under it; click the repository, or the `in folder/ ✕` chip in Files, to show them all again.
 - **Filter** the list: the field appears once you have more than 6 repositories. It matches repository and group names.
-- **Right-click** a repository for **Open**, **Move to group** (a group, **No group**, or **New group…**), **Reveal in Finder**, **Open in External Terminal**, **Copy path** and **Remove from list**. Removing the open repository closes the project.
+- **Right-click** a repository for **Open as Project**, **Move to group** (a group, **No group**, or **New group…**), **Reveal in Finder**, **Open in External Terminal**, **Copy path** and **Remove from list**. Removing the project's repository closes the project; removing another one that is shown takes the Git view back to the project's.
 
 ### Groups
 

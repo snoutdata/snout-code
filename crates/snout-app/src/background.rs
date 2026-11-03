@@ -150,6 +150,14 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
         out.extend(runs.read(cx).tasks());
     }
     out.extend(crate::remote::tasks(cx));
+    if let Some((stage, percent)) = &model.reload {
+        out.push(BgTask {
+            title: "Reload from Disk".into(),
+            stage: stage.clone(),
+            percent: *percent,
+            ..Default::default()
+        });
+    }
     if let Some(job) = &model.job {
         out.push(BgTask { title: "Git".into(), stage: job.clone(), percent: None, ..Default::default() });
     }

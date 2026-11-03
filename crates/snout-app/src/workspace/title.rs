@@ -111,7 +111,7 @@ impl Workspace {
             cx.notify();
             return;
         }
-        if self.model.read(cx).repo.is_none() {
+        if self.model.read(cx).project_repo().is_none() {
             return;
         }
         let model = self.model.clone();
@@ -131,8 +131,10 @@ impl Workspace {
     pub(super) fn title_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let m = self.model.read(cx);
-        let name = m.repo.as_ref().and(m.project_root()).map(|r| Model::dir_name(&r));
-        let branch = m.repo.as_ref().map(|_| m.head_label());
+        // The project's own: its name and its repository's branch, whichever repository
+        // the Git panel shows.
+        let name = m.project_repo().and(m.project_root()).map(|r| Model::dir_name(&r));
+        let branch = m.project_repo().map(|_| m.project_head_label());
         let recent = m.recent_projects();
         let model = self.model.clone();
 

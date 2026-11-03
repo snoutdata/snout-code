@@ -272,10 +272,7 @@ impl DialogBody {
 
     fn act(&self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
         window.close_dialog(cx);
-        self.model.update(cx, |m, cx| {
-            m.dialog = None;
-            m.handle(action, cx);
-        });
+        self.model.update(cx, |m, cx| m.answer_dialog(action, cx));
     }
 
     fn close(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -532,10 +529,11 @@ impl Render for DialogBody {
             )
         };
         let primary_enabled = self.primary(cx).is_some();
-        let branch = m.status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
-        let upstream = m.status.branch.upstream.clone().unwrap_or_else(|| "its upstream".into());
-        let has_tracked = m.status.files.iter().any(|f| !f.is_untracked());
-        let has_changes = !m.status.files.is_empty();
+        let status = m.dialog_status();
+        let branch = status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
+        let upstream = status.branch.upstream.clone().unwrap_or_else(|| "its upstream".into());
+        let has_tracked = status.files.iter().any(|f| !f.is_untracked());
+        let has_changes = !status.files.is_empty();
 
         let mut body: Vec<AnyElement> = Vec::new();
         let mut buttons: Vec<AnyElement> = Vec::new();

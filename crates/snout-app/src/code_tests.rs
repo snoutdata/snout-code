@@ -1061,3 +1061,98 @@ fn quitting_in_a_test_leaves_the_other_tests_processes_be(cx: &mut TestAppContex
     let _ = std::fs::remove_dir_all(repo);
     assert_eq!(status, None, "another test's process was stopped");
 }
+
+/// Right-click the editor tab at `ix` and pick the menu's item `n` places down.
+fn tab_menu_pick(ix: usize, n: usize, cx: &mut VisualTestContext) {
+    let selector: &'static str = Box::leak(format!("editor-tab-{ix}").into_boxed_str());
+    let tab = cx.debug_bounds(selector).expect("the tab is drawn").center();
+    cx.simulate_mouse_down(tab, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(tab, MouseButton::Right, Modifiers::none());
+    cx.run_until_parked();
+    cx.simulate_keystrokes(&format!("{}enter", "down ".repeat(n)));
+    cx.run_until_parked();
+}
+
+fn sorted_tabs(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> Vec<String> {
+    let mut names = tab_names(ws, cx);
+    names.sort();
+    names
+}
+
+#[gpui::test]
+fn a_pinned_tab_goes_to_the_front_and_the_bulk_closes_pass_it_by(cx: &mut TestAppContext) {
+    let repo = demo_repo("pin-tabs");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    for f in ["README.md", "status.rs", "src/main.rs", "NOTES.md"] {
+        act(&model, cx, Action::OpenFile(repo.join(f), None));
+    }
+    cx.run_until_parked();
+    // Pin Tab (the menu's first item) on the last tab: it moves to the front, its pin
+    // in place of the close button.
+    tab_menu_pick(3, 1, cx);
+    let notes = editor_for(&ws, &repo.join("NOTES.md"), cx);
+    cx.update(|_, cx| assert!(notes.read(cx).pinned));
+    assert!(cx.debug_bounds("unpin-tab-0").is_some(), "the pinned tab is first");
+    // [NOTES, README, status, main]: Close Tabs to the Left of status.rs closes the README
+    // only.
+    tab_menu_pick(2, 4, cx);
+    assert_eq!(sorted_tabs(&ws, cx), ["NOTES.md", "main.rs", "status.rs"]);
+    // [NOTES, status, main]: Close Others on main.rs closes status.rs only.
+    tab_menu_pick(2, 3, cx);
+    assert_eq!(sorted_tabs(&ws, cx), ["NOTES.md", "main.rs"]);
+    // The pin unpins.
+    let pin = cx.debug_bounds("unpin-tab-0").unwrap().center();
+    cx.simulate_click(pin, Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(!notes.read(cx).pinned));
+    assert!(cx.debug_bounds("unpin-tab-0").is_none());
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn a_pinned_tab_is_saved_with_the_layout(cx: &mut TestAppContext) {
+    use gpui_component::dock::BasePanel as _;
+    let repo = demo_repo("pin-saved");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    let readme = editor_for(&ws, &repo.join("README.md"), cx);
+    cx.update(|_, cx| assert!(!crate::editor::saved_pinned(&readme.read(cx).dump(cx))));
+    cx.update(|_, cx| readme.update(cx, |e, cx| e.set_pinned(true, cx)));
+    cx.update(|_, cx| assert!(crate::editor::saved_pinned(&readme.read(cx).dump(cx))));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn reload_all_from_disk_takes_what_changed_in_the_open_tabs(cx: &mut TestAppContext) {
+    let repo = demo_repo("reload-disk");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    cx.run_until_parked();
+    let readme = editor_for(&ws, &repo.join("README.md"), cx);
+    std::fs::write(repo.join("README.md"), "# changed elsewhere\n").unwrap();
+    // No poll runs here (the clock stands still): only the reload looks.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.reload_from_disk(w, cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(readme.read(cx).text(cx), "# changed elsewhere\n"));
+    // The status bar shows it as a background task while it runs, long enough to be seen,
+    // then what changed, then nothing.
+    let reload_task = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let status = ws.read(cx).status.clone();
+            status.read(cx).tasks(cx).into_iter().find(|t| t.title == "Reload from Disk")
+        })
+    };
+    let running = reload_task(cx).expect("the reload shows while it runs");
+    assert!(running.stage.starts_with("Reading the open file"), "{}", running.stage);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("status-tasks").is_some(), "the status bar draws it");
+    cx.executor().advance_clock(std::time::Duration::from_millis(800));
+    cx.run_until_parked();
+    let done = reload_task(cx).expect("then its outcome");
+    assert_eq!((done.stage.as_str(), done.percent), ("1 file changed on disk", Some(100)));
+    cx.executor().advance_clock(std::time::Duration::from_secs(3));
+    cx.run_until_parked();
+    assert!(reload_task(cx).is_none(), "and then it goes");
+    assert!(cx.debug_bounds("status-tasks").is_none());
+    let _ = std::fs::remove_dir_all(repo);
+}

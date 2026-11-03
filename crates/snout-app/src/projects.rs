@@ -167,6 +167,7 @@ impl Render for ProjectsView {
                     false,
                     false,
                     &chips,
+                    None,
                     &p,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| this.toggle(key.clone(), cx)))
@@ -335,16 +336,15 @@ impl ProjectsView {
         let g = if missing { Glyph::Alert } else { Glyph::Repo };
         let id = SharedString::from(key.clone());
         let path_buf = path.to_owned();
-        let row = list_row(id, g, &name, depth, open, selected, missing, &chips, &p)
+        let chevron = chevron_click(&key, cx);
+        let row = list_row(id, g, &name, depth, open, selected, missing, &chips, Some(chevron), &p)
             .on_click(cx.listener({
                 let path = path_buf.clone();
-                move |this, e: &ClickEvent, _, cx| {
-                    if current && open.is_some() && e.position().x < px(8. + f32::from(depth) * INDENT + 18.) {
-                        this.toggle(key.clone(), cx);
-                    } else if current {
+                move |this, _: &ClickEvent, _, cx| {
+                    if current {
                         this.model.update(cx, |m, cx| m.handle(Action::FilterDir(None), cx));
                     } else {
-                        let a = Action::OpenRepo(path.clone());
+                        let a = Action::ShowRepo(path.clone());
                         this.model.update(cx, |m, cx| m.handle(a, cx));
                     }
                 }
@@ -404,17 +404,14 @@ impl ProjectsView {
                 selected,
                 false,
                 &chips,
+                Some(chevron_click(&key, cx)),
                 &p,
             )
             .on_click(cx.listener({
                 let dir = dir.clone();
-                move |this, e: &ClickEvent, _, cx| {
-                    if open.is_some() && e.position().x < px(8. + f32::from(depth) * INDENT + 18.) {
-                        this.toggle(key.clone(), cx);
-                    } else {
-                        let a = Action::FilterDir(Some(dir.clone()));
-                        this.model.update(cx, |m, cx| m.handle(a, cx));
-                    }
+                move |this, _: &ClickEvent, _, cx| {
+                    let a = Action::FilterDir(Some(dir.clone()));
+                    this.model.update(cx, |m, cx| m.handle(a, cx));
                 }
             }))
             .context_menu({
@@ -479,7 +476,7 @@ fn repo_menu(
 ) -> PopupMenu {
     let menu = if openable {
         menu.item(
-            PopupMenuItem::new("Open")
+            PopupMenuItem::new("Open as Project")
                 .icon(crate::components::menu_icon(crate::components::IconName::File))
                 .on_click(send(model, Action::OpenRepo(path.to_owned()))),
         )
@@ -528,6 +525,17 @@ fn repo_menu(
 }
 
 /// A row of the tree: arrow column, icon, name (cut to fit), and chips at the right end.
+/// What a click on a row's chevron does: open or close the row, and nothing else.
+type ChevronClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+fn chevron_click(key: &str, cx: &mut Context<ProjectsView>) -> ChevronClick {
+    let key = key.to_owned();
+    Box::new(cx.listener(move |this, _: &ClickEvent, _, cx| {
+        cx.stop_propagation();
+        this.toggle(key.clone(), cx);
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn list_row(
     id: SharedString,
@@ -538,15 +546,30 @@ fn list_row(
     selected: bool,
     dim: bool,
     chips: &[(String, gpui::Hsla)],
+    on_chevron: Option<ChevronClick>,
     p: &Palette,
 ) -> gpui::Stateful<gpui::Div> {
     let ink = if dim { p.fg_dim } else { p.fg };
-    crate::components::tree_row(id, crate::components::RowState::current(selected), p)
+    let chevron = div()
+        .id(SharedString::from(format!("{id}:chevron")))
+        .when(open.is_some(), |d| {
+            d.debug_selector({
+                let id = id.clone();
+                move || format!("chevron:{id}")
+            })
+        })
+        .w(px(14.))
+        .h_full()
+        .flex_none()
+        .when_some(open, |d, open| d.child(look::chevron(open, p.fg_dim)))
+        .when_some(on_chevron.filter(|_| open.is_some()), |d, f| d.on_click(f));
+    crate::components::tree_row(id.clone(), crate::components::RowState::current(selected), p)
+        .debug_selector(move || format!("row:{id}"))
         .gap_0()
         .pl(px(2. + f32::from(depth) * INDENT))
         .pr(px(3.))
         .text_color(ink)
-        .child(div().w(px(14.)).h_full().flex_none().when_some(open, |d, open| d.child(look::chevron(open, p.fg_dim))))
+        .child(chevron)
         .child(div().w(px(1.)))
         .child(glyph(g, 16., ink))
         .child(

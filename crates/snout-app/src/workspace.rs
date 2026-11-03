@@ -237,7 +237,11 @@ fn restore_layout(
             crate::editor::saved_path(ctx.state()).unwrap_or_default()
         };
         let editor = cx.new(|cx| EditorPanel::open(path, window, cx));
-        editor.update(cx, |e, _| e.close_if_gone = true);
+        let pinned = crate::editor::saved_pinned(ctx.state());
+        editor.update(cx, |e, _| {
+            e.close_if_gone = true;
+            e.pinned = pinned;
+        });
         if let Some((uri, root)) = class_file {
             let loading = "// Loading the class from the Java server…\n".to_owned();
             editor.update(cx, |e, cx| e.show_class_file(uri, root, loading, window, cx));
@@ -730,7 +734,7 @@ impl Workspace {
     /// File ▸ Close Project: ask about unsaved changes first, then keep the project's tabs
     /// for when it opens again, close them and the project, and show the Welcome page.
     pub fn close_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.model.read(cx).repo.is_none() {
+        if self.model.read(cx).project_repo().is_none() {
             return;
         }
         self.settle_unsaved(window, cx, |this, _, cx| {
@@ -1776,6 +1780,69 @@ impl Workspace {
     }
 
     /// The editor tabs open now.
+    /// Reload All from Disk: the project trees read their folders again, every open tab
+    /// looks at its file (taking what changed, or asking when it has changes of its own),
+    /// and the repository's status is read again. The status bar shows it as a background
+    /// task, with how many tabs have looked, long enough to be seen, then what changed.
+    pub fn reload_from_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        /// The least time the task shows while it runs, and how long its outcome stays.
+        const SHOWN: std::time::Duration = std::time::Duration::from_millis(700);
+        const OUTCOME: std::time::Duration = std::time::Duration::from_millis(2500);
+        if self.model.read(cx).reload.as_ref().is_some_and(|(_, done)| *done != Some(100)) {
+            return;
+        }
+        let files = self.side.read(cx).files.clone();
+        files.update(cx, |f, cx| f.reload(cx));
+        self.model.update(cx, |m, cx| m.refresh(cx));
+        let editors = self.editors(cx);
+        let looks: Vec<_> =
+            editors.iter().filter_map(|e| e.update(cx, |e, cx| e.reload_from_disk(window, cx))).collect();
+        let total = editors.len();
+        let stage = move |n: usize| match total {
+            0 => "Reading the project's folders".to_owned(),
+            1 => "Reading the open file and the project's folders".to_owned(),
+            _ => format!("Reading {n} of {total} open files and the project's folders"),
+        };
+        let model = self.model.clone();
+        model.update(cx, |m, cx| {
+            m.reload = Some((stage(0), Some(0)));
+            cx.notify();
+        });
+        let started = std::time::Instant::now();
+        // The tabs not looking now (one was already) count as done.
+        let skipped = total - looks.len();
+        cx.spawn(async move |_, cx| {
+            let mut changed = 0;
+            for (i, look) in looks.into_iter().enumerate() {
+                changed += usize::from(look.await);
+                let n = skipped + i + 1;
+                let percent = (n * 100 / total.max(1)).min(99) as u32;
+                model.update(cx, |m, cx| {
+                    m.reload = Some((stage(n), Some(percent)));
+                    cx.notify();
+                });
+            }
+            cx.background_executor().timer(SHOWN.saturating_sub(started.elapsed())).await;
+            let outcome = match changed {
+                0 => "Nothing changed on disk".to_owned(),
+                1 => "1 file changed on disk".to_owned(),
+                n => format!("{n} files changed on disk"),
+            };
+            model.update(cx, |m, cx| {
+                m.reload = Some((outcome, Some(100)));
+                cx.notify();
+            });
+            cx.background_executor().timer(OUTCOME).await;
+            model.update(cx, |m, cx| {
+                if m.reload.as_ref().is_some_and(|(_, done)| *done == Some(100)) {
+                    m.reload = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     pub fn editors(&self, cx: &App) -> Vec<Entity<EditorPanel>> {
         let dock = self.dock.read(cx);
         self.editors
@@ -2010,6 +2077,7 @@ impl Render for Workspace {
                     project.update(cx, |v, cx| v.reveal(&path, cx));
                 }
             }))
+            .on_action(cx.listener(|this, _: &ReloadFromDisk, w, cx| this.reload_from_disk(w, cx)))
             .on_action(cx.listener(|this, _: &CollapseAll, _, cx| {
                 let (files, project) = (this.side.read(cx).files.clone(), this.side.read(cx).project.clone());
                 files.update(cx, |f, cx| {
