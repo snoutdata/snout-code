@@ -450,3 +450,13 @@ fn a_new_playwright_project_lists_its_tests_in_every_browser() {
     assert!(ok, "the files type-check: {text}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn typescript_server_uris_are_kept_as_the_documents_are() {
+    use crate::lang::typescript::canonical_uri;
+    assert_eq!(canonical_uri("file:///Users/a/My%20Tests/a.spec.ts"), "file:///Users/a/My%20Tests/a.spec.ts");
+    assert_eq!(canonical_uri("untitled:Untitled-1"), "untitled:Untitled-1");
+    if cfg!(windows) {
+        assert_eq!(canonical_uri("file:///c%3A/Users/a/e2e/a.spec.ts"), "file:///C:/Users/a/e2e/a.spec.ts");
+    }
+}

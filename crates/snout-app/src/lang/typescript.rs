@@ -133,6 +133,17 @@ fn next_generation() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// A `file:` URI as SnoutCode writes it, however the server wrote it: vtsls writes Windows
+/// paths as VS Code does (`file:///c%3A/Users/…`), the documents are kept by
+/// `file:///C:/Users/…`.
+pub fn canonical_uri(uri: &str) -> String {
+    use std::str::FromStr as _;
+    Uri::from_str(uri)
+        .ok()
+        .and_then(|u| snout_lang::uri::to_path(&u))
+        .map_or_else(|| uri.to_owned(), |p| snout_lang::uri::from_path(&p).as_str().to_owned())
+}
+
 /// The language id a file goes to vtsls with, when it is one vtsls serves.
 pub fn language_id(path: &Path) -> Option<&'static str> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
@@ -496,7 +507,7 @@ impl LangHub {
         let Some(server) = self.ts.get_mut(root) else { return };
         match method {
             "textDocument/publishDiagnostics" => {
-                let Some(uri) = params.get("uri").and_then(Value::as_str).map(str::to_owned) else { return };
+                let Some(uri) = params.get("uri").and_then(Value::as_str).map(canonical_uri) else { return };
                 let list: Vec<Diagnostic> =
                     serde_json::from_value(params.get("diagnostics").cloned().unwrap_or_default()).unwrap_or_default();
                 if list.is_empty() {

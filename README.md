@@ -2,7 +2,9 @@
 
 **[Read the user guide](docs/README.md)**
 
-A native IDE for Java, Gradle, Maven and Spring Boot on macOS, Linux and Windows, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your desktop.
+A native IDE for Java, Gradle, Maven and Spring Boot, and for end-to-end tests written with Playwright in TypeScript, on macOS, Linux and Windows, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your desktop.
+
+A Java project gets SnoutCode's Java engine; a repository of Playwright tests opens as a project of its own, with TypeScript editing and the Node, packages and browsers its tests need, and never starts Java. A repository with both gets each for its own files.
 
 ![SnoutCode on a Spring Boot web shop: the Project view, the editor and the Spring window's beans](docs/images/spring-beans.png)
 
@@ -12,9 +14,11 @@ A native IDE for Java, Gradle, Maven and Spring Boot on macOS, Linux and Windows
 
 Each item links to its page in the user guide.
 
-- **[Projects](docs/projects.md):** open any folder as the project, with one Gradle or Maven build or many side by side. The Project view shows the modules as the build sees them, or the plain files. File ▸ New Project… makes a Java application or a Spring Boot application, with Gradle or Maven.
+- **[Projects](docs/projects.md):** open any folder as the project, with one Gradle or Maven build or many side by side. The Project view shows the modules as the build sees them, or the plain files. File ▸ New Project… makes a Java application or a Spring Boot application, with Gradle or Maven, or a Playwright project of end-to-end tests.
 - **[Editor](docs/editor.md):** tabs and split editors, find and replace, Find and Replace in Files, Go to File, Search Everywhere and the command palette.
 - **[Java](docs/java.md):** completion that adds imports, go to definition (into libraries too), find references, rename, quick fixes, organize imports, formatting, parameter hints and problems. Scala classes in the build are compiled so Java sees them.
+- **[TypeScript and JavaScript](docs/typescript.md):** completion with auto imports, hover, go to definition, find references, rename, quick fixes and problems, from a TypeScript server on the project's own TypeScript. It runs on the Node the project asks for (`.nvmrc`, `.node-version`, `volta`, `engines`), found among nvm, Volta, fnm, asdf, mise and Homebrew installs, or downloaded from nodejs.org when none fits.
+- **[Playwright projects](docs/playwright.md):** a tests-only repository that tests an application through its URL opens without Java. A bar installs its packages (npm, pnpm, Yarn or Bun, by its lockfile) and the browsers its Playwright version runs, with the output in the Build window. New projects test in Chromium, Firefox and WebKit and read the application's address from `BASE_URL`.
 - **[Gradle](docs/gradle.md):** sync, the Gradle window and its tasks, build problems, a JDK that suits each build's Gradle version, with a download offered when none is installed.
 - **[Maven](docs/maven.md):** Maven builds with no Maven install: reactors, parent POMs, BOM imports and profiles, the Maven window with its phases, goals and profiles, tests through Surefire, and POM completion from the local repository.
 - **[Run and debug](docs/run-and-debug.md):** run configurations, run icons in the gutter, tests with their results in a tree, and a debugger with breakpoints, stepping, variables and expressions.
@@ -26,6 +30,8 @@ Each item links to its page in the user guide.
 - **[Processes](docs/processes.md):** what SnoutCode runs on your machine, and stopping it.
 
 The Java features come from SnoutCode's Java engine (`engine/`, see [engine/README.md](engine/README.md)). The macOS app, the Linux packages and the Windows installer carry the engine with its own Java runtime, so you need no Java installed to start.
+
+The TypeScript features come from [vtsls](https://github.com/yioneko/vtsls), a language server around TypeScript's own `tsserver`. SnoutCode installs it on first use into its data folder with the project's Node, so neither Node nor vtsls needs to be installed beforehand.
 
 ## Linux
 
@@ -95,7 +101,7 @@ Without signing settings the app is signed ad hoc: it opens as is on the Mac tha
 crates/
   snout-app/           the SnoutCode app, on GPUI and GPUI Kit (binary: snout-code)
   snout-core/          Git operations, through the git CLI
-  snout-lang/          the language server client
+  snout-lang/          the language server client (the Java engine, vtsls)
   snout-host/          the machine a workspace lives on: files, processes, terminals
   snout-remote/        the app's side of Remote SSH
   snout-remote-proto/  the wire protocol between the app and snout-server
@@ -114,6 +120,8 @@ cargo fmt --all --check
 ```
 
 The GUI tests render the app headlessly. Set `SNOUT_SCREENSHOT=/path/to/dir` to save PNGs of the renders. The engine has its own tests: `cd engine && ./gradlew build`.
+
+The TypeScript tests run the real vtsls when the machine has Node, and say they are skipped when it has none. A few tests need the network (a Node download from nodejs.org, a package install, the real Playwright listing a new project's tests); they are ignored by default and run with `cargo test -p snout-app --lib playwright_tests -- --ignored`.
 
 ## Contributing
 

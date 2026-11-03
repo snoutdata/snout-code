@@ -1,6 +1,6 @@
 # SnoutCode user guide
 
-SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot on macOS, Linux and Windows, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
+SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, and for end-to-end tests written with Playwright in TypeScript, on macOS, Linux and Windows, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
 
 ## Start here
 
