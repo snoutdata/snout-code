@@ -496,8 +496,9 @@ pub enum Target {
     Script {
         file: PathBuf,
     },
-    /// A script of the project's `package.json`.
+    /// A script of a `package.json`: the package's folder, and the script's name.
     NpmScript {
+        package: PathBuf,
         name: String,
     },
 }
@@ -512,7 +513,7 @@ impl Target {
             Target::Script { file } => {
                 file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned())
             }
-            Target::NpmScript { name } => name.clone(),
+            Target::NpmScript { name, .. } => name.clone(),
         }
     }
 
@@ -1755,8 +1756,8 @@ impl Runs {
                 self.run_node_file(file, debug, cx);
                 return;
             }
-            Target::NpmScript { name } => {
-                self.run_npm_script(name, debug, cx);
+            Target::NpmScript { package, name } => {
+                self.run_npm_script(package, name, debug, cx);
                 return;
             }
             Target::TestClass { class } | Target::TestMethod { class, .. } => {

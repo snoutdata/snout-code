@@ -149,16 +149,21 @@ impl EditorPanel {
             }));
             return;
         }
-        // A project's `package.json`: a run icon beside each script; the run configurations
+        // A package's `package.json`: a run icon beside each script; the run configurations
         // follow what it says.
         if self.path.file_name().is_some_and(|n| n == "package.json") && self.class_file.is_none() {
             let text = self.state.read(cx).value().to_string();
+            let package = self.path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
             let items: Vec<crate::run::Runnable> = crate::run::node_run::scripts(&text)
                 .into_iter()
-                .map(|s| crate::run::Runnable { line: s.line, target: crate::run::Target::NpmScript { name: s.name } })
+                .map(|s| crate::run::Runnable {
+                    line: s.line,
+                    target: crate::run::Target::NpmScript { package: package.clone(), name: s.name },
+                })
                 .collect();
             let root = crate::run::runs(cx).and_then(|r| r.read(cx).project_root.clone());
-            let ours = root.is_some_and(|r| self.path.parent() == Some(r.as_path()));
+            let ours = root.is_some_and(|r| self.path.starts_with(&r))
+                && !self.path.components().any(|c| c.as_os_str() == "node_modules");
             self.runnables = (ours && !items.is_empty())
                 .then(|| Rc::new(crate::run::FileRunnables { module: None, items, whole: None }));
             if ours && let Some(runs) = crate::run::runs(cx) {

@@ -68,9 +68,10 @@ pub fn is_node_project(host: &dyn Host, dir: &Path) -> bool {
 pub fn has_dependencies(host: &dyn Host, dir: &Path) -> bool {
     let Ok(text) = host.read_to_string(&dir.join("package.json")) else { return false };
     let Ok(json) = serde_json::from_str::<Value>(&text) else { return false };
-    ["dependencies", "devDependencies", "optionalDependencies"]
-        .iter()
-        .any(|k| json.get(k).and_then(Value::as_object).is_some_and(|m| !m.is_empty()))
+    json.get("workspaces").is_some()
+        || ["dependencies", "devDependencies", "optionalDependencies"]
+            .iter()
+            .any(|k| json.get(k).and_then(Value::as_object).is_some_and(|m| !m.is_empty()))
 }
 
 /// Whether `path` is a script Current File can run: JavaScript or TypeScript, not a type
@@ -86,21 +87,145 @@ pub fn is_script_file(path: &Path) -> bool {
         && !path.components().any(|c| c.as_os_str() == "node_modules")
 }
 
-/// The run configurations of the project at `root`: one for each script of its
-/// `package.json`.
+/// Folders never looked in for packages: installed packages and build output.
+const NOT_PACKAGES: [&str; 8] =
+    ["node_modules", "dist", "build", "out", "target", "coverage", "vendor", "bower_components"];
+
+/// How deep below the project packages are looked for.
+const PACKAGE_DEPTH: usize = 4;
+
+/// The Node packages of the project at `root`: each folder with a `package.json` (the
+/// project's own, a workspace's packages, a front end beside a Java build), the project's
+/// first, then by path; not in `node_modules`, build output or hidden folders.
+pub fn packages(host: &dyn Host, root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![(root.to_owned(), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        if host.is_file(&dir.join("package.json")) {
+            out.push(dir.clone());
+        }
+        if depth >= PACKAGE_DEPTH {
+            continue;
+        }
+        let Ok(entries) = host.read_dir(&dir) else { continue };
+        for e in entries.into_iter().filter(|e| e.is_dir) {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with('.') && !NOT_PACKAGES.contains(&name.as_str()) {
+                stack.push((e.path.clone(), depth + 1));
+            }
+        }
+    }
+    out.sort_by(|a, b| (a != root, a).cmp(&(b != root, b)));
+    out
+}
+
+/// The package `file` is in: the nearest folder above it with a `package.json`, up to
+/// `root`.
+pub fn package_of(host: &dyn Host, file: &Path, root: &Path) -> Option<PathBuf> {
+    let mut at = file.parent();
+    while let Some(d) = at {
+        if host.is_file(&d.join("package.json")) {
+            return Some(d.to_owned());
+        }
+        if d == root {
+            break;
+        }
+        at = d.parent();
+    }
+    None
+}
+
+/// The package manager of the package at `dir`: by the lockfile beside it, else by the
+/// nearest one above it up to `root` (a workspace keeps one, at its root).
+pub fn manager_of(host: &dyn Host, dir: &Path, root: &Path) -> PackageManager {
+    const LOCKS: [&str; 5] = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock"];
+    for d in dir.ancestors() {
+        if LOCKS.iter().any(|l| host.is_file(&d.join(l))) {
+            return PackageManager::of(host, d);
+        }
+        if d == root {
+            break;
+        }
+    }
+    PackageManager::Npm
+}
+
+/// Where the packages of the package at `dir` are installed: the nearest folder from it up
+/// to `root` with a lockfile or a workspace's list of packages (`workspaces`,
+/// `pnpm-workspace.yaml`), else its own.
+pub fn install_dir(host: &dyn Host, dir: &Path, root: &Path) -> PathBuf {
+    const MARKS: [&str; 6] =
+        ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "pnpm-workspace.yaml"];
+    for d in dir.ancestors() {
+        let workspace = host
+            .read_to_string(&d.join("package.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .is_some_and(|j| j.get("workspaces").is_some());
+        if workspace || MARKS.iter().any(|m| host.is_file(&d.join(m))) {
+            return d.to_owned();
+        }
+        if d == root {
+            break;
+        }
+    }
+    dir.to_owned()
+}
+
+/// A package's folder as configurations name it, relative to the project (`apps/web`);
+/// empty for the project's own.
+fn rel(dir: &Path, root: &Path) -> String {
+    dir.strip_prefix(root).unwrap_or(dir).to_string_lossy().replace('\\', "/")
+}
+
+/// The id of the configuration of script `name` of the package at `dir`.
+pub fn script_id(dir: &Path, root: &Path, name: &str) -> String {
+    match rel(dir, root) {
+        r if r.is_empty() => format!("npm:{name}"),
+        r => format!("npm:{r}:{name}"),
+    }
+}
+
+/// The run configurations of the project at `root`: one for each script of each of its
+/// packages, named as they run (`npm run dev`, `pnpm run build (apps/web)`).
 pub fn configs(host: &dyn Host, root: &Path) -> Vec<RunConfig> {
-    let Ok(text) = host.read_to_string(&root.join("package.json")) else { return Vec::new() };
-    let manager = PackageManager::of(host, root);
-    scripts(&text)
-        .into_iter()
-        .map(|s| RunConfig {
-            id: format!("npm:{}", s.name),
-            kind: Kind::Npm,
-            name: format!("{} run {}", manager.name(), s.name),
-            task: Some(s.name),
-            ..Default::default()
-        })
-        .collect()
+    let mut out = Vec::new();
+    for dir in packages(host, root) {
+        let Ok(text) = host.read_to_string(&dir.join("package.json")) else { continue };
+        let manager = manager_of(host, &dir, root);
+        let folder = rel(&dir, root);
+        for s in scripts(&text) {
+            out.push(RunConfig {
+                id: script_id(&dir, root, &s.name),
+                kind: Kind::Npm,
+                name: match folder.as_str() {
+                    "" => format!("{} run {}", manager.name(), s.name),
+                    f => format!("{} run {} ({f})", manager.name(), s.name),
+                },
+                build: Some(folder.clone()).filter(|f| !f.is_empty()),
+                task: Some(s.name),
+                ..Default::default()
+            });
+        }
+    }
+    out
+}
+
+/// The package a configuration runs in: its own folder for a script, the file's package
+/// for a file; the project's folder when there is none.
+pub fn config_package(host: &dyn Host, root: &Path, config: &RunConfig) -> PathBuf {
+    match config.kind {
+        Kind::Npm => {
+            config.build.as_deref().filter(|b| !b.is_empty()).map_or_else(|| root.to_owned(), |b| root.join(b))
+        }
+        _ => config
+            .task
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .and_then(|t| package_of(host, &root.join(t), root))
+            .unwrap_or_else(|| root.to_owned()),
+    }
 }
 
 /// The variables every Node run gets: `node` first on `PATH`, and colours.
@@ -111,17 +236,18 @@ fn base_env(host: &dyn Host, node: &Node) -> Vec<(String, String)> {
     ]
 }
 
-/// The command that runs script `script` of the project at `root` with its package
-/// manager, `args` after it.
+/// The command that runs script `script` of the package at `dir` (in the project at
+/// `root`) with its package manager, `args` after it.
 pub fn script_launch(
     host: &dyn Host,
+    dir: &Path,
     root: &Path,
     node: &Node,
     script: &str,
     args: &[String],
     env: Vec<(String, String)>,
 ) -> Result<ProcessLaunch, String> {
-    let manager = PackageManager::of(host, root);
+    let manager = manager_of(host, dir, root);
     let (program, mut all) = match manager {
         PackageManager::Npm => {
             let npm = crate::lang::typescript::npm_cli(host, node).ok_or("npm is missing beside Node")?;
@@ -146,7 +272,7 @@ pub fn script_launch(
         title: format!("{} run {script}", manager.name()),
         program,
         args: all,
-        cwd: root.to_owned(),
+        cwd: dir.to_owned(),
         env: vars,
         place: Place::Run,
         report: false,
@@ -245,8 +371,8 @@ pub fn file_config(root: &Path, file: &Path) -> RunConfig {
     }
 }
 
-/// What the configuration `config` of the project at `root` runs, on `node`; `debug` has
-/// js-debug launch it.
+/// What the configuration `config` of the project at `root` runs, on `node` (the one its
+/// package asks for); `debug` has js-debug launch it.
 pub fn config_launch(
     host: &dyn Host,
     root: &Path,
@@ -271,10 +397,11 @@ pub fn config_launch(
     let env: Vec<(String, String)> = config.env.clone().into_iter().collect();
     let cwd = config.working_dir.as_deref().filter(|d| !d.trim().is_empty()).map(|d| root.join(d));
     let task = config.task.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let package = config_package(host, root, config);
     let mut launch = match config.kind {
         Kind::Npm => {
             let script = task.ok_or("The configuration names no script")?;
-            let mut l = script_launch(host, root, node, script, &config.args, env)?;
+            let mut l = script_launch(host, &package, root, node, script, &config.args, env)?;
             if let Some(cwd) = cwd {
                 l.cwd = cwd;
             }
@@ -286,7 +413,7 @@ pub fn config_launch(
             if !host.is_file(&file) {
                 return Err(format!("{} is not there", file.display()));
             }
-            file_launch(host, root, node, &file, &config.jvm_args, &config.args, cwd.as_deref(), env)?
+            file_launch(host, &package, node, &file, &config.jvm_args, &config.args, cwd.as_deref(), env)?
         }
     };
     if !config.name.trim().is_empty() {
@@ -330,7 +457,7 @@ impl Runs {
         let host = crate::host::host(cx);
         let id = config.id.clone();
         let find = cx.background_executor().spawn(async move {
-            let n = project_node(&*host, &project)?;
+            let n = project_node(&*host, &config_package(&*host, &project, &config), &project)?;
             config_launch(&*host, &project, &n, &config, debug)
         });
         cx.spawn(async move |this, cx| {
@@ -367,13 +494,16 @@ impl Runs {
         self.start_node_config(config, debug, cx);
     }
 
-    /// Run (or debug) the open project's script `name`.
-    pub fn run_npm_script(&mut self, name: &str, debug: bool, cx: &mut Context<Self>) {
-        let id = format!("npm:{name}");
+    /// Run (or debug) script `name` of the package at `dir`.
+    pub fn run_npm_script(&mut self, dir: &Path, name: &str, debug: bool, cx: &mut Context<Self>) {
+        let Some(project) = self.model.read(cx).project_root() else { return };
+        let id = script_id(dir, &project, name);
+        let folder = rel(dir, &project);
         let config = self.configurations().into_iter().find(|c| c.id == id).unwrap_or_else(|| RunConfig {
             id,
             kind: Kind::Npm,
             name: format!("run {name}"),
+            build: Some(folder).filter(|f| !f.is_empty()),
             task: Some(name.to_owned()),
             ..Default::default()
         });
@@ -384,9 +514,9 @@ impl Runs {
     }
 }
 
-/// The Node the project at `root` runs on.
-pub fn project_node(host: &dyn Host, root: &Path) -> Result<Node, String> {
-    let wanted = node::wanted(host, root, Some(root));
+/// The Node the package at `dir` of the project at `root` runs on.
+pub fn project_node(host: &dyn Host, dir: &Path, root: &Path) -> Result<Node, String> {
+    let wanted = node::wanted(host, dir, Some(root));
     let all = node::discover(host);
     node::choose(&wanted, &all)
         .cloned()

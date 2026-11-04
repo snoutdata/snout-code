@@ -3,9 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::lang::node;
+use crate::lang::node::{self, PackageManager};
 use crate::lang_tests::{editor_of, pump_until};
 use crate::model::Action;
+use crate::playwright::setup::Need;
 use crate::run::config::{Kind, RunConfig};
 use crate::run::{Launch, Outcome, Place, Runs, Target};
 use crate::tests::{act, open, scratch_dir, with_repo};
@@ -121,7 +122,8 @@ fn package_json_gets_a_run_icon_beside_each_script(cx: &mut gpui::TestAppContext
     assert!(found);
     let r = cx.update(|_, cx| editor.read(cx).runnables.clone()).unwrap();
     let items: Vec<(u32, Target)> = r.items.iter().map(|i| (i.line, i.target.clone())).collect();
-    assert_eq!(items, [(3, Target::NpmScript { name: "build".into() }), (4, Target::NpmScript { name: "dev".into() })]);
+    let script = |name: &str| Target::NpmScript { package: repo.clone(), name: name.into() };
+    assert_eq!(items, [(3, script("build")), (4, script("dev"))]);
     assert_eq!(r.at_line(4).map(Target::menu_label).as_deref(), Some("dev"), "the editor's Run is the script's");
     let _ = std::fs::remove_dir_all(repo);
 }
@@ -374,7 +376,7 @@ fn a_real_debug_stops_in_an_npm_script_a_typescript_file_and_an_attach(cx: &mut 
     cx.update(|_, cx| {
         runs.update(cx, |r, cx| {
             r.toggle_breakpoint(&main, 2, cx);
-            r.run_npm_script("start", true, cx);
+            r.run_npm_script(&repo, "start", true, cx);
         })
     });
     let started = std::time::Instant::now();
@@ -448,5 +450,114 @@ fn a_real_debug_stops_in_an_npm_script_a_typescript_file_and_an_attach(cx: &mut 
     assert!(matches!(program.try_wait(), Ok(None)), "the program goes on after Stop");
     let _ = program.kill();
     println!("node {}: all three stopped and ran on", n.version);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A workspace: the root lists its packages, each with scripts of its own.
+fn workspace(name: &str) -> PathBuf {
+    let repo = crate::tests::demo_repo(name);
+    write(
+        &repo,
+        "package.json",
+        r#"{ "name": "shop", "workspaces": ["apps/*"], "scripts": { "build": "node build.js" } }"#,
+    );
+    write(&repo, "build.js", "console.log('built all');\n");
+    write(
+        &repo,
+        "apps/web/package.json",
+        r#"{ "name": "web", "scripts": { "dev": "node server.js" }, "dependencies": { "vue": "^3.5.0" } }"#,
+    );
+    write(&repo, "apps/web/server.js", "console.log('web in', require('path').basename(process.cwd()));\n");
+    write(&repo, "apps/api/package.json", r#"{ "name": "api", "scripts": { "dev": "node api.js" } }"#);
+    write(&repo, "apps/api/api.js", "console.log('api');\n");
+    // Not packages of the project: installed ones, and build output.
+    write(&repo, "node_modules/vue/package.json", r#"{ "name": "vue", "scripts": { "x": "y" } }"#);
+    write(&repo, "apps/web/dist/package.json", r#"{ "scripts": { "x": "y" } }"#);
+    repo
+}
+
+#[test]
+fn every_package_of_a_workspace_gets_its_scripts_and_runs_in_its_folder() {
+    use crate::run::node_run::{config_package, configs, install_dir, manager_of, packages};
+    let host = snout_host::local();
+    let repo = workspace("node-workspace");
+    let web = repo.join("apps/web");
+    assert_eq!(packages(&*host, &repo), [repo.clone(), repo.join("apps/api"), web.clone()]);
+    let all = configs(&*host, &repo);
+    let names: Vec<(&str, &str, Option<&str>)> =
+        all.iter().map(|c| (c.id.as_str(), c.name.as_str(), c.build.as_deref())).collect();
+    assert_eq!(
+        names,
+        [
+            ("npm:build", "npm run build", None),
+            ("npm:apps/api:dev", "npm run dev (apps/api)", Some("apps/api")),
+            ("npm:apps/web:dev", "npm run dev (apps/web)", Some("apps/web")),
+        ]
+    );
+    assert_eq!(crate::run::config::default_config(&all).unwrap().id, "npm:apps/api:dev", "a package's dev");
+    assert_eq!(config_package(&*host, &repo, &all[2]), web);
+    let file = crate::run::node_run::file_config(&repo, &web.join("tools/seed.ts"));
+    write(&web, "tools/seed.ts", "");
+    assert_eq!(config_package(&*host, &repo, &file), web, "a file runs in its package");
+    // One lockfile, at the workspace's root, says the manager for all.
+    assert_eq!(manager_of(&*host, &web, &repo), PackageManager::Npm);
+    write(&repo, "pnpm-lock.yaml", "");
+    assert_eq!(manager_of(&*host, &web, &repo), PackageManager::Pnpm);
+    assert_eq!(install_dir(&*host, &web, &repo), repo);
+    // The workspace installs at its root; once it has, its packages have theirs.
+    std::fs::remove_dir_all(repo.join("node_modules")).unwrap();
+    let need = crate::playwright::setup::check(&*host, &repo);
+    assert_eq!(need, Some(Need::Packages { manager: PackageManager::Pnpm, dir: None }));
+    std::fs::create_dir_all(repo.join("node_modules")).unwrap();
+    assert_eq!(crate::playwright::setup::check(&*host, &repo), None);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn a_front_end_beside_a_java_build_installs_in_its_own_folder() {
+    let host = snout_host::local();
+    let repo = scratch_dir("node-front-end");
+    write(&repo, "settings.gradle.kts", "");
+    write(
+        &repo,
+        "frontend/package.json",
+        r#"{ "scripts": { "dev": "vite" }, "devDependencies": { "vite": "^6.0.0" } }"#,
+    );
+    assert!(!crate::run::node_run::is_node_project(&*host, &repo));
+    let need = crate::playwright::setup::check(&*host, &repo);
+    assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm, dir: Some(repo.join("frontend")) }));
+    let ids: Vec<String> = crate::run::node_run::configs(&*host, &repo).into_iter().map(|c| c.id).collect();
+    assert_eq!(ids, ["npm:frontend:dev"]);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn a_packages_script_runs_in_its_folder_from_its_own_package_json(cx: &mut gpui::TestAppContext) {
+    if has_node().is_none() {
+        println!("node runs: skipped; needs Node and npm");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = workspace("node-workspace-run");
+    std::fs::create_dir_all(repo.join("node_modules")).unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let file = repo.join("apps/web/package.json");
+    act(&model, cx, Action::OpenFile(file.clone(), None));
+    let editor = editor_of(&ws, &file, cx).expect("the package's package.json opens");
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| editor.read(cx).runnables.is_some()));
+    assert!(found, "its scripts get icons");
+    let r = cx.update(|_, cx| editor.read(cx).runnables.clone()).unwrap();
+    let target = r.items[0].target.clone();
+    assert_eq!(target, Target::NpmScript { package: repo.join("apps/web"), name: "dev".into() });
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.run_target(&target, None, false, cx)));
+    let id = ended(&runs, cx).expect("the script ends");
+    cx.update(|_, cx| {
+        let r = runs.read(cx);
+        let s = r.session(id).unwrap();
+        assert_eq!(s.title, "npm run dev (apps/web)");
+        assert!(s.console_text().contains("web in web"), "{}", s.console_text());
+        assert_eq!(r.selected_config().unwrap().id, "npm:apps/web:dev", "the title bar's from now on");
+    });
     let _ = std::fs::remove_dir_all(repo);
 }

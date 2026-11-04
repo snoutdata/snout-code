@@ -270,12 +270,15 @@ pub const CURRENT_FILE: &str = "current-file";
 /// The configuration the title bar starts on: the Spring Boot application, else the first
 /// main class, else the first `bootRun` or `run` task.
 pub fn default_config(all: &[RunConfig]) -> Option<RunConfig> {
+    let starts = |c: &RunConfig| matches!(c.task.as_deref(), Some("dev" | "start"));
     all.iter()
         .find(|c| c.kind == Kind::Main && c.spring_boot)
         .or_else(|| all.iter().find(|c| c.kind == Kind::Main))
         .or_else(|| all.iter().find(|c| c.kind == Kind::Gradle || c.kind == Kind::Maven))
         .or_else(|| all.iter().find(|c| c.kind == Kind::Playwright))
-        .or_else(|| all.iter().find(|c| c.kind == Kind::Npm && matches!(c.task.as_deref(), Some("dev" | "start"))))
+        // The project's own `dev` or `start`, else a package's, else the first script.
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Npm && c.build.is_none() && starts(c)))
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Npm && starts(c)))
         .or_else(|| all.iter().find(|c| c.kind == Kind::Npm))
         .cloned()
 }

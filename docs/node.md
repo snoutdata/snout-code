@@ -12,13 +12,24 @@ When `package.json` lists packages and `node_modules` is missing, a bar above th
 
 A repository with both a Java build and a `package.json` (a Spring Boot application with its front end, say) opens as the Java project it is, with the `package.json` scripts among its run configurations too.
 
+## Several packages
+
+A project can hold several packages: a workspace (npm, pnpm, Yarn or Bun) whose root lists them, or folders that each have their own `package.json`, such as `frontend/` beside a Java build. SnoutCode finds every `package.json` down to four folders deep, leaving out `node_modules`, build output (`dist`, `build`, `out`, `target`, `coverage`) and hidden folders.
+
+- Each package's scripts are configurations of their own, named with the package's folder: `npm run dev (apps/web)`. The project's own scripts come first and have no folder in their name.
+- A script runs in its package's folder, on the Node that package asks for (its `.nvmrc` or `engines`, else the project's).
+- The package manager is the lockfile's: the package's own, else the nearest one above it, which for a workspace is the one at its root.
+- Each package's `package.json` has run icons beside its scripts.
+- A script file runs in the package it is in, with that package's `tsx`, or the workspace root's when it is installed there.
+- The bar offers to install the packages of the first package that lacks them, in the folder that holds its lockfile or its workspace (the workspace's root, so one install covers all its packages), else in its own. Once that install ends, it looks again.
+
 ## Scripts
 
 ![A Node project's package.json with a run icon beside each script, and npm run dev in the Run window](images/node-scripts.png)
 
 *`package.json` with its scripts' run icons; `npm run dev` picked in the title bar and running.*
 
-Each script of `package.json` is a run configuration, under **Scripts** in the title bar's configuration menu, named as it runs: `npm run dev`, `pnpm run build`. The package manager is the one the lockfile names. Until you pick a configuration, the title bar starts on `dev` or `start`, else the first script.
+Each script of `package.json` is a run configuration, under **Scripts** in the title bar's configuration menu, named as it runs: `npm run dev`, `pnpm run build`. The package manager is the one the lockfile names. Until you pick a configuration, the title bar starts on the project's `dev` or `start`, else a package's (see [Several packages](#several-packages)), else the first script.
 
 In `package.json` itself, a run icon sits beside each script. Click it for **Run** or **Debug**; ⌃⇧R and ⌃⇧D in the editor run the script the caret is on. The list follows `package.json` each time you save it.
 

@@ -18,10 +18,22 @@ use crate::run::{Launch, Place, Runs, RunsEvent};
 /// What the project lacks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Need {
-    /// `node_modules` does not hold the test runner yet.
-    Packages { manager: PackageManager },
+    /// `node_modules` does not hold the test runner (or a package's packages) yet; `dir` is
+    /// the folder to install in, below the project's (a package of its own, a workspace's
+    /// root), none for the project's.
+    Packages { manager: PackageManager, dir: Option<PathBuf> },
     /// The browsers this Playwright version runs are not downloaded: their names.
     Browsers { version: String, missing: Vec<String> },
+}
+
+impl Need {
+    /// The folder the install runs in, when not the project's.
+    pub fn dir(&self) -> Option<&Path> {
+        match self {
+            Need::Packages { dir, .. } => dir.as_deref(),
+            Need::Browsers { .. } => None,
+        }
+    }
 }
 
 /// Where Playwright keeps its browsers on `host`: `PLAYWRIGHT_BROWSERS_PATH`, else its
@@ -111,14 +123,18 @@ fn node_line(host: &dyn Host, root: &Path, stop: Option<&Path>) -> String {
 /// What the Playwright project (or Node project) at `root` needs, if anything.
 pub fn check(host: &dyn Host, root: &Path) -> Option<Need> {
     let Some(project) = super::project_at(host, root) else {
-        // A Node project needs its packages once it lists some.
-        let node = crate::run::node_run::is_node_project(host, root);
-        let missing =
-            node && crate::run::node_run::has_dependencies(host, root) && !host.is_dir(&root.join("node_modules"));
-        return missing.then(|| Need::Packages { manager: PackageManager::of(host, root) });
+        // A Node package needs its packages once it lists some: the project's own first.
+        use crate::run::node_run::{has_dependencies, install_dir, manager_of, packages};
+        return packages(host, root).into_iter().find_map(|pkg| {
+            let at = install_dir(host, &pkg, root);
+            let installed =
+                pkg.ancestors().take_while(|d| d.starts_with(root)).any(|d| host.is_dir(&d.join("node_modules")));
+            (has_dependencies(host, &pkg) && !installed)
+                .then(|| Need::Packages { manager: manager_of(host, &at, root), dir: Some(at).filter(|a| a != root) })
+        });
     };
     let Some(version) = project.installed.clone() else {
-        return Some(Need::Packages { manager: project.package_manager });
+        return Some(Need::Packages { manager: project.package_manager, dir: None });
     };
     let core = package_dir(host, root, "playwright-core")?;
     let manifest: Value = serde_json::from_str(&host.read_to_string(&core.join("browsers.json")).ok()?).ok()?;
@@ -128,10 +144,11 @@ pub fn check(host: &dyn Host, root: &Path) -> Option<Need> {
 
 /// The command that installs what `need` asks for, run with `node`; or why there is none.
 pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) -> Result<ProcessLaunch, String> {
+    let root = need.dir().unwrap_or(root);
     let path = crate::lang::typescript::path_with(host, node);
     let env = vec![("PATH".to_owned(), path), ("FORCE_COLOR".to_owned(), "1".to_owned())];
     match need {
-        Need::Packages { manager: PackageManager::Npm } => {
+        Need::Packages { manager: PackageManager::Npm, .. } => {
             let npm = crate::lang::typescript::npm_cli(host, node).ok_or("npm is missing beside Node")?;
             let ci = host.is_file(&root.join("package-lock.json"));
             Ok(ProcessLaunch {
@@ -146,7 +163,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 attach: None,
             })
         }
-        Need::Packages { manager } => {
+        Need::Packages { manager, .. } => {
             let name = manager.name();
             let program = snout_host::which(host, &[name], &[node.bin_dir().to_owned()])
                 .ok_or_else(|| format!("{name} is not installed (the project's lockfile is {name}'s)"))?;
@@ -287,7 +304,8 @@ impl Setup {
         let project = self.model.read(cx).project_root();
         // Which Node, and the command, are found off the UI thread.
         let find = cx.background_executor().spawn(async move {
-            let wanted = node::wanted(&*host, &root, project.as_deref());
+            let at = need.dir().map_or_else(|| root.clone(), Path::to_path_buf);
+            let wanted = node::wanted(&*host, &at, project.as_deref());
             let all = node::discover(&*host);
             let n = node::choose(&wanted, &all)
                 .cloned()

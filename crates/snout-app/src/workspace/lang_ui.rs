@@ -583,22 +583,30 @@ impl Workspace {
         use crate::playwright::setup::Need;
         let setup = self.pw_setup.read(cx);
         let need = setup.shown()?.clone();
+        // A package's folder, as the project has it (`apps/web`).
+        let root = setup.root.clone().unwrap_or_default();
+        let folder =
+            |dir: &std::path::Path| dir.strip_prefix(&root).unwrap_or(dir).to_string_lossy().replace('\\', "/");
         let (installing, error) = (setup.installing.is_some(), setup.error.clone());
         let p = palette(cx);
         let (text, button) = match (&need, installing) {
+            (Need::Packages { dir: Some(dir), .. }, true) => {
+                (format!("Installing the packages of {}… The Build window shows how it goes.", folder(dir)), None)
+            }
             (Need::Packages { .. }, true) => {
                 ("Installing the project's packages… The Build window shows how it goes.".to_owned(), None)
             }
             (Need::Browsers { .. }, true) => {
                 ("Installing Playwright's browsers… The Build window shows how it goes.".to_owned(), None)
             }
-            (Need::Packages { manager }, false) => (
-                if setup.playwright {
-                    "This Playwright project's packages are not installed, so its tests cannot run yet."
-                } else {
-                    "This project's packages are not installed, so it cannot run yet."
-                }
-                .to_owned(),
+            (Need::Packages { manager, dir }, false) => (
+                match dir {
+                    Some(dir) => format!("The packages of {} are not installed, so it cannot run yet.", folder(dir)),
+                    None if setup.playwright => {
+                        "This Playwright project's packages are not installed, so its tests cannot run yet.".to_owned()
+                    }
+                    None => "This project's packages are not installed, so it cannot run yet.".to_owned(),
+                },
                 Some(format!(
                     "Install packages ({} {})",
                     manager.name(),

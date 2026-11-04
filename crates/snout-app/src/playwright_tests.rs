@@ -297,7 +297,7 @@ fn a_playwright_project_without_its_packages_offers_to_install_them(cx: &mut gpu
     let found = pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).need.is_some()));
     assert!(found, "the project is looked at");
     let need = cx.update(|_, cx| setup.read(cx).need.clone());
-    assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm }));
+    assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm, dir: None }));
     assert!(cx.debug_bounds("playwright-bar").is_some() && cx.debug_bounds("playwright-install").is_some());
     let summary = cx.update(|_, cx| setup.read(cx).summary.clone()).unwrap_or_default();
     assert!(summary.starts_with("Playwright 1.64.1, not installed · npm · "), "{summary}");
@@ -413,7 +413,9 @@ fn the_new_project_dialog_makes_a_playwright_project(cx: &mut gpui::TestAppConte
     // It opens offering to install its packages.
     let setup = cx.update(|_, cx| ws.read(cx).pw_setup.clone());
     let offered = pump_until(cx, 10, |cx| {
-        cx.update(|_, cx| matches!(setup.read(cx).need, Some(Need::Packages { manager: PackageManager::Npm })))
+        cx.update(|_, cx| {
+            matches!(setup.read(cx).need, Some(Need::Packages { manager: PackageManager::Npm, dir: None }))
+        })
     });
     assert!(offered);
     let _ = std::fs::remove_dir_all(repo);
