@@ -515,6 +515,11 @@ pub struct Model {
     git_jobs: VecDeque<GitJob>,
     git_busy: bool,
     refresh_queued: bool,
+    /// When a Git job that may write the working tree (not a read of the repository)
+    /// last ran: pulled, checked out or discarded files are Git's, not an agent's.
+    git_wrote: Option<std::time::Instant>,
+    /// The Git job running is one that may write the working tree.
+    git_writing_job: bool,
     /// A project opened and waiting for the workspace to switch to it.
     pending_open: Option<Opened>,
     /// A draft of the commit message is being started.
@@ -602,6 +607,8 @@ impl Model {
             claude: None,
             git_jobs: VecDeque::new(),
             git_busy: false,
+            git_wrote: None,
+            git_writing_job: false,
             refresh_queued: false,
             pending_open: None,
             starting_draft: false,
@@ -1167,12 +1174,21 @@ impl Model {
             }
         }
         self.git_busy = true;
+        let writes = !job.refresh;
+        self.git_writing_job = writes;
+        if writes {
+            self.git_wrote = Some(std::time::Instant::now());
+        }
         let repo = job.repo.clone();
         let work = cx.background_executor().spawn(async move { (job.work)(&job.repo) });
         cx.spawn(async move |this, cx| {
             let then = work.await;
             let _ = this.update(cx, |m, cx| {
                 m.git_busy = false;
+                m.git_writing_job = false;
+                if writes {
+                    m.git_wrote = Some(std::time::Instant::now());
+                }
                 if m.repo.as_ref() == Some(&repo) {
                     then(m, cx);
                     m.persist();
@@ -1185,6 +1201,14 @@ impl Model {
             });
         })
         .detach();
+    }
+
+    /// Git is writing the working tree, or did a moment ago (its files' events still arrive):
+    /// a pull, a checkout, a discard. What changes on disk then is Git's.
+    pub fn git_writing(&self) -> bool {
+        const GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+        let busy = self.job.is_some() || (self.git_busy && self.git_writing_job);
+        busy || self.git_wrote.is_some_and(|t| t.elapsed() < GRACE)
     }
 
     /// Read the repository again, off the UI thread (once, however often it is asked while
@@ -1558,6 +1582,7 @@ impl Model {
         }
         self.message = format!("{label}…");
         self.job = Some(label.to_owned());
+        self.git_wrote = Some(std::time::Instant::now());
         self.job_on_project = self.on_project_side;
         self.survey_hold.store(true, Ordering::Relaxed);
         let label = label.to_owned();
@@ -1578,6 +1603,7 @@ impl Model {
 
     fn finish_job(&mut self, label: &str, result: Result<Outcome, String>, cx: &mut Context<Self>) {
         self.job = None;
+        self.git_wrote = Some(std::time::Instant::now());
         self.survey_hold.store(false, Ordering::Relaxed);
         match result {
             Ok(Outcome::Done(text)) => {

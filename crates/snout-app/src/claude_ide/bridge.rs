@@ -77,6 +77,8 @@ pub struct Bridge {
     /// The files the hooks reported, and when; the files the app wrote itself (a revert).
     hooked: HashMap<PathBuf, Instant>,
     own_writes: HashMap<PathBuf, Instant>,
+    /// When Claude Code's hooks were last heard: a Claude that has them reports its edits.
+    pub hooks_heard: Option<Instant>,
     /// Each file's text before the edit under way (the hooks' `PreToolUse`).
     pre: HashMap<PathBuf, Snapshot>,
     /// The file last brought forward to follow Claude, and when; the one waiting its turn.
@@ -280,6 +282,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         settings_dir,
         hooked: HashMap::new(),
         own_writes: HashMap::new(),
+        hooks_heard: None,
         pre: HashMap::new(),
         last_reveal: None,
         queued: None,
@@ -953,12 +956,21 @@ fn changed_lines(before: &str, after: &str) -> Vec<Range<usize>> {
 /// console (or ended a moment ago), else Claude Code while it is connected; never while a
 /// Git job of the app's own is changing files.
 pub fn watched_agent(ws: &Workspace, cx: &App) -> Option<&'static str> {
-    if ws.model.read(cx).job.is_some() {
+    // A pull, a checkout, a discard: what changes is Git's.
+    if ws.model.read(cx).git_writing() {
         return None;
     }
     let turn = cx.try_global::<ConsoleTurn>();
     let console = turn.filter(|t| t.at_work()).and_then(|t| t.agent);
-    let claude = ws.claude.as_ref().is_some_and(|b| b.clients() > 0).then_some(agents::CLAUDE);
+    // A Claude Code connected without hooks (started elsewhere): the watcher stands in for
+    // them. One whose hooks are heard reports each edit itself, so a change it did not
+    // report is not its own.
+    let console_claude = turn.is_some_and(|t| t.agent == Some(agents::CLAUDE));
+    let claude = ws
+        .claude
+        .as_ref()
+        .is_some_and(|b| b.clients() > 0 && b.hooks_heard.is_none() && !console_claude)
+        .then_some(agents::CLAUDE);
     console.or(claude)
 }
 
@@ -1066,19 +1078,23 @@ fn follow_watched(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Work
     let read = cx.background_executor().spawn({
         let root = root.clone();
         async move {
+            // What differs from the last commit: a file that now matches it (pulled,
+            // checked out, reset, by the app or in a terminal) is Git's, not an agent's.
+            let dirty: Option<std::collections::HashSet<String>> = snout_core::Repo::open(&host, &root)
+                .ok()
+                .and_then(|r| r.status().ok())
+                .map(|s| s.files.into_iter().map(|f| f.path).collect());
             changed
                 .into_iter()
                 .zip(unknown)
                 .filter(|(p, _)| host.is_file(p))
                 .filter_map(|(path, unknown)| {
+                    let rel = path.strip_prefix(&root).ok()?.to_string_lossy().replace('\\', "/");
+                    let clean = dirty.as_ref().is_some_and(|d| !d.contains(&rel));
                     let text = host.read_to_string(&path).ok()?;
-                    let head = unknown
-                        .then(|| {
-                            let rel = path.strip_prefix(&root).ok()?.to_string_lossy().replace('\\', "/");
-                            snout_core::gutter::head_text(&*host, &root, &rel)
-                        })
-                        .flatten();
-                    Some((path, text, head))
+                    let head =
+                        (unknown && !clean).then(|| snout_core::gutter::head_text(&*host, &root, &rel)).flatten();
+                    Some((path, text, head, clean))
                 })
                 .collect::<Vec<_>>()
         }
@@ -1094,11 +1110,12 @@ fn follow_watched(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Work
     }));
 }
 
-/// Follow Claude into the files read, `(path, text, text at the last commit)`.
+/// Follow Claude into the files read, `(path, text, text at the last commit, whether it
+/// now matches the last commit)`.
 fn follow_changed(
     ws: &mut Workspace,
     root: &Path,
-    files: Vec<(PathBuf, String, Option<String>)>,
+    files: Vec<(PathBuf, String, Option<String>, bool)>,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
@@ -1109,15 +1126,16 @@ fn follow_changed(
     let connected = agent.is_some();
     let follow = connected && ws.model.read(cx).settings.follow_claude && files.len() <= FOLLOW_MAX;
     let open: Vec<PathBuf> = ws.editors(cx).into_iter().map(|e| e.read(cx).path.clone()).collect();
-    for (path, text, head) in files {
+    for (path, text, head, clean) in files {
         let hooked = left_to_hooks(ws, &path);
         let Some(b) = ws.claude.as_mut() else { return };
         if b.known.len() > 512 {
             b.known.clear();
         }
         let before = b.known.insert(path.clone(), text.clone());
-        // Open tabs follow through their own reload; the hooks show their own files.
-        if hooked || open.contains(&path) {
+        // Open tabs follow through their own reload; the hooks show their own files; a
+        // file back as the last commit has it is Git's doing.
+        if hooked || clean || open.contains(&path) {
             continue;
         }
         let before = before.or(head).unwrap_or_default();
@@ -1272,6 +1290,11 @@ fn user_typing(ws: &Workspace, window: &Window, cx: &App) -> bool {
 }
 
 pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut Context<Workspace>) {
+    if e.agent == agents::CLAUDE
+        && let Some(b) = ws.claude.as_mut()
+    {
+        b.hooks_heard = Some(Instant::now());
+    }
     let changes = changes_of(ws, cx);
     match e.kind {
         HookKind::TurnComplete => changes.update(cx, |c, cx| {

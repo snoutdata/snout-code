@@ -109,6 +109,8 @@ When the agent writes out of sight (you scrolled away, or **Follow** is off), a 
 
 With **Follow** off, the editor stays where it is, and a dot in the agent's colour marks a tab the agent changed.
 
+Only the agent's own edits count. Files Git changes (a pull, a checkout, a discard, from SnoutCode or from a terminal) are never put down to an agent, even with it connected: nothing opens, and nothing waits for review in the Agent Changes window.
+
 While Claude Code edits, a note floats over the lower right of the editor: **Claude is editing** with the file and the tool, or **Claude is waiting for your review**. Click it to open that file.
 
 ## Who wrote which lines

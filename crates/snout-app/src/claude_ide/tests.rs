@@ -1255,3 +1255,40 @@ fn the_skill_opens_files_in_the_editor_over_the_api(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }
+
+/// A pull while Claude Code is connected is not Claude's doing: the files it brings (now
+/// as the last commit has them) are not recorded as Claude's changes, no tab opens on
+/// them, and the window stays where it was. A file Claude changes afterwards still is.
+#[gpui::test]
+fn a_pull_is_not_put_down_to_claude(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("claude-pull", cx);
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(crate::panels::Activity::Git, w, cx)));
+    // The watcher starts with the first look at the project.
+    pump(cx, 300);
+    std::thread::sleep(Duration::from_millis(300));
+    let other = repo.join("src/demo/Other.java");
+    let tabs = |cx: &mut VisualTestContext| cx.update(|_, cx| ws.read(cx).editors(cx).len());
+    let before = tabs(cx);
+
+    // What a pull leaves: the file rewritten, and HEAD moved to the commit that has it
+    // (made here by Git outside the app, as a `git pull` in a terminal would).
+    std::fs::write(&other, "class Other { int pulled; }\n").unwrap();
+    git(&repo, &["commit", "-qam", "Upstream change"]);
+    pump(cx, 1_500);
+    std::thread::sleep(Duration::from_millis(500));
+    pump(cx, 500);
+    assert!(listed(&ws, cx).is_empty(), "nothing waits for review: {:?}", listed(&ws, cx));
+    assert_eq!(tabs(cx), before, "no tab opened on the pulled file");
+    cx.update(|_, cx| {
+        assert_eq!(ws.read(cx).side.read(cx).activity, crate::panels::Activity::Git, "the Git view stays");
+    });
+
+    // Claude (connected, its edits seen only by the watcher) changes it afterwards: that is
+    // Claude's, against the text the pull brought.
+    std::fs::write(&other, "class Other { int pulled; int claude; }\n").unwrap();
+    pump_until(cx, "Claude's change", |cx| !listed(&ws, cx).is_empty());
+    assert_eq!(listed(&ws, cx)[0].0, other);
+    let _ = model;
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
