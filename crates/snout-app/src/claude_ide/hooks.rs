@@ -246,32 +246,42 @@ pub fn command(header: &Path) -> String {
     )
 }
 
-/// The settings `claude` gets with `--settings`: the hooks, nothing else.
-pub fn settings(header: &Path) -> Value {
+/// The settings `claude` gets with `--settings`: the hooks, and leave to run the editor's
+/// API script `api` (the skill's calls) without asking.
+pub fn settings(header: &Path, api: &Path) -> Value {
     let hook = json!([{ "type": "command", "command": command(header), "timeout": 10 }]);
     let on_tools = json!([{ "matcher": FILE_TOOLS.join("|"), "hooks": hook }]);
     let always = json!([{ "hooks": hook }]);
-    json!({ "hooks": {
-        "PreToolUse": on_tools,
-        "PostToolUse": on_tools,
-        "UserPromptSubmit": always,
-        "Stop": always,
-    } })
+    json!({
+        "hooks": {
+            "PreToolUse": on_tools,
+            "PostToolUse": on_tools,
+            "UserPromptSubmit": always,
+            "Stop": always,
+        },
+        "permissions": { "allow": [format!("Bash({}:*)", api.to_string_lossy())] },
+    })
 }
 
-/// Write the settings file and the header file into `dir` on `host`, readable by this
-/// user only. Returns the settings file.
+/// Write the settings file, the header file and the editor's plugin ([`super::api`]) into
+/// `dir` on `host`, readable by this user only. Returns the settings file.
 pub fn write_settings(host: &dyn snout_host::Host, dir: &Path, token: &str) -> std::io::Result<PathBuf> {
     host.create_dir_all_mode(dir, Some(0o700))?;
     let header = dir.join("hook-header");
     host.write_mode(&header, format!("{TOKEN_HEADER}: {token}\n").as_bytes(), Some(0o600))?;
+    super::api::write_plugin(host, dir)?;
     let file = dir.join("claude-settings.json");
-    let text = serde_json::to_string_pretty(&settings(&header)).map_err(std::io::Error::other)?;
+    let text =
+        serde_json::to_string_pretty(&settings(&header, &super::api::script(dir))).map_err(std::io::Error::other)?;
     host.write_mode(&file, text.as_bytes(), Some(0o600))?;
     Ok(file)
 }
 
 type Emit = Arc<dyn Fn(HookEvent) + Send + Sync>;
+type Ask = Arc<dyn Fn(super::server::Call) + Send + Sync>;
+
+/// How long an API call waits for the editor's answer.
+const API_WAIT: Duration = Duration::from_secs(30);
 
 /// The endpoint. Dropping it stops it.
 pub struct HookServer {
@@ -281,22 +291,27 @@ pub struct HookServer {
 }
 
 impl HookServer {
-    /// Listen on 127.0.0.1; `emit` hears each hook, with the file read on `host`.
-    pub fn start(host: HostRef, emit: impl Fn(HookEvent) + Send + Sync + 'static) -> std::io::Result<Self> {
+    /// Listen on 127.0.0.1; `emit` hears each hook, with the file read on `host`, and
+    /// `ask` each call of the editor's API ([`super::api`]), to answer through its reply.
+    pub fn start(
+        host: HostRef,
+        emit: impl Fn(HookEvent) + Send + Sync + 'static,
+        ask: impl Fn(super::server::Call) + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
         let token = lockfile::new_token()?;
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let stop = Arc::new(AtomicBool::new(false));
-        let (s, t, emit): (_, _, Emit) = (stop.clone(), token.clone(), Arc::new(emit));
+        let (s, t, emit, ask): (_, _, Emit, Ask) = (stop.clone(), token.clone(), Arc::new(emit), Arc::new(ask));
         std::thread::Builder::new().name("claude-hooks".into()).spawn(move || {
             while !s.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        let (h, t, e) = (host.clone(), t.clone(), emit.clone());
+                        let (h, t, e, a) = (host.clone(), t.clone(), emit.clone(), ask.clone());
                         let _ = std::thread::Builder::new()
                             .name("claude-hook".into())
-                            .spawn(move || serve(stream, &*h, &t, &e));
+                            .spawn(move || serve(stream, &*h, &t, &e, &a));
                     }
                     Err(e) if e.kind() == ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(15)),
                     Err(_) => std::thread::sleep(Duration::from_millis(100)),
@@ -378,7 +393,46 @@ fn respond(stream: &mut TcpStream, status: &str) {
     let _ = stream.flush();
 }
 
-fn serve(mut stream: TcpStream, host: &dyn snout_host::Host, token: &str, emit: &Emit) {
+fn respond_with(stream: &mut TcpStream, a: &super::api::Answer) {
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        a.status,
+        a.content_type,
+        a.body.len(),
+        a.body
+    );
+    let _ = stream.flush();
+}
+
+/// A call of the editor's API: `GET /utcp` (the manual) or `POST /api/<tool>`.
+fn serve_api(stream: &mut TcpStream, req: &Request, ask: &Ask) {
+    use super::api::{self, Answer};
+    let (path, query) = req.path.split_once('?').unwrap_or((req.path.as_str(), ""));
+    if path == "/utcp" {
+        let body = serde_json::to_string_pretty(&api::manual()).unwrap_or_default();
+        return respond_with(stream, &Answer { status: "200 OK", content_type: "application/json", body });
+    }
+    let Some(name) = path.strip_prefix("/api/").filter(|n| api::TOOLS.contains(n)) else {
+        return respond_with(stream, &Answer::error("404 Not Found", format!("no such call: {path}")));
+    };
+    if req.method != "POST" {
+        return respond_with(stream, &Answer::error("405 Method Not Allowed", "use POST"));
+    }
+    let arguments = match api::arguments(name, query, &req.body) {
+        Ok(a) => a,
+        Err(e) => return respond_with(stream, &Answer::error("400 Bad Request", e)),
+    };
+    let (reply, answer) = super::server::Reply::channel();
+    ask(super::server::Call { client: 0, name: name.to_owned(), arguments, reply });
+    let a = match answer.recv_timeout(API_WAIT) {
+        Ok(message) => api::answer(&message),
+        Err(_) => Answer::error("504 Gateway Timeout", "the editor did not answer"),
+    };
+    respond_with(stream, &a);
+}
+
+fn serve(mut stream: TcpStream, host: &dyn snout_host::Host, token: &str, emit: &Emit, ask: &Ask) {
     let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let Ok(req) = stream.try_clone().and_then(read_request) else {
@@ -386,6 +440,9 @@ fn serve(mut stream: TcpStream, host: &dyn snout_host::Host, token: &str, emit: 
     };
     if !req.header(TOKEN_HEADER).is_some_and(|t| same(t, token)) {
         return respond(&mut stream, "401 Unauthorized");
+    }
+    if req.path == "/utcp" || req.path.starts_with("/utcp?") || req.path.starts_with("/api/") {
+        return serve_api(&mut stream, &req, ask);
     }
     if req.method != "POST" || (req.path != "/hook" && req.path != "/codex") {
         return respond(&mut stream, "404 Not Found");
@@ -452,7 +509,8 @@ pub mod tests {
 
     #[test]
     fn the_settings_hook_the_file_tools_and_keep_the_token_off_the_command_line() {
-        let v = settings(Path::new("/tmp/x y/hook-header"));
+        let v = settings(Path::new("/tmp/x y/hook-header"), Path::new("/tmp/x y/snout-plugin/bin/snout-api"));
+        assert_eq!(v["permissions"]["allow"], json!(["Bash(/tmp/x y/snout-plugin/bin/snout-api:*)"]));
         let pre = &v["hooks"]["PreToolUse"][0];
         assert_eq!(pre["matcher"], "Edit|MultiEdit|Write|NotebookEdit");
         let cmd = pre["hooks"][0]["command"].as_str().unwrap();
@@ -469,7 +527,8 @@ pub mod tests {
         std::fs::write(&file, "class A {}\n").unwrap();
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
-        let server = HookServer::start(snout_host::local(), move |e| tx.lock().unwrap().send(e).unwrap()).unwrap();
+        let server =
+            HookServer::start(snout_host::local(), move |e| tx.lock().unwrap().send(e).unwrap(), |_| {}).unwrap();
         let pre = json!({ "hook_event_name": "PreToolUse", "session_id": "s", "tool_name": "Write",
             "tool_input": { "file_path": file, "content": "class A { int x; }\n" } });
         assert!(post(server.port(), "wrong", &pre).starts_with("HTTP/1.1 401"));
@@ -546,7 +605,8 @@ pub mod tests {
         let dir = scratch("codex");
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
-        let server = HookServer::start(snout_host::local(), move |e| tx.lock().unwrap().send(e).unwrap()).unwrap();
+        let server =
+            HookServer::start(snout_host::local(), move |e| tx.lock().unwrap().send(e).unwrap(), |_| {}).unwrap();
         write_settings(&*snout_host::local(), &dir, server.token()).unwrap();
         let args = codex_args(&dir.join("hook-header"), server.port());
         assert_eq!(args[0], "-c");

@@ -1185,3 +1185,73 @@ fn the_last_tab_closes_and_the_empty_editor_shows(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }
+
+/// Run `script` through the shell on its own thread, with `env`, while the window runs;
+/// whether it succeeded, and its standard output.
+fn shell_while_pumping(cx: &mut VisualTestContext, script: &str, env: &[(&'static str, String)]) -> (bool, String) {
+    let mut c = std::process::Command::new("/bin/sh");
+    c.arg("-c").arg(script).env_remove(super::hooks::PORT_ENV).env_remove(super::api::HEADER_ENV);
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    let child = std::thread::spawn(move || c.output().unwrap());
+    pump_until(cx, "the command", |_| child.is_finished());
+    let out = child.join().unwrap();
+    (out.status.success(), String::from_utf8(out.stdout).unwrap().trim_end().to_owned())
+}
+
+/// The model asks the editor through the skill the console's `claude` loads: the skill's
+/// own commands (its script, which the session's settings let run) open a file and select
+/// in it, read the selection back, and fetch the UTCP manual; a UTCP client's call with
+/// query parameters works too; without the token nothing happens.
+#[gpui::test]
+fn the_skill_opens_files_in_the_editor_over_the_api(cx: &mut TestAppContext) {
+    if !Path::new("/bin/sh").exists() {
+        return;
+    }
+    let (repo, lock_dir, _model, ws, _client, cx) = connected("claude-api", cx);
+    let (port, _) = hook_command(&ws, cx);
+    let (args, env) = cx.update(|_, cx| (cx.global::<super::IdeArgs>().0.clone(), cx.global::<IdeEnv>().0.clone()));
+    let plugin = PathBuf::from(&args[args.iter().position(|a| a == "--plugin-dir").expect("the plugin") + 1]);
+    let skill = std::fs::read_to_string(plugin.join("skills/snout-editor/SKILL.md")).unwrap();
+    assert!(env.iter().any(|(k, _)| *k == super::api::HEADER_ENV), "the console gets the token's header file");
+    let api = plugin.join("bin/snout-api").to_string_lossy().into_owned();
+    let settings: Value = serde_json::from_str(&std::fs::read_to_string(&args[1]).unwrap()).unwrap();
+    assert_eq!(settings["permissions"]["allow"], json!([format!("Bash({api}:*)")]), "it runs without asking");
+    let blocks: Vec<&str> = skill.split("```sh\n").skip(1).map(|b| b.split("```").next().unwrap().trim_end()).collect();
+
+    // The skill's own command, with the path and line it shows swapped for ours.
+    let hello = repo.join("src/demo/Hello.java");
+    let open = blocks[0]
+        .replace("/abs/path/File.java", &hello.to_string_lossy())
+        .replace("\"startLine\":42", "\"startText\":\"class Hello\"");
+    assert!(open.starts_with(&format!("{api} openFile '")), "{open}");
+    assert_eq!(shell_while_pumping(cx, &open, &env), (true, "Opened file and selected text \"class Hello\"".into()));
+    assert!(editor_of(&ws, &hello, cx).is_some(), "a tab for the file");
+    let (ok, sel) = shell_while_pumping(cx, &format!("{api} getCurrentSelection"), &env);
+    assert!(ok);
+    assert_eq!(serde_json::from_str::<Value>(&sel).unwrap()["text"], "class Hello");
+
+    // Lines, as query parameters: how a UTCP client sends them.
+    let other = repo.join("src/demo/Other.java");
+    let q = format!(
+        "curl -s -X POST -H @\"$SNOUT_API_HEADER\" \"http://127.0.0.1:$SNOUT_HOOK_PORT/api/openFile?filePath={}&startLine=1\"",
+        other.to_string_lossy()
+    );
+    assert_eq!(shell_while_pumping(cx, &q, &env), (true, "Opened file and selected lines 1 to 1".into()));
+
+    // A file that is not there fails the script; the manual; outside the console, and
+    // without the token, nothing happens.
+    let missing = open.replace(&*hello.to_string_lossy(), &repo.join("nope.txt").to_string_lossy());
+    let (ok, out) = shell_while_pumping(cx, &missing, &env);
+    assert!(!ok && out.contains("File not found"), "{out}");
+    let (ok, manual) = shell_while_pumping(cx, blocks[1], &env);
+    assert!(ok);
+    let manual: Value = serde_json::from_str(&manual).unwrap();
+    assert!(manual["tools"].as_array().unwrap().iter().any(|t| t["name"] == "openFile"));
+    assert!(!shell_while_pumping(cx, &open, &[]).0, "no editor outside the console");
+    let anon = format!("curl -s -o /dev/null -w '%{{http_code}}' -X POST http://127.0.0.1:{port}/api/getOpenEditors");
+    assert_eq!(shell_while_pumping(cx, &anon, &[]), (true, "401".into()));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}

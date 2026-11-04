@@ -138,6 +138,8 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
     let root = ws.model.read(cx).project_root();
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
     let folders: Vec<PathBuf> = root.iter().cloned().collect();
+    // The editor's API answers its calls with the IDE connection's tools.
+    let api_tx = tx.clone();
     let server = match Server::start(host.clone(), &lock_dir, &folders, move |e| {
         let _ = tx.unbounded_send(e);
     }) {
@@ -149,9 +151,15 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
     };
     // Claude Code's hooks report every edit to the endpoint; `claude` gets their settings.
     let (htx, mut hrx) = futures::channel::mpsc::unbounded::<HookEvent>();
-    let hooks = match HookServer::start(host.clone(), move |e| {
-        let _ = htx.unbounded_send(e);
-    }) {
+    let hooks = match HookServer::start(
+        host.clone(),
+        move |e| {
+            let _ = htx.unbounded_send(e);
+        },
+        move |call| {
+            let _ = api_tx.unbounded_send(Event::Call(call));
+        },
+    ) {
         Ok(h) => Some(h),
         Err(e) => {
             eprintln!("Claude Code integration: could not start the hooks' endpoint: {e}");
@@ -173,7 +181,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             Some(cx.background_spawn(async move {
                 let forward = host.forward_to_app(app_port)?;
                 let file = hooks::write_settings(&*host, &dir, &token)?;
-                std::io::Result::Ok((forward, file))
+                std::io::Result::Ok((forward, file, super::api::plugin_dir(&dir)))
             }))
         }
         _ => None,
@@ -185,11 +193,18 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         let mut codex = Vec::new();
         if let Some(task) = hooks_ready {
             match task.await {
-                Ok((forward, file)) => {
+                Ok((forward, file, plugin)) => {
                     env.push((hooks::PORT_ENV, forward.port.to_string()));
-                    args = vec!["--settings".into(), file.to_string_lossy().into_owned()];
+                    args = vec![
+                        "--settings".into(),
+                        file.to_string_lossy().into_owned(),
+                        "--plugin-dir".into(),
+                        plugin.to_string_lossy().into_owned(),
+                    ];
                     if let Some(dir) = file.parent() {
-                        codex = hooks::codex_args(&dir.join("hook-header"), forward.port);
+                        let header = dir.join("hook-header");
+                        env.push((super::api::HEADER_ENV, header.to_string_lossy().into_owned()));
+                        codex = hooks::codex_args(&header, forward.port);
                     }
                     let _ = ws.update(cx, |ws, _| {
                         if let Some(b) = ws.claude.as_mut() {

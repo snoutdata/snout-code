@@ -61,6 +61,13 @@ pub struct Reply {
 }
 
 impl Reply {
+    /// A reply that arrives on the receiver as the JSON-RPC message the socket would send:
+    /// for callers of the tools that are not on the socket (the HTTP API).
+    pub fn channel() -> (Self, mpsc::Receiver<String>) {
+        let (out, rx) = mpsc::channel();
+        (Self { id: json!(0), out, sent: false }, rx)
+    }
+
     fn send(&mut self, body: Value) {
         self.sent = true;
         let mut msg = json!({ "jsonrpc": "2.0", "id": self.id });

@@ -182,7 +182,14 @@ pub struct ConsolePanel {
     /// Text to type into a session once its agent is up (it has printed), by folder.
     queued: Vec<(PathBuf, String)>,
     _queue: Option<gpui::Task<()>>,
+    /// The width the header was last laid out at: a console moved to a side dock is
+    /// narrow, and its toolbar keeps to icons.
+    width: f32,
 }
+
+/// Below this width (points) the console's toolbar shows icons only, and its empty state
+/// stacks.
+const COMPACT_W: f32 = 560.;
 
 /// How long the first session waits for the IDE server's variables at most.
 const IDE_WAIT: Duration = Duration::from_secs(4);
@@ -280,6 +287,21 @@ impl ConsolePanel {
             note: None,
             ended: Default::default(),
             born: Instant::now(),
+            width: f32::MAX,
+        }
+    }
+
+    fn compact(&self) -> bool {
+        self.width < COMPACT_W
+    }
+
+    /// A toolbar chip: its glyph and label, or its glyph alone when the console is narrow
+    /// (its tooltip says what it does).
+    fn chip(&self, id: &'static str, g: Glyph, label: &'static str, p: &Palette) -> gpui::Stateful<gpui::Div> {
+        if self.compact() {
+            look::chip_button(id, g, "", true, p).gap(px(0.)).px(px(4.))
+        } else {
+            look::chip_button(id, g, label, true, p)
         }
     }
 
@@ -472,14 +494,16 @@ impl ConsolePanel {
         let (fg, bg) = (rgb(p.fg), rgb(p.panel));
         // The settings' variables, then for Claude Code those that connect it to this
         // window's IDE server, and its hooks report its edits.
-        // Codex gets the hooks' port, to tell the end of each turn; a command of the
+        // Codex gets the hooks' port, to tell the end of each turn, and the editor's API; a command of the
         // user's runs through the shell.
         let mut env = added;
         let agent_id = agent.as_ref().map(|a| a.id);
         if let Some(ide) = cx.try_global::<crate::claude_ide::IdeEnv>() {
             let take = |k: &str| match agent_id {
                 Some(crate::agents::CLAUDE) => true,
-                Some(crate::agents::CODEX) => k == crate::claude_ide::hooks::PORT_ENV,
+                Some(crate::agents::CODEX) => {
+                    k == crate::claude_ide::hooks::PORT_ENV || k == crate::claude_ide::api::HEADER_ENV
+                }
                 _ => false,
             };
             env.extend(ide.0.iter().filter(|(k, _)| take(k)).map(|(k, v)| ((*k).to_owned(), v.clone())));
@@ -975,7 +999,11 @@ impl ConsolePanel {
             .to_owned();
         let color = agent.color(p);
         // The session's own title, unless it only names the agent again.
-        let show_title = !title.is_empty() && running && title != agent.name.as_ref() && title != agent.short.as_ref();
+        let show_title = !title.is_empty()
+            && running
+            && !self.compact()
+            && title != agent.name.as_ref()
+            && title != agent.short.as_ref();
         let who = match kind {
             Kind::Claude => self.agent_picker(&agent, p, cx),
             // The dock's title says Terminal: the row names the shell it runs.
@@ -1031,24 +1059,31 @@ impl ConsolePanel {
         if kind == Kind::Claude {
             let follow = self.model.read(cx).settings.follow_claude;
             buttons.push(
-                look::toggle("follow", IconName::ArrowDownToLine, "Follow", follow, p)
-                    .h(px(22.))
-                    .tooltip(move |w, cx| {
-                        let tip = if follow {
-                            "Following: the editor goes to the files the agent changes, as it types"
-                        } else {
-                            "Not following: the editor stays where you are; dots mark what the agent changed"
-                        };
-                        gpui_component::tooltip::Tooltip::new(tip).build(w, cx)
+                look::toggle(
+                    "follow",
+                    IconName::ArrowDownToLine,
+                    if self.compact() { "" } else { "Follow" },
+                    follow,
+                    p,
+                )
+                .h(px(22.))
+                .when(self.compact(), |d| d.gap(px(0.)).px(px(5.)))
+                .tooltip(move |w, cx| {
+                    let tip = if follow {
+                        "Following: the editor goes to the files the agent changes, as it types"
+                    } else {
+                        "Not following: the editor stays where you are; dots mark what the agent changed"
+                    };
+                    gpui_component::tooltip::Tooltip::new(tip).build(w, cx)
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.model.update(cx, |m, cx| {
+                        m.settings.follow_claude = !m.settings.follow_claude;
+                        m.persist();
+                        cx.notify();
                     })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.model.update(cx, |m, cx| {
-                            m.settings.follow_claude = !m.settings.follow_claude;
-                            m.persist();
-                            cx.notify();
-                        })
-                    }))
-                    .into_any_element(),
+                }))
+                .into_any_element(),
             );
         }
         if let Some(root) = root.cloned() {
@@ -1058,7 +1093,7 @@ impl ConsolePanel {
             };
             let r = root.clone();
             buttons.push(
-                look::chip_button("new", Glyph::Plus, "New", true, p)
+                self.chip("new", Glyph::Plus, "New", p)
                     .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
                     .on_click(cx.listener(move |this, _, window, cx| this.start(&r, &[], window, cx)))
                     .into_any_element(),
@@ -1067,7 +1102,7 @@ impl ConsolePanel {
             if kind == Kind::Claude && !resume.is_empty() {
                 let r = root.clone();
                 buttons.push(
-                    look::chip_button("continue", Glyph::Refresh, "Continue", true, p)
+                    self.chip("continue", Glyph::Refresh, "Continue", p)
                         .tooltip(|w, cx| {
                             gpui_component::tooltip::Tooltip::new(
                                 "Start again on the most recent conversation in this folder",
@@ -1081,7 +1116,7 @@ impl ConsolePanel {
             if running {
                 let r = root.clone();
                 buttons.push(
-                    look::chip_button("end", Glyph::Stop, "End", true, p)
+                    self.chip("end", Glyph::Stop, "End", p)
                         .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("End this session").build(w, cx))
                         .on_click(cx.listener(move |this, _, _, cx| this.end_session(&r, cx)))
                         .into_any_element(),
@@ -1104,6 +1139,7 @@ impl ConsolePanel {
             .id("console-header")
             .debug_selector(|| "console-header".into())
             .flex_none()
+            .relative()
             .h(px(36.))
             .pl(px(12.))
             .pr(px(8.))
@@ -1128,9 +1164,34 @@ impl ConsolePanel {
                         .child(title),
                 )
             })
-            .when(!show_title, |d| d.child(div().flex_1()))
+            .when(!show_title, |d| d.child(div().flex_1().min_w_0()))
             .child(div().flex_none().flex().items_center().gap(px(2.)).children(buttons))
+            .child(self.measure(cx))
             .into_any_element()
+    }
+
+    /// An empty layer over the header that notes the console's width as it is laid out,
+    /// and draws it again when it crosses into or out of the compact toolbar.
+    fn measure(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let view = cx.entity();
+        canvas(
+            move |bounds, _, cx| {
+                let w = f32::from(bounds.size.width);
+                view.update(cx, |this, cx| {
+                    let was = this.compact();
+                    this.width = w;
+                    if was != this.compact() {
+                        cx.notify();
+                    }
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .into_any_element()
     }
 
     /// The agent's name with its icon in its colour, a menu of the others under it.
@@ -1246,6 +1307,7 @@ impl ConsolePanel {
             .gap(px(28.))
             .px(px(24.))
             .py(px(12.))
+            .when(self.compact(), |d| d.flex_col().gap(px(16.)))
             .child(crate::art::drawing_on(snout_core::art::spots::agent_console(), 156., 104., p.panel))
             .child(
                 div()
@@ -1253,12 +1315,14 @@ impl ConsolePanel {
                     .flex_col()
                     .gap(px(4.))
                     .max_w(px(420.))
+                    .when(self.compact(), |d| d.w_full())
                     .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
                     .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
                     .child(
                         div()
                             .mt(px(10.))
                             .flex()
+                            .flex_wrap()
                             .gap(px(8.))
                             .child(
                                 look::primary_button("console-start", IconName::Play, start, true, p)
