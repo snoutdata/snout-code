@@ -553,6 +553,40 @@ fn a_front_end_beside_a_java_build_installs_in_its_own_folder() {
     assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm, dir: Some(repo.join("frontend")) }));
     let ids: Vec<String> = crate::run::node_run::configs(&*host, &repo).into_iter().map(|c| c.id).collect();
     assert_eq!(ids, ["npm:frontend:dev"]);
+    // `npm ci` only with a lockfile to install from; else `npm install`.
+    let need = need.unwrap();
+    assert!(!crate::playwright::setup::uses_ci(&*host, &repo, &need));
+    write(&repo, "frontend/package-lock.json", "{}");
+    assert!(crate::playwright::setup::uses_ci(&*host, &repo, &need));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A Java build's front end in a folder, its packages not installed: opening the project
+/// says nothing of it; the bar comes once one of its files is open, and offers what will
+/// run (`npm install`, with no lockfile for `npm ci`).
+#[gpui::test]
+fn a_java_builds_front_end_asks_for_its_packages_only_once_you_work_in_it(cx: &mut gpui::TestAppContext) {
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("node-front-end-quiet");
+    write(&repo, "settings.gradle", "");
+    write(
+        &repo,
+        "frontend/package.json",
+        r#"{ "scripts": { "build": "grunt" }, "devDependencies": { "grunt": "^1.6.0" } }"#,
+    );
+    write(&repo, "frontend/app/main.js", "console.log(1)\n");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let setup = cx.update(|_, cx| ws.read(cx).pw_setup.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).need.is_some()));
+    assert!(found, "the front end's packages are missing");
+    cx.update(|_, cx| assert!(setup.read(cx).quiet && !setup.read(cx).ci));
+    cx.update(|w, _| w.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("playwright-bar").is_none(), "no bar on opening the Java project");
+    act(&model, cx, Action::OpenFile(repo.join("frontend/app/main.js"), None));
+    cx.update(|w, _| w.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("playwright-bar").is_some(), "the bar once a file of it is open");
     let _ = std::fs::remove_dir_all(repo);
 }
 

@@ -8,7 +8,9 @@ Everything runs on the Node the project asks for (`.nvmrc`, `.node-version`, `vo
 
 The Project view says, at the top, the project's package manager and its Node, such as `npm · Node 24.13.0`.
 
-When `package.json` lists packages and `node_modules` is missing, a bar above the editor says so and offers **Install packages**. It runs `npm ci` (with a `package-lock.json`, else `npm install`), or `pnpm install`, `yarn install` or `bun install` by the project's lockfile, in the Build window. **Not now** hides the bar.
+When `package.json` lists packages and `node_modules` is missing, a bar above the editor says so and offers **Install packages**. It runs `npm ci` (with a `package-lock.json`, else `npm install`), or `pnpm install`, `yarn install` or `bun install` by the project's lockfile, in the Build window; the button names the command it will run. **Not now** hides the bar.
+
+In a project that is not a Node package itself, such as a Java build with its front end in a folder (`src/main/javascript`, `frontend`), that folder's bar waits until you open one of its files: opening the project says nothing about it.
 
 A repository with both a Java build and a `package.json` (a Spring Boot application with its front end, say) opens as the Java project it is, with the `package.json` scripts among its run configurations too.
 

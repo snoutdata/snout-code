@@ -583,6 +583,16 @@ impl Workspace {
         use crate::playwright::setup::Need;
         let setup = self.pw_setup.read(cx);
         let need = setup.shown()?.clone();
+        // A front end in a folder of a project that is not a Node package (a Java build's)
+        // says nothing until one of its files is open, or an install of it runs or failed.
+        if setup.quiet
+            && setup.installing.is_none()
+            && setup.error.is_none()
+            && let Some(dir) = need.dir()
+            && !self.editors(cx).iter().any(|e| e.read(cx).path.starts_with(dir))
+        {
+            return None;
+        }
         // A package's folder, as the project has it (`apps/web`).
         let root = setup.root.clone().unwrap_or_default();
         let folder =
@@ -607,11 +617,7 @@ impl Workspace {
                     }
                     None => "This project's packages are not installed, so it cannot run yet.".to_owned(),
                 },
-                Some(format!(
-                    "Install packages ({} {})",
-                    manager.name(),
-                    if *manager == crate::lang::node::PackageManager::Npm { "ci" } else { "install" }
-                )),
+                Some(format!("Install packages ({} {})", manager.name(), if setup.ci { "ci" } else { "install" })),
             ),
             (Need::Browsers { version, missing }, false) => (
                 format!("Playwright {version} needs browsers that are not downloaded: {}.", missing.join(", ")),

@@ -142,6 +142,13 @@ pub fn check(host: &dyn Host, root: &Path) -> Option<Need> {
     (!missing.is_empty()).then_some(Need::Browsers { version, missing })
 }
 
+/// Whether the install `need` asks for runs `npm ci`: npm, and a `package-lock.json` in
+/// the folder it installs in (without one, `npm ci` fails, so it is `npm install`).
+pub fn uses_ci(host: &dyn Host, root: &Path, need: &Need) -> bool {
+    matches!(need, Need::Packages { manager: PackageManager::Npm, .. })
+        && host.is_file(&need.dir().unwrap_or(root).join("package-lock.json"))
+}
+
 /// The command that installs what `need` asks for, run with `node`; or why there is none.
 pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) -> Result<ProcessLaunch, String> {
     let root = need.dir().unwrap_or(root);
@@ -150,7 +157,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
     match need {
         Need::Packages { manager: PackageManager::Npm, .. } => {
             let npm = crate::lang::typescript::npm_cli(host, node).ok_or("npm is missing beside Node")?;
-            let ci = host.is_file(&root.join("package-lock.json"));
+            let ci = uses_ci(host, root, need);
             Ok(ProcessLaunch {
                 title: "Install packages".into(),
                 program: node.bin.clone(),
@@ -210,6 +217,12 @@ pub struct Setup {
     pub summary: Option<String>,
     /// The project is a Playwright one (else a Node one, or neither).
     pub playwright: bool,
+    /// The project is not a Node package itself (a Java build with a front end in a
+    /// folder): a package's bar waits until one of that package's files is open.
+    pub quiet: bool,
+    /// The install the bar offers is `npm ci` (npm, with a `package-lock.json`), not
+    /// `install`.
+    pub ci: bool,
     /// The install running, as its session.
     pub installing: Option<u64>,
     /// Why the install could not start.
@@ -254,6 +267,8 @@ impl Setup {
             need: None,
             summary: None,
             playwright: false,
+            quiet: false,
+            ci: false,
             installing: None,
             error: None,
             dismissed: None,
@@ -279,15 +294,21 @@ impl Setup {
         let host = crate::host::host(cx);
         let task = cx.background_executor().spawn(async move {
             let need = check(&*host, &root);
-            (need, summary(&*host, &root, Some(&root)), super::is_root(&*host, &root))
+            let playwright = super::is_root(&*host, &root);
+            let quiet = !playwright && !crate::run::node_run::is_node_project(&*host, &root);
+            let ci = need.as_ref().is_some_and(|n| uses_ci(&*host, &root, n));
+            (need, summary(&*host, &root, Some(&root)), playwright, quiet, ci)
         });
         self.looking = Some(cx.spawn(async move |this, cx| {
-            let (need, summary, playwright) = task.await;
+            let (need, summary, playwright, quiet, ci) = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.need != need || this.summary != summary || this.playwright != playwright {
+                let now = (&need, &summary, playwright, quiet, ci);
+                if now != (&this.need, &this.summary, this.playwright, this.quiet, this.ci) {
                     this.need = need;
                     this.summary = summary;
                     this.playwright = playwright;
+                    this.quiet = quiet;
+                    this.ci = ci;
                     cx.notify();
                 }
             });
