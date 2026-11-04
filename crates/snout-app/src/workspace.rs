@@ -77,7 +77,7 @@ pub struct Workspace {
     /// The menus drawn in the title bar, where the system has no menu bar (Linux).
     pub(crate) menu_bar: Option<Entity<crate::menu_bar::MenuBar>>,
     /// Holds the keyboard when no field or panel does, so shortcuts reach the workspace.
-    focus: gpui::FocusHandle,
+    pub(crate) focus: gpui::FocusHandle,
     title: String,
     /// The go-to-file or find-in-files box, while it shows.
     pub search: Option<Entity<SearchView>>,
@@ -407,11 +407,17 @@ impl Workspace {
             }
         }
         let open = model.read(cx).settings.console_open;
+        // The console's dock opens as the console was left; another dock as the layout has it.
+        let console_dock = tabs
+            .console
+            .and_then(|id| stripes::dock_of(dock.read(cx), id))
+            .filter(|p| *p != DockPlacement::Left)
+            .unwrap_or(DockPlacement::Bottom);
         dock.update(cx, |d, cx| {
             d.set_dock_collapsible(DockPlacement::Bottom, true, window, cx);
             d.set_dock_collapsible(DockPlacement::Right, true, window, cx);
-            if d.is_dock_open(DockPlacement::Bottom) != open {
-                d.toggle_dock(DockPlacement::Bottom, window, cx);
+            if d.is_dock_open(console_dock) != open {
+                d.toggle_dock(console_dock, window, cx);
             }
         });
 
@@ -445,14 +451,10 @@ impl Workspace {
                     this.save_layout_soon(cx);
                 }
             }),
-            // The bottom dock's own collapse control shows or hides the console too.
+            // The collapse control of the console's dock shows or hides the console too.
             cx.subscribe(&dock, |this, _, e: &DockToggleEvent, cx| {
-                if e.placement() == DockPlacement::Bottom {
-                    this.model.update(cx, |m, cx| {
-                        m.settings.console_open = e.is_open();
-                        m.persist();
-                        cx.notify();
-                    });
+                if e.placement() == this.placement_of(Tool::Claude, cx) {
+                    this.note_console_open(e.is_open(), cx);
                 }
             }),
             cx.subscribe_in(&model, window, Self::on_model_event),
@@ -1041,16 +1043,12 @@ impl Workspace {
                 let (colors, choice) = (s.colors, s.theme);
                 theme::apply(colors, choice, Some(window), cx);
             }
+            // The Git view shows its own console pane by the setting alone.
+            ModelEvent::ToggleConsole if self.side.read(cx).activity == Activity::Git => {}
+            // Hidden when it shows, else brought to the front of its dock (open or not).
             ModelEvent::ToggleConsole => {
-                let open = model.read(cx).settings.console_open;
-                self.dock.update(cx, |d, cx| {
-                    if d.is_dock_open(DockPlacement::Bottom) != open {
-                        d.toggle_dock(DockPlacement::Bottom, window, cx);
-                    }
-                    if let Some(id) = self.tabs.console.filter(|_| open) {
-                        d.select_panel(id, window, cx);
-                    }
-                });
+                let show = !self.tool_open(Tool::Claude, cx);
+                self.set_console_shown(show, window, cx);
             }
             // The commit and the diff show in the Git view.
             ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),

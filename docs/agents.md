@@ -28,8 +28,9 @@ You can also switch agents in the console's header: click the agent's name.
 ## The console
 
 - Press ⌘J, choose View ▸ Agent Console, or click the console on the tool window stripe. In the Git view, the **Claude** button does the same.
-- The console opens in the bottom dock, beside the **Terminal** tab (your login shell in the project, see [Terminal](terminal.md)).
-- Press ⌘J again, or click × in the console's header, to hide it. The session keeps running.
+- The console opens in the bottom dock, beside the **Terminal** tab (your login shell in the project, see [Terminal](terminal.md)). To keep it on the left or the right instead, [move it](tool-windows.md#move-a-tool-window): Options (the three dots) in its header, **Move to**.
+- Press ⌘J again, or click **Hide** (the minus) in its header, to hide it. It hides where it is: on the right, the right dock closes and the bottom dock stays as it was; on the left, the Project view comes back. In the Git view, × in the console's row hides it. The session keeps running.
+- With the console open but behind another window of its dock, ⌘J brings it to the front.
 
 The agent starts in the folder of the open project. There is one session per project: switch projects and each keeps its own, still running.
 

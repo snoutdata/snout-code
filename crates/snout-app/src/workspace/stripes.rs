@@ -466,7 +466,44 @@ impl Workspace {
                 d.set_dock_size(place, px(TERMINAL_SIDE_W), window, cx);
             }
         });
+        if tool == Tool::Claude {
+            self.note_console_open(true, cx);
+        }
         cx.notify();
+    }
+
+    /// Show or hide the agent console where it is (⌘J, its ×, the View menu): its dock
+    /// opens with it in front, or closes; in the left dock, which it shares with Project,
+    /// hiding it brings Project back instead.
+    pub fn set_console_shown(&mut self, show: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.tool_panel(Tool::Claude) else { return };
+        let place = self.placement_of(Tool::Claude, cx);
+        if show {
+            self.dock.update(cx, |d, cx| {
+                if !d.is_dock_open(place) {
+                    d.toggle_dock(place, window, cx);
+                }
+                d.select_panel(id, window, cx);
+            });
+        } else if place == DockPlacement::Left {
+            self.front_side(window, cx);
+        } else {
+            self.hide_dock(place, window, cx);
+        }
+        self.note_console_open(show, cx);
+        cx.notify();
+    }
+
+    /// Keep the setting that says the console shows (and lets its session start) in step
+    /// with what the window shows.
+    pub(super) fn note_console_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.model.read(cx).settings.console_open != open {
+            self.model.update(cx, |m, cx| {
+                m.settings.console_open = open;
+                m.persist();
+                cx.notify();
+            });
+        }
     }
 
     /// Whether `tool`'s window shows: its dock is open with it in front.
@@ -508,6 +545,10 @@ impl Workspace {
                 }
             }
         });
+        if tool == Tool::Claude {
+            let shown = self.tool_open(tool, cx);
+            self.note_console_open(shown, cx);
+        }
         cx.notify();
     }
 

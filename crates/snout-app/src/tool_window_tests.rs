@@ -194,7 +194,13 @@ fn a_tool_window_moves_between_docks_and_stays_there(cx: &mut TestAppContext) {
 
     // To the left, through the action: in front of Project, whose button stands back;
     // Project comes back to the front with its button.
-    vcx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::MoveToolWindow(Tool::Claude, Side::Left)), cx));
+    // (The keyboard was in the console, hidden with its dock: the menu's click comes from
+    // the window.)
+    vcx.update(|w, cx| {
+        let focus = ws.read(cx).focus.clone();
+        w.focus(&focus, cx);
+        w.dispatch_action(Box::new(crate::menus::MoveToolWindow(Tool::Claude, Side::Left)), cx)
+    });
     vcx.run_until_parked();
     assert_eq!(place(vcx, Tool::Claude), DockPlacement::Left);
     assert!(vcx.update(|_, cx| ws.read(cx).tool_open(Tool::Claude, cx)));
@@ -227,5 +233,59 @@ fn a_tool_window_moves_between_docks_and_stays_there(cx: &mut TestAppContext) {
     vcx2.update(|w, cx| ws2.update(cx, |ws, cx| ws.move_tool(Tool::Claude, Side::Bottom, w, cx)));
     vcx2.run_until_parked();
     assert_eq!(vcx2.update(|_, cx| ws2.read(cx).placement_of(Tool::Claude, cx)), DockPlacement::Bottom);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// The console's own hide (its ×, ⌘J) hides the console where it is: moved to the right,
+/// it closes the right dock and leaves the bottom one (the Terminal) as it was; ⌘J brings
+/// it back; on the left, hiding it brings Project back.
+#[gpui::test]
+fn the_console_hides_in_its_own_dock(cx: &mut TestAppContext) {
+    use crate::model::Action;
+    use crate::workspace::Side;
+    let repo = demo_repo("console-hide");
+    let (model, ws, vcx) = open(cx, with_repo(&repo));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_tool(Tool::Terminal, w, cx)));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.move_tool(Tool::Claude, Side::Right, w, cx)));
+    vcx.run_until_parked();
+    let open_at =
+        |vcx: &mut VisualTestContext, p: DockPlacement| vcx.update(|_, cx| ws.read(cx).dock.read(cx).is_dock_open(p));
+    let toggle = |vcx: &mut VisualTestContext| {
+        vcx.update(|_, cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+        vcx.run_until_parked();
+    };
+    let shows = |vcx: &mut VisualTestContext| vcx.update(|_, cx| ws.read(cx).tool_open(Tool::Claude, cx));
+    assert!(open_at(vcx, DockPlacement::Bottom) && open_at(vcx, DockPlacement::Right) && shows(vcx));
+    assert!(vcx.update(|_, cx| model.read(cx).settings.console_open));
+
+    // Its × (Toggle Console): the right dock closes, the Terminal stays.
+    toggle(vcx);
+    assert!(!open_at(vcx, DockPlacement::Right), "the console's dock closes");
+    assert!(open_at(vcx, DockPlacement::Bottom), "the bottom dock stays open");
+    assert!(vcx.update(|_, cx| ws.read(cx).tool_open(Tool::Terminal, cx)));
+    assert!(!vcx.update(|_, cx| model.read(cx).settings.console_open));
+    toggle(vcx);
+    assert!(shows(vcx) && open_at(vcx, DockPlacement::Bottom));
+    assert!(vcx.update(|_, cx| model.read(cx).settings.console_open));
+
+    // Behind another window of its dock, ⌘J brings it forward rather than hide the dock.
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_tool(Tool::Structure, w, cx)));
+    vcx.run_until_parked();
+    assert!(!shows(vcx));
+    toggle(vcx);
+    assert!(shows(vcx), "in front of its dock again");
+
+    // On the left: hiding it brings Project back, the left dock stays.
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.move_tool(Tool::Claude, Side::Left, w, cx)));
+    vcx.run_until_parked();
+    assert!(shows(vcx));
+    toggle(vcx);
+    assert!(open_at(vcx, DockPlacement::Left) && vcx.update(|_, cx| ws.read(cx).side_in_front(cx)));
+    assert!(open_at(vcx, DockPlacement::Bottom), "the bottom dock untouched");
+    // Its stripe button shows it again, and its session may start.
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.toggle_tool(Tool::Claude, w, cx)));
+    vcx.run_until_parked();
+    assert!(shows(vcx) && vcx.update(|_, cx| model.read(cx).settings.console_open));
     let _ = std::fs::remove_dir_all(repo);
 }

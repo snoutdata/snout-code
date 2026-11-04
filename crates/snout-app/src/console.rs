@@ -1123,7 +1123,9 @@ impl ConsolePanel {
                 );
             }
         }
-        if kind == Kind::Claude {
+        // Hide: in the Git view's console pane; as a tool window its header's Hide does it.
+        let in_git = self.model.read(cx).settings.activity == Some(crate::panels::Activity::Git);
+        if kind == Kind::Claude && in_git {
             buttons.push(div().w(px(2.)).into_any_element());
             buttons.push(
                 look::icon_button("hide", Glyph::Close, "Hide (⌘J); the session keeps running", true, p)
