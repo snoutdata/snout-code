@@ -99,9 +99,10 @@ fn is_editor_group(group: &TabGroupContext, cx: &App) -> bool {
     group.panels().iter().any(|p| matches!(p.panel_name(cx), crate::editor::PANEL_NAME | "Welcome"))
 }
 
-/// Whether the group is the left dock's one panel, which draws its own panes.
+/// Whether the group shows the side panel (Project), which draws its own panes. A tool
+/// window moved to the left dock shares its group, and draws its own header when in front.
 fn is_side(group: &TabGroupContext, cx: &App) -> bool {
-    group.panels().iter().any(|p| p.panel_name(cx) == "Side")
+    group.active_panel().is_some_and(|p| p.panel_name(cx) == "Side")
 }
 
 impl TabGroupRenderer for Group {
@@ -616,10 +617,6 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
     use crate::glyphs::Icon;
     let p = palette(cx);
     let active = group.active_panel().map(|panel| panel.panel_name(cx)).unwrap_or_default();
-    let right = matches!(
-        active,
-        "Gradle" | "Maven" | "Spring" | "Notifications" | "Claude Changes" | "Structure" | "Hierarchy"
-    );
     let selector = format!("tool-header-{}", crate::tool_windows::title(active));
     let mut row = header_row(("tool-header", group.node().as_u64()), &p).debug_selector(move || selector.clone());
     HEADERS.with(|h| h.borrow_mut().push(active.to_owned()));
@@ -717,10 +714,25 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
         }
         _ => {}
     }
+    let tool = crate::workspace::Tool::of_panel(active);
     row.child(div().mx(px(2.)).w(px(1.)).h(px(16.)).bg(p.border))
+        .when_some(tool, |row, tool| {
+            use gpui_component::Sizable as _;
+            use gpui_component::button::{Button, ButtonVariants as _};
+            use gpui_component::menu::DropdownMenu as _;
+            row.child(
+                Button::new("tool-options")
+                    .debug_selector(|| "tool-options".into())
+                    .ghost()
+                    .xsmall()
+                    .icon(crate::components::menu_icon(crate::components::IconName::Ellipsis))
+                    .tooltip("Options")
+                    .dropdown_menu(move |menu, _, cx| crate::workspace::move_menu(menu, tool, cx)),
+            )
+        })
         .child(
             tool_button("tool-hide", Icon::Minus, "Hide", &p)
-                .on_click(move |_, w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow(right)), cx)),
+                .on_click(move |_, w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow(active)), cx)),
         )
         .into_any_element()
 }

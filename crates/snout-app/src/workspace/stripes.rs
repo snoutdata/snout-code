@@ -1,8 +1,12 @@
 //! The tool window stripes: thin icon strips down both edges of the window. Left, at the
-//! top: the Project and Git activities; at the bottom: Run, Debug, Build, Output,
-//! Terminal, Problems and Claude Code, which open in the bottom dock. Right: Structure, Hierarchy, Gradle
-//! (unless the project is Maven alone), Maven (when it has a Maven build), Spring, Notifications and
-//! Claude Changes, in the right dock. The item showing is a filled accent square with a white glyph.
+//! top: the Project and Git activities, then the tool windows moved to the left dock; at
+//! the bottom: those of the bottom dock (Run, Debug, Build, Output, Terminal, Problems and
+//! the agent console to begin with). Right: those of the right dock (Structure, Hierarchy,
+//! Gradle unless the project is Maven alone, Maven when it has a Maven build, Spring,
+//! Notifications and Agent Changes to begin with). Each tool window can move to another
+//! dock (Move to, in its header's menu and its stripe button's); the dock layout, saved
+//! with the session, keeps it there. The item showing is a filled accent square with a
+//! white glyph.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -15,6 +19,7 @@ use gpui_component::tooltip::Tooltip;
 use lsp_types::DiagnosticSeverity;
 
 use super::Workspace;
+use crate::components::{ContextMenuExt as _, IconName, PopupMenu, PopupMenuItem, menu_icon};
 use crate::glyphs::{Icon, icon};
 use crate::model::Action;
 use crate::panels::Activity;
@@ -25,6 +30,10 @@ pub const STRIPE_W: f32 = 40.;
 
 /// The least width the right dock opens to for the Spring window.
 const SPRING_W: f32 = 460.;
+
+/// The least width a side dock takes when a terminal (the agent console, the Terminal)
+/// moves into it: an agent's screen needs its columns.
+const TERMINAL_SIDE_W: f32 = 480.;
 
 /// A tool window a stripe opens.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,7 +58,97 @@ pub enum Tool {
     Tests,
 }
 
+/// A dock a tool window can be moved to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Side {
+    Left,
+    Right,
+    Bottom,
+}
+
+impl Side {
+    pub const ALL: [Side; 3] = [Side::Left, Side::Right, Side::Bottom];
+
+    pub fn placement(self) -> DockPlacement {
+        match self {
+            Side::Left => DockPlacement::Left,
+            Side::Right => DockPlacement::Right,
+            Side::Bottom => DockPlacement::Bottom,
+        }
+    }
+
+    pub fn of(place: DockPlacement) -> Option<Side> {
+        Side::ALL.into_iter().find(|s| s.placement() == place)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Side::Left => "Left",
+            Side::Right => "Right",
+            Side::Bottom => "Bottom",
+        }
+    }
+
+    fn icon(self) -> IconName {
+        match self {
+            Side::Left => IconName::PanelLeft,
+            Side::Right => IconName::PanelRight,
+            Side::Bottom => IconName::PanelBottom,
+        }
+    }
+}
+
+/// Where each tool window is now, for the Move to menus (drawn where the workspace is not
+/// at hand): refreshed whenever the dock layout changes.
+#[derive(Clone, Debug, Default)]
+pub struct ToolPlaces(pub Vec<(Tool, Side)>);
+
+impl gpui::Global for ToolPlaces {}
+
+/// The Move to items of `tool`'s menus: its dock checked, the others a click away.
+pub fn move_menu(mut menu: PopupMenu, tool: Tool, cx: &gpui::App) -> PopupMenu {
+    let now = cx.try_global::<ToolPlaces>().and_then(|p| p.0.iter().find(|(t, _)| *t == tool).map(|(_, s)| *s));
+    let now = now.or_else(|| Side::of(tool.placement()));
+    menu = menu.label("Move to");
+    for side in Side::ALL {
+        menu = menu.item(
+            PopupMenuItem::new(side.label())
+                .icon(menu_icon(side.icon()))
+                .checked(now == Some(side))
+                .on_click(move |_, w, cx| w.dispatch_action(Box::new(crate::menus::MoveToolWindow(tool, side)), cx)),
+        );
+    }
+    menu
+}
+
+/// The dock that holds the panel `id`, if any.
+pub fn dock_of(dock: &DockArea, id: PanelId) -> Option<DockPlacement> {
+    [DockPlacement::Left, DockPlacement::Bottom, DockPlacement::Right, DockPlacement::Center]
+        .into_iter()
+        .find(|place| dock.layout(*place).is_some_and(|t| t.panels().any(|p| p == id)))
+}
+
+/// The tool windows in the order the stripes list them, whichever dock they are in.
+const ORDER: [Tool; 15] = [
+    Tool::Tests,
+    Tool::Run,
+    Tool::Debug,
+    Tool::Build,
+    Tool::Output,
+    Tool::Terminal,
+    Tool::Problems,
+    Tool::Claude,
+    Tool::Structure,
+    Tool::Hierarchy,
+    Tool::Gradle,
+    Tool::Maven,
+    Tool::Spring,
+    Tool::Notifications,
+    Tool::ClaudeChanges,
+];
+
 impl Tool {
+    /// The dock it starts in.
     pub fn placement(self) -> DockPlacement {
         match self {
             Tool::Gradle
@@ -279,13 +378,104 @@ impl Workspace {
         }
     }
 
+    /// The dock `tool`'s window is in: where it was moved to, else where it starts.
+    pub fn placement_of(&self, tool: Tool, cx: &gpui::App) -> DockPlacement {
+        let dock = self.dock.read(cx);
+        self.tool_panel(tool).and_then(|id| dock_of(dock, id)).unwrap_or(tool.placement())
+    }
+
+    /// The dock that holds the panel of dock name `name`.
+    pub fn dock_of_panel_named(&self, name: &str, cx: &gpui::App) -> Option<DockPlacement> {
+        let (view, _) = self.panels.iter().find(|(v, _)| v.panel_name(cx) == name)?;
+        dock_of(self.dock.read(cx), view.panel_id(cx))
+    }
+
+    /// The panel id of the side panel (Project), which the left dock shows by default.
+    fn side_panel(&self) -> PanelId {
+        crate::tabs::panel_id(&self.side)
+    }
+
+    /// Whether the left dock shows the side panel (Project) rather than a tool window
+    /// moved there.
+    pub fn side_in_front(&self, cx: &gpui::App) -> bool {
+        active_in(self.dock.read(cx), DockPlacement::Left).is_none_or(|id| id == self.side_panel())
+    }
+
+    /// Bring the side panel (Project) to the front of the left dock.
+    pub(super) fn front_side(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.side_in_front(cx) {
+            let id = self.side_panel();
+            self.dock.update(cx, |d, cx| d.select_panel(id, window, cx));
+        }
+    }
+
+    /// Note where each tool window is, for the Move to menus.
+    pub(super) fn refresh_tool_places(&self, cx: &mut gpui::App) {
+        let places =
+            ORDER.into_iter().filter_map(|t| Side::of(self.placement_of(t, cx)).map(|s| (t, s))).collect::<Vec<_>>();
+        cx.set_global(ToolPlaces(places));
+    }
+
+    /// Move `tool`'s window to the dock at `to`, and show it there.
+    pub fn move_tool(&mut self, tool: Tool, to: Side, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_component::dock::InsertTarget;
+        let Some(id) = self.tool_panel(tool) else { return };
+        let place = to.placement();
+        if self.placement_of(tool, cx) != place {
+            self.dock.update(cx, |d, cx| {
+                // Into the dock's tab group (where the stripe buttons pick what shows), or,
+                // in a dock left empty, a group of its own.
+                let target = d.layout(place).map(|tree| {
+                    let mut group = None;
+                    tree.root().walk(&mut |node| {
+                        if group.is_none() && matches!(node.kind(), PaneRef::Tabs { .. }) {
+                            group = Some(node.id());
+                        }
+                    });
+                    match group {
+                        Some(node) => InsertTarget::Tabs { node, ix: None, activate: true },
+                        None => InsertTarget::Split {
+                            node: tree.root().id(),
+                            placement: gpui_component::Placement::Right,
+                            size: None,
+                        },
+                    }
+                });
+                match target {
+                    Some(target) => d.move_panel(id, target, window, cx),
+                    // A dock never made (none is missing in a layout of this build).
+                    None => {
+                        if let Some(view) = d.panel(id).cloned() {
+                            d.add_panel_view(view, place, None, window, cx);
+                        }
+                    }
+                }
+            });
+            self.refresh_tool_places(cx);
+        }
+        if self.side.read(cx).activity == Activity::Git {
+            self.show_activity(Activity::Project, window, cx);
+        }
+        self.dock.update(cx, |d, cx| {
+            if !d.is_dock_open(place) {
+                d.toggle_dock(place, window, cx);
+            }
+            d.select_panel(id, window, cx);
+            let terminal = matches!(tool, Tool::Claude | Tool::Terminal);
+            if terminal && to != Side::Bottom && d.dock_size(place).is_some_and(|w| w < px(TERMINAL_SIDE_W)) {
+                d.set_dock_size(place, px(TERMINAL_SIDE_W), window, cx);
+            }
+        });
+        cx.notify();
+    }
+
     /// Whether `tool`'s window shows: its dock is open with it in front.
     pub fn tool_open(&self, tool: Tool, cx: &gpui::App) -> bool {
         if tool == Tool::Claude && self.side.read(cx).activity == Activity::Git {
             return self.model.read(cx).settings.console_open;
         }
+        let place = self.placement_of(tool, cx);
         let dock = self.dock.read(cx);
-        let place = tool.placement();
         self.side.read(cx).activity != Activity::Git
             && dock.is_dock_open(place)
             && self.tool_panel(tool).is_some_and(|id| active_in(dock, place) == Some(id))
@@ -303,7 +493,7 @@ impl Workspace {
         if git {
             self.show_activity(Activity::Project, window, cx);
         }
-        let place = tool.placement();
+        let place = self.placement_of(tool, cx);
         self.dock.update(cx, |d, cx| {
             if open {
                 d.toggle_dock(place, window, cx);
@@ -347,15 +537,48 @@ impl Workspace {
         let p = palette(cx);
         item(tool.id(), tool.icon(), tool.tip(), self.tool_open(tool, cx), badge, tool.hue(), &p)
             .on_click(cx.listener(move |this, _, w, cx| this.toggle_tool(tool, w, cx)))
+            .context_menu(move |menu, _, cx| move_menu(menu, tool, cx))
             .into_any_element()
+    }
+
+    /// The stripe buttons of the tool windows in the dock at `place`, with their counts.
+    fn tool_items(&self, place: DockPlacement, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let p = palette(cx);
+        let mut out = Vec::new();
+        for tool in ORDER {
+            if self.placement_of(tool, cx) != place {
+                continue;
+            }
+            let shown = match tool {
+                Tool::Tests => self.pw_tests.read(cx).root.is_some(),
+                Tool::Gradle => self.shows_gradle(cx),
+                Tool::Maven => self.shows_maven(cx),
+                _ => true,
+            };
+            if !shown {
+                continue;
+            }
+            let badge = match tool {
+                Tool::Tests => Some((self.pw_tests.read(cx).run(cx).map_or(0, |r| r.counts().failed), p.error)),
+                Tool::Problems => Some((self.error_count(cx), p.error)),
+                Tool::Notifications => Some((self.notifications.read(cx).items(cx).len(), p.accent)),
+                Tool::ClaudeChanges => {
+                    Some((crate::claude_ide::bridge::changes_of(self, cx).read(cx).set.files.len(), p.claude().mark))
+                }
+                _ => None,
+            };
+            out.push(self.tool_item(tool, badge, cx));
+        }
+        out
     }
 
     pub(super) fn left_stripe(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let current = self.side.read(cx).activity;
-        let open = current == Activity::Git || self.dock.read(cx).is_dock_open(DockPlacement::Left);
+        let left_open = self.dock.read(cx).is_dock_open(DockPlacement::Left);
+        let open = current == Activity::Git || (left_open && self.side_in_front(cx));
         let changed = self.model.read(cx).status.files.len();
-        let errors = self.error_count(cx);
+        let (left, bottom) = (self.tool_items(DockPlacement::Left, cx), self.tool_items(DockPlacement::Bottom, cx));
         let pick = |a: Activity| cx.listener(move |this, _, w, cx| this.set_activity(a, w, cx));
         div()
             .id("left-stripe")
@@ -386,25 +609,15 @@ impl Workspace {
                 )
                 .on_click(pick(Activity::Git)),
             )
+            .when(!left.is_empty(), |d| d.child(div().my(px(2.)).w(px(20.)).h(px(1.)).bg(p.border)).children(left))
             .child(div().flex_1())
-            .when(self.pw_tests.read(cx).root.is_some(), |d| {
-                let failed = self.pw_tests.read(cx).run(cx).map_or(0, |r| r.counts().failed);
-                d.child(self.tool_item(Tool::Tests, Some((failed, p.error)), cx))
-            })
-            .child(self.tool_item(Tool::Run, None, cx))
-            .child(self.tool_item(Tool::Debug, None, cx))
-            .child(self.tool_item(Tool::Build, None, cx))
-            .child(self.tool_item(Tool::Output, None, cx))
-            .child(self.tool_item(Tool::Terminal, None, cx))
-            .child(self.tool_item(Tool::Problems, Some((errors, p.error)), cx))
-            .child(self.tool_item(Tool::Claude, None, cx))
+            .children(bottom)
             .into_any_element()
     }
 
     pub(super) fn right_stripe(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        let notes = self.notifications.read(cx).items(cx).len();
-        let claude = crate::claude_ide::bridge::changes_of(self, cx).read(cx).set.files.len();
+        let items = self.tool_items(DockPlacement::Right, cx);
         div()
             .id("right-stripe")
             .flex_none()
@@ -418,13 +631,7 @@ impl Workspace {
             .bg(p.ground)
             .border_l_1()
             .border_color(p.border)
-            .child(self.tool_item(Tool::Structure, None, cx))
-            .child(self.tool_item(Tool::Hierarchy, None, cx))
-            .when(self.shows_gradle(cx), |d| d.child(self.tool_item(Tool::Gradle, None, cx)))
-            .when(self.shows_maven(cx), |d| d.child(self.tool_item(Tool::Maven, None, cx)))
-            .child(self.tool_item(Tool::Spring, None, cx))
-            .child(self.tool_item(Tool::Notifications, Some((notes, p.accent)), cx))
-            .child(self.tool_item(Tool::ClaudeChanges, Some((claude, p.claude().mark)), cx))
+            .children(items)
             .into_any_element()
     }
 }

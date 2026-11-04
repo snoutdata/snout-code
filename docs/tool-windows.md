@@ -3,15 +3,16 @@
 The tool windows sit around the editor: Run, Debug, Build, Output, Terminal, Problems and the
 agent console in the bottom dock, with Tests for a Playwright project; Structure, Hierarchy,
 Gradle, Maven, Spring, Notifications and Agent Changes on the right; the Project view on the
-left. The stripes down the window's
-edges open them, and so do the View, Build and Tools menus.
+left. Each can [move to another dock](#move-a-tool-window). The stripes down the window's edges
+open them, and so do the View, Build and Tools menus.
 
 ![The Build window empty, and the Spring window waiting for the engine](images/tool-windows-empty.png)
 
 ## The header
 
 Each tool window has one header: its icon and title on the left, and its own buttons on the
-right, then **Hide** (the minus). Hover a button to see what it does. The buttons per window:
+right, then **Options** (the three dots) and **Hide** (the minus). Hover a button to see what it
+does. The buttons per window:
 
 | Window | Buttons |
 |---|---|
@@ -25,7 +26,22 @@ right, then **Hide** (the minus). Hover a button to see what it does. The button
 Problems and References share one header, with a tab for each. The Terminal and the agent
 console have a row under the header for the session: the shell or the agent, a pill that says
 how it is (**Running**, **Connected**, **Working**, **Ended**; hover it for what that means),
-and **New**, **Continue** and **End**.
+and **New**, **Continue** and **End**. In a narrow dock those keep to their icons; hover one for
+its name.
+
+## Move a tool window
+
+Any tool window can sit in the left, right or bottom dock. Open **Options** (the three dots) in
+its header, or right-click its button on a stripe, and pick **Move to** ▸ **Left**, **Right** or
+**Bottom**. Its stripe button moves with it: the left stripe lists the left dock's windows under
+Project and Git, and the bottom dock's at its foot; the right stripe lists the right dock's.
+
+A window moved to the left dock shares it with the Project view: its stripe button and the
+Project button pick which one shows. The agent console or the Terminal moved into a side dock
+widens it to 480 points, so the agent has room for its screen.
+
+SnoutCode keeps each window where you put it, across launches, with the rest of the window's
+layout.
 
 ## When a window is empty
 

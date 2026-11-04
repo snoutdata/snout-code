@@ -111,6 +111,8 @@ mod shots {
         /// A commit (by summary) and one of its files, in a repository with a merge.
         Commit(&'static str, &'static str),
         Console,
+        /// The agent console moved to another dock, in the Project view.
+        ConsoleAt(snout_app::workspace::Side),
         /// The console running a program that prints colours, attributes, wide characters
         /// and a link: the same output under each terminal engine.
         TerminalColors,
@@ -471,6 +473,24 @@ sleep 30
                 Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
                 cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+            }
+            Some(Select::ConsoleAt(side)) => {
+                let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+                let fake = repo.join("fake-claude");
+                let script =
+                    "#!/bin/sh\nprintf '\\033[1;32m✓\\033[0m Read \\033[36msrc/main.rs\\033[0m\\n> '\nsleep 30\n";
+                std::fs::write(&fake, script).unwrap();
+                Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+                cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |w, cx| {
+                        w.move_tool(snout_app::workspace::Tool::Claude, side, window, cx);
+                        if side == snout_app::workspace::Side::Right {
+                            w.show_activity(Activity::Project, window, cx);
+                        }
+                    })
+                })
+                .unwrap();
             }
             Some(Select::TerminalColors) => {
                 let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
@@ -2978,6 +2998,18 @@ sleep 30
         shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
+        shot(
+            "console-right",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::ConsoleAt(snout_app::workspace::Side::Right)),
+        );
+        shot(
+            "console-left",
+            ThemeChoice::Dark,
+            Activity::Project,
+            Some(Select::ConsoleAt(snout_app::workspace::Side::Left)),
+        );
         // The same colourful output under each terminal engine this build has.
         for engine in snout_core::term::EngineKind::available() {
             let name = engine.label().to_lowercase().replace('-', "");

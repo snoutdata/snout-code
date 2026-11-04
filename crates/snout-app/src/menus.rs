@@ -171,10 +171,16 @@ pub struct RunMavenGoal {
 #[action(namespace = snout, no_json)]
 pub struct OpenRemoteRecent(pub crate::remote::RemoteProject);
 
-/// Hide a tool window's dock: the right one when true, else the bottom one.
+/// Hide a tool window's dock: the one that holds the panel of this dock name.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = snout, no_json)]
-pub struct HideToolWindow(pub bool);
+pub struct HideToolWindow(pub &'static str);
+
+/// Move a tool window to the left, right or bottom dock (its header's menu, its stripe
+/// button's): the dock layout keeps it there.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct MoveToolWindow(pub crate::workspace::Tool, pub crate::workspace::Side);
 
 /// Open in External Terminal at this file's folder (or this folder): from a tab's menu.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]

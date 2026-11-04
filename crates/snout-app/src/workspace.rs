@@ -40,7 +40,7 @@ mod run_ui;
 pub mod session;
 mod stripes;
 mod title;
-pub use stripes::{STRIPE_W, Tool, active_in};
+pub use stripes::{STRIPE_W, Side, Tool, ToolPlaces, active_in, dock_of, move_menu};
 pub use title::{TITLE_H, badge_color, branch_popup, initials};
 
 /// The center and bottom tabs, so events can bring one forward.
@@ -441,6 +441,7 @@ impl Workspace {
             cx.subscribe_in(&dock, window, |this, _, e: &DockEvent, window, cx| {
                 if matches!(e, DockEvent::LayoutChanged) {
                     this.keep_welcome(window, cx);
+                    this.refresh_tool_places(cx);
                     this.save_layout_soon(cx);
                 }
             }),
@@ -577,6 +578,7 @@ impl Workspace {
             }
         });
         this.adopt_editors(restored.1, window, cx);
+        this.refresh_tool_places(cx);
         for path in reopen {
             let editor = this.reveal_file(path, false, true, window, cx);
             editor.update(cx, |e, _| e.close_if_gone = true);
@@ -1072,6 +1074,9 @@ impl Workspace {
         if activity != Activity::Git && !self.dock.read(cx).is_dock_open(DockPlacement::Left) {
             self.dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Left, window, cx));
         }
+        if activity != Activity::Git {
+            self.front_side(window, cx);
+        }
         self.side.update(cx, |s, cx| {
             s.activity = activity;
             cx.notify();
@@ -1097,12 +1102,13 @@ impl Workspace {
         }
         let same = self.side.read(cx).activity == activity;
         let open = self.dock.read(cx).is_dock_open(DockPlacement::Left);
-        if same && open {
+        if same && open && self.side_in_front(cx) {
             self.dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Left, window, cx));
         } else {
             if !open {
                 self.dock.update(cx, |d, cx| d.toggle_dock(DockPlacement::Left, window, cx));
             }
+            self.front_side(window, cx);
             self.remember_activity(activity, cx);
             self.side.update(cx, |s, cx| {
                 s.activity = activity;
@@ -2097,9 +2103,10 @@ impl Render for Workspace {
                 d.on_action(cx.listener(|this, _: &CloseRemote, w, cx| this.close_remote(w, cx)))
             })
             .on_action(cx.listener(|this, a: &HideToolWindow, w, cx| {
-                let place = if a.0 { DockPlacement::Right } else { DockPlacement::Bottom };
+                let place = this.dock_of_panel_named(a.0, cx).unwrap_or(DockPlacement::Bottom);
                 this.hide_dock(place, w, cx)
             }))
+            .on_action(cx.listener(|this, a: &crate::menus::MoveToolWindow, w, cx| this.move_tool(a.0, a.1, w, cx)))
             .on_action(cx.listener(|this, _: &HideSide, w, cx| this.hide_dock(DockPlacement::Left, w, cx)))
             .on_action(cx.listener(|this, _: &LocateFile, _, cx| {
                 let path = this.status.read(cx).editor().map(|e| e.read(cx).path.clone());

@@ -1,7 +1,7 @@
 //! Every tool window draws one header (its title and its toolbar), and with nothing in it,
 //! an illustrated empty state under that header. The sheets resize from their edges.
 
-use gpui::{Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px};
+use gpui::{AppContext as _, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px};
 use gpui_component::dock::DockPlacement;
 
 use crate::panels::Activity;
@@ -143,5 +143,89 @@ fn the_settings_sheet_resizes_from_its_corner_and_keeps_its_size(cx: &mut TestAp
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_settings(w, cx)));
     cx.run_until_parked();
     assert_eq!(cx.debug_bounds("sheet-settings").unwrap().size, wide.size);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Draw the window again.
+fn draw(cx: &mut VisualTestContext) {
+    cx.update(|w, _| w.refresh());
+    cx.run_until_parked();
+}
+
+/// A tool window moves to another dock (Move to): its stripe button goes with it, its
+/// header hides that dock, the Project button stands back while it is in front of the left
+/// dock, and the next launch finds it where it was left.
+#[gpui::test]
+fn a_tool_window_moves_between_docks_and_stays_there(cx: &mut TestAppContext) {
+    use crate::workspace::Side;
+    let repo = demo_repo("tool-move");
+    let (model, ws, vcx) = open(cx, with_repo(&repo));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    vcx.run_until_parked();
+    let place = |vcx: &mut VisualTestContext, t: Tool| vcx.update(|_, cx| ws.read(cx).placement_of(t, cx));
+    assert_eq!(place(vcx, Tool::Claude), DockPlacement::Bottom);
+    // A stripe button is on the left stripe when it lines up with Project's, else on the
+    // right one.
+    let on_left = |vcx: &mut VisualTestContext, item: &'static str| {
+        draw(vcx);
+        let (project, i) = (vcx.debug_bounds("act-project").unwrap(), vcx.debug_bounds(item).unwrap());
+        (i.left() - project.left()).abs() < px(1.)
+    };
+
+    // To the right: shown there, its button on the right stripe, the menu checks Right.
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.move_tool(Tool::Claude, Side::Right, w, cx)));
+    vcx.run_until_parked();
+    assert_eq!(place(vcx, Tool::Claude), DockPlacement::Right);
+    assert!(vcx.update(|_, cx| ws.read(cx).tool_open(Tool::Claude, cx)), "shown where it went");
+    assert!(!on_left(vcx, "stripe-claude"), "on the right stripe");
+    assert!(vcx.debug_bounds("tool-header-Console").is_some(), "its header, with the Move to menu");
+    assert!(vcx.debug_bounds("tool-options").is_some());
+    let places = vcx.update(|_, cx| cx.global::<crate::workspace::ToolPlaces>().0.clone());
+    assert!(places.contains(&(Tool::Claude, Side::Right)));
+    // Its stripe button toggles it in its new dock; the header's Hide hides that dock.
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.toggle_tool(Tool::Claude, w, cx)));
+    vcx.run_until_parked();
+    assert!(!vcx.update(|_, cx| ws.read(cx).dock.read(cx).is_dock_open(DockPlacement::Right)));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.toggle_tool(Tool::Claude, w, cx)));
+    vcx.run_until_parked();
+    vcx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow("Claude")), cx));
+    vcx.run_until_parked();
+    assert!(!vcx.update(|_, cx| ws.read(cx).dock.read(cx).is_dock_open(DockPlacement::Right)));
+
+    // To the left, through the action: in front of Project, whose button stands back;
+    // Project comes back to the front with its button.
+    vcx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::MoveToolWindow(Tool::Claude, Side::Left)), cx));
+    vcx.run_until_parked();
+    assert_eq!(place(vcx, Tool::Claude), DockPlacement::Left);
+    assert!(vcx.update(|_, cx| ws.read(cx).tool_open(Tool::Claude, cx)));
+    assert!(on_left(vcx, "stripe-claude"));
+    assert!(!vcx.update(|_, cx| ws.read(cx).side_in_front(cx)));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Project, w, cx)));
+    vcx.run_until_parked();
+    assert!(vcx.update(|_, cx| ws.read(cx).side_in_front(cx)), "Project in front again");
+    assert!(vcx.update(|_, cx| ws.read(cx).dock.read(cx).is_dock_open(DockPlacement::Left)), "and not hidden");
+    assert!(!vcx.update(|_, cx| ws.read(cx).tool_open(Tool::Claude, cx)));
+    // The Terminal still lives at the bottom.
+    assert_eq!(place(vcx, Tool::Terminal), DockPlacement::Bottom);
+
+    // The next launch: still on the left.
+    let saved = vcx.update(|_, cx| {
+        ws.update(cx, |ws, cx| ws.save_layout(cx));
+        model.read(cx).settings.clone()
+    });
+    let model2 = cx.update(|cx| cx.new(|cx| crate::model::Model::new(saved, None, cx)));
+    let mut ws2 = None;
+    let (_, vcx2) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| crate::workspace::Workspace::new(model2.clone(), window, cx));
+        ws2 = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    vcx2.run_until_parked();
+    let ws2 = ws2.unwrap();
+    assert_eq!(vcx2.update(|_, cx| ws2.read(cx).placement_of(Tool::Claude, cx)), DockPlacement::Left);
+    // And back to the bottom.
+    vcx2.update(|w, cx| ws2.update(cx, |ws, cx| ws.move_tool(Tool::Claude, Side::Bottom, w, cx)));
+    vcx2.run_until_parked();
+    assert_eq!(vcx2.update(|_, cx| ws2.read(cx).placement_of(Tool::Claude, cx)), DockPlacement::Bottom);
     let _ = std::fs::remove_dir_all(repo);
 }
