@@ -264,6 +264,18 @@ pub struct Project {
     pub name: String,
     /// The browser it runs, when it says (`chromium`, `firefox`, `webkit`).
     pub browser: String,
+    /// The branded browser it runs (`chrome`, `msedge`), when it says.
+    pub channel: String,
+    /// Its `use.baseURL`, as the configuration made it for this run's variables.
+    #[serde(rename = "baseURL")]
+    pub base_url: String,
+    /// Its `use.testIdAttribute`, when not `data-testid`.
+    #[serde(rename = "testIdAttribute")]
+    pub test_id_attribute: String,
+    /// Its `use.storageState`, when a file (the session a setup project saved).
+    #[serde(rename = "storageState")]
+    pub storage_state: String,
+    pub viewport: Option<(u32, u32)>,
 }
 
 /// What a worker does now.

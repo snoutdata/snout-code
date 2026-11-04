@@ -167,6 +167,8 @@ mod shots {
         NodeBar,
         PlaywrightBar,
         TestsWindow,
+        /// Record at Cursor writing into a spec, its bar above the text.
+        Recording,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -375,7 +377,7 @@ sleep 30
         if matches!(select, Some(Select::Commit(..))) {
             with_merge(&repo);
         }
-        if matches!(select, Some(Select::TestsWindow)) {
+        if matches!(select, Some(Select::TestsWindow | Select::Recording)) {
             crate::playwright_repo(&repo);
         }
         let mut cx = HeadlessAppContext::with_platform(
@@ -1482,6 +1484,25 @@ sleep 30
                             missing: vec!["Chromium".into(), "Firefox".into(), "WebKit".into()],
                         });
                         cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::Recording) => {
+                // A spec, the caret in a test: the recorder's steps written so far.
+                let file = repo.join("tests/checkout.spec.ts");
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(&file, crate::RECORDED_SPEC).unwrap();
+                let open =
+                    |cx: &mut HeadlessAppContext, a: Action| cx.update(|cx| model.update(cx, |m, cx| m.handle(a, cx)));
+                open(&mut cx, Action::OpenFile(file, Some((13, 4))));
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let ws = ws.read(cx);
+                    let e = ws.editors(cx).into_iter().find(|e| e.read(cx).path.ends_with("checkout.spec.ts")).unwrap();
+                    e.update(cx, |e, cx| {
+                        let bar = snout_app::editor::recording::RecordBar::Recording { steps: 5, lost: false };
+                        e.set_record_bar(Some(bar), cx)
                     });
                 })
                 .unwrap();
@@ -2984,6 +3005,7 @@ sleep 30
             shot(&format!("ui-node-bar-{mode}"), theme, Activity::Project, Some(Select::NodeBar));
             shot(&format!("ui-playwright-bar-{mode}"), theme, Activity::Project, Some(Select::PlaywrightBar));
             shot(&format!("ui-tests-window-{mode}"), theme, Activity::Project, Some(Select::TestsWindow));
+            shot(&format!("ui-recording-{mode}"), theme, Activity::Project, Some(Select::Recording));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(
@@ -3018,6 +3040,25 @@ sleep 30
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+/// A spec part way through Record at Cursor: the steps so far, after the caret's line.
+const RECORDED_SPEC: &str = "import { test, expect } from '@playwright/test';
+
+test.describe('checkout', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+  });
+
+  test('pays by card', async ({ page }) => {
+    await page.getByRole('link', { name: 'Shop' }).click();
+    await page.getByRole('button', { name: 'Add to cart' }).first().click();
+    await page.getByRole('link', { name: 'Cart (1)' }).click();
+    await page.getByRole('button', { name: 'Checkout' }).click();
+    await page.getByLabel('Card number').fill('4242 4242 4242 4242');
+  });
+});
+";
 
 #[cfg(target_os = "macos")]
 /// A Playwright project for the Tests window's shot: installed, so no bar shows.

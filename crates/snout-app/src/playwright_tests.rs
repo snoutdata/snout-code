@@ -905,3 +905,286 @@ fn a_real_playwright_run_feeds_the_tests_window(cx: &mut gpui::TestAppContext) {
         }
     });
 }
+
+/// Phase 3: writing tests. Record at Cursor, Pick Locator and UI Mode.
+mod writing {
+    use std::path::{Path, PathBuf};
+
+    use super::write;
+    use crate::lang::node;
+    use crate::playwright::gutter::Spot;
+    use crate::playwright::record::{self, Start};
+    use crate::playwright::report::Project;
+    use crate::run::config::Environment;
+
+    const GENERATED: &str = "import { test, expect } from '@playwright/test';\n\ntest.use({\n  storageState: '.auth/user.json'\n});\n\ntest('test', async ({ page }) => {\n  await page.goto('https://shop.test/cart');\n  await page.getByRole('button', { name: 'Pay' }).click();\n\n  await expect(page.getByText('Paid')).toBeVisible();\n});";
+
+    #[test]
+    fn the_recorders_file_gives_its_steps_and_a_half_written_one_none() {
+        let steps = record::steps(GENERATED).unwrap();
+        assert_eq!(
+            steps,
+            [
+                "await page.goto('https://shop.test/cart');",
+                "await page.getByRole('button', { name: 'Pay' }).click();",
+                "",
+                "await expect(page.getByText('Paid')).toBeVisible();",
+            ]
+        );
+        assert_eq!(record::count(&steps), 3);
+        assert_eq!(record::steps(&GENERATED[..GENERATED.len() - 3]), None, "not whole yet");
+        assert_eq!(record::steps(""), None);
+    }
+
+    #[test]
+    fn a_goto_to_the_base_url_is_made_relative_only_for_a_bare_origin() {
+        let goto = "await page.goto('https://shop.test/cart');";
+        assert_eq!(record::relative(goto, Some("https://shop.test")), "await page.goto('/cart');");
+        assert_eq!(record::relative(goto, Some("https://shop.test/")), "await page.goto('/cart');");
+        assert_eq!(
+            record::relative("await page.goto('https://shop.test');", Some("https://shop.test")),
+            "await page.goto('/');"
+        );
+        // `/cart` against `…/app` would drop `/app`.
+        assert_eq!(record::relative(goto, Some("https://shop.test/app")), goto);
+        assert_eq!(record::relative(goto, Some("https://other.test")), goto);
+        assert_eq!(record::relative(goto, None), goto);
+    }
+
+    #[test]
+    fn steps_go_into_a_test_into_a_new_one_or_make_the_whole_spec() {
+        let steps = record::steps(GENERATED).unwrap();
+        let base = Some("https://shop.test");
+        let body = record::render(&Spot::Body { indent: "    ".into() }, &steps, GENERATED, "  ", base);
+        assert_eq!(
+            body,
+            "    await page.goto('/cart');\n    await page.getByRole('button', { name: 'Pay' }).click();\n\n    await expect(page.getByText('Paid')).toBeVisible();"
+        );
+        let new = record::render(&Spot::Outside { indent: "  ".into() }, &steps[..1], GENERATED, "  ", base);
+        assert_eq!(new, "  test('new test', async ({ page }) => {\n    await page.goto('/cart');\n  });");
+        let whole = record::render(&Spot::Empty, &steps, GENERATED, "  ", base);
+        assert!(whole.starts_with("import { test, expect } from '@playwright/test';\n"), "{whole}");
+        assert!(whole.contains("  await page.goto('/cart');\n") && whole.ends_with("});\n"), "{whole}");
+    }
+
+    #[test]
+    fn a_recording_takes_a_blank_line_or_goes_after_the_carets_line() {
+        let text = "test('a', async ({ page }) => {\n  await page.goto('/');\n  \n});\n";
+        let blank = text.find("  \n}").unwrap() + 1;
+        let body = Spot::Body { indent: "  ".into() };
+        assert_eq!(record::place(text, blank, &body), (blank - 1..blank + 1, ""));
+        let goto = text.find("goto").unwrap();
+        let end = text.find(";\n").unwrap() + 1;
+        assert_eq!(record::place(text, goto, &body), (end..end, "\n"));
+        let outside = Spot::Outside { indent: String::new() };
+        assert_eq!(record::place(text, 1, &outside), (31..31, "\n\n"));
+        assert_eq!(record::place("\n\n", 1, &Spot::Empty), (0..2, ""));
+    }
+
+    #[test]
+    fn a_pick_goes_on_page_unless_the_caret_follows_a_member_access() {
+        let l = "getByRole('button', { name: 'Log in' })";
+        assert_eq!(record::picked_text("  await ", l), format!("page.{l}"));
+        assert_eq!(record::picked_text("  await expect(", l), format!("page.{l}"));
+        assert_eq!(record::picked_text("  await dialog.", l), l);
+    }
+
+    #[test]
+    fn a_recording_starts_where_the_tests_do_as_whom_they_log_in() {
+        let project = |name: &str, browser: &str, storage: &str| Project {
+            name: name.into(),
+            browser: browser.into(),
+            base_url: "https://shop.test".into(),
+            storage_state: storage.into(),
+            ..Default::default()
+        };
+        let projects = [
+            project("setup", "", ""),
+            project("firefox", "firefox", ".auth/user.json"),
+            Project { test_id_attribute: "data-qa".into(), ..project("chromium", "chromium", "") },
+        ];
+        let root = Path::new("/qa");
+        let start = Start::of(&projects, None, root);
+        assert_eq!(start.url.as_deref(), Some("https://shop.test"));
+        assert_eq!(start.browser.as_deref(), Some("firefox"), "the project that logs in");
+        assert_eq!(start.storage, Some(PathBuf::from("/qa/.auth/user.json")));
+        // The environment picked comes before the configuration.
+        let staging =
+            Environment { name: "Staging".into(), base_url: "https://staging.shop.test".into(), ..Default::default() };
+        assert_eq!(Start::of(&projects, Some(&staging), root).url.as_deref(), Some("https://staging.shop.test"));
+        let chromium = Start::of(&projects[2..], None, root);
+        let args = chromium.codegen_args(Path::new("/tmp/r.ts"), false);
+        assert_eq!(
+            args,
+            [
+                "codegen",
+                "--target=playwright-test",
+                "--output=/tmp/r.ts",
+                "--browser=chromium",
+                "--test-id-attribute=data-qa",
+                "https://shop.test"
+            ]
+        );
+        let logged_in = start.codegen_args(Path::new("/tmp/r.ts"), true);
+        assert!(logged_in.contains(&"--load-storage=/qa/.auth/user.json".to_owned()), "{logged_in:?}");
+        assert!(!start.codegen_args(Path::new("/tmp/r.ts"), false).iter().any(|a| a.starts_with("--load-storage")));
+        // Nothing listed and no environment: the recorder opens empty.
+        assert_eq!(Start::of(&[], None, root).codegen_args(Path::new("/r.ts"), false).len(), 3);
+    }
+
+    const SPEC: &str = "import { test, expect } from '@playwright/test';\n\ntest.describe('shop', () => {\n    test('buys', async ({ page }) => {\n        await page.goto('/');\n        \n    });\n});\n";
+
+    /// A Playwright project of the fakes, its spec open, the caret on `find` (plus
+    /// `offset`), the tests listed.
+    fn spec_open<'a>(
+        name: &str,
+        find: &str,
+        offset: usize,
+        cx: &'a mut gpui::TestAppContext,
+    ) -> Option<(
+        PathBuf,
+        gpui::Entity<crate::workspace::Workspace>,
+        gpui::Entity<crate::editor::EditorPanel>,
+        &'a mut gpui::VisualTestContext,
+    )> {
+        use crate::lang_tests::{caret_at, pump_until};
+        use crate::tests::{open, with_repo};
+        if node::discover(&*snout_host::local()).is_empty() {
+            println!("writing tests: skipped; needs Node");
+            return None;
+        }
+        cx.executor().allow_parking();
+        let repo = super::running::fake_project(name);
+        write(&repo, "tests/shop.spec.ts", SPEC);
+        let fixtures = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/playwright"));
+        std::fs::copy(fixtures.join("fake-api.js"), repo.join("node_modules/@playwright/test/index.js")).unwrap();
+        let (_, ws, cx) = open(cx, with_repo(&repo));
+        cx.update(|_, cx| cx.set_global(crate::lang_tests::TestWorkspace(ws.clone())));
+        let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+        let listed = pump_until(cx, 30, |cx| cx.update(|_, cx| tests.read(cx).listing.is_some()));
+        assert!(listed, "the tests are listed: {:?}", cx.update(|_, cx| tests.read(cx).listing_error.clone()));
+        let path = repo.join("tests/shop.spec.ts");
+        cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(path.clone(), None, false, w, cx)));
+        let opened = pump_until(cx, 10, |cx| {
+            cx.update(|_, cx| ws.read(cx).editors(cx).iter().any(|e| e.read(cx).path == path && !e.read(cx).loading))
+        });
+        assert!(opened, "the spec opens");
+        let editor = crate::lang_tests::editor_of(&ws, &path, cx).unwrap();
+        caret_at(&editor, find, 0, offset, cx);
+        Some((repo, ws, editor, cx))
+    }
+
+    fn message(ws: &gpui::Entity<crate::workspace::Workspace>, cx: &mut gpui::VisualTestContext) -> String {
+        cx.update(|_, cx| ws.read(cx).model.read(cx).message.clone())
+    }
+
+    #[gpui::test]
+    fn record_at_cursor_writes_the_recorders_steps_into_the_test_live(cx: &mut gpui::TestAppContext) {
+        use crate::lang_tests::{pump_until, text};
+        // The caret on the blank line of the test.
+        let Some((repo, ws, editor, cx)) = spec_open("pw-record", "        \n    });", 8, cx) else { return };
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::RecordAtCursor), cx));
+        let first =
+            pump_until(cx, 20, |cx| text(&editor, cx).contains("await page.goto('/');\n        await page.goto('/');"));
+        assert!(first, "the first step is written as it comes:\n{}", text(&editor, cx));
+        assert!(cx.debug_bounds("record-bar").is_some(), "the tab says it is recording");
+        let all = pump_until(cx, 20, |cx| text(&editor, cx).contains("fill('qa@shop.test')"));
+        assert!(all, "the rest follow:\n{}", text(&editor, cx));
+        assert_eq!(
+            text(&editor, cx),
+            "import { test, expect } from '@playwright/test';\n\ntest.describe('shop', () => {\n    test('buys', async ({ page }) => {\n        await page.goto('/');\n        await page.goto('/');\n        await page.getByRole('link', { name: 'Shop' }).click();\n        await page.getByLabel('Email').fill('qa@shop.test');\n    });\n});\n",
+            "in place of the blank line, at the test's indentation, the base URL made relative"
+        );
+        // The recorder got the configuration's browser, URL and test id attribute; no saved
+        // session yet (the setup has not run).
+        let args_file =
+            std::fs::read_dir(crate::playwright::record::recording_file(snout_host::local().info()).parent().unwrap())
+                .unwrap()
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.to_string_lossy().ends_with(".args.json"))
+                .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+                .unwrap();
+        let args: Vec<String> = serde_json::from_str(&std::fs::read_to_string(&args_file).unwrap()).unwrap();
+        let _ = std::fs::remove_file(&args_file);
+        for want in ["--browser=chromium", "--test-id-attribute=data-qa", "https://shop.test"] {
+            assert!(args.iter().any(|a| a == want), "{want} in {args:?}");
+        }
+        assert!(!args.iter().any(|a| a.starts_with("--load-storage")), "{args:?}");
+        // Stop ends it and says how it went.
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::StopRecording), cx));
+        let ended = pump_until(cx, 20, |cx| cx.debug_bounds("record-bar").is_none());
+        assert!(ended, "the bar goes when it ends");
+        assert_eq!(message(&ws, cx), "Recorded 3 steps into shop.spec.ts");
+        let _ = repo;
+    }
+
+    #[gpui::test]
+    fn recording_between_tests_writes_a_new_test(cx: &mut gpui::TestAppContext) {
+        use crate::lang_tests::{pump_until, text};
+        // The caret at the end of the describe's last line: after the test.
+        let Some((_, _, editor, cx)) = spec_open("pw-record-new", "    });\n});", 7, cx) else { return };
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::RecordAtCursor), cx));
+        let all = pump_until(cx, 20, |cx| text(&editor, cx).contains("fill('qa@shop.test')"));
+        assert!(all, "{}", text(&editor, cx));
+        assert!(
+            text(&editor, cx).contains("    });\n\n    test('new test', async ({ page }) => {\n        await page.goto('/');\n        await page.getByRole('link', { name: 'Shop' }).click();\n        await page.getByLabel('Email').fill('qa@shop.test');\n    });\n});\n"),
+            "{}",
+            text(&editor, cx)
+        );
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::StopRecording), cx));
+        assert!(pump_until(cx, 20, |cx| cx.debug_bounds("record-bar").is_none()));
+    }
+
+    #[gpui::test]
+    fn pick_locator_puts_the_locator_at_the_caret_and_a_new_pick_replaces_it(cx: &mut gpui::TestAppContext) {
+        use crate::lang_tests::{pump_until, text};
+        let Some((repo, ws, editor, cx)) = spec_open("pw-pick", "await page.goto('/');", 6, cx) else { return };
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::PickLocator), cx));
+        let first = pump_until(cx, 20, |cx| {
+            text(&editor, cx).contains("await page.getByRole('button', { name: 'Log in' })page.goto('/')")
+        });
+        assert!(first, "{}", text(&editor, cx));
+        assert!(cx.debug_bounds("record-bar").is_some(), "the tab says it is picking");
+        let second =
+            pump_until(cx, 20, |cx| text(&editor, cx).contains("await page.getByTestId('cart')page.goto('/')"));
+        assert!(second, "the next pick takes the last one's place: {}", text(&editor, cx));
+        assert_eq!(message(&ws, cx), "Picked getByTestId('cart')");
+        // The browser opened where the tests start, with their test id attribute.
+        let opened: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(repo.join("picker-opened.json")).unwrap()).unwrap();
+        assert_eq!(opened["url"], "https://shop.test");
+        assert_eq!(opened["browser"], "chromium");
+        assert_eq!(opened["testIdAttribute"], "data-qa");
+        assert_eq!(opened["headless"], false);
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::StopRecording), cx));
+        assert!(pump_until(cx, 20, |cx| cx.debug_bounds("record-bar").is_none()), "Stop ends the pick");
+    }
+
+    #[gpui::test]
+    fn ui_mode_serves_playwrights_runner_to_the_browser(cx: &mut gpui::TestAppContext) {
+        use crate::lang_tests::pump_until;
+        let Some((_, ws, _, cx)) = spec_open("pw-ui", "test(", 0, cx) else { return };
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::OpenUiMode), cx));
+        let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+        let started = pump_until(cx, 20, |cx| {
+            cx.update(|_, cx| runs.read(cx).sessions.iter().any(|s| s.launch.title() == "UI Mode" && s.running()))
+        });
+        assert!(started, "UI Mode runs");
+        cx.update(|_, cx| {
+            let r = runs.read(cx);
+            let s = r.sessions.iter().find(|s| s.launch.title() == "UI Mode").unwrap();
+            let crate::run::Launch::Process(p) = &s.launch else { panic!("a process") };
+            assert!(p.args.ends_with(&["test".into(), "--ui".into(), "--ui-port=0".into()]), "{:?}", p.args);
+        });
+        assert_eq!(message(&ws, cx), "UI Mode opens in your browser");
+        cx.update(|_, cx| {
+            runs.update(cx, |r, cx| {
+                let ids: Vec<u64> = r.sessions.iter().filter(|s| s.running()).map(|s| s.id).collect();
+                for id in ids {
+                    r.stop(id, cx);
+                }
+            })
+        });
+        assert!(pump_until(cx, 20, |cx| cx.update(|_, cx| !runs.read(cx).sessions.iter().any(|s| s.running()))));
+    }
+}

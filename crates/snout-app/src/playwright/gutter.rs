@@ -36,8 +36,8 @@ fn literal(node: tree_sitter::Node, text: &str) -> Option<String> {
     }
 }
 
-/// The tests and groups in the spec file at `path` holding `text`.
-pub fn runnables(path: &Path, text: &str) -> FileRunnables {
+/// `text` of the file at `path`, parsed.
+fn parse(path: &Path, text: &str) -> Option<tree_sitter::Tree> {
     let tsx = path.extension().is_some_and(|e| e == "tsx" || e == "jsx");
     let language: tree_sitter::Language = if tsx {
         tree_sitter_typescript::LANGUAGE_TSX.into()
@@ -45,11 +45,14 @@ pub fn runnables(path: &Path, text: &str) -> FileRunnables {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     };
     let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&language).ok()?;
+    parser.parse(text, None)
+}
+
+/// The tests and groups in the spec file at `path` holding `text`.
+pub fn runnables(path: &Path, text: &str) -> FileRunnables {
     let mut out = FileRunnables::default();
-    if parser.set_language(&language).is_err() {
-        return out;
-    }
-    let Some(tree) = parser.parse(text, None) else { return out };
+    let Some(tree) = parse(path, text) else { return out };
     let mut cursor = tree.walk();
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
@@ -71,6 +74,95 @@ pub fn runnables(path: &Path, text: &str) -> FileRunnables {
     }
     out.items.sort_by_key(|r| r.line);
     out
+}
+
+/// Where the caret is in a spec, for what a recording writes there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Spot {
+    /// In the body of a test, a hook or a step: the steps go in as they are, at `indent`.
+    Body { indent: String },
+    /// Between tests (at the top, or in a `describe`): a new test goes in, at `indent`.
+    Outside { indent: String },
+    /// The file holds nothing yet: a whole spec goes in.
+    Empty,
+}
+
+/// Calls whose callback holds steps: tests, hooks and steps.
+fn holds_steps(callee: &str) -> bool {
+    marked(callee) == Some(false)
+        || callee
+            .strip_prefix("test.")
+            .is_some_and(|m| matches!(m, "beforeEach" | "afterEach" | "beforeAll" | "afterAll" | "step"))
+}
+
+/// The indentation of the line `at` is on.
+fn indent_at(text: &str, at: usize) -> String {
+    let start = text[..at.min(text.len())].rfind('\n').map_or(0, |i| i + 1);
+    text[start..].chars().take_while(|c| *c == ' ' || *c == '\t').collect()
+}
+
+/// The indentation inside `block` (a `{ … }`): its first statement's, else one step in
+/// from the line it opens on.
+fn inner_indent(block: tree_sitter::Node, text: &str) -> String {
+    match block.named_child(0) {
+        Some(first) => indent_at(text, first.start_byte()),
+        None => indent_at(text, block.start_byte()) + &indent_unit(text),
+    }
+}
+
+/// One step of the file's indentation: a tab, or its smallest run of spaces (two in a file
+/// without any).
+pub fn indent_unit(text: &str) -> String {
+    let mut spaces = usize::MAX;
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        if line.starts_with('\t') {
+            return "\t".into();
+        }
+        let n = line.len() - line.trim_start_matches(' ').len();
+        if n > 0 {
+            spaces = spaces.min(n);
+        }
+    }
+    " ".repeat(if spaces == usize::MAX { 2 } else { spaces })
+}
+
+/// Where the caret at byte `at` is, in `text` of the spec at `path`.
+pub fn spot(path: &Path, text: &str, at: usize) -> Spot {
+    if text.trim().is_empty() {
+        return Spot::Empty;
+    }
+    let Some(tree) = parse(path, text) else { return Spot::Outside { indent: String::new() } };
+    let mut found = Spot::Outside { indent: String::new() };
+    let mut cursor = tree.walk();
+    let mut stack = vec![tree.root_node()];
+    // Outer calls come before inner ones: the last that holds the caret wins.
+    while let Some(node) = stack.pop() {
+        if node.start_byte() > at || node.end_byte() < at {
+            continue;
+        }
+        if node.kind() == "call_expression"
+            && let Some(callee) = node.child_by_field_name("function")
+            && let Ok(name) = callee.utf8_text(text.as_bytes())
+            && let Some(args) = node.child_by_field_name("arguments")
+        {
+            let name: String = name.split_whitespace().collect();
+            let body = (0..args.named_child_count() as u32)
+                .filter_map(|i| args.named_child(i))
+                .filter(|a| matches!(a.kind(), "arrow_function" | "function_expression" | "function"))
+                .filter_map(|f| f.child_by_field_name("body"))
+                .find(|b| b.kind() == "statement_block" && b.start_byte() < at && at < b.end_byte());
+            if let Some(body) = body {
+                if holds_steps(&name) {
+                    found = Spot::Body { indent: inner_indent(body, text) };
+                } else if marked(&name) == Some(true) {
+                    found = Spot::Outside { indent: inner_indent(body, text) };
+                }
+            }
+        }
+        let children: Vec<tree_sitter::Node> = node.children(&mut cursor).collect();
+        stack.extend(children.into_iter().rev());
+    }
+    found
 }
 
 #[cfg(test)]
@@ -113,5 +205,21 @@ test.use({ locale: 'fr' });
             ]
         );
         assert_eq!(r.items[1].line, 4, "the icon's line counts from 0");
+    }
+
+    #[test]
+    fn the_caret_is_in_a_test_between_tests_or_in_an_empty_file() {
+        let text = "import { test } from '@playwright/test';\n\ntest.describe('cart', () => {\n    test('adds', async ({ page }) => {\n        await page.goto('/');\n        \n    });\n    test.beforeEach(async ({ page }) => {});\n    \n});\n\n";
+        let path = Path::new("/p/tests/cart.spec.ts");
+        let at = |needle: &str, ahead: usize| text.find(needle).unwrap() + ahead;
+        // On the blank line after the goto.
+        assert_eq!(spot(path, text, at("await page.goto('/');\n", 30)), Spot::Body { indent: "        ".into() });
+        // In an empty hook: one step in from its line.
+        assert_eq!(spot(path, text, at("{});", 1)), Spot::Body { indent: "        ".into() });
+        // In the describe, between its tests.
+        assert_eq!(spot(path, text, at("{});\n    \n", 9)), Spot::Outside { indent: "    ".into() });
+        // At the end of the file.
+        assert_eq!(spot(path, text, text.len()), Spot::Outside { indent: String::new() });
+        assert_eq!(spot(path, " \n", 1), Spot::Empty);
     }
 }

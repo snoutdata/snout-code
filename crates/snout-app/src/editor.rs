@@ -37,6 +37,7 @@ mod lang_features;
 pub mod navigation;
 pub mod pom_lang;
 pub mod problem_hover;
+pub mod recording;
 mod refactor;
 mod run_gutter;
 pub mod settings_lang;
@@ -387,6 +388,8 @@ pub struct EditorPanel {
     _runnables: Option<Task<()>>,
     /// The gutter's menu, while it shows.
     pub gutter_menu: Option<GutterMenu>,
+    /// A recording writes here, or picked locators come here: the bar above the text.
+    pub recording: Option<recording::RecordBar>,
     /// Where the gutter's lanes were drawn last.
     pub lanes: run_gutter::LanesCell,
     /// The padding left of the line numbers, for the gutter's lanes.
@@ -593,6 +596,7 @@ impl EditorPanel {
             runnables: None,
             _runnables: None,
             gutter_menu: None,
+            recording: None,
             lanes: Default::default(),
             gutter_pad: run_gutter::PLAIN_PAD,
             spring: None,
@@ -1612,6 +1616,7 @@ impl Render for EditorPanel {
             .children(self.review_bar(cx))
             .children(self.claude_bar(cx))
             .children(self.revision_bar(cx))
+            .children(self.record_bar(cx))
             .child(
                 div()
                     .flex_1()
@@ -1740,13 +1745,16 @@ impl EditorPanel {
         cx: &mut Context<Self>,
     ) {
         let target = gpui::Focusable::focus_handle(&self.state, cx);
+        // In a Playwright project's scripts: Record at Cursor and Pick Locator.
+        let spec = crate::playwright::tests::tests(cx).is_some_and(|t| t.read(cx).root.is_some())
+            && crate::playwright::record::scriptable(&self.path);
         self.context.open(
             Some(target),
             at,
             window,
             cx,
             |e| &mut e.context,
-            move |menu, window, cx| context_menu(menu, lang, run.as_deref(), window, cx),
+            move |menu, window, cx| context_menu(menu, lang, run.as_deref(), spec, window, cx),
         );
     }
 }
@@ -1757,6 +1765,7 @@ pub fn context_menu(
     menu: crate::components::PopupMenu,
     lang: bool,
     run: Option<&str>,
+    spec: bool,
     window: &mut Window,
     cx: &mut Context<crate::components::PopupMenu>,
 ) -> crate::components::PopupMenu {
@@ -1768,6 +1777,13 @@ pub fn context_menu(
             .item(action_item(format!("Debug '{name}'"), I::Bug, Box::new(crate::menus::DebugContext)))
             .separator(),
         None => menu,
+    };
+    let menu = if spec {
+        menu.item(action_item("Record at Cursor", I::CircleDot, Box::new(crate::menus::RecordAtCursor)))
+            .item(action_item("Pick Locator", I::Crosshair, Box::new(crate::menus::PickLocator)))
+            .separator()
+    } else {
+        menu
     };
     let menu = if lang {
         let refactor = PopupMenu::build(window, cx, |m, _, _| {

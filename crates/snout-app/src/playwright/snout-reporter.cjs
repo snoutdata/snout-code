@@ -54,10 +54,20 @@ class SnoutReporter {
   }
 
   onBegin(config, suite) {
-    const projects = (config.projects || []).map((p) => ({
-      name: p.name,
-      browser: (p.use && (p.use.browserName || p.use.defaultBrowserType)) || '',
-    }));
+    const projects = (config.projects || []).map((p) => {
+      const use = p.use || {};
+      const viewport = use.viewport && use.viewport.width ? use.viewport : null;
+      // What a recording or a locator pick starts from: where, as whom, on what.
+      return {
+        name: p.name,
+        browser: use.browserName || use.defaultBrowserType || '',
+        channel: typeof use.channel === 'string' ? use.channel : '',
+        baseURL: typeof use.baseURL === 'string' ? use.baseURL : '',
+        testIdAttribute: typeof use.testIdAttribute === 'string' ? use.testIdAttribute : '',
+        storageState: typeof use.storageState === 'string' ? use.storageState : '',
+        viewport: viewport ? [viewport.width, viewport.height] : null,
+      };
+    });
     const tests = suite.allTests().map((t) => {
       const path = t.titlePath();
       // ['', project, file, ...describes, title]

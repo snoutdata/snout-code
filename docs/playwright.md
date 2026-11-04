@@ -25,6 +25,25 @@ The commands run on the Node the project asks for (see [Node](typescript.md#node
 
 On Linux, browsers also need system libraries. Playwright installs them with `sudo npx playwright install-deps`, which you run yourself in the Terminal.
 
+## Writing tests
+
+![Record at Cursor writing the recorder's steps into a test](images/playwright-recording.png)
+
+Three tools help write tests without typing every locator. They start where the tests do: the application's URL from the environment picked (or the configuration's `baseURL`), in the configuration's browser, with its test id attribute (`testIdAttribute`). When a project of the configuration logs in once and keeps the session (`storageState`, saved by a setup project), they start logged in, provided a run has saved that file.
+
+- **Record at Cursor** (**Run ▸ Record at Cursor**, or the editor's right-click menu in a spec) opens Playwright's recorder: a browser, and Playwright's Inspector beside it. What you do in the browser comes back as steps, written into the spec as you go, where the caret was:
+  - in a test, a hook or a `test.step`, the steps go there, at its indentation;
+  - between tests, they go in a new test (`test('new test', …)`) to rename;
+  - in an empty file, the whole spec goes in, with its `import`.
+
+  A `page.goto` to the application's URL is written relative to it (`page.goto('/cart')`), so the test runs against any environment. The recorder's toolbar in the browser adds assertions (visible, text, value). A bar on the tab counts the steps; **Stop**, or closing the browser, ends the recording. If you edit the recorded steps while it goes, it stops writing them and says so.
+- **Pick Locator** opens the browser at the same place. Each element you click puts its locator at the caret, as Playwright would write it: `page.getByRole('button', { name: 'Log in' })`, or the locator alone after a `.`. Click another element without moving the caret and it takes the last one's place; move the caret first to keep both. It needs a Playwright that has `page.pickLocator()` (1.64 has it). **Stop** or closing the browser ends it.
+- **Open UI Mode** (**Run ▸ Open UI Mode**) starts Playwright's own UI Mode (`playwright test --ui`) with the environment's variables, in your browser: its watch mode, its timeline and its locator tools. Stop it from the **Build** window.
+
+To step through a test, use **Debug** on it (its gutter icon, the configuration's Debug, or **Debug in Inspector** in the Tests window): it runs with `--debug` in the Playwright Inspector, which pauses before each action and has its own locator picker.
+
+The recorder and the picker run in the **Build** window, where their output shows.
+
 ## Running tests
 
 A Playwright project runs its tests with its own Playwright, on the Node it asks for, the way `npx playwright test` would. Start a run from any of these:
@@ -61,6 +80,7 @@ The **Tests** window opens on its own when a run starts. Its button is at the bo
   - **Open full trace** opens Playwright's own trace viewer, with the DOM at each step.
   - **Video** plays the recording in the system's player.
   - **Run this test** runs it again in its project.
+  - **Debug in Inspector** runs it in the Playwright Inspector (`--debug`), to step through it.
   - **Show in editor** opens the test at its line.
   - **Copy error** copies the error and its stack.
 

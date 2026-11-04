@@ -3,9 +3,13 @@
 //! the UI thread, adds the environment picked, then starts as a process run whose reporter
 //! feeds the session's [`crate::playwright::report::Run`].
 
+use std::path::{Path, PathBuf};
+
 use gpui::Context;
+use snout_host::Host;
 
 use super::config::{Environment, Kind, RunConfig};
+use super::process::ProcessLaunch;
 use super::{Launch, Runs};
 use crate::lang::node;
 use crate::playwright::run::{Options, Scope, test_launch};
@@ -80,45 +84,74 @@ impl Runs {
         title: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        let env_name = self.environment().map(|e| e.name.clone());
+        let file = match &scope {
+            Scope::At { file, .. } => Some(file.clone()),
+            _ => None,
+        };
+        self.start_node_tool(
+            file,
+            move |host, root, n, mut vars| {
+                vars.extend(env);
+                let mut launch = test_launch(host, root, n, &scope, options, &extra, vars)?;
+                if let Some(t) = title {
+                    launch.title = t;
+                }
+                Ok(launch)
+            },
+            move |this, started, cx| match started {
+                Ok(id) => {
+                    if let Some(run) = this.session_mut(id).and_then(|s| s.playwright.as_mut()) {
+                        run.environment = env_name;
+                    }
+                }
+                Err(why) => this.say(why, cx),
+            },
+            cx,
+        );
+    }
+
+    /// Start a program of the open Playwright project (the one `file` is in, when given) on
+    /// the Node it asks for, with the environment's variables: `build` makes its launch off
+    /// the UI thread from the host, the project's folder, the Node and the variables; `then`
+    /// hears the session it started as, or why it did not start.
+    pub fn start_node_tool(
+        &mut self,
+        file: Option<PathBuf>,
+        build: impl FnOnce(&dyn Host, &Path, &node::Node, Vec<(String, String)>) -> Result<ProcessLaunch, String>
+        + Send
+        + 'static,
+        then: impl FnOnce(&mut Self, Result<u64, String>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
         let Some(project) = self.model.read(cx).project_root() else {
-            self.say("Open a Playwright project to run its tests", cx);
+            then(self, Err("Open a Playwright project first".into()), cx);
             return;
         };
         let host = crate::host::host(cx);
         let environment = self.environment().cloned();
-        let env_name = environment.as_ref().map(|e| e.name.clone());
         let find = cx.background_executor().spawn(async move {
-            // The Playwright project the scope is in: a file's nearest, else the open one.
-            let root = match &scope {
-                Scope::At { file, .. } => crate::playwright::root_of(&*host, file, Some(&project)),
-                _ => None,
-            }
-            .unwrap_or_else(|| project.clone());
+            // The Playwright project the file is in, else the open one.
+            let root = file
+                .as_deref()
+                .and_then(|f| crate::playwright::root_of(&*host, f, Some(&project)))
+                .unwrap_or_else(|| project.clone());
             let wanted = node::wanted(&*host, &root, Some(&project));
             let all = node::discover(&*host);
             let n = node::choose(&wanted, &all)
                 .cloned()
                 .ok_or("No Node fits this project: download it from the bar above the editor first.".to_owned())?;
-            let mut vars =
+            let vars =
                 environment.map(|e| e.variables(|f| host.read_to_string(&root.join(f)).ok())).unwrap_or_default();
-            vars.extend(env);
-            let mut launch = test_launch(&*host, &root, &n, &scope, options, &extra, vars)?;
-            if let Some(t) = title {
-                launch.title = t;
-            }
-            Ok::<_, String>(launch)
+            build(&*host, &root, &n, vars)
         });
         cx.spawn(async move |this, cx| {
             let found = find.await;
-            let _ = this.update(cx, |this, cx| match found {
-                Ok(launch) => {
-                    if let Some(id) = this.start(Launch::Process(launch), cx)
-                        && let Some(run) = this.session_mut(id).and_then(|s| s.playwright.as_mut())
-                    {
-                        run.environment = env_name;
-                    }
-                }
-                Err(why) => this.say(why, cx),
+            let _ = this.update(cx, |this, cx| {
+                let started = found.and_then(|launch| {
+                    this.start(Launch::Process(launch), cx).ok_or_else(|| "It did not start".to_owned())
+                });
+                then(this, started, cx);
             });
         })
         .detach();

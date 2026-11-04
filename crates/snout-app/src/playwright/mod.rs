@@ -12,6 +12,7 @@ use crate::lang::node::PackageManager;
 pub mod env_dialog;
 pub mod gutter;
 pub mod history;
+pub mod record;
 pub mod report;
 pub mod run;
 pub mod setup;

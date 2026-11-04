@@ -123,8 +123,22 @@ pub fn reporter(host: &dyn Host) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
+/// Another script of ours (`name`, holding `content`), written beside the reporter if it is
+/// not there yet; named by its content too.
+pub fn write_tool(host: &dyn Host, name: &str, content: &str) -> std::io::Result<PathBuf> {
+    let hash = content.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+    let path = reporter_path(host.info()).with_file_name(format!("{name}-{hash:016x}.cjs"));
+    if !host.is_file(&path) {
+        if let Some(dir) = path.parent() {
+            host.create_dir_all(dir)?;
+        }
+        host.write(&path, content.as_bytes())?;
+    }
+    Ok(path)
+}
+
 /// The variables every Playwright run gets: `node` first on `PATH`, and colours.
-fn base_env(host: &dyn Host, node: &Node) -> Vec<(String, String)> {
+pub(super) fn base_env(host: &dyn Host, node: &Node) -> Vec<(String, String)> {
     vec![
         ("PATH".to_owned(), crate::lang::typescript::path_with(host, node)),
         ("FORCE_COLOR".to_owned(), "1".to_owned()),

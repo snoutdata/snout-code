@@ -34,6 +34,7 @@ use crate::theme::{self, palette};
 mod debug_ui;
 mod lang_ui;
 pub mod quit;
+mod record_ui;
 mod remote_ui;
 mod run_ui;
 pub mod session;
@@ -124,6 +125,10 @@ pub struct Workspace {
     pub tests_window: Entity<crate::playwright::window::TestsWindow>,
     /// Edit Environments, while it shows.
     pub env_dialog: Option<Entity<crate::playwright::env_dialog::EnvDialog>>,
+    /// Record at Cursor, while it writes into a tab.
+    recording: Option<record_ui::Recording>,
+    /// Pick Locator, while its picks go to a tab.
+    picking: Option<record_ui::Picking>,
     pub run_window: Entity<crate::run::windows::RunWindow>,
     pub debug_window: Entity<crate::run::windows::RunWindow>,
     pub build_window: Entity<crate::run::windows::RunWindow>,
@@ -527,6 +532,8 @@ impl Workspace {
             welcome,
             config_dialog: None,
             env_dialog: None,
+            recording: None,
+            picking: None,
             breakpoints_dialog: None,
             evaluate_dialog: None,
             new_project: None,
@@ -2167,6 +2174,10 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &crate::menus::EditEnvironments, w, cx| this.open_env_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &crate::menus::ShowTests, w, cx| this.show_tool(Tool::Tests, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::RecordAtCursor, w, cx| this.record_at_cursor(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::PickLocator, w, cx| this.pick_locator(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::StopRecording, _, cx| this.stop_recording(cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::OpenUiMode, _, cx| this.open_ui_mode(cx)))
             .on_action(cx.listener(|this, _: &RunSelected, w, cx| this.run_selected(false, w, cx)))
             .on_action(cx.listener(|this, _: &DebugSelected, w, cx| this.run_selected(true, w, cx)))
             .on_action(cx.listener(|this, _: &RunContext, w, cx| this.run_context(false, w, cx)))

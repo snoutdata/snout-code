@@ -564,6 +564,8 @@ pub enum RunsEvent {
     Ended(u64),
     /// Bring the Tests window forward (a Playwright run started).
     ShowTests,
+    /// Session `id`'s process, a tool of ours, said this to the app (a locator picked).
+    Said(u64, serde_json::Value),
 }
 
 pub struct Runs {

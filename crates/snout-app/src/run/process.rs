@@ -197,6 +197,16 @@ impl Runs {
                     run.apply_line(json);
                 }
             }
+            Event::Line(Stream::Out, line) if line.contains(crate::playwright::report::MARK) => {
+                // A tool of ours (the locator picker) says something to the app.
+                let (shown, event) = crate::playwright::report::split_line(&line);
+                if let Some(text) = shown {
+                    s.push(Stream::Out, text);
+                }
+                if let Some(v) = event.and_then(|j| serde_json::from_str(j).ok()) {
+                    cx.emit(super::RunsEvent::Said(id, v));
+                }
+            }
             Event::Line(stream, line) => s.push(stream, &line),
             Event::Exit(code) => {
                 let stopped = s.process.as_ref().is_some_and(Handle::stopped);

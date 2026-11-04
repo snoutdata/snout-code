@@ -7,8 +7,41 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 
 const args = process.argv.slice(2);
+
+// `codegen --output=<file> … <url>`: the recorder rewrites its file as steps come, and runs
+// until stopped (its browser stays open). What it was given goes beside the file.
+if (args[0] === 'codegen') {
+  const out = args.find((a) => a.startsWith('--output=')).slice('--output='.length);
+  fs.writeFileSync(out + '.args.json', JSON.stringify(args));
+  const url = args.slice(1).filter((a) => !a.startsWith('-')).pop() || 'about:blank';
+  const steps = [
+    `  await page.goto('${url}/');`,
+    "  await page.getByRole('link', { name: 'Shop' }).click();",
+    "  await page.getByLabel('Email').fill('qa@shop.test');",
+  ];
+  let n = 0;
+  const write = () => {
+    n += 1;
+    const body = steps.slice(0, n).join('\n');
+    fs.writeFileSync(out, "import { test, expect } from '@playwright/test';\n\ntest('test', async ({ page }) => {\n" + body + '\n});');
+    if (n < steps.length) setTimeout(write, 300);
+  };
+  write();
+  process.on('SIGTERM', () => process.exit(0));
+  setInterval(() => {}, 1000);
+  return;
+}
+
+// `test --ui --ui-port=0`: UI Mode serves until stopped.
+if (args.includes('--ui')) {
+  process.stdout.write('Listening on http://127.0.0.1:52123\n');
+  process.on('SIGTERM', () => process.exit(0));
+  setInterval(() => {}, 1000);
+  return;
+}
 const reporterArg = args.find((a) => a.startsWith('--reporter='));
 const Reporter = require(reporterArg.slice('--reporter='.length).split(',')[0]);
 const reporter = new Reporter();
@@ -47,7 +80,10 @@ reporter.onBegin(
     rootDir: process.cwd(),
     workers: 2,
     projects: [
-      { name: 'chromium', use: { browserName: 'chromium' } },
+      {
+        name: 'chromium',
+        use: { browserName: 'chromium', baseURL: 'https://shop.test', testIdAttribute: 'data-qa', storageState: '.auth/user.json' },
+      },
       { name: 'firefox', use: { browserName: 'firefox' } },
     ],
   },

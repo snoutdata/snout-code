@@ -901,6 +901,12 @@ impl TestsWindow {
                     .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.run_selected(cx)))
                     .into_any_element(),
             );
+            let tests = self.tests.clone();
+            actions.push(
+                button("tests-debug-this", "Debug in Inspector", Some(Icon::Bug), p.fg, &p)
+                    .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.debug_selected(cx)))
+                    .into_any_element(),
+            );
         }
         if let Some((file, line)) = location {
             actions.push(

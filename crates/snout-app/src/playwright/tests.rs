@@ -292,6 +292,15 @@ impl PwTests {
         self.start(Scope::At { file, line: Some(line), project: Some(t.project.clone()) }, cx);
     }
 
+    /// Step through the test picked in the Playwright Inspector (`--debug`).
+    pub fn debug_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(t) = self.selected_test(cx).cloned() else { return };
+        let Some((file, line)) = self.run(cx).and_then(|r| r.location(&t.id)) else { return };
+        let options = Options { debug: true, ..Default::default() };
+        let scope = Scope::At { file, line: Some(line), project: Some(t.project.clone()) };
+        self.runs.update(cx, |r, cx| r.start_playwright(scope, options, cx));
+    }
+
     /// Take the screenshots of the test picked as they are now (`--update-snapshots`).
     pub fn accept_screenshots(&mut self, cx: &mut Context<Self>) {
         let Some(t) = self.selected_test(cx).cloned() else { return };

@@ -35,7 +35,8 @@ impl Workspace {
             RunsEvent::OpenAt(path, line) => self.open_file(path.clone(), Some((*line, 0)), false, window, cx),
             RunsEvent::EditConfigurations => self.open_config_dialog(window, cx),
             RunsEvent::ShowProblems => self.show_problems(window, cx),
-            RunsEvent::Ended(_) => {}
+            RunsEvent::Ended(id) => self.tool_ended(*id, window, cx),
+            RunsEvent::Said(id, v) => self.tool_said(*id, v, window, cx),
             RunsEvent::ShowTests => self.show_tool(crate::workspace::Tool::Tests, window, cx),
         }
     }
