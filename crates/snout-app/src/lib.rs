@@ -17,6 +17,7 @@ pub mod git_view;
 pub mod glyphs;
 pub mod host;
 pub mod icons;
+pub mod jstest;
 pub mod keymap;
 pub mod lang;
 pub mod look;
@@ -59,6 +60,8 @@ mod code_tests;
 mod fix_tests;
 #[cfg(test)]
 mod java_tools_tests;
+#[cfg(test)]
+mod jstest_tests;
 #[cfg(test)]
 mod lang_tests;
 #[cfg(test)]

@@ -45,7 +45,7 @@ A window with nothing to show yet says why, with a drawing, and offers the next 
 | Spring | No Spring model yet | **Read the Spring Model** |
 | Notifications | No notifications | **Show Output** |
 | Agent Changes | No changes from agents yet | **Open the Agent Console** |
-| Tests | No Playwright project (outside one) | Open a folder with a `playwright.config.ts` |
+| Tests | No tests found (no Playwright project, no package testing with Vitest or Jest) | Open a Playwright project, or a project whose packages test with Vitest or Jest |
 
 While something is being read (the Gradle tasks, a file's structure, the processes) the window
 says so, with the same kind of drawing.

@@ -66,6 +66,21 @@ Debug (⌃D, or **Debug** on a script's icon) runs the script or file under js-d
 - When the program stops, the Debug window shows its stack, variables and watches, and stepping, Resume and Run to Cursor work as for Java (see [Run and debug](run-and-debug.md#when-the-program-stops)).
 - The program's output goes to the Debug window as it would to the Run window. Stop ends the program and every process it started.
 
+## Unit tests: Vitest and Jest
+
+![A Vitest run in the Tests window, a failed test picked, its test file above with run icons](images/node-vitest.png)
+
+*A Vitest run: five passed, one failed with its message, one skipped; the test file's run icons above.*
+
+A package that depends on `vitest` or `jest` (or has a `vitest.config.*` or `jest.config.*`) has its tests run in the **Tests** window, as a Playwright project's are (see [Running tests](playwright.md#running-tests)). SnoutCode runs the package's own Vitest or Jest from its `node_modules`, on the package's Node, with a reporter of its own beside the runner's, so the runner's output still shows in the Run window.
+
+- **Run icons.** A test file (`*.test.ts`, `*.spec.js`, or any script in a `__tests__` folder) has an icon at each `test`, `it` and `describe`. **Run** runs that test, or every test of that `describe`, by its file and its full name (Vitest's and Jest's `-t`). ⌃⇧R and ⌃⇧D run or debug the test the caret is in.
+- **The Tests window** follows the run live: each test as the runner finds it (Vitest and Jest find a file's tests as they load it), passed, failed or skipped, its time, and for a failure its message and the line it points at. **Run all** runs the package's tests; **Rerun failed** runs the ones that failed, by name. **Run this test** and **Debug this test** take the test picked. Environments, Watch and the Inspector are Playwright's and do not show for these runs.
+- **Several packages.** When more than one package has tests (or a Playwright project also has them), a switch beside Run all picks which tests it runs: `Vitest in apps/web`, `Jest in apps/api`, `Playwright`. Unless you pick one, it runs those of the run in front.
+- **Debugging.** Debug runs the test under js-debug and stops at the breakpoints in the test and the code it calls, in TypeScript or JavaScript. Vitest then runs its files one at a time in a child process (`--no-file-parallelism --pool=forks`) and Jest in its own process (`--runInBand`), both without a test timeout, so a test paused at a breakpoint does not fail for taking too long.
+
+Vitest 2 and later and Jest 27 and later work (tried with Vitest 2.1 and 3.2, and Jest 27.5 and 29.7). Results come as each test ends; with Vitest 2, all of them when the run ends.
+
 ## Attach to a running Node
 
 To debug a Node you start yourself (a server in a terminal, a container with its port forwarded), start it listening for a debugger:

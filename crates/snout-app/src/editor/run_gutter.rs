@@ -131,12 +131,28 @@ impl EditorPanel {
     /// Ask what the file holds to run, for the gutter's icons.
     pub(super) fn refresh_runnables(&mut self, cx: &mut Context<Self>) {
         let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or_default();
-        // A Playwright spec: its tests are read here, by tree-sitter, off the UI thread.
-        if crate::playwright::is_test_file(&self.path) && self.class_file.is_none() {
+        // A Playwright spec, or a Vitest or Jest test file: its tests are read here, by
+        // tree-sitter, off the UI thread, for the runner of the package it is in.
+        if crate::jstest::is_test_file(&self.path) && self.class_file.is_none() {
             let text = self.state.read(cx).value().to_string();
             let path = self.path.clone();
-            let task =
-                cx.background_executor().spawn(async move { crate::playwright::gutter::runnables(&path, &text) });
+            let host = crate::host::host(cx);
+            let project = crate::run::runs(cx).and_then(|r| r.read(cx).project_root.clone());
+            let task = cx.background_executor().spawn(async move {
+                let stop = project.as_deref();
+                if crate::playwright::root_of(&*host, &path, stop).is_some() {
+                    return crate::playwright::gutter::runnables(&path, &text);
+                }
+                let suite = stop.and_then(|root| crate::jstest::suite_of(&*host, &path, root));
+                match suite {
+                    Some(suite) => crate::jstest::runnables(&path, &text, &suite),
+                    // A spec outside any project of tests: Playwright's, as before.
+                    None if crate::playwright::is_test_file(&path) => {
+                        crate::playwright::gutter::runnables(&path, &text)
+                    }
+                    None => crate::run::FileRunnables::default(),
+                }
+            });
             let path = self.path.clone();
             self._runnables = Some(cx.spawn(async move |this, cx| {
                 let found = task.await;

@@ -1,7 +1,8 @@
-//! What the Tests window shows of the open Playwright project: its tests as
-//! `playwright test --list` finds them, the run in front (the newest Playwright session,
-//! live while it runs), the runs kept before it, and what the window has picked (a test,
-//! a filter, a tab). Runs start through [`crate::run::Runs`]; this follows them.
+//! What the Tests window shows of the open project: a Playwright project's tests as
+//! `playwright test --list` finds them, and the packages that test with Vitest or Jest
+//! ([`crate::jstest`]); the run in front (the newest test session, live while it runs), the
+//! runs kept before it, and what the window has picked (a test, a filter, a tab, the suite
+//! runs go to). Runs start through [`crate::run::Runs`]; this follows them.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -43,8 +44,19 @@ pub const LONG_MS: u64 = 60_000;
 pub struct PwTests {
     model: Entity<Model>,
     runs: Entity<Runs>,
-    /// The open project, when it is a Playwright one.
+    /// The open project, when it has tests: it is a Playwright one, or packages of it test
+    /// with Vitest or Jest.
     pub root: Option<PathBuf>,
+    /// The open project, whether it has tests or not.
+    project: Option<PathBuf>,
+    /// The project is a Playwright one.
+    pub playwright: bool,
+    /// Its packages that test with Vitest or Jest.
+    pub suites: Vec<crate::jstest::Suite>,
+    /// The suite runs go to, as picked (by its folder); none for Playwright's, or the one
+    /// the run in front ran.
+    pub picked: Option<PathBuf>,
+    suites_task: Option<Task<()>>,
     /// The tests as listed (nothing run).
     pub listing: Option<Run>,
     pub listing_error: Option<String>,
@@ -91,6 +103,11 @@ impl PwTests {
             model,
             runs,
             root: None,
+            project: None,
+            playwright: false,
+            suites: Vec::new(),
+            picked: None,
+            suites_task: None,
             listing: None,
             listing_error: None,
             listing_now: false,
@@ -112,27 +129,75 @@ impl PwTests {
 
     fn project_changed(&mut self, cx: &mut Context<Self>) {
         let host = crate::host::host(cx);
-        let root = self.model.read(cx).project_root().filter(|r| super::is_root(&*host, r));
-        if root == self.root {
+        let project = self.model.read(cx).project_root();
+        if project == self.project {
             return;
         }
+        self.project = project.clone();
+        self.playwright = project.as_deref().is_some_and(|r| super::is_root(&*host, r));
+        let root = project.clone().filter(|_| self.playwright);
         self.root = root.clone();
+        self.suites.clear();
+        self.picked = None;
         self.listing = None;
         self.listing_error = None;
         self.live = None;
         self.selected = None;
         let support = self.model.read(cx).support_dir();
         self.history =
-            root.as_deref().map_or_else(History::default, |r| History::load(History::file(support.as_deref(), r)));
+            project.as_deref().map_or_else(History::default, |r| History::load(History::file(support.as_deref(), r)));
         if root.is_some() {
             self.refresh(cx);
         }
+        self.find_suites(cx);
         cx.notify();
     }
 
-    /// List the project's tests again.
+    /// Look for the packages that test with Vitest or Jest, off the UI thread.
+    pub fn find_suites(&mut self, cx: &mut Context<Self>) {
+        let Some(project) = self.project.clone() else { return };
+        let host = crate::host::host(cx);
+        let scan = cx.background_executor().spawn(async move { crate::jstest::suites(&*host, &project) });
+        self.suites_task = Some(cx.spawn(async move |this, cx| {
+            let found = scan.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.suites != found {
+                    this.suites = found;
+                    if this.root.is_none() && !this.suites.is_empty() {
+                        this.root = this.project.clone();
+                    }
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// The suite runs go to, when not Playwright's: the one picked, else the one the run in
+    /// front ran, else (in a project without Playwright) the first.
+    pub fn unit(&self, cx: &App) -> Option<crate::jstest::Suite> {
+        let by_dir = |d: &PathBuf| self.suites.iter().find(|s| &s.dir == d).cloned();
+        if let Some(d) = &self.picked {
+            return by_dir(d);
+        }
+        if let Some(run) = self.run(cx) {
+            return match (&run.dir, run.runner) {
+                (Some(d), Some(runner)) => by_dir(d).or(Some(crate::jstest::Suite { dir: d.clone(), runner })),
+                _ if self.playwright => None,
+                _ => self.suites.first().cloned(),
+            };
+        }
+        if self.playwright { None } else { self.suites.first().cloned() }
+    }
+
+    /// Run in this suite from now on (none: Playwright's).
+    pub fn pick_suite(&mut self, dir: Option<PathBuf>, cx: &mut Context<Self>) {
+        self.picked = dir;
+        cx.notify();
+    }
+
+    /// List the project's tests again (a Playwright project's).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        let Some(root) = self.root.clone() else { return };
+        let Some(root) = self.root.clone().filter(|_| self.playwright) else { return };
         let host = crate::host::host(cx);
         let env: Vec<(String, String)> = self
             .runs
@@ -277,16 +342,68 @@ impl PwTests {
         Options { headed: self.watch, ..Default::default() }
     }
 
-    /// Run `scope`, headed when Watch is on.
+    /// Run `scope`, headed when Watch is on; in a suite of Vitest or Jest when that is where
+    /// runs go.
     pub fn start(&mut self, scope: Scope, cx: &mut Context<Self>) {
-        let options = self.options();
         self.tab = Tab::Live;
         self.ended_note = None;
+        if let Some(suite) = self.unit(cx) {
+            let scope = self.unit_scope(scope, &suite, cx);
+            self.runs.update(cx, |r, cx| r.start_js_tests(suite.dir, suite.runner, scope, false, cx));
+            return;
+        }
+        let options = self.options();
         self.runs.update(cx, |r, cx| r.start_playwright(scope, options, cx));
+    }
+
+    /// A Playwright scope as a unit runner takes it: the tests that failed in the run in
+    /// front, a file, a test at a line.
+    fn unit_scope(&self, scope: Scope, suite: &crate::jstest::Suite, cx: &App) -> crate::jstest::Scope {
+        use crate::jstest::Scope as J;
+        let run = self.run(cx).filter(|r| r.dir.as_ref() == Some(&suite.dir));
+        let abs = |run: &Run, t: &super::report::Test| run.location(&t.id).map(|(f, _)| f);
+        match scope {
+            Scope::LastFailed => match run {
+                Some(run) => {
+                    J::Tests(run.failures().into_iter().filter_map(|t| Some((abs(run, t)?, t.path.clone()))).collect())
+                }
+                None => J::All,
+            },
+            Scope::At { file, line: Some(line), .. } => {
+                let found = run.and_then(|run| {
+                    run.tests
+                        .values()
+                        .find(|t| t.line == line && abs(run, t).as_ref() == Some(&file))
+                        .map(|t| t.path.clone())
+                });
+                match found {
+                    Some(path) => J::At { file, path, group: false },
+                    None => J::File(file),
+                }
+            }
+            Scope::At { file, line: None, .. } => J::File(file),
+            Scope::All | Scope::Project(_) => J::All,
+        }
+    }
+
+    /// The test picked as its unit runner runs it: its suite, and its scope.
+    fn selected_unit(&self, cx: &App) -> Option<(crate::jstest::Suite, crate::jstest::Scope)> {
+        let run = self.run(cx)?;
+        let (dir, runner) = (run.dir.clone()?, run.runner?);
+        let t = self.selected_test(cx)?;
+        let (file, _) = run.location(&t.id)?;
+        Some((
+            crate::jstest::Suite { dir, runner },
+            crate::jstest::Scope::At { file, path: t.path.clone(), group: false },
+        ))
     }
 
     /// Run the test picked, in its project.
     pub fn run_selected(&mut self, cx: &mut Context<Self>) {
+        if let Some((suite, scope)) = self.selected_unit(cx) {
+            self.runs.update(cx, |r, cx| r.start_js_tests(suite.dir, suite.runner, scope, false, cx));
+            return;
+        }
         let Some(t) = self.selected_test(cx).cloned() else { return };
         let Some((file, line)) = self.run(cx).and_then(|r| r.location(&t.id)) else { return };
         self.start(Scope::At { file, line: Some(line), project: Some(t.project.clone()) }, cx);
@@ -294,7 +411,16 @@ impl PwTests {
 
     /// Debug the test picked: it stops at the breakpoints in its code.
     pub fn debug_selected(&mut self, cx: &mut Context<Self>) {
+        if let Some((suite, scope)) = self.selected_unit(cx) {
+            self.runs.update(cx, |r, cx| r.start_js_tests(suite.dir, suite.runner, scope, true, cx));
+            return;
+        }
         self.start_selected(Options { breakpoints: true, ..Default::default() }, cx);
+    }
+
+    /// Whether the run in front is a unit runner's (no browsers, traces or Inspector).
+    pub fn unit_run(&self, cx: &App) -> bool {
+        self.run(cx).is_some_and(|r| r.runner.is_some())
     }
 
     /// Step through the test picked in the Playwright Inspector (`--debug`).

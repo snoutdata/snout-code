@@ -496,6 +496,15 @@ pub enum Target {
     Script {
         file: PathBuf,
     },
+    /// A Vitest or Jest test or `describe` of the package at `dir`: its file, and its
+    /// `describe`s' titles and its own.
+    JsTest {
+        file: PathBuf,
+        path: Vec<String>,
+        group: bool,
+        dir: PathBuf,
+        runner: crate::jstest::Runner,
+    },
     /// A script of a `package.json`: the package's folder, and the script's name.
     NpmScript {
         package: PathBuf,
@@ -514,6 +523,7 @@ impl Target {
                 file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned())
             }
             Target::NpmScript { name, .. } => name.clone(),
+            Target::JsTest { path, .. } => path.last().cloned().unwrap_or_default(),
         }
     }
 
@@ -534,7 +544,13 @@ impl FileRunnables {
         let nearest = self.items.iter().filter(|r| r.line <= line).max_by_key(|r| r.line);
         nearest
             .filter(|r| {
-                matches!(r.target, Target::TestMethod { .. } | Target::Playwright { .. } | Target::NpmScript { .. })
+                matches!(
+                    r.target,
+                    Target::TestMethod { .. }
+                        | Target::Playwright { .. }
+                        | Target::NpmScript { .. }
+                        | Target::JsTest { .. }
+                )
             })
             .map(|r| &r.target)
             .or_else(|| self.items.iter().find(|r| matches!(r.target, Target::TestClass { .. })).map(|r| &r.target))
@@ -1754,6 +1770,11 @@ impl Runs {
             }
             Target::Script { file } => {
                 self.run_node_file(file, debug, cx);
+                return;
+            }
+            Target::JsTest { file, path, group, dir, runner } => {
+                let scope = crate::jstest::Scope::At { file: file.clone(), path: path.clone(), group: *group };
+                self.start_js_tests(dir.clone(), *runner, scope, debug, cx);
                 return;
             }
             Target::NpmScript { package, name } => {

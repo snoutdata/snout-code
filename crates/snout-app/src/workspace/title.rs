@@ -258,7 +258,7 @@ impl Workspace {
         let runs = self.runs.read(cx);
         let configs = runs.configurations();
         let selected = runs.selected_config();
-        let playwright = self.pw_tests.read(cx).root.is_some();
+        let playwright = self.pw_tests.read(cx).playwright;
         // Node configurations run without the Java engine, and so may the current file (a
         // script).
         let ready = runs.engine(cx).is_some() || selected.as_ref().is_none_or(|c| c.kind.is_node());

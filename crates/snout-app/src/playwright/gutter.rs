@@ -76,6 +76,36 @@ pub fn runnables(path: &Path, text: &str) -> FileRunnables {
     out
 }
 
+/// The tests and groups in the test file at `path` holding `text`, each with its line (from
+/// 0), its `describe`s' titles and its own, and whether it is a group.
+pub fn tests_with_paths(path: &Path, text: &str) -> Vec<(u32, Vec<String>, bool)> {
+    let mut out = Vec::new();
+    let Some(tree) = parse(path, text) else { return out };
+    let mut cursor = tree.walk();
+    let mut stack: Vec<(tree_sitter::Node, Vec<String>)> = vec![(tree.root_node(), Vec::new())];
+    while let Some((node, around)) = stack.pop() {
+        let mut inner = around.clone();
+        if node.kind() == "call_expression"
+            && let Some(callee) = node.child_by_field_name("function")
+            && let Ok(name) = callee.utf8_text(text.as_bytes())
+            && let Some(group) = marked(&name.split_whitespace().collect::<String>())
+            && let Some(args) = node.child_by_field_name("arguments")
+            && let Some(title) = args.named_child(0).and_then(|a| literal(a, text))
+        {
+            let mut titles = around.clone();
+            titles.push(title);
+            out.push((node.start_position().row as u32, titles.clone(), group));
+            if group {
+                inner = titles;
+            }
+        }
+        let children: Vec<tree_sitter::Node> = node.children(&mut cursor).collect();
+        stack.extend(children.into_iter().rev().map(|c| (c, inner.clone())));
+    }
+    out.sort_by_key(|(line, _, _)| *line);
+    out
+}
+
 /// Where the caret is in a spec, for what a recording writes there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Spot {

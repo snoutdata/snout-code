@@ -214,7 +214,11 @@ impl TestsWindow {
             None => String::new(),
         };
         let progress = if total == 0 { 0. } else { c.done as f32 / total as f32 };
-        let env = Self::environment_switch("tests-environment", cx);
+        // Environments and Watch are Playwright's; a project with suites switches between
+        // them.
+        let unit = t.unit(cx).is_some();
+        let env = (!unit).then(|| Self::environment_switch("tests-environment", cx));
+        let suites = self.suite_switch(cx);
         let tests = self.tests.clone();
         let failed_any = c.failed > 0 && !running;
         let watch = t.watch;
@@ -249,9 +253,17 @@ impl TestsWindow {
                         div().text_color(p.fg_dim).whitespace_nowrap().overflow_hidden().text_ellipsis().child(detail),
                     )
                     .child(div().flex_1())
-                    .child(env)
-                    .child(
-                        button("tests-watch", "Watch", Some(Icon::Eye), if watch { p.accent } else { p.fg_dim }, &p)
+                    .children(suites)
+                    .children(env)
+                    .when(!unit, |d| {
+                        d.child(
+                            button(
+                                "tests-watch",
+                                "Watch",
+                                Some(Icon::Eye),
+                                if watch { p.accent } else { p.fg_dim },
+                                &p,
+                            )
                             .when(watch, |d| d.border_color(p.accent).bg(p.wash(p.accent)))
                             .tooltip(|w, cx| {
                                 Tooltip::new("Run with the browsers showing, one test at a time").build(w, cx)
@@ -260,7 +272,8 @@ impl TestsWindow {
                                 let tests = tests.clone();
                                 move |_, _, cx| tests.update(cx, |t, cx| t.toggle_watch(cx))
                             }),
-                    )
+                        )
+                    })
                     .when(failed_any, |d| {
                         d.child(
                             button("tests-rerun-failed", "Rerun failed", Some(Icon::RerunFailed), p.error, &p)
@@ -308,6 +321,49 @@ impl TestsWindow {
                     .child(div().text_color(p.fg_dim).child(time)),
             )
             .into_any_element()
+    }
+
+    /// Which tests Run all runs, when the project has more than one kind or package of
+    /// them: Playwright's, or a package's Vitest or Jest.
+    fn suite_switch(&self, cx: &App) -> Option<AnyElement> {
+        let p = palette(cx);
+        let t = self.tests.read(cx);
+        let root = t.root.clone()?;
+        let many = t.suites.len() + usize::from(t.playwright) > 1;
+        if !many {
+            return None;
+        }
+        let current = t.unit(cx);
+        let label = current.as_ref().map_or_else(|| "Playwright".to_owned(), |s| s.label(&root));
+        let choices: Vec<(Option<PathBuf>, String)> = t
+            .playwright
+            .then(|| (None, "Playwright".to_owned()))
+            .into_iter()
+            .chain(t.suites.iter().map(|s| (Some(s.dir.clone()), s.label(&root))))
+            .collect();
+        let on = current.map(|s| s.dir);
+        let tests = self.tests.clone();
+        let trigger = button("tests-suite", label, Some(Icon::TestFolder), p.accent, &p).child(icon(
+            Icon::ChevronDown,
+            11.,
+            p.fg_dim,
+        ));
+        Some(
+            crate::look::Trigger(trigger)
+                .dropdown_menu(move |mut menu, _, _| {
+                    for (dir, label) in &choices {
+                        let tests = tests.clone();
+                        let pick = dir.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(label.clone())
+                                .checked(*dir == on)
+                                .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.pick_suite(pick.clone(), cx))),
+                        );
+                    }
+                    menu
+                })
+                .into_any_element(),
+        )
     }
 
     /// The environment switcher: the one runs go against, and Edit Environments.
@@ -908,11 +964,13 @@ impl TestsWindow {
                     .into_any_element(),
             );
             let tests = self.tests.clone();
-            actions.push(
-                button("tests-inspect-this", "Debug in Inspector", Some(Icon::Search), p.fg, &p)
-                    .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.inspect_selected(cx)))
-                    .into_any_element(),
-            );
+            if !self.tests.read(cx).unit_run(cx) {
+                actions.push(
+                    button("tests-inspect-this", "Debug in Inspector", Some(Icon::Search), p.fg, &p)
+                        .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.inspect_selected(cx)))
+                        .into_any_element(),
+                );
+            }
         }
         if let Some((file, line)) = location {
             actions.push(
@@ -1125,8 +1183,8 @@ impl Render for TestsWindow {
         let base = div().size_full().flex().flex_col().bg(p.ground).text_size(px(look::BODY)).text_color(p.fg);
         if t.root.is_none() {
             return base.child(
-                crate::components::EmptyState::new(snout_core::art::spots::no_tests(), "No Playwright project")
-                    .hint("Open a folder with a playwright.config.ts to run its tests here.")
+                crate::components::EmptyState::new(snout_core::art::spots::no_tests(), "No tests found")
+                    .hint("Open a Playwright project, or a project whose packages test with Vitest or Jest, to run its tests here.")
                     .compact(),
             );
         }

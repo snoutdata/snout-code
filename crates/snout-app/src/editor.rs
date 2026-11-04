@@ -1746,7 +1746,7 @@ impl EditorPanel {
     ) {
         let target = gpui::Focusable::focus_handle(&self.state, cx);
         // In a Playwright project's scripts: Record at Cursor and Pick Locator.
-        let spec = crate::playwright::tests::tests(cx).is_some_and(|t| t.read(cx).root.is_some())
+        let spec = crate::playwright::tests::tests(cx).is_some_and(|t| t.read(cx).playwright)
             && crate::playwright::record::scriptable(&self.path);
         self.context.open(
             Some(target),

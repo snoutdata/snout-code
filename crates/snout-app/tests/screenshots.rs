@@ -175,6 +175,8 @@ mod shots {
         /// A Node project: its `package.json` with a run icon beside each script, and
         /// `npm run dev` running in the Run window.
         NodeScripts,
+        /// A Vitest run in the Tests window, a failure picked; its test file above.
+        VitestRun,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -1652,6 +1654,43 @@ sleep 30
                 cx.run_until_parked();
                 cx.update_window(handle.into(), |_, window, cx| {
                     ws.update(cx, |ws, cx| ws.show_bottom(ws.tabs.run, window, cx));
+                })
+                .unwrap();
+            }
+            Some(Select::VitestRun) => {
+                std::fs::write(
+                    repo.join("package.json"),
+                    r#"{ "name": "cart", "devDependencies": { "vitest": "^3.2.0" } }"#,
+                )
+                .unwrap();
+                let file = repo.join("src/cart.test.ts");
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(&file, crate::VITEST_SPEC).unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((14, 4))), cx)));
+                let run = crate::vitest_run(&repo);
+                cx.update_window(handle.into(), |_, window, cx| {
+                    let runs = ws.read(cx).runs.clone();
+                    let tests = ws.read(cx).pw_tests.clone();
+                    tests.update(cx, |t, cx| {
+                        t.root = Some(repo.clone());
+                        t.suites = vec![snout_app::jstest::Suite {
+                            dir: repo.clone(),
+                            runner: snout_app::jstest::Runner::Vitest,
+                        }];
+                        cx.notify();
+                    });
+                    runs.update(cx, |r, cx| {
+                        r.adopt_playwright("Vitest", run, cx);
+                    });
+                    tests.update(cx, |t, cx| {
+                        t.select("src/cart.test.ts › cart › applies the discount".into(), "Vitest".into(), cx)
+                    });
+                    ws.update(cx, |ws, cx| {
+                        ws.show_tool(snout_app::workspace::Tool::Tests, window, cx);
+                        ws.dock.update(cx, |d, cx| {
+                            d.set_dock_size(gpui_component::dock::DockPlacement::Bottom, gpui::px(470.), window, cx)
+                        });
+                    });
                 })
                 .unwrap();
             }
@@ -3156,6 +3195,7 @@ sleep 30
             shot(&format!("ui-recording-{mode}"), theme, Activity::Project, Some(Select::Recording));
             shot(&format!("ui-playwright-debug-{mode}"), theme, Activity::Project, Some(Select::PlaywrightDebug));
             shot(&format!("ui-node-scripts-{mode}"), theme, Activity::Project, Some(Select::NodeScripts));
+            shot(&format!("ui-tests-vitest-{mode}"), theme, Activity::Project, Some(Select::VitestRun));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(
@@ -3261,8 +3301,79 @@ fn playwright_repo(repo: &std::path::Path) {
 }
 
 #[cfg(target_os = "macos")]
+const VITEST_SPEC: &str = "import { describe, it, expect } from 'vitest';
+import { Cart } from './cart';
+
+describe('cart', () => {
+  it('adds items', () => {
+    const cart = new Cart();
+    cart.add({ sku: 'mug', price: 12 });
+    expect(cart.count).toBe(1);
+  });
+
+  it('applies the discount', () => {
+    const cart = new Cart();
+    cart.add({ sku: 'mug', price: 12 }, 3);
+    cart.discount('SPRING10');
+    expect(cart.total).toBe(32.4);
+  });
+
+  it('empties', () => {
+    expect(new Cart().total).toBe(0);
+  });
+});
+
+describe('checkout', () => {
+  it('needs an address', () => {});
+  it.skip('pays by card', () => {});
+});
+";
+
+/// A Vitest run of `src/cart.test.ts` and `src/price.test.ts`, as our reporter tells it.
+#[cfg(target_os = "macos")]
+fn vitest_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
+    use serde_json::json;
+    let mut run = snout_app::playwright::report::Run::default();
+    let cart = repo.join("src/cart.test.ts").display().to_string();
+    let price = repo.join("src/price.test.ts").display().to_string();
+    run.apply(&json!({ "e": "begin", "version": "3.2.7", "rootDir": repo, "workers": 0, "projects": [{ "name": "Vitest" }], "tests": [] }));
+    let tests = [
+        ("c1", &cart, 5, vec!["cart", "adds items"], "passed", 3.0),
+        ("c2", &cart, 11, vec!["cart", "applies the discount"], "failed", 8.0),
+        ("c3", &cart, 18, vec!["cart", "empties"], "passed", 1.0),
+        ("c4", &cart, 24, vec!["checkout", "needs an address"], "passed", 2.0),
+        ("c5", &cart, 25, vec!["checkout", "pays by card"], "skipped", 0.0),
+        ("p1", &price, 4, vec!["price", "rounds to cents"], "passed", 1.0),
+        ("p2", &price, 9, vec!["price", "formats euros"], "passed", 2.0),
+    ];
+    let list: Vec<_> = tests
+        .iter()
+        .map(|(id, f, line, path, _, _)| json!({ "id": id, "project": "Vitest", "file": f, "line": line, "column": 3, "path": path, "expected": "passed" }))
+        .collect();
+    run.apply(&json!({ "e": "tests", "tests": list }));
+    for (id, _, _, _, status, ms) in &tests {
+        let outcome = match *status {
+            "passed" => "expected",
+            "failed" => "unexpected",
+            _ => "skipped",
+        };
+        let errors = if *status == "failed" {
+            json!([{ "message": "expected 36 to be 32.4 // Object.is equality\n\n- Expected\n+ Received\n\n- 32.4\n+ 36", "stack": "AssertionError: expected 36 to be 32.4\n    at src/cart.test.ts:15:24", "file": cart, "line": 15, "column": 24 }])
+        } else {
+            json!([])
+        };
+        run.apply(&json!({ "e": "testBegin", "id": id, "retry": 0 }));
+        run.apply(&json!({ "e": "testEnd", "id": id, "retry": 0, "status": status, "outcome": outcome, "duration": ms, "errors": errors }));
+    }
+    run.apply(&json!({ "e": "end", "status": "failed", "duration": 412 }));
+    run.runner = Some(snout_app::jstest::Runner::Vitest);
+    run.dir = Some(repo.to_owned());
+    run
+}
+
 /// A run of three browsers, part way through its history: a failure with a screenshot
 /// comparison and a trace, a flaky test, a skipped one.
+#[cfg(target_os = "macos")]
 fn playwright_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
     use serde_json::json;
     let fixtures = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/playwright"));

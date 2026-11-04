@@ -63,7 +63,13 @@ impl Workspace {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Result<(Entity<EditorPanel>, PathBuf), String> {
-        let root = self.pw_tests.read(cx).root.clone().ok_or(format!("{what} works in a Playwright project"))?;
+        let root = self
+            .pw_tests
+            .read(cx)
+            .root
+            .clone()
+            .filter(|_| self.pw_tests.read(cx).playwright)
+            .ok_or(format!("{what} works in a Playwright project"))?;
         let editor = self
             .active_editor(window, cx)
             .filter(|e| scriptable(&e.read(cx).path))

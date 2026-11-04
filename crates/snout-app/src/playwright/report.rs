@@ -321,6 +321,9 @@ pub struct Run {
     pub over: bool,
     /// The environment it ran against.
     pub environment: Option<String>,
+    /// The test runner, when not Playwright, and the package it ran in.
+    pub runner: Option<crate::jstest::Runner>,
+    pub dir: Option<PathBuf>,
 }
 
 /// What a run counts.
@@ -355,41 +358,10 @@ impl Run {
                 self.root = s("rootDir").map(PathBuf::from);
                 self.workers = n("workers").unwrap_or(1) as u32;
                 self.projects = serde_json::from_value(ev["projects"].clone()).unwrap_or_default();
-                for t in ev.get("tests").and_then(Value::as_array).into_iter().flatten() {
-                    let ts = |k: &str| t.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
-                    let strings = |k: &str| -> Vec<String> {
-                        t.get(k)
-                            .and_then(Value::as_array)
-                            .into_iter()
-                            .flatten()
-                            .filter_map(Value::as_str)
-                            .map(str::to_owned)
-                            .collect()
-                    };
-                    let file = PathBuf::from(ts("file"));
-                    let file = self
-                        .root
-                        .as_ref()
-                        .and_then(|r| file.strip_prefix(r).ok())
-                        .map_or(file.clone(), Path::to_path_buf);
-                    let test = Test {
-                        id: ts("id"),
-                        project: ts("project"),
-                        file,
-                        line: t.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
-                        column: t.get("column").and_then(Value::as_u64).unwrap_or(0) as u32,
-                        path: strings("path"),
-                        tags: strings("tags"),
-                        expected: ts("expected"),
-                        tries: Vec::new(),
-                        outcome: None,
-                    };
-                    if !self.tests.contains_key(&test.id) {
-                        self.order.push(test.id.clone());
-                    }
-                    self.tests.insert(test.id.clone(), test);
-                }
+                self.add_tests(ev);
             }
+            // Tests found as the run goes (Vitest and Jest find a file's as they load it).
+            Some("tests") => self.add_tests(ev),
             Some("testBegin") => {
                 let worker = n("worker").map(|w| w as u32);
                 if let Some(t) = self.tests.get_mut(&id) {
@@ -444,6 +416,51 @@ impl Run {
                 self.busy.clear();
             }
             _ => {}
+        }
+    }
+
+    /// The tests an event lists, in its `tests`.
+    fn add_tests(&mut self, ev: &Value) {
+        for t in ev.get("tests").and_then(Value::as_array).into_iter().flatten() {
+            let ts = |k: &str| t.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+            let strings = |k: &str| -> Vec<String> {
+                t.get(k)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            };
+            let file = PathBuf::from(ts("file"));
+            let file =
+                self.root.as_ref().and_then(|r| file.strip_prefix(r).ok()).map_or(file.clone(), Path::to_path_buf);
+            let test = Test {
+                id: ts("id"),
+                project: ts("project"),
+                file,
+                line: t.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
+                column: t.get("column").and_then(Value::as_u64).unwrap_or(0) as u32,
+                path: strings("path"),
+                tags: strings("tags"),
+                expected: ts("expected"),
+                tries: Vec::new(),
+                outcome: None,
+            };
+            if !self.tests.contains_key(&test.id) {
+                self.order.push(test.id.clone());
+            }
+            // Found again (a retry, a second collection): keep what it did so far.
+            match self.tests.get_mut(&test.id) {
+                Some(old) => {
+                    old.line = test.line;
+                    old.column = test.column;
+                    old.path = test.path;
+                }
+                None => {
+                    self.tests.insert(test.id.clone(), test);
+                }
+            }
         }
     }
 

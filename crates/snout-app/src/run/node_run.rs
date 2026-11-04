@@ -514,6 +514,45 @@ impl Runs {
     }
 }
 
+impl Runs {
+    /// Run (or debug) `scope` of the package at `dir` with its unit test runner, into the
+    /// Tests window.
+    pub fn start_js_tests(
+        &mut self,
+        dir: PathBuf,
+        runner: crate::jstest::Runner,
+        scope: crate::jstest::Scope,
+        debug: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.model.read(cx).project_root() else {
+            self.say("Open a project first", cx);
+            return;
+        };
+        let host = crate::host::host(cx);
+        let at = dir.clone();
+        let find = cx.background_executor().spawn(async move {
+            let n = project_node(&*host, &at, &project)?;
+            crate::jstest::test_launch(&*host, &at, &project, &n, runner, &scope, debug)
+        });
+        cx.spawn(async move |this, cx| {
+            let found = find.await;
+            let _ = this.update(cx, |this, cx| match found {
+                Ok(launch) => {
+                    if let Some(id) = this.start(Launch::Process(launch), cx)
+                        && let Some(run) = this.session_mut(id).and_then(|s| s.playwright.as_mut())
+                    {
+                        run.runner = Some(runner);
+                        run.dir = Some(dir);
+                    }
+                }
+                Err(why) => this.say(why, cx),
+            });
+        })
+        .detach();
+    }
+}
+
 /// The Node the package at `dir` of the project at `root` runs on.
 pub fn project_node(host: &dyn Host, dir: &Path, root: &Path) -> Result<Node, String> {
     let wanted = node::wanted(host, dir, Some(root));

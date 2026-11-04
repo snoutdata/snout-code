@@ -26,7 +26,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScrip
 - [Maven](maven.md): Maven builds without a Maven install: reactors, parents, BOMs and profiles, the Maven window, goals, tests, and POM editing.
 - [Project Structure](project-structure.md): the project's JDK, modules, source sets, dependencies and their conflicts, the JDKs on your machine, and the facets SnoutCode found.
 - [Run and debug](run-and-debug.md): run configurations, the Run window, tests, and the debugger.
-- [Node projects](node.md): a `package.json` project's scripts as run configurations, script files run on the project's Node (TypeScript too), breakpoints through js-debug, and attaching to a Node started elsewhere.
+- [Node projects](node.md): a `package.json` project's scripts as run configurations, for every package of a workspace, script files run on the project's Node (TypeScript too), Vitest and Jest tests in the Tests window, breakpoints through js-debug, and attaching to a Node started elsewhere.
 - [Processes](processes.md): what SnoutCode runs on your machine, and how to stop it.
 - [Supported versions and performance](versions-and-performance.md): the Gradle and Maven versions and JDKs SnoutCode supports, what it shows for a build outside them, how long opening a project takes, and the scripts that check both.
 
