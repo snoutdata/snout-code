@@ -1026,7 +1026,8 @@ mod writing {
             ]
         );
         let logged_in = start.codegen_args(Path::new("/tmp/r.ts"), true);
-        assert!(logged_in.contains(&"--load-storage=/qa/.auth/user.json".to_owned()), "{logged_in:?}");
+        let load = format!("--load-storage={}", root.join(".auth/user.json").display());
+        assert!(logged_in.contains(&load), "{logged_in:?}");
         assert!(!start.codegen_args(Path::new("/tmp/r.ts"), false).iter().any(|a| a.starts_with("--load-storage")));
         // Nothing listed and no environment: the recorder opens empty.
         assert_eq!(Start::of(&[], None, root).codegen_args(Path::new("/r.ts"), false).len(), 3);
