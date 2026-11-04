@@ -37,3 +37,23 @@ pub fn process_start() -> Option<SystemTime> {
             + Duration::from_micros(info.pbi_start_tvusec)
     })
 }
+
+/// A long run ended while the app was in the background: the Dock icon bounces once and
+/// wears `badge` until the app is in front again.
+pub fn attention(badge: &str) {
+    use objc2_app_kit::{NSApplication, NSRequestUserAttentionType};
+    let Some(mtm) = objc2::MainThreadMarker::new() else { return };
+    let app = NSApplication::sharedApplication(mtm);
+    if app.isActive() {
+        return;
+    }
+    app.requestUserAttention(NSRequestUserAttentionType::InformationalRequest);
+    app.dockTile().setBadgeLabel(Some(&objc2_foundation::NSString::from_str(badge)));
+}
+
+/// The app is in front: the Dock icon's badge goes.
+pub fn clear_attention() {
+    use objc2_app_kit::NSApplication;
+    let Some(mtm) = objc2::MainThreadMarker::new() else { return };
+    NSApplication::sharedApplication(mtm).dockTile().setBadgeLabel(None);
+}

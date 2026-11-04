@@ -45,6 +45,8 @@ pub enum Tool {
     Hierarchy,
     /// Not on a stripe: the status bar and View ▸ Processes open it.
     Processes,
+    /// A Playwright project's tests.
+    Tests,
 }
 
 impl Tool {
@@ -79,6 +81,7 @@ impl Tool {
             "Processes" => Tool::Processes,
             "Structure" => Tool::Structure,
             "Hierarchy" => Tool::Hierarchy,
+            "Tests" => Tool::Tests,
             _ => return None,
         })
     }
@@ -100,6 +103,7 @@ impl Tool {
             Tool::Structure => Icon::Structure,
             Tool::Hierarchy => Icon::Hierarchy,
             Tool::Processes => Icon::Gear,
+            Tool::Tests => Icon::TestFolder,
         }
     }
 
@@ -121,6 +125,7 @@ impl Tool {
             Tool::ClaudeChanges => 2,
             Tool::Structure => 4,
             Tool::Hierarchy => 0,
+            Tool::Tests => 4,
         }
     }
 
@@ -141,6 +146,7 @@ impl Tool {
             Tool::Structure => "Structure (⌘7)",
             Tool::Hierarchy => "Hierarchy (⌃H, ⌃⌥H)",
             Tool::Processes => "Processes",
+            Tool::Tests => "Tests",
         }
     }
 
@@ -161,6 +167,7 @@ impl Tool {
             Tool::Structure => "stripe-structure",
             Tool::Hierarchy => "stripe-hierarchy",
             Tool::Processes => "stripe-processes",
+            Tool::Tests => "stripe-tests",
         }
     }
 }
@@ -268,6 +275,7 @@ impl Workspace {
             Tool::Structure => Some(self.tabs.structure),
             Tool::Hierarchy => Some(self.tabs.hierarchy),
             Tool::Processes => Some(self.tabs.processes),
+            Tool::Tests => Some(self.tabs.tests),
         }
     }
 
@@ -379,6 +387,10 @@ impl Workspace {
                 .on_click(pick(Activity::Git)),
             )
             .child(div().flex_1())
+            .when(self.pw_tests.read(cx).root.is_some(), |d| {
+                let failed = self.pw_tests.read(cx).run(cx).map_or(0, |r| r.counts().failed);
+                d.child(self.tool_item(Tool::Tests, Some((failed, p.error)), cx))
+            })
             .child(self.tool_item(Tool::Run, None, cx))
             .child(self.tool_item(Tool::Debug, None, cx))
             .child(self.tool_item(Tool::Build, None, cx))

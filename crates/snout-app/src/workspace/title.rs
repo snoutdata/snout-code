@@ -258,7 +258,10 @@ impl Workspace {
         let runs = self.runs.read(cx);
         let configs = runs.configurations();
         let selected = runs.selected_config();
-        let ready = runs.engine(cx).is_some();
+        let playwright = self.pw_tests.read(cx).root.is_some();
+        // A Playwright configuration runs without the Java engine.
+        let ready = runs.engine(cx).is_some()
+            || selected.as_ref().is_some_and(|c| c.kind == crate::run::config::Kind::Playwright);
         let loading = runs.configs_loading;
         let running = runs.any_running();
         // The selected configuration runs: Run becomes Rerun.
@@ -273,6 +276,7 @@ impl Workspace {
                 crate::run::config::Kind::Gradle => Icon::Build,
                 crate::run::config::Kind::Maven => Icon::Feather,
                 crate::run::config::Kind::Tests => Icon::Check,
+                crate::run::config::Kind::Playwright => Icon::TestFolder,
             });
             Trigger(
                 bar_button("title-run-config", &p)
@@ -302,6 +306,8 @@ impl Workspace {
                 if configs.is_empty() {
                     let note = if loading {
                         "Reading the configurations…"
+                    } else if playwright {
+                        "Configurations appear once the tests are listed"
                     } else {
                         "Configurations appear once the Java engine is ready"
                     };
@@ -336,6 +342,10 @@ impl Workspace {
             .flex()
             .items_center()
             .gap(px(2.))
+            .when(playwright, |d| {
+                d.child(crate::playwright::window::TestsWindow::environment_switch("title-environment", cx))
+                    .child(div().w(px(4.)))
+            })
             .child(run_config)
             .child(run_button)
             .child(debug_button)

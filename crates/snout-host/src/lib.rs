@@ -296,6 +296,9 @@ pub struct Cmd {
     pub stdin: Stdio,
     pub stdout: Stdio,
     pub stderr: Stdio,
+    /// Start it in a process group of its own, so ending it ends what it started too (on
+    /// Unix; on Windows every local process is in a job object of its own anyway).
+    pub group: bool,
 }
 
 impl Cmd {
@@ -309,7 +312,15 @@ impl Cmd {
             stdin: Stdio::Null,
             stdout: Stdio::Piped,
             stderr: Stdio::Piped,
+            group: false,
         }
+    }
+
+    /// In a process group of its own: [`Process::terminate`] and [`Process::kill`] reach
+    /// the processes it started (a test runner's browsers).
+    pub fn group(mut self) -> Self {
+        self.group = true;
+        self
     }
 
     pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {

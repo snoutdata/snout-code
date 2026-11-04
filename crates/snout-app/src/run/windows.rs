@@ -1102,6 +1102,8 @@ impl SessionView {
             pid: s.pid,
             engine: s.engine,
             process: s.process.clone(),
+            // The Tests window reads it from the session itself.
+            playwright: None,
         })
     }
 }

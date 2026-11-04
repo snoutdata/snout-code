@@ -212,6 +212,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "RerunFailedTests" => sf("exclamationmark.arrow.circlepath", L::RotateCcw),
         "RunGradleTask" => sf("play.rectangle", L::SquarePlay),
         "EditConfigurations" => sf("slider.horizontal.3", L::SlidersHorizontal),
+        "EditEnvironments" => sf("globe", L::Globe),
         "ToggleBreakpoint" => sf("smallcircle.filled.circle", L::CircleDot),
         "ToggleBreakpointEnabled" => sf("circle.slash", L::CircleSlash),
         "EditBreakpointCondition" => sf("questionmark.diamond", L::Diamond),

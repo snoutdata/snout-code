@@ -960,6 +960,7 @@ fn a_process_run_streams_its_output_and_ends_with_its_exit_code(cx: &mut TestApp
             cwd: repo.clone(),
             env: vec![("SNOUT_GREETING".into(), "hello there".into())],
             place: Place::Build,
+            report: false,
         })
     };
     let id = cx
@@ -997,5 +998,28 @@ fn a_process_run_streams_its_output_and_ends_with_its_exit_code(cx: &mut TestApp
     assert!(stopped, "Stop ends it");
     let outcome = cx.update(|_, cx| runs.read(cx).session(id).unwrap().ended.as_ref().unwrap().outcome);
     assert_eq!(outcome, Outcome::Cancelled);
+
+    // What it started goes with it (a test runner's browsers): Stop ends the whole group.
+    #[cfg(unix)]
+    {
+        let pidfile = repo.join("child.pid");
+        let script = format!("sleep 60 & echo $! > '{}'; echo started; wait", pidfile.display());
+        let id = cx.update(|_, cx| runs.update(cx, |r, cx| r.start(launch("Tree", &script), cx))).unwrap();
+        let printed = pump_until(cx, 20, |cx| {
+            cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| s.console_text().contains("started")))
+        });
+        assert!(printed);
+        let child: i32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        cx.update(|_, cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        let stopped =
+            pump_until(cx, 20, |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| !s.running())));
+        assert!(stopped);
+        // SAFETY: signal 0 only asks whether the process is there.
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            (unsafe { libc::kill(child, 0) }) != 0
+        });
+        assert!(gone, "the program's own child ends with it");
+    }
     let _ = std::fs::remove_dir_all(repo);
 }

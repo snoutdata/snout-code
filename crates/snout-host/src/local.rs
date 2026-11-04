@@ -105,6 +105,11 @@ fn command(cmd: &Cmd) -> io::Result<std::process::Command> {
         })
     };
     c.stdin(stdio(&cmd.stdin)?).stdout(stdio(&cmd.stdout)?).stderr(stdio(&cmd.stderr)?);
+    #[cfg(unix)]
+    if cmd.group {
+        use std::os::unix::process::CommandExt as _;
+        c.process_group(0);
+    }
     Ok(c)
 }
 
@@ -119,17 +124,29 @@ struct LocalProcess {
     child: std::process::Child,
     #[cfg(windows)]
     job: Option<crate::win::Job>,
+    /// It leads a process group of its own: signals go to the whole group.
+    #[cfg(unix)]
+    group: bool,
 }
 
 impl LocalProcess {
-    fn new(child: std::process::Child) -> Self {
+    fn new(child: std::process::Child, _group: bool) -> Self {
         #[cfg(windows)]
         {
             let job = crate::win::Job::new(false).ok().filter(|j| j.assign_child(&child).is_ok());
             Self { child, job }
         }
         #[cfg(not(windows))]
-        Self { child }
+        Self { child, group: _group }
+    }
+
+    /// Send `sig` to it, or to its group when it leads one.
+    #[cfg(unix)]
+    fn signal(&mut self, sig: libc::c_int) -> io::Result<()> {
+        let pid = libc::pid_t::try_from(self.child.id()).map_err(io::Error::other)?;
+        let to = if self.group { -pid } else { pid };
+        // SAFETY: a plain system call on a child of ours (or its group) not waited for yet.
+        if unsafe { libc::kill(to, sig) } == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
     }
 }
 
@@ -155,9 +172,7 @@ impl Process for LocalProcess {
         if self.child.try_wait()?.is_some() {
             return Ok(());
         }
-        let pid = libc::pid_t::try_from(self.child.id()).map_err(io::Error::other)?;
-        // SAFETY: a plain system call on a child of ours that has not been waited for.
-        if unsafe { libc::kill(pid, libc::SIGTERM) } == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+        self.signal(libc::SIGTERM)
     }
 
     /// Windows has no SIGTERM for a program without a window: it ends at once, with what it
@@ -175,6 +190,11 @@ impl Process for LocalProcess {
         if let Some(job) = &self.job
             && job.terminate(1).is_ok()
         {
+            return Ok(());
+        }
+        // The group, while the leader has not been waited for (its id cannot be reused yet).
+        #[cfg(unix)]
+        if self.group && self.child.try_wait()?.is_none() && self.signal(libc::SIGKILL).is_ok() {
             return Ok(());
         }
         self.child.kill()
@@ -470,7 +490,7 @@ impl Host for LocalHost {
     }
 
     fn spawn(&self, cmd: &Cmd) -> io::Result<Box<dyn Process>> {
-        Ok(Box::new(LocalProcess::new(command(cmd)?.spawn()?)))
+        Ok(Box::new(LocalProcess::new(command(cmd)?.spawn()?, cmd.group)))
     }
 
     fn run(&self, cmd: &Cmd, input: Option<&[u8]>) -> io::Result<Output> {

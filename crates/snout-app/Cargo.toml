@@ -47,6 +47,10 @@ dekobon-tree-sitter-groovy = "0.3"
 tree-sitter-properties = "0.3"
 # The classes and methods the author hints are for: the grammars GPUI Kit links already.
 tree-sitter-java = "0.23"
+# Where a Playwright spec's tests are, for the gutter's run icons.
+tree-sitter-typescript = "0.23"
+# Playwright's traces (`trace.zip`): the filmstrip, actions, failed requests, console errors.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 tree-sitter-kotlin-sg = "0.4"
 # What a project's .gitignore leaves out (the host walks and watches the tree, and finds text).
 ignore = "0.4"
@@ -72,7 +76,7 @@ tempfile.workspace = true
 # the menu bar's icons, set on the NSMenuItems GPUI makes.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSData", "NSGeometry", "NSArray"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSApplication", "NSResponder", "NSMenu", "NSMenuItem", "NSImage"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSApplication", "NSResponder", "NSMenu", "NSMenuItem", "NSImage", "NSDockTile"] }
 # Lucide icons drawn for menu items that have no SF Symbol (GPUI's own SVG renderer).
 resvg = { version = "0.46", default-features = false }
 

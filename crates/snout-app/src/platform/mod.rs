@@ -28,6 +28,19 @@ pub const APP_ID: &str = "snout-code";
 
 pub use imp::{IN_WINDOW_MENUS, REVEAL, THIS_MACHINE, process_start, window_decorations};
 
+/// A long run ended: where the system has a way to say so while the app is in the
+/// background (the Dock's bounce and badge on a Mac), it does. `badge` is what it wears.
+pub fn attention(_badge: &str) {
+    #[cfg(target_os = "macos")]
+    imp::attention(_badge);
+}
+
+/// The window is in front again: what [`attention`] put up goes.
+pub fn clear_attention() {
+    #[cfg(target_os = "macos")]
+    imp::clear_attention();
+}
+
 /// The app (not the reaper, not ssh's password prompt) is starting: on Windows, what it
 /// starts is tied to it, and stderr goes to the console it was started from.
 pub fn app_started() {

@@ -21,10 +21,12 @@ pub enum Kind {
     Tests,
     /// Maven goals (`spring-boot:run`), in `task`.
     Maven,
+    /// Playwright tests: `playwright test` with `args` (`--project=chromium`, a file).
+    Playwright,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 4] = [Kind::Main, Kind::Gradle, Kind::Maven, Kind::Tests];
+    pub const ALL: [Kind; 5] = [Kind::Main, Kind::Gradle, Kind::Maven, Kind::Tests, Kind::Playwright];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -32,6 +34,7 @@ impl Kind {
             "gradle" => Some(Kind::Gradle),
             "tests" => Some(Kind::Tests),
             "maven" => Some(Kind::Maven),
+            "playwright" => Some(Kind::Playwright),
             _ => None,
         }
     }
@@ -42,6 +45,7 @@ impl Kind {
             Kind::Gradle => "gradle",
             Kind::Tests => "tests",
             Kind::Maven => "maven",
+            Kind::Playwright => "playwright",
         }
     }
 
@@ -51,6 +55,7 @@ impl Kind {
             Kind::Gradle => "Gradle",
             Kind::Tests => "Tests",
             Kind::Maven => "Maven",
+            Kind::Playwright => "Playwright",
         }
     }
 }
@@ -121,6 +126,7 @@ impl RunConfig {
                 Kind::Gradle => args.push(format!("--args=--spring.profiles.active={profiles}")),
                 Kind::Tests => jvm_args.push(format!("-Dspring.profiles.active={profiles}")),
                 Kind::Maven => args.push(format!("-Dspring-boot.run.profiles={profiles}")),
+                Kind::Playwright => {}
             }
         }
         let mut v = json!({
@@ -151,6 +157,7 @@ impl RunConfig {
             Kind::Gradle => "Gradle",
             Kind::Maven => "Maven",
             Kind::Tests => "Tests",
+            Kind::Playwright => "Playwright",
         }
     }
 }
@@ -244,6 +251,7 @@ pub fn default_config(all: &[RunConfig]) -> Option<RunConfig> {
         .find(|c| c.kind == Kind::Main && c.spring_boot)
         .or_else(|| all.iter().find(|c| c.kind == Kind::Main))
         .or_else(|| all.iter().find(|c| c.kind == Kind::Gradle || c.kind == Kind::Maven))
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Playwright))
         .cloned()
 }
 
@@ -259,6 +267,65 @@ pub struct ProjectSettings {
     pub breakpoints: Vec<Breakpoint>,
     /// The Maven window's choices.
     pub maven: MavenChoices,
+    /// A Playwright project's environments, and the one its runs go against.
+    pub environments: Vec<Environment>,
+    pub environment: Option<String>,
+}
+
+/// Where a Playwright project's tests point: `BASE_URL`, other variables and a `.env` file.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Environment {
+    pub name: String,
+    pub base_url: String,
+    pub vars: BTreeMap<String, String>,
+    /// A file of `NAME=value` lines, relative to the project (`.env.staging`).
+    pub env_file: Option<String>,
+}
+
+impl Environment {
+    /// Its variables over those of its file, then `BASE_URL`: what a run gets.
+    pub fn variables(&self, read: impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+        let mut all: BTreeMap<String, String> = BTreeMap::new();
+        if let Some(text) = self.env_file.as_deref().filter(|f| !f.trim().is_empty()).and_then(|f| read(f.trim())) {
+            all.extend(parse_dotenv(&text));
+        }
+        all.extend(self.vars.clone());
+        if !self.base_url.trim().is_empty() {
+            all.insert("BASE_URL".into(), self.base_url.trim().to_owned());
+        }
+        all.into_iter().collect()
+    }
+
+    /// What the switcher says under its name: the URL, or its file.
+    pub fn detail(&self) -> String {
+        let url = self.base_url.trim();
+        let url = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap_or(url);
+        if !url.is_empty() { url.trim_end_matches('/').to_owned() } else { self.env_file.clone().unwrap_or_default() }
+    }
+}
+
+/// `NAME=value` lines (`export` and quotes allowed; `#` starts a comment).
+pub fn parse_dotenv(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|l| {
+            let l = l.trim();
+            if l.is_empty() || l.starts_with('#') {
+                return None;
+            }
+            let l = l.strip_prefix("export ").unwrap_or(l);
+            let (k, v) = l.split_once('=')?;
+            let v = v.trim();
+            let v = if (v.starts_with('"') && v.ends_with('"') || v.starts_with('\'') && v.ends_with('\''))
+                && v.len() >= 2
+            {
+                v[1..v.len() - 1].to_owned()
+            } else {
+                v.split(" #").next().unwrap_or(v).trim().to_owned()
+            };
+            Some((k.trim().to_owned(), v))
+        })
+        .collect()
 }
 
 /// How the Maven window runs goals, for one project: profiles turned on or off by hand

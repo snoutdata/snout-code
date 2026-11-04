@@ -125,6 +125,24 @@ impl EditorPanel {
     /// Ask what the file holds to run, for the gutter's icons.
     pub(super) fn refresh_runnables(&mut self, cx: &mut Context<Self>) {
         let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        // A Playwright spec: its tests are read here, by tree-sitter, off the UI thread.
+        if crate::playwright::is_test_file(&self.path) && self.class_file.is_none() {
+            let text = self.state.read(cx).value().to_string();
+            let path = self.path.clone();
+            let task =
+                cx.background_executor().spawn(async move { crate::playwright::gutter::runnables(&path, &text) });
+            let path = self.path.clone();
+            self._runnables = Some(cx.spawn(async move |this, cx| {
+                let found = task.await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.path == path {
+                        this.runnables = (!found.items.is_empty()).then(|| Rc::new(found));
+                        cx.notify();
+                    }
+                });
+            }));
+            return;
+        }
         if !matches!(ext, "java" | "scala") || self.class_file.is_some() {
             self.runnables = None;
             return;

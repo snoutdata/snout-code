@@ -125,6 +125,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 cwd: root.to_owned(),
                 env,
                 place: Place::Build,
+                report: false,
             })
         }
         Need::Packages { manager } => {
@@ -138,6 +139,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 cwd: root.to_owned(),
                 env,
                 place: Place::Build,
+                report: false,
             })
         }
         Need::Browsers { .. } => {
@@ -152,6 +154,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 cwd: root.to_owned(),
                 env,
                 place: Place::Build,
+                report: false,
             })
         }
     }
@@ -305,6 +308,10 @@ impl Setup {
             });
         }
         self.look(cx);
+        // With the packages (or browsers) in, the tests can be listed.
+        if ok && let Some(tests) = super::tests::tests(cx) {
+            tests.update(cx, |t, cx| t.refresh(cx));
+        }
         cx.notify();
     }
 

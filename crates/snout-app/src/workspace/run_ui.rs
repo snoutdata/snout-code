@@ -36,6 +36,7 @@ impl Workspace {
             RunsEvent::EditConfigurations => self.open_config_dialog(window, cx),
             RunsEvent::ShowProblems => self.show_problems(window, cx),
             RunsEvent::Ended(_) => {}
+            RunsEvent::ShowTests => self.show_tool(crate::workspace::Tool::Tests, window, cx),
         }
     }
 
@@ -192,6 +193,26 @@ impl Workspace {
     }
 
     /// Put up the Edit Configurations dialog.
+    pub fn open_env_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::playwright::env_dialog::{EnvDialog, EnvEvent};
+        if self.env_dialog.is_some() {
+            return;
+        }
+        let runs = self.runs.clone();
+        let dialog = cx.new(|cx| EnvDialog::new(runs, window, cx));
+        cx.subscribe_in(&dialog, window, |this, _, e: &EnvEvent, window, cx| {
+            let EnvEvent::Close = e;
+            this.env_dialog = None;
+            window.focus(&this.focus, cx);
+            cx.notify();
+        })
+        .detach();
+        let focus = gpui::Focusable::focus_handle(dialog.read(cx), cx);
+        window.focus(&focus, cx);
+        self.env_dialog = Some(dialog);
+        cx.notify();
+    }
+
     pub fn open_config_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.config_dialog.is_some() {
             return;

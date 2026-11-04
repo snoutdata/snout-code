@@ -327,6 +327,7 @@ impl ConfigDialog {
                 .into_any_element()
         };
         let from_build = self.engine.iter().any(|e| e.id == c.id);
+        let pw = c.kind == Kind::Playwright;
         div()
             .id("config-form")
             .size_full()
@@ -337,22 +338,23 @@ impl ConfigDialog {
             .overflow_y_scrollbar()
             .child(row("Name", input(&self.fields.name)))
             .child(row("Kind", div().flex().child(kind_menu).into_any_element()))
-            .child(row("Module", div().flex().child(module_menu).into_any_element()))
+            .when(!pw, |d| d.child(row("Module", div().flex().child(module_menu).into_any_element())))
             .when(c.kind == Kind::Main, |d| d.child(row("Main class", input(&self.fields.main_class))))
-            .when(c.kind != Kind::Main, |d| {
+            .when(c.kind != Kind::Main && !pw, |d| {
                 d.child(row(if c.kind == Kind::Maven { "Goals" } else { "Task" }, input(&self.fields.task)))
             })
             .child(row(
                 match c.kind {
                     Kind::Gradle => "Gradle arguments",
                     Kind::Maven => "Maven arguments",
+                    Kind::Playwright => "Playwright arguments",
                     _ => "Program arguments",
                 },
                 input(&self.fields.args),
             ))
-            .child(row("VM options", input(&self.fields.jvm_args)))
+            .when(!pw, |d| d.child(row("VM options", input(&self.fields.jvm_args))))
             .child(row("Environment variables", input(&self.fields.env)))
-            .child(row("Active profiles", self.profiles_field(cx)))
+            .when(!pw, |d| d.child(row("Active profiles", self.profiles_field(cx))))
             .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(if from_build {
                 if c.user {
                     "From the build, with your changes. Remove puts it back as the build has it."
@@ -407,6 +409,7 @@ impl Render for ConfigDialog {
                         Kind::Gradle => Icon::Build,
                         Kind::Maven => Icon::Feather,
                         Kind::Tests => Icon::Check,
+                        Kind::Playwright => Icon::TestFolder,
                     },
                     12.,
                     p.ok,

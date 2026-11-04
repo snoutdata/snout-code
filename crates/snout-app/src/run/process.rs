@@ -24,6 +24,9 @@ pub struct ProcessLaunch {
     /// Set on top of the inherited environment.
     pub env: Vec<(String, String)>,
     pub place: Place,
+    /// It runs Playwright with the SnoutCode reporter: the reporter's lines feed the
+    /// session's [`crate::playwright::report::Run`] instead of the console.
+    pub report: bool,
 }
 
 impl ProcessLaunch {
@@ -121,7 +124,7 @@ impl Runs {
         for (k, v) in &launch.env {
             cmd = cmd.env(k, v);
         }
-        let cmd = cmd.stdin(Stdio::Null).stdout(Stdio::Piped).stderr(Stdio::Piped);
+        let cmd = cmd.stdin(Stdio::Null).stdout(Stdio::Piped).stderr(Stdio::Piped).group();
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
         match host.spawn(&cmd) {
             Ok(mut child) => {
@@ -185,6 +188,15 @@ impl Runs {
     fn on_process_event(&mut self, id: u64, event: Event, cx: &mut Context<Self>) {
         let Some(s) = self.session_mut(id) else { return };
         match event {
+            Event::Line(Stream::Out, line) if s.playwright.is_some() => {
+                let (shown, event) = crate::playwright::report::split_line(&line);
+                if let Some(text) = shown {
+                    s.push(Stream::Out, text);
+                }
+                if let (Some(json), Some(run)) = (event, s.playwright.as_mut()) {
+                    run.apply_line(json);
+                }
+            }
             Event::Line(stream, line) => s.push(stream, &line),
             Event::Exit(code) => {
                 let stopped = s.process.as_ref().is_some_and(Handle::stopped);
@@ -202,6 +214,9 @@ impl Runs {
                 s.ended =
                     Some(Ended { outcome, elapsed: s.started.elapsed(), exit_code: code.map(i64::from), error: None });
                 s.process = None;
+                if let Some(run) = s.playwright.as_mut() {
+                    run.finish();
+                }
                 cx.emit(super::RunsEvent::Ended(id));
             }
             Event::Failed(why) => {
@@ -213,6 +228,9 @@ impl Runs {
                     error: Some(why),
                 });
                 s.process = None;
+                if let Some(run) = s.playwright.as_mut() {
+                    run.finish();
+                }
                 cx.emit(super::RunsEvent::Ended(id));
             }
         }

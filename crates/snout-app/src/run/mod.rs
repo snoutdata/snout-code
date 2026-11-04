@@ -15,6 +15,7 @@ pub mod debug_dialogs;
 pub mod gradle_window;
 pub mod maven_window;
 pub mod process;
+mod pw;
 pub mod test_tree;
 pub mod windows;
 
@@ -189,6 +190,8 @@ pub struct Session {
     pub engine: Option<u32>,
     /// The process SnoutCode started itself, while it runs (a [`Launch::Process`]).
     pub process: Option<process::Handle>,
+    /// A Playwright run: what its reporter has said.
+    pub playwright: Option<crate::playwright::report::Run>,
 }
 
 impl Session {
@@ -462,9 +465,23 @@ pub struct Runnable {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
-    TestClass { class: String },
-    TestMethod { class: String, method: String },
-    Main { class: String },
+    TestClass {
+        class: String,
+    },
+    TestMethod {
+        class: String,
+        method: String,
+    },
+    Main {
+        class: String,
+    },
+    /// A Playwright test or `describe`, at its line (from 1) of a spec file.
+    Playwright {
+        file: PathBuf,
+        line: u32,
+        title: String,
+        group: bool,
+    },
 }
 
 impl Target {
@@ -473,6 +490,7 @@ impl Target {
         match self {
             Target::TestClass { class } | Target::Main { class } => simple(class),
             Target::TestMethod { class, method } => format!("{}.{method}", simple(class)),
+            Target::Playwright { title, .. } => title.clone(),
         }
     }
 
@@ -492,7 +510,7 @@ impl FileRunnables {
         // The nearest item at or above the caret, when it is a test method.
         let nearest = self.items.iter().filter(|r| r.line <= line).max_by_key(|r| r.line);
         nearest
-            .filter(|r| matches!(r.target, Target::TestMethod { .. }))
+            .filter(|r| matches!(r.target, Target::TestMethod { .. } | Target::Playwright { .. }))
             .map(|r| &r.target)
             .or_else(|| self.items.iter().find(|r| matches!(r.target, Target::TestClass { .. })).map(|r| &r.target))
             .or_else(|| self.items.iter().find(|r| matches!(r.target, Target::Main { .. })).map(|r| &r.target))
@@ -544,6 +562,8 @@ pub enum RunsEvent {
     ShowProblems,
     /// Session `id` ended (a process run).
     Ended(u64),
+    /// Bring the Tests window forward (a Playwright run started).
+    ShowTests,
 }
 
 pub struct Runs {
@@ -1017,6 +1037,14 @@ impl Runs {
     /// Before the engine is ready the session waits for it; when nothing can run, the
     /// session says why. Either way the window shows it.
     pub fn start(&mut self, launch: Launch, cx: &mut Context<Self>) -> Option<u64> {
+        // A Playwright configuration finds its Node first, off the UI thread.
+        if let Launch::Config { config, debug } = &launch
+            && config.kind == Kind::Playwright
+        {
+            let options = crate::playwright::run::Options { debug: *debug, ..Default::default() };
+            self.start_playwright_config(config.clone(), options, cx);
+            return None;
+        }
         let state = if matches!(launch, Launch::Process(_)) {
             EngineState::Ready
         } else {
@@ -1052,6 +1080,7 @@ impl Runs {
             pid: None,
             engine: None,
             process: None,
+            playwright: matches!(&launch, Launch::Process(p) if p.report).then(Default::default),
         };
         let what = match &launch {
             Launch::Config { config, .. } => match (config.kind, &config.main_class, &config.task) {
@@ -1095,7 +1124,11 @@ impl Runs {
             self.dispatch(id, cx);
         }
         self.tick(cx);
-        cx.emit(RunsEvent::Show(place));
+        if matches!(&launch, Launch::Process(p) if p.report) {
+            cx.emit(RunsEvent::ShowTests);
+        } else {
+            cx.emit(RunsEvent::Show(place));
+        }
         cx.notify();
         Some(id)
     }
@@ -1228,6 +1261,7 @@ impl Runs {
             pid: None,
             engine: None,
             process: None,
+            playwright: matches!(&launch, Launch::Process(p) if p.report).then(Default::default),
         };
         s.lines.push(ConsoleLine::system(format!("Running {}", launch.title())));
         if matches!(launch, Launch::Tests { .. }) {
@@ -1646,6 +1680,12 @@ impl Runs {
     /// Run (or debug) what a gutter icon stands for.
     pub fn run_target(&mut self, target: &Target, module: Option<&str>, debug: bool, cx: &mut Context<Self>) {
         let launch = match target {
+            Target::Playwright { file, line, .. } => {
+                let scope = crate::playwright::run::Scope::At { file: file.clone(), line: Some(*line), project: None };
+                let options = crate::playwright::run::Options { debug, ..Default::default() };
+                self.start_playwright(scope, options, cx);
+                return;
+            }
             Target::TestClass { class } | Target::TestMethod { class, .. } => {
                 let Some(module) = module else {
                     self.say("The engine does not know this file's module yet", cx);

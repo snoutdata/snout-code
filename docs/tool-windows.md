@@ -1,8 +1,9 @@
 # Tool windows and menus
 
 The tool windows sit around the editor: Run, Debug, Build, Output, Terminal, Problems and the
-agent console in the bottom dock; Structure, Hierarchy, Gradle, Maven, Spring, Notifications
-and Agent Changes on the right; the Project view on the left. The stripes down the window's
+agent console in the bottom dock, with Tests for a Playwright project; Structure, Hierarchy,
+Gradle, Maven, Spring, Notifications and Agent Changes on the right; the Project view on the
+left. The stripes down the window's
 edges open them, and so do the View, Build and Tools menus.
 
 ![The Build window empty, and the Spring window waiting for the engine](images/tool-windows-empty.png)
@@ -44,6 +45,7 @@ A window with nothing to show yet says why, with a drawing, and offers the next 
 | Spring | No Spring model yet | **Read the Spring Model** |
 | Notifications | No notifications | **Show Output** |
 | Agent Changes | No changes from agents yet | **Open the Agent Console** |
+| Tests | No Playwright project (outside one) | Open a folder with a `playwright.config.ts` |
 
 While something is being read (the Gradle tasks, a file's structure, the processes) the window
 says so, with the same kind of drawing.

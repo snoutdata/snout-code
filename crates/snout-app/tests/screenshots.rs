@@ -166,6 +166,7 @@ mod shots {
         JdkBar,
         NodeBar,
         PlaywrightBar,
+        TestsWindow,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -373,6 +374,9 @@ sleep 30
         let repo = demo_repo(name);
         if matches!(select, Some(Select::Commit(..))) {
             with_merge(&repo);
+        }
+        if matches!(select, Some(Select::TestsWindow)) {
+            crate::playwright_repo(&repo);
         }
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
@@ -1478,6 +1482,33 @@ sleep 30
                             missing: vec!["Chromium".into(), "Firefox".into(), "WebKit".into()],
                         });
                         cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::TestsWindow) => {
+                let run = crate::playwright_run(&repo);
+                cx.update_window(handle.into(), |_, window, cx| {
+                    let runs = ws.read(cx).runs.clone();
+                    let tests = ws.read(cx).pw_tests.clone();
+                    runs.update(cx, |r, cx| {
+                        let e = snout_app::run::config::Environment {
+                            name: "Staging".into(),
+                            base_url: "https://staging.shop.test".into(),
+                            ..Default::default()
+                        };
+                        r.set_environments(vec![e], Some("Staging".into()), cx);
+                        r.adopt_playwright("All tests", run.clone(), cx);
+                    });
+                    tests.update(cx, |t, cx| {
+                        t.history = crate::playwright_history(&run);
+                        t.select("shop.spec.ts › checkout › pays by card".into(), "webkit".into(), cx);
+                    });
+                    ws.update(cx, |ws, cx| {
+                        ws.show_tool(snout_app::workspace::Tool::Tests, window, cx);
+                        ws.dock.update(cx, |d, cx| {
+                            d.set_dock_size(gpui_component::dock::DockPlacement::Bottom, gpui::px(560.), window, cx)
+                        });
                     });
                 })
                 .unwrap();
@@ -2952,6 +2983,7 @@ sleep 30
             shot(&format!("ui-jdk-bar-{mode}"), theme, Activity::Project, Some(Select::JdkBar));
             shot(&format!("ui-node-bar-{mode}"), theme, Activity::Project, Some(Select::NodeBar));
             shot(&format!("ui-playwright-bar-{mode}"), theme, Activity::Project, Some(Select::PlaywrightBar));
+            shot(&format!("ui-tests-window-{mode}"), theme, Activity::Project, Some(Select::TestsWindow));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(
@@ -2985,4 +3017,166 @@ sleep 30
             }
         }
     }
+}
+
+/// A Playwright project for the Tests window's shot: installed, so no bar shows.
+fn playwright_repo(repo: &std::path::Path) {
+    let w = |name: &str, text: &str| {
+        let p = repo.join(name);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    w("package.json", r#"{ "devDependencies": { "@playwright/test": "1.64.1" } }"#);
+    w("playwright.config.ts", "export default {};\n");
+    w("node_modules/@playwright/test/package.json", r#"{ "version": "1.64.1" }"#);
+}
+
+/// A run of three browsers, part way through its history: a failure with a screenshot
+/// comparison and a trace, a flaky test, a skipped one.
+fn playwright_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
+    use serde_json::json;
+    let fixtures = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/playwright"));
+    let results = repo.join("test-results");
+    std::fs::create_dir_all(&results).unwrap();
+    for shot in ["home-expected.png", "home-actual.png", "home-diff.png"] {
+        std::fs::copy(fixtures.join("shot.png"), results.join(shot)).unwrap();
+    }
+    let trace = results.join("trace.zip");
+    {
+        use std::io::Write as _;
+        let frame = std::fs::read(fixtures.join("frame.jpg")).unwrap();
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&trace).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        zip.start_file("1-trace.trace", opts).unwrap();
+        writeln!(zip, "{}", json!({ "type": "context-options", "monotonicTime": 0.0 })).unwrap();
+        for i in 0..6 {
+            let f = json!({ "type": "screencast-frame", "file": format!("screencast/{i}.jpeg"), "timestamp": 400.0 * i as f64 });
+            writeln!(zip, "{f}").unwrap();
+        }
+        writeln!(
+            zip,
+            "{}",
+            json!({ "type": "console", "messageType": "error", "text": "Payment widget: order id missing in response" })
+        )
+        .unwrap();
+        zip.start_file("1-trace.network", opts).unwrap();
+        let req = json!({ "type": "resource-snapshot", "snapshot": { "request": { "method": "POST", "url": "https://staging.shop.test/api/orders" }, "response": { "status": 502 }, "time": 1200.0 } });
+        writeln!(zip, "{req}").unwrap();
+        for i in 0..6 {
+            zip.start_file(format!("screencast/{i}.jpeg"), opts).unwrap();
+            zip.write_all(&frame).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    let file = repo.join("tests/shop.spec.ts");
+    let tests = [
+        ("checkout", "pays by card", 12),
+        ("checkout", "applies a coupon", 24),
+        ("checkout", "rejects an expired card", 31),
+        ("login", "signs in", 5),
+        ("login", "shows an error for a wrong password", 14),
+        ("cart", "keeps the cart after reload", 40),
+    ];
+    let projects = ["chromium", "firefox", "webkit"];
+    let mut list = Vec::new();
+    for (i, (group, title, line)) in tests.iter().enumerate() {
+        for p in projects {
+            list.push(json!({ "id": format!("{i}-{p}"), "project": p, "file": file, "line": line, "column": 3,
+                              "path": [group, title], "expected": if *title == "keeps the cart after reload" && p == "webkit" { "skipped" } else { "passed" } }));
+        }
+    }
+    let mut run = snout_app::playwright::report::Run::default();
+    run.apply(&json!({ "e": "begin", "version": "1.64.1", "rootDir": repo.join("tests"), "workers": 4,
+        "projects": projects.iter().map(|p| json!({ "name": p, "browser": p })).collect::<Vec<_>>(), "tests": list }));
+    let end = |run: &mut snout_app::playwright::report::Run,
+               id: &str,
+               retry: u32,
+               status: &str,
+               outcome: &str,
+               ms: u64,
+               extra: serde_json::Value| {
+        run.apply(&json!({ "e": "testBegin", "id": id, "retry": retry, "worker": 0 }));
+        let mut ev = json!({ "e": "testEnd", "id": id, "retry": retry, "worker": 0, "status": status, "outcome": outcome, "duration": ms });
+        if let (Some(o), Some(x)) = (ev.as_object_mut(), extra.as_object()) {
+            o.extend(x.clone());
+        }
+        run.apply(&ev);
+    };
+    for (i, (_, title, _)) in tests.iter().enumerate() {
+        for (j, p) in projects.iter().enumerate() {
+            let id = format!("{i}-{p}");
+            let ms = 900 + 400 * (i as u64 + j as u64);
+            match (*title, *p) {
+                ("pays by card", "webkit") => end(
+                    &mut run,
+                    &id,
+                    0,
+                    "failed",
+                    "unexpected",
+                    5020,
+                    json!({
+                    "errors": [{ "message": "Error: expect(page).toHaveScreenshot(expected) failed\n\n  1.8% of the pixels are different.",
+                                 "snippet": "  14 |   await page.getByRole('button', { name: 'Pay' }).click();\n> 15 |   await expect(page).toHaveScreenshot('checkout.png');\n     |                      ^",
+                                 "file": file, "line": 15 }],
+                    "attachments": [
+                        { "name": "home-expected.png", "contentType": "image/png", "path": results.join("home-expected.png") },
+                        { "name": "home-actual.png", "contentType": "image/png", "path": results.join("home-actual.png") },
+                        { "name": "home-diff.png", "contentType": "image/png", "path": results.join("home-diff.png") },
+                        { "name": "trace", "contentType": "application/zip", "path": trace },
+                    ],
+                    "steps": [
+                        { "title": "page.goto('/checkout')", "category": "pw:api", "duration": 820, "depth": 0 },
+                        { "title": "fill the card", "category": "test.step", "duration": 1310, "depth": 0 },
+                        { "title": "locator.fill(getByLabel('Card number'))", "category": "pw:api", "duration": 240, "depth": 1 },
+                        { "title": "click getByRole('button', { name: 'Pay' })", "category": "pw:api", "duration": 160, "depth": 0 },
+                        { "title": "Expect \"toHaveScreenshot(checkout.png)\"", "category": "expect", "duration": 2400, "depth": 0, "error": "1.8% of the pixels are different" },
+                    ] }),
+                ),
+                ("shows an error for a wrong password", "firefox") => {
+                    end(&mut run, &id, 0, "failed", "unexpected", 4800, json!({}));
+                    end(&mut run, &id, 1, "passed", "flaky", 1500, json!({}));
+                }
+                ("keeps the cart after reload", "webkit") => end(&mut run, &id, 0, "skipped", "skipped", 0, json!({})),
+                _ => end(&mut run, &id, 0, "passed", "expected", ms, json!({})),
+            }
+        }
+    }
+    run.apply(&json!({ "e": "end", "status": "failed", "duration": 252_000 }));
+    run
+}
+
+/// Nine runs before this one: a test that fails now and then, one that is flaky.
+fn playwright_history(run: &snout_app::playwright::report::Run) -> snout_app::playwright::history::History {
+    use snout_app::playwright::history::{History, Record};
+    use snout_app::playwright::report::State;
+    let mut h = History::default();
+    for i in 0..9u64 {
+        let mut r = Record::of(
+            run,
+            1_793_700_000 + i * 3600,
+            "All tests".into(),
+            Some("Staging".into()),
+            (Some("main".into()), Some(format!("{:07x}", 0xa1b2c3 + i))),
+        );
+        for (k, c) in r.results.iter_mut() {
+            c.state = if k.contains("pays by card") && k.starts_with("webkit") && i % 3 == 2 {
+                State::Failed
+            } else if k.contains("wrong password") && k.starts_with("firefox") && i % 4 == 1 {
+                State::Flaky
+            } else if c.state == State::Skipped {
+                State::Skipped
+            } else {
+                State::Passed
+            };
+        }
+        h.add(r);
+    }
+    h.add(Record::of(
+        run,
+        1_793_740_000,
+        "All tests".into(),
+        Some("Staging".into()),
+        (Some("main".into()), Some("d4e5f60".into())),
+    ));
+    h
 }

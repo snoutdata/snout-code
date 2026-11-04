@@ -60,6 +60,7 @@ pub struct Tabs {
     pub debug: PanelId,
     pub build: PanelId,
     pub processes: PanelId,
+    pub tests: PanelId,
 }
 
 pub struct Workspace {
@@ -118,6 +119,11 @@ pub struct Workspace {
     pub runs: Entity<crate::run::Runs>,
     /// What the open Playwright project still needs (its packages, its browsers).
     pub pw_setup: Entity<crate::playwright::setup::Setup>,
+    /// A Playwright project's tests, runs and history, and their tool window.
+    pub pw_tests: Entity<crate::playwright::tests::PwTests>,
+    pub tests_window: Entity<crate::playwright::window::TestsWindow>,
+    /// Edit Environments, while it shows.
+    pub env_dialog: Option<Entity<crate::playwright::env_dialog::EnvDialog>>,
     pub run_window: Entity<crate::run::windows::RunWindow>,
     pub debug_window: Entity<crate::run::windows::RunWindow>,
     pub build_window: Entity<crate::run::windows::RunWindow>,
@@ -293,6 +299,9 @@ impl Workspace {
         let pw_setup = cx.new(|cx| crate::playwright::setup::Setup::new(model.clone(), runs.clone(), cx));
         cx.set_global(crate::playwright::setup::SetupHandle(pw_setup.clone()));
         cx.observe(&pw_setup, |_, _, cx| cx.notify()).detach();
+        let pw_tests = cx.new(|cx| crate::playwright::tests::PwTests::new(model.clone(), runs.clone(), cx));
+        cx.set_global(crate::playwright::tests::PwTestsHandle(pw_tests.clone()));
+        cx.observe(&pw_tests, |_, _, cx| cx.notify()).detach();
         let marks = runs.read(cx).marks.clone();
         cx.set_global(crate::run::MarksHandle(marks));
         let processes = cx.new(|cx| crate::processes::Processes::new(model.clone(), hub.clone(), runs.clone(), cx));
@@ -328,6 +337,7 @@ impl Workspace {
         let run_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Run, window, cx));
         let debug_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Debug, window, cx));
         let build_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Build, window, cx));
+        let tests_window = cx.new(|cx| crate::playwright::window::TestsWindow::new(pw_tests.clone(), window, cx));
         let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
         let claude_changes = cx.new(|cx| crate::claude_ide::panel::ChangesPanel::new(cx_ws.clone(), cx));
         let processes_window = cx.new(|cx| crate::processes::window::ProcessesWindow::new(processes.clone(), cx));
@@ -351,6 +361,7 @@ impl Workspace {
             debug: PanelId::from(debug_window.entity_id()),
             build: PanelId::from(build_window.entity_id()),
             processes: PanelId::from(processes_window.entity_id()),
+            tests: PanelId::from(tests_window.entity_id()),
         };
         if let Some(console) = console {
             tabs.console = Some(console.panel_id(cx));
@@ -364,6 +375,7 @@ impl Workspace {
         panels.push((panel_handle(debug_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(processes_window.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(tests_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(structure.clone()), DockPlacement::Right));
         panels.push((panel_handle(hierarchy.clone()), DockPlacement::Right));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
@@ -459,6 +471,9 @@ impl Workspace {
             // Coming back to the window, re-read the repository and count again, so
             // changes made elsewhere (terminal, editor, an agent) show up at once.
             cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() {
+                    crate::platform::clear_attention();
+                }
                 if window.is_window_active() && this.model.read(cx).job.is_none() {
                     this.model.update(cx, |m, cx| {
                         m.refresh(cx);
@@ -504,11 +519,14 @@ impl Workspace {
             processes_window,
             runs,
             pw_setup,
+            pw_tests,
+            tests_window,
             run_window,
             debug_window,
             build_window,
             welcome,
             config_dialog: None,
+            env_dialog: None,
             breakpoints_dialog: None,
             evaluate_dialog: None,
             new_project: None,
@@ -2147,6 +2165,8 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &RestartJava, _, cx| this.restart_java(cx)))
             .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::EditEnvironments, w, cx| this.open_env_dialog(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::ShowTests, w, cx| this.show_tool(Tool::Tests, w, cx)))
             .on_action(cx.listener(|this, _: &RunSelected, w, cx| this.run_selected(false, w, cx)))
             .on_action(cx.listener(|this, _: &DebugSelected, w, cx| this.run_selected(true, w, cx)))
             .on_action(cx.listener(|this, _: &RunContext, w, cx| this.run_context(false, w, cx)))
@@ -2416,6 +2436,18 @@ impl Render for Workspace {
                     .items_start()
                     .justify_center()
                     .pt(px(TITLE_H + 60.))
+                    .bg(p.scrim)
+                    .occlude()
+                    .child(dialog)
+            }))
+            .children(self.env_dialog.clone().map(|dialog| {
+                div()
+                    .id("env-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .bg(p.scrim)
                     .occlude()
                     .child(dialog)
