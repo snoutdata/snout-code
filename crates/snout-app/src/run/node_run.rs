@@ -307,6 +307,40 @@ fn tsx_cli(host: &dyn Host, root: &Path) -> Option<PathBuf> {
     Some(dir.join(bin.trim_start_matches("./"))).filter(|p| host.is_file(p))
 }
 
+/// Whether the package around `file` loads `.ts` files as ES modules: a `.mts` file, or a
+/// package whose `package.json` says `"type": "module"`.
+fn es_module(host: &dyn Host, file: &Path) -> bool {
+    match file.extension().and_then(|e| e.to_str()) {
+        Some("mts") => return true,
+        Some("cts") => return false,
+        _ => {}
+    }
+    let manifest = file.ancestors().skip(1).map(|d| d.join("package.json")).find(|p| host.is_file(p));
+    manifest
+        .and_then(|p| host.read_to_string(&p).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .is_some_and(|j| j.get("type").and_then(Value::as_str) == Some("module"))
+}
+
+/// The Node options that load TypeScript through the project's `ts-node`, when it has the
+/// package and the file is CommonJS: its transpiler (no type check, as the editor checks),
+/// and `tsconfig-paths` for the `paths` of `tsconfig.json` when that is installed too.
+fn ts_node_args(host: &dyn Host, root: &Path, file: &Path) -> Option<Vec<String>> {
+    let ts_node = crate::playwright::setup::package_dir(host, root, "ts-node")?;
+    let register = ts_node.join("register").join("transpile-only.js");
+    if !host.is_file(&register) || es_module(host, file) {
+        return None;
+    }
+    let mut args = vec!["-r".to_owned(), register.display().to_string()];
+    if let Some(paths) = crate::playwright::setup::package_dir(host, root, "tsconfig-paths") {
+        let register = paths.join("register.js");
+        if host.is_file(&register) {
+            args.extend(["-r".to_owned(), register.display().to_string()]);
+        }
+    }
+    Some(args)
+}
+
 /// The command that runs `file` of the project at `root` on `node`: `node_args` for Node,
 /// `args` for the program, in `cwd` (the project's folder when none).
 #[allow(clippy::too_many_arguments)]
@@ -324,9 +358,10 @@ pub fn file_launch(
     let typescript = matches!(ext, "ts" | "mts" | "cts" | "tsx");
     let mut all: Vec<String> = Vec::new();
     if typescript {
-        match (tsx_cli(host, root), strips_types(node)) {
-            (Some(tsx), _) => all.push(tsx.display().to_string()),
-            (None, Some(flag)) if ext != "tsx" => {
+        match (tsx_cli(host, root), ts_node_args(host, root, file), strips_types(node)) {
+            (Some(tsx), _, _) => all.push(tsx.display().to_string()),
+            (None, Some(register), _) => all.extend(register),
+            (None, None, Some(flag)) if ext != "tsx" => {
                 if flag {
                     all.push("--experimental-strip-types".to_owned());
                 }

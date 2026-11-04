@@ -39,7 +39,7 @@ A script's **Script arguments** (in Edit Configurations) go after it, past `--` 
 
 With **Current File** picked in the title bar, Run and Debug take the file in front when it is a script: a `.js`, `.mjs` or `.cjs` file runs on the project's Node. The editor's right click menu has **Run '…'** and **Debug '…'** for it too, and ⌃⇧R and ⌃⇧D do the same.
 
-A TypeScript file (`.ts`, `.mts`, `.cts`) runs through the project's `tsx`, when it has that package. Without it, Node runs the file itself, stripping the types, from Node 22.6 (with `--experimental-strip-types` before 22.18 and 23.6). On an older Node, the run says to add `tsx` to the project. A `.tsx` file needs `tsx`.
+A TypeScript file (`.ts`, `.mts`, `.cts`) runs through the project's `tsx`, when it has that package. Else a CommonJS file runs through its `ts-node`, without the type check, and with `tsconfig-paths` when that is installed too, so imports without extensions and the `paths` of `tsconfig.json` work. Without either, Node runs the file itself, stripping the types, from Node 22.6 (with `--experimental-strip-types` before 22.18 and 23.6). On an older Node, the run says to add `tsx` to the project. A `.tsx` file needs `tsx`.
 
 Type declarations (`.d.ts`), test files (`*.spec.ts`, `*.test.js`) and files in `node_modules` are not run this way.
 
@@ -61,7 +61,7 @@ A **Package script** configuration has a **Script** (the name in `package.json`)
 
 Debug (⌃D, or **Debug** on a script's icon) runs the script or file under js-debug, the JavaScript debugger VS Code ships. SnoutCode downloads it the first time you debug (about 1 MB), checks it against its checksum, and keeps it in its data folder.
 
-- Breakpoints go in any TypeScript or JavaScript file of the project: click a line number. In TypeScript they sit on the TypeScript line, through the source maps of `tsx` or Node.
+- Breakpoints go in any TypeScript or JavaScript file of the project: click a line number. In TypeScript they sit on the TypeScript line, through the source maps of `tsx`, `ts-node` or Node.
 - The debugger follows every Node process the run starts. An npm script starts a shell, which starts Node; that Node, and any it starts in turn, stop at the breakpoints.
 - When the program stops, the Debug window shows its stack, variables and watches, and stepping, Resume and Run to Cursor work as for Java (see [Run and debug](run-and-debug.md#when-the-program-stops)).
 - The program's output goes to the Debug window as it would to the Run window. Stop ends the program and every process it started.

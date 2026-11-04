@@ -179,6 +179,31 @@ fn current_file_runs_a_script_on_the_projects_node(cx: &mut gpui::TestAppContext
 }
 
 #[test]
+fn typescript_runs_through_the_projects_ts_node_with_its_paths() {
+    let host = snout_host::local();
+    let dir = scratch_dir("node-ts-node");
+    write(&dir, "package.json", r#"{ "workspaces": ["svc"] }"#);
+    write(&dir, "svc/package.json", r#"{ "dependencies": { "ts-node": "^10.9.2" } }"#);
+    write(&dir, "node_modules/ts-node/package.json", r#"{ "version": "10.9.2" }"#);
+    write(&dir, "node_modules/ts-node/register/transpile-only.js", "");
+    write(&dir, "node_modules/tsconfig-paths/package.json", r#"{ "version": "4.2.0" }"#);
+    write(&dir, "node_modules/tsconfig-paths/register.js", "");
+    let pkg = dir.join("svc");
+    let file = pkg.join("src/main.ts");
+    let n = node::Node { bin: "/n/24/bin/node".into(), version: "24.13.0".into(), major: 24 };
+    let l = crate::run::node_run::file_launch(&*host, &pkg, &n, &file, &[], &[], None, Vec::new()).unwrap();
+    let m = dir.join("node_modules");
+    let register = m.join("ts-node").join("register").join("transpile-only.js").display().to_string();
+    let paths = m.join("tsconfig-paths").join("register.js").display().to_string();
+    assert_eq!(l.args, ["-r".into(), register, "-r".into(), paths, file.display().to_string()]);
+    // An ES module package strips the types instead: ts-node's hook is for CommonJS.
+    write(&dir, "svc/package.json", r#"{ "type": "module", "dependencies": { "ts-node": "^10.9.2" } }"#);
+    let l = crate::run::node_run::file_launch(&*host, &pkg, &n, &file, &[], &[], None, Vec::new()).unwrap();
+    assert_eq!(l.args, [file.display().to_string()]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn typescript_runs_through_the_projects_tsx_when_it_has_it() {
     let host = snout_host::local();
     let dir = scratch_dir("node-tsx");
