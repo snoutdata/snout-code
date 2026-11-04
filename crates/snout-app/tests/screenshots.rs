@@ -3019,6 +3019,7 @@ sleep 30
     }
 }
 
+#[cfg(target_os = "macos")]
 /// A Playwright project for the Tests window's shot: installed, so no bar shows.
 fn playwright_repo(repo: &std::path::Path) {
     let w = |name: &str, text: &str| {
@@ -3031,6 +3032,7 @@ fn playwright_repo(repo: &std::path::Path) {
     w("node_modules/@playwright/test/package.json", r#"{ "version": "1.64.1" }"#);
 }
 
+#[cfg(target_os = "macos")]
 /// A run of three browsers, part way through its history: a failure with a screenshot
 /// comparison and a trace, a flaky test, a skipped one.
 fn playwright_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
@@ -3145,6 +3147,7 @@ fn playwright_run(repo: &std::path::Path) -> snout_app::playwright::report::Run 
     run
 }
 
+#[cfg(target_os = "macos")]
 /// Nine runs before this one: a test that fails now and then, one that is flaky.
 fn playwright_history(run: &snout_app::playwright::report::Run) -> snout_app::playwright::history::History {
     use snout_app::playwright::history::{History, Record};
