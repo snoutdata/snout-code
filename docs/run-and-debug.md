@@ -1,6 +1,6 @@
 # Running and debugging
 
-Run your application, its Gradle tasks or Maven goals and its tests, and debug them, from the title bar, the editor's gutter or the keyboard. Runs, tests and the debugger need a Gradle or Maven build and the Java engine; see [Gradle](gradle.md) and [Maven](maven.md).
+Run your application, its Gradle tasks or Maven goals and its tests, and debug them, from the title bar, the editor's gutter or the keyboard. Java runs, tests and the debugger need a Gradle or Maven build and the Java engine; see [Gradle](gradle.md) and [Maven](maven.md). A `package.json` project's scripts and files run on Node, without Java; see [Node projects](node.md).
 
 ## Run configurations
 
@@ -11,6 +11,8 @@ A run configuration says what runs. The Java engine finds these in your build by
 - **Gradle**: the `bootRun` and `run` tasks.
 - **Maven**: `spring-boot:run` in a Maven module with Spring Boot's plugin.
 - **Tests**: the tests of each module.
+
+A project with a `package.json` also gets one configuration for each of its scripts, under **Scripts** (see [Node projects](node.md#scripts)).
 
 They appear once the Java engine is ready. Until you pick one, the title bar starts on the Spring Boot application, else the first main class, else the first Gradle task or Maven goal.
 
@@ -25,7 +27,7 @@ For the configuration you select, set:
 | Field | What it is |
 |---|---|
 | Name | What the title bar shows |
-| Kind | Application, Gradle, Maven or Tests |
+| Kind | Application, Gradle, Maven, Tests, Playwright, Package script or Node (see [Node projects](node.md#node-configurations)) |
 | Module | The module it runs in |
 | Main class | For an application, as `com.example.App` |
 | Task | For Gradle and tests, as `:app:bootRun`; **Goals** for Maven, as `spring-boot:run` |
@@ -55,9 +57,9 @@ The right side of the title bar holds:
 - **Debug** (the bug). Debugs the configuration (⌃D).
 - **Stop** (■). Shows while something runs, and stops everything in the Run and Debug windows (⌘F2).
 
-With **Current File**, Run and Debug take the file in front: its test class, else its main class.
+With **Current File**, Run and Debug take the file in front: its test class, else its main class; a TypeScript or JavaScript file runs on Node (see [Script files](node.md#script-files)).
 
-Run and Debug are grey until the Java engine is ready.
+Run and Debug are grey until the Java engine is ready, except for Current File and the configurations that run on Node.
 
 ## Run from the editor
 
@@ -156,7 +158,7 @@ Start a debug session with the title bar's Debug button (⌃D), **Debug '…'** 
 
 ### Breakpoints
 
-Breakpoints go in Java, Scala, Kotlin and Groovy files, and in the TypeScript and JavaScript of a Playwright project (see [Debugging tests](playwright.md#debugging-tests)).
+Breakpoints go in Java, Scala, Kotlin and Groovy files, and in TypeScript and JavaScript files (see [Debugging](node.md#debugging) for Node projects and [Debugging tests](playwright.md#debugging-tests) for Playwright).
 
 - Click on a line number to set a breakpoint. Click again to remove it. **Toggle Breakpoint** (⌘F8, Run menu) does the same for the caret's line.
 - Right click a breakpoint to give it a condition (a right click on a line without one opens the gutter's menu, whose **Breakpoint Condition…** sets one with a condition), or press ⌥⇧⌘F8 (**Edit Breakpoint Condition…**) on its line. In the box **Breakpoint on line N**, type an expression such as `i > 3`, then press Enter or click **Done**. The program stops there only when it is true. Leave it empty to stop every time. **Remove** removes the breakpoint.

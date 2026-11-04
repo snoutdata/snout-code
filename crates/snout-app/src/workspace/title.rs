@@ -259,9 +259,9 @@ impl Workspace {
         let configs = runs.configurations();
         let selected = runs.selected_config();
         let playwright = self.pw_tests.read(cx).root.is_some();
-        // A Playwright configuration runs without the Java engine.
-        let ready = runs.engine(cx).is_some()
-            || selected.as_ref().is_some_and(|c| c.kind == crate::run::config::Kind::Playwright);
+        // Node configurations run without the Java engine, and so may the current file (a
+        // script).
+        let ready = runs.engine(cx).is_some() || selected.as_ref().is_none_or(|c| c.kind.is_node());
         let loading = runs.configs_loading;
         let running = runs.any_running();
         // The selected configuration runs: Run becomes Rerun.
@@ -277,6 +277,8 @@ impl Workspace {
                 crate::run::config::Kind::Maven => Icon::Feather,
                 crate::run::config::Kind::Tests => Icon::Check,
                 crate::run::config::Kind::Playwright => Icon::TestFolder,
+                crate::run::config::Kind::Npm => Icon::Package,
+                crate::run::config::Kind::Node => Icon::Code,
             });
             Trigger(
                 bar_button("title-run-config", &p)

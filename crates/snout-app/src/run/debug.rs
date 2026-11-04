@@ -86,6 +86,8 @@ pub struct Debugger {
     pub targets: Vec<Dap>,
     /// js-debug's server, for this session.
     pub server: Option<std::sync::Arc<crate::lang::js_debug::Server>>,
+    /// Attached to a program started elsewhere: letting go leaves it running.
+    pub attached: bool,
     pub ended: bool,
     pub paused: bool,
     pub reason: Option<String>,
@@ -118,6 +120,7 @@ impl Debugger {
             dap: self.dap.clone(),
             targets: self.targets.clone(),
             server: None,
+            attached: self.attached,
             ended: self.ended,
             paused: self.paused,
             reason: self.reason.clone(),
@@ -178,10 +181,11 @@ impl Debugger {
         {
             all.push(d);
         }
+        let terminate = !self.attached;
         let byes: Vec<_> = all
             .into_iter()
             .filter(Dap::is_open)
-            .map(|dap| (dap.request("disconnect", json!({ "terminateDebuggee": true })), dap))
+            .map(|dap| (dap.request("disconnect", json!({ "terminateDebuggee": terminate })), dap))
             .collect();
         let server = self.server.take();
         if !byes.is_empty() || server.is_some() {
@@ -377,6 +381,7 @@ impl Runs {
                 let Some(d) = self.dbg(id) else { return };
                 if d.is_first(from) {
                     d.end();
+                    self.attach_ended(id, cx);
                 } else {
                     // A Node process's connection: the debugger goes on with the others.
                     d.targets.retain(|t| !t.same(from));
@@ -420,7 +425,7 @@ impl Runs {
                     if first {
                         self.run_to.take_if(|(sid, _, _)| *sid == id);
                     }
-                    if event == "terminated" && !first && node {
+                    if event == "terminated" && node && (!first || self.is_attach(id)) {
                         // A Node process waits for its debugger to let go before it exits.
                         let bye = from.request("disconnect", json!({}));
                         cx.background_executor().spawn(async move { bye.await.ok() }).detach();

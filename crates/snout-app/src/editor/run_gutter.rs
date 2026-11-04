@@ -28,7 +28,9 @@ pub const PLAIN_PAD: f32 = PROBLEM_W;
 
 /// The gutter's padding for `path`.
 pub fn gutter_pad(path: &std::path::Path) -> f32 {
-    if debuggable(path) || crate::spring::has_marks(path) { CODE_PAD } else { PLAIN_PAD }
+    // `package.json` has run icons beside its scripts.
+    let scripts = path.file_name().is_some_and(|n| n == "package.json");
+    if debuggable(path) || scripts || crate::spring::has_marks(path) { CODE_PAD } else { PLAIN_PAD }
 }
 
 /// Where the gutter's lanes are, from the editor's last layout.
@@ -145,6 +147,30 @@ impl EditorPanel {
                     }
                 });
             }));
+            return;
+        }
+        // A project's `package.json`: a run icon beside each script; the run configurations
+        // follow what it says.
+        if self.path.file_name().is_some_and(|n| n == "package.json") && self.class_file.is_none() {
+            let text = self.state.read(cx).value().to_string();
+            let items: Vec<crate::run::Runnable> = crate::run::node_run::scripts(&text)
+                .into_iter()
+                .map(|s| crate::run::Runnable { line: s.line, target: crate::run::Target::NpmScript { name: s.name } })
+                .collect();
+            let root = crate::run::runs(cx).and_then(|r| r.read(cx).project_root.clone());
+            let ours = root.is_some_and(|r| self.path.parent() == Some(r.as_path()));
+            self.runnables = (ours && !items.is_empty())
+                .then(|| Rc::new(crate::run::FileRunnables { module: None, items, whole: None }));
+            if ours && let Some(runs) = crate::run::runs(cx) {
+                runs.update(cx, |r, cx| r.load_node_configs(cx));
+            }
+            return;
+        }
+        // A JavaScript or TypeScript file runs whole, on the project's Node.
+        if crate::run::node_run::is_script_file(&self.path) && self.class_file.is_none() {
+            let whole = crate::run::Target::Script { file: self.path.clone() };
+            self.runnables =
+                Some(Rc::new(crate::run::FileRunnables { module: None, items: Vec::new(), whole: Some(whole) }));
             return;
         }
         if !matches!(ext, "java" | "scala") || self.class_file.is_some() {

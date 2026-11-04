@@ -30,6 +30,7 @@ impl Runs {
         if let Some(d) = self.session_mut(id).and_then(|s| s.debug.as_mut()) {
             d.adapter = Adapter::Node;
             d.attaching = true;
+            d.attached = launch.attach.is_some();
         }
         let host = crate::host::host(cx);
         let fixed = self.js_debug_server.clone();
@@ -101,9 +102,17 @@ impl Runs {
             if let Err(e) = dap.request("initialize", js_debug::initialize_args()).await {
                 eprintln!("[debug] initialize: {e}");
             }
-            if let Err(e) = dap.request("launch", js_debug::launch_args(&launch)).await {
+            let (command, arguments) = match launch.attach {
+                Some(port) => ("attach", js_debug::attach_args(&launch, port)),
+                None => ("launch", js_debug::launch_args(&launch)),
+            };
+            if let Err(e) = dap.request(command, arguments).await {
                 let _ = this.update(cx, |this, cx| {
-                    this.node_debug_failed(id, format!("The debugger could not start the program: {e}"), cx)
+                    let why = match command {
+                        "attach" => format!("The debugger could not attach: {e}"),
+                        _ => format!("The debugger could not start the program: {e}"),
+                    };
+                    this.node_debug_failed(id, why, cx)
                 });
             }
         })
@@ -131,6 +140,25 @@ impl Runs {
         } else {
             s.push(Stream::Err, &why);
         }
+        cx.notify();
+    }
+
+    /// Whether session `id` attached to a Node rather than starting one.
+    pub(super) fn is_attach(&self, id: u64) -> bool {
+        self.session(id).is_some_and(|s| matches!(&s.launch, super::Launch::Process(p) if p.attach.is_some()))
+    }
+
+    /// An attach session's debugger let go (the Node it was attached to ended, or Stop):
+    /// the session ends with it.
+    pub(super) fn attach_ended(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(s) = self.session_mut(id) else { return };
+        let attached = matches!(&s.launch, super::Launch::Process(p) if p.attach.is_some());
+        if !attached || s.ended.is_some() {
+            return;
+        }
+        s.push(Stream::System, "Detached");
+        s.ended = Some(Ended { outcome: Outcome::Success, elapsed: s.started.elapsed(), exit_code: None, error: None });
+        cx.emit(super::RunsEvent::Ended(id));
         cx.notify();
     }
 

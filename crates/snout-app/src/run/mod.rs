@@ -15,6 +15,7 @@ pub mod debug_dialogs;
 pub mod gradle_window;
 pub mod maven_window;
 mod node_debug;
+pub mod node_run;
 pub mod process;
 mod pw;
 pub mod test_tree;
@@ -172,6 +173,8 @@ const MAX_LINES: usize = 50_000;
 pub struct Session {
     pub id: u64,
     pub run_id: Option<String>,
+    /// The configuration a process run was started from (a script's), for Rerun.
+    pub config: Option<String>,
     pub title: String,
     pub launch: Launch,
     pub lines: Vec<ConsoleLine>,
@@ -459,6 +462,8 @@ pub struct GradleTasks {
 pub struct FileRunnables {
     pub module: Option<String>,
     pub items: Vec<Runnable>,
+    /// What the whole file runs as, with no icon of its own (a Node script).
+    pub whole: Option<Target>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -487,6 +492,14 @@ pub enum Target {
         title: String,
         group: bool,
     },
+    /// A JavaScript or TypeScript file, run on the project's Node.
+    Script {
+        file: PathBuf,
+    },
+    /// A script of the project's `package.json`.
+    NpmScript {
+        name: String,
+    },
 }
 
 impl Target {
@@ -496,6 +509,10 @@ impl Target {
             Target::TestClass { class } | Target::Main { class } => simple(class),
             Target::TestMethod { class, method } => format!("{}.{method}", simple(class)),
             Target::Playwright { title, .. } => title.clone(),
+            Target::Script { file } => {
+                file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned())
+            }
+            Target::NpmScript { name } => name.clone(),
         }
     }
 
@@ -515,10 +532,13 @@ impl FileRunnables {
         // The nearest item at or above the caret, when it is a test method.
         let nearest = self.items.iter().filter(|r| r.line <= line).max_by_key(|r| r.line);
         nearest
-            .filter(|r| matches!(r.target, Target::TestMethod { .. } | Target::Playwright { .. }))
+            .filter(|r| {
+                matches!(r.target, Target::TestMethod { .. } | Target::Playwright { .. } | Target::NpmScript { .. })
+            })
             .map(|r| &r.target)
             .or_else(|| self.items.iter().find(|r| matches!(r.target, Target::TestClass { .. })).map(|r| &r.target))
             .or_else(|| self.items.iter().find(|r| matches!(r.target, Target::Main { .. })).map(|r| &r.target))
+            .or(self.whole.as_ref())
     }
 }
 
@@ -579,6 +599,8 @@ pub struct Runs {
     pub marks: Entity<Marks>,
     /// The build's configurations, and the engine process they came from.
     pub engine_configs: Vec<RunConfig>,
+    /// The scripts of the project's `package.json`, as configurations.
+    pub node_configs: Vec<RunConfig>,
     configs_from: Option<u32>,
     pub configs_loading: bool,
     /// The open project, and what is kept for it.
@@ -633,6 +655,7 @@ impl Runs {
             hub,
             marks,
             engine_configs: Vec::new(),
+            node_configs: Vec::new(),
             configs_from: None,
             configs_loading: false,
             project_root: None,
@@ -673,6 +696,8 @@ impl Runs {
         self.configs_from = None;
         self.gradle = GradleTasks::default();
         self.maven = MavenGoals::default();
+        self.node_configs.clear();
+        self.load_node_configs(cx);
         self.sync_marks(cx);
         cx.notify();
     }
@@ -885,7 +910,15 @@ impl Runs {
 
     /// Every configuration: the build's (as the user changed them), then the user's own.
     pub fn configurations(&self) -> Vec<RunConfig> {
-        config::merged(&self.engine_configs, &self.project.configurations)
+        config::merged(&self.found_configs(), &self.project.configurations)
+    }
+
+    /// The configurations the project has without the user: the build's, then its
+    /// `package.json` scripts.
+    pub fn found_configs(&self) -> Vec<RunConfig> {
+        let mut all = self.engine_configs.clone();
+        all.extend(self.node_configs.iter().filter(|c| !all.iter().any(|e| e.id == c.id)).cloned().collect::<Vec<_>>());
+        all
     }
 
     /// The configuration the title bar shows; none for Current File. Until one is picked,
@@ -1056,6 +1089,13 @@ impl Runs {
             self.start_playwright_config(config.clone(), options, cx);
             return None;
         }
+        // So does a script or a Node file.
+        if let Launch::Config { config, debug } = &launch
+            && matches!(config.kind, Kind::Npm | Kind::Node)
+        {
+            self.start_node_config(config.clone(), *debug, cx);
+            return None;
+        }
         let state = if matches!(launch, Launch::Process(_)) {
             EngineState::Ready
         } else {
@@ -1074,6 +1114,7 @@ impl Runs {
         let mut session = Session {
             id,
             run_id: None,
+            config: None,
             title,
             launch: launch.clone(),
             lines: Vec::new(),
@@ -1102,7 +1143,10 @@ impl Runs {
             Launch::Tests { label, .. } => format!("Testing {label}"),
             Launch::Task { task, .. } => format!("Running {task}"),
             Launch::Maven { goals, module, .. } => format!("Running mvn {goals} in {module}"),
-            Launch::Process(p) => p.command_line(),
+            Launch::Process(p) => match p.attach {
+                Some(port) => format!("Attaching to the Node listening on port {port}"),
+                None => p.command_line(),
+            },
         };
         session.lines.push(ConsoleLine::system(what));
         if matches!(&launch, Launch::Tests { .. })
@@ -1259,6 +1303,7 @@ impl Runs {
         let mut s = Session {
             id,
             run_id: Some(run_id.to_owned()),
+            config: None,
             title: launch.title(),
             launch: launch.clone(),
             lines: Vec::new(),
@@ -1390,9 +1435,13 @@ impl Runs {
 
     /// Run session `id`'s launch again, stopping it first.
     pub fn rerun(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(launch) = self.session(id).map(|s| s.launch.clone()) else { return };
+        let Some((launch, config)) = self.session(id).map(|s| (s.launch.clone(), s.config.clone())) else { return };
         self.stop(id, cx);
-        self.start(launch, cx);
+        if let Some(next) = self.start(launch, cx)
+            && let Some(s) = self.session_mut(next)
+        {
+            s.config = config;
+        }
     }
 
     /// Run the tests that failed in session `id`'s module.
@@ -1670,6 +1719,7 @@ impl Runs {
             let mut out = FileRunnables {
                 module: v.as_ref().and_then(|v| v.get("module")).and_then(Value::as_str).map(str::to_owned),
                 items: Vec::new(),
+                whole: None,
             };
             for c in v.as_ref().and_then(|v| v.get("classes")).and_then(Value::as_array).into_iter().flatten() {
                 let Some(class) = c.get("name").and_then(Value::as_str).map(str::to_owned) else { continue };
@@ -1699,6 +1749,14 @@ impl Runs {
                 let scope = crate::playwright::run::Scope::At { file: file.clone(), line: Some(*line), project: None };
                 let options = crate::playwright::run::Options { breakpoints: debug, ..Default::default() };
                 self.start_playwright(scope, options, cx);
+                return;
+            }
+            Target::Script { file } => {
+                self.run_node_file(file, debug, cx);
+                return;
+            }
+            Target::NpmScript { name } => {
+                self.run_npm_script(name, debug, cx);
                 return;
             }
             Target::TestClass { class } | Target::TestMethod { class, .. } => {
@@ -1747,10 +1805,11 @@ impl Runs {
 
     /// The running session of the configuration `id`, in the Run or Debug window.
     pub fn running_config(&self, id: &str) -> Option<&Session> {
-        self.sessions
-            .iter()
-            .rev()
-            .find(|s| s.running() && matches!(&s.launch, Launch::Config { config, .. } if config.id == id))
+        self.sessions.iter().rev().find(|s| {
+            s.running()
+                && (s.config.as_deref() == Some(id)
+                    || matches!(&s.launch, Launch::Config { config, .. } if config.id == id))
+        })
     }
 
     // ----- Breakpoints --------------------------------------------------------------------------

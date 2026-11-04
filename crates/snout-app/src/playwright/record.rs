@@ -134,6 +134,7 @@ pub fn codegen_launch(
         place: Place::Build,
         report: false,
         debug_node: None,
+        attach: None,
     })
 }
 
@@ -158,6 +159,7 @@ pub fn picker_launch(
         place: Place::Build,
         report: false,
         debug_node: None,
+        attach: None,
     })
 }
 
@@ -178,6 +180,7 @@ pub fn ui_launch(
         place: Place::Build,
         report: false,
         debug_node: None,
+        attach: None,
     })
 }
 

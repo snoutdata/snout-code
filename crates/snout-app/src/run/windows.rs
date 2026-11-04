@@ -1085,6 +1085,7 @@ impl SessionView {
         Self(Session {
             id: s.id,
             run_id: s.run_id.clone(),
+            config: s.config.clone(),
             title: s.title.clone(),
             launch: s.launch.clone(),
             lines: Vec::new(),

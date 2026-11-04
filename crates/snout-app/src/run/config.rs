@@ -23,10 +23,16 @@ pub enum Kind {
     Maven,
     /// Playwright tests: `playwright test` with `args` (`--project=chromium`, a file).
     Playwright,
+    /// A script of `package.json` (in `task`), run by the project's package manager.
+    Npm,
+    /// A JavaScript or TypeScript file (in `task`) run on the project's Node, with Node's
+    /// options in `jvm_args`; with a `port`, an attach to a Node started elsewhere.
+    Node,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [Kind::Main, Kind::Gradle, Kind::Maven, Kind::Tests, Kind::Playwright];
+    pub const ALL: [Kind; 7] =
+        [Kind::Main, Kind::Gradle, Kind::Maven, Kind::Tests, Kind::Playwright, Kind::Npm, Kind::Node];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -35,6 +41,8 @@ impl Kind {
             "tests" => Some(Kind::Tests),
             "maven" => Some(Kind::Maven),
             "playwright" => Some(Kind::Playwright),
+            "npm" => Some(Kind::Npm),
+            "node" => Some(Kind::Node),
             _ => None,
         }
     }
@@ -46,6 +54,8 @@ impl Kind {
             Kind::Tests => "tests",
             Kind::Maven => "maven",
             Kind::Playwright => "playwright",
+            Kind::Npm => "npm",
+            Kind::Node => "node",
         }
     }
 
@@ -56,7 +66,14 @@ impl Kind {
             Kind::Tests => "Tests",
             Kind::Maven => "Maven",
             Kind::Playwright => "Playwright",
+            Kind::Npm => "Package script",
+            Kind::Node => "Node",
         }
+    }
+
+    /// Whether it runs on Node, found by SnoutCode, rather than through the Java engine.
+    pub fn is_node(self) -> bool {
+        matches!(self, Kind::Playwright | Kind::Npm | Kind::Node)
     }
 }
 
@@ -79,6 +96,9 @@ pub struct RunConfig {
     /// Spring profiles to activate, separated by commas.
     pub profiles: String,
     pub working_dir: Option<String>,
+    /// A Node configuration's debug port to attach to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
     /// Made or changed by the user (not as the build has it).
     pub user: bool,
 }
@@ -110,6 +130,7 @@ impl RunConfig {
                 .unwrap_or_default(),
             profiles: String::new(),
             working_dir: s("workingDir"),
+            port: None,
             user: false,
         })
     }
@@ -126,7 +147,7 @@ impl RunConfig {
                 Kind::Gradle => args.push(format!("--args=--spring.profiles.active={profiles}")),
                 Kind::Tests => jvm_args.push(format!("-Dspring.profiles.active={profiles}")),
                 Kind::Maven => args.push(format!("-Dspring-boot.run.profiles={profiles}")),
-                Kind::Playwright => {}
+                Kind::Playwright | Kind::Npm | Kind::Node => {}
             }
         }
         let mut v = json!({
@@ -158,6 +179,8 @@ impl RunConfig {
             Kind::Maven => "Maven",
             Kind::Tests => "Tests",
             Kind::Playwright => "Playwright",
+            Kind::Npm => "Scripts",
+            Kind::Node => "Node",
         }
     }
 }
@@ -252,6 +275,8 @@ pub fn default_config(all: &[RunConfig]) -> Option<RunConfig> {
         .or_else(|| all.iter().find(|c| c.kind == Kind::Main))
         .or_else(|| all.iter().find(|c| c.kind == Kind::Gradle || c.kind == Kind::Maven))
         .or_else(|| all.iter().find(|c| c.kind == Kind::Playwright))
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Npm && matches!(c.task.as_deref(), Some("dev" | "start"))))
+        .or_else(|| all.iter().find(|c| c.kind == Kind::Npm))
         .cloned()
 }
 

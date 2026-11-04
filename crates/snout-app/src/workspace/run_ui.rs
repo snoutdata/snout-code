@@ -144,13 +144,14 @@ impl Workspace {
                 .iter()
                 .find(|i| matches!(i.target, Target::TestClass { .. }))
                 .or_else(|| r.items.iter().find(|i| matches!(i.target, Target::Main { .. })))
-                .cloned()?;
-            Some((pick.target, r.module.clone()))
+                .map(|i| i.target.clone())
+                .or_else(|| r.whole.clone())?;
+            Some((pick, r.module.clone()))
         });
         match found {
             Some((target, module)) => runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx)),
             None => self.model.update(cx, |m, cx| {
-                m.message = "The file in front has no tests or main class to run".into();
+                m.message = "The file in front has no tests, main class or script to run".into();
                 cx.notify();
             }),
         }
@@ -170,7 +171,7 @@ impl Workspace {
                 self.runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx));
             }
             None => self.model.update(cx, |m, cx| {
-                m.message = "Nothing to run here: put the caret in a main class or a test".into();
+                m.message = "Nothing to run here: put the caret in a main class, a test or a script".into();
                 cx.notify();
             }),
         }

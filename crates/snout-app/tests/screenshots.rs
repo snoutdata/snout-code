@@ -172,6 +172,9 @@ mod shots {
         /// A Playwright test stopped at a breakpoint in its spec: the line, the Debug window
         /// on the worker's stack.
         PlaywrightDebug,
+        /// A Node project: its `package.json` with a run icon beside each script, and
+        /// `npm run dev` running in the Run window.
+        NodeScripts,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -1526,6 +1529,7 @@ sleep 30
                     place: snout_app::run::Place::Debug,
                     report: true,
                     debug_node: Some("/usr/local/bin/node".into()),
+                    attach: None,
                 };
                 cx.update(|cx| {
                     runs.update(cx, |r, cx| {
@@ -1605,6 +1609,51 @@ sleep 30
                 })
                 .unwrap();
                 std::mem::forget(_server);
+            }
+            Some(Select::NodeScripts) => {
+                let file = repo.join("package.json");
+                std::fs::write(&file, crate::NODE_PACKAGE).unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((6, 5))), cx)));
+                let runs = cx.update(|cx| ws.read(cx).runs.clone());
+                let host = snout_host::local();
+                let launch = snout_app::run::process::ProcessLaunch {
+                    title: "npm run dev".into(),
+                    program: "/usr/local/bin/node".into(),
+                    args: vec!["/usr/local/lib/node_modules/npm/bin/npm-cli.js".into(), "run".into(), "dev".into()],
+                    cwd: repo.clone(),
+                    env: Vec::new(),
+                    place: snout_app::run::Place::Run,
+                    report: false,
+                    debug_node: None,
+                    attach: None,
+                };
+                cx.update(|cx| {
+                    runs.update(cx, |r, cx| {
+                        r.node_configs = snout_app::run::node_run::configs(&*host, &repo);
+                        r.select_config(Some("npm:dev".into()), cx);
+                        let id = r.adopt(snout_app::run::Launch::Process(launch), "npm-1", cx);
+                        let s = r.session_mut(id).unwrap();
+                        for line in [
+                            "",
+                            "> shop@1.4.0 dev",
+                            "> vite --port 5173",
+                            "",
+                            "",
+                            "  \x1b[32m\x1b[1mVITE\x1b[22m v6.0.7\x1b[39m  ready in \x1b[1m412\x1b[22m ms",
+                            "",
+                            "  \x1b[32m➜\x1b[39m  \x1b[1mLocal\x1b[22m:   \x1b[36mhttp://localhost:\x1b[1m5173\x1b[22m/\x1b[39m",
+                            "  \x1b[32m➜\x1b[39m  \x1b[1mNetwork\x1b[22m: use \x1b[1m--host\x1b[22m to expose",
+                            "\x1b[2m10:42:07\x1b[22m \x1b[36m\x1b[1m[vite]\x1b[22m\x1b[39m \x1b[32mpage reload \x1b[39m\x1b[2msrc/cart.ts\x1b[22m",
+                        ] {
+                            s.push(snout_app::run::Stream::Out, line);
+                        }
+                    })
+                });
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.show_bottom(ws.tabs.run, window, cx));
+                })
+                .unwrap();
             }
             Some(Select::TestsWindow) => {
                 let run = crate::playwright_run(&repo);
@@ -3106,6 +3155,7 @@ sleep 30
             shot(&format!("ui-tests-window-{mode}"), theme, Activity::Project, Some(Select::TestsWindow));
             shot(&format!("ui-recording-{mode}"), theme, Activity::Project, Some(Select::Recording));
             shot(&format!("ui-playwright-debug-{mode}"), theme, Activity::Project, Some(Select::PlaywrightDebug));
+            shot(&format!("ui-node-scripts-{mode}"), theme, Activity::Project, Some(Select::NodeScripts));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(
@@ -3161,6 +3211,28 @@ test.describe('checkout', () => {
 ";
 
 #[cfg(target_os = "macos")]
+const NODE_PACKAGE: &str = r#"{
+  "name": "shop",
+  "version": "1.4.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src",
+    "db:seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}
+"#;
+
 const DEBUGGED_SPEC: &str = "import { test, expect } from '@playwright/test';
 import { CartPage } from './pages/cart';
 

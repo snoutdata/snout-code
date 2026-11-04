@@ -178,6 +178,7 @@ impl Runs {
             place: super::Place::Run,
             report: true,
             debug_node: None,
+            attach: None,
         });
         let id = self.adopt(launch, "playwright", cx);
         run.finish();

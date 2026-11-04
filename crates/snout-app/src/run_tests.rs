@@ -865,6 +865,7 @@ fn the_caret_picks_the_test_method_else_the_class_else_the_main_class() {
     use crate::run::{FileRunnables, Runnable};
     let tests = FileRunnables {
         module: None,
+        whole: None,
         items: vec![
             Runnable { line: 2, target: Target::TestClass { class: "demo.T".into() } },
             Runnable { line: 4, target: Target::TestMethod { class: "demo.T".into(), method: "a".into() } },
@@ -876,6 +877,7 @@ fn the_caret_picks_the_test_method_else_the_class_else_the_main_class() {
     assert_eq!(tests.at_line(12), Some(&Target::TestMethod { class: "demo.T".into(), method: "b".into() }));
     let main = FileRunnables {
         module: None,
+        whole: None,
         items: vec![
             Runnable { line: 12, target: Target::Main { class: "demo.Application".into() } },
             Runnable { line: 17, target: Target::Main { class: "demo.Application".into() } },
@@ -962,6 +964,7 @@ fn a_process_run_streams_its_output_and_ends_with_its_exit_code(cx: &mut TestApp
             place: Place::Build,
             report: false,
             debug_node: None,
+            attach: None,
         })
     };
     let id = cx

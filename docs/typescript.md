@@ -1,6 +1,6 @@
 # TypeScript and JavaScript
 
-How SnoutCode understands TypeScript and JavaScript: completion, navigation, rename and problems. It is made for test projects, such as a Playwright repository, and for the scripts beside a Java project.
+How SnoutCode understands TypeScript and JavaScript: completion, navigation, rename and problems. It is made for Node projects (see [Node projects](node.md)), test projects such as a Playwright repository, and the scripts beside a Java project.
 
 ## Where it works
 

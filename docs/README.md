@@ -1,6 +1,6 @@
 # SnoutCode user guide
 
-SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, and for end-to-end tests written with Playwright in TypeScript, on macOS, Linux and Windows, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
+SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScript and JavaScript projects on Node, and for end-to-end tests written with Playwright in TypeScript, on macOS, Linux and Windows, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
 
 ## Start here
 
@@ -16,7 +16,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, and for end-t
 
 - [Editor](editor.md): tabs, editing, finding and replacing text across files, finding files, Search Everywhere and the command palette.
 - [Java](java.md): completion, navigation, find references, rename, quick fixes, formatting, problems, and the engine's readiness.
-- [TypeScript and JavaScript](typescript.md): completion, navigation, rename and problems for test projects such as Playwright repositories, and the Node they run on.
+- [TypeScript and JavaScript](typescript.md): completion, navigation, rename and problems for Node projects, test projects such as Playwright repositories, and the scripts beside a Java project, and the Node they run on.
 - [Playwright projects](playwright.md): a repository of Playwright tests as a project of its own: the packages and browsers its tests need, steps recorded into a spec and locators picked from the page, runs followed live in the Tests window, breakpoints in the test code, environments, traces and screenshot comparisons, and the runs kept.
 - [Spring](spring.md): beans and injections, endpoints, the Spring window, and `application.yml` and `application.properties` help.
 
@@ -26,6 +26,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, and for end-t
 - [Maven](maven.md): Maven builds without a Maven install: reactors, parents, BOMs and profiles, the Maven window, goals, tests, and POM editing.
 - [Project Structure](project-structure.md): the project's JDK, modules, source sets, dependencies and their conflicts, the JDKs on your machine, and the facets SnoutCode found.
 - [Run and debug](run-and-debug.md): run configurations, the Run window, tests, and the debugger.
+- [Node projects](node.md): a `package.json` project's scripts as run configurations, script files run on the project's Node (TypeScript too), breakpoints through js-debug, and attaching to a Node started elsewhere.
 - [Processes](processes.md): what SnoutCode runs on your machine, and how to stop it.
 - [Supported versions and performance](versions-and-performance.md): the Gradle and Maven versions and JDKs SnoutCode supports, what it shows for a build outside them, how long opening a project takes, and the scripts that check both.
 

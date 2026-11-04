@@ -593,7 +593,12 @@ impl Workspace {
                 ("Installing Playwright's browsers… The Build window shows how it goes.".to_owned(), None)
             }
             (Need::Packages { manager }, false) => (
-                "This Playwright project's packages are not installed, so its tests cannot run yet.".to_owned(),
+                if setup.playwright {
+                    "This Playwright project's packages are not installed, so its tests cannot run yet."
+                } else {
+                    "This project's packages are not installed, so it cannot run yet."
+                }
+                .to_owned(),
                 Some(format!(
                     "Install packages ({} {})",
                     manager.name(),

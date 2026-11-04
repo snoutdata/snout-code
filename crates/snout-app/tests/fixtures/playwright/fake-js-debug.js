@@ -3,7 +3,8 @@
 // connection's `launch` asks the client to start the program (`runInTerminal`, with a
 // bootloader of its own, which does nothing, in NODE_OPTIONS), then asks for a session for the program's worker
 // (`startDebugging`); on that session's connection it stops at the first breakpoint it was
-// given, shows a frame there with one variable, and once continued ends the session. The
+// given, shows a frame there with one variable, and once continued ends the session. An
+// `attach` on the first connection asks for the attached Node's session the same way. The
 // program (the fake cli.js) waits for the worker's session to let go before it runs: this
 // server writes `released` beside itself then. What each connection said goes into
 // `js-debug.log` beside it, a JSON line each.
@@ -91,7 +92,16 @@ function on(c, m) {
       break;
     }
     case 'launch':
-      if (c.role === 'launch') {
+    case 'attach':
+      if (m.command === 'attach' && c.role === 'launch') {
+        // Attached to a Node listening elsewhere: its session comes as the worker's does.
+        reply(c, m);
+        c.send({
+          type: 'request',
+          command: 'startDebugging',
+          arguments: { request: 'attach', configuration: { type: 'pwa-node', name: 'attached', __pendingTargetId: 'a1' } },
+        });
+      } else if (c.role === 'launch') {
         c.launch = m;
         c.send({
           type: 'request',

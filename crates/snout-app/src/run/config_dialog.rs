@@ -49,6 +49,7 @@ struct Fields {
     jvm_args: Entity<InputState>,
     env: Entity<InputState>,
     profiles: Entity<InputState>,
+    port: Entity<InputState>,
 }
 
 pub struct ConfigDialog {
@@ -75,7 +76,7 @@ impl ConfigDialog {
     pub fn new(runs: Entity<Runs>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let r = runs.read(cx);
         let list = r.configurations();
-        let engine = r.engine_configs.clone();
+        let engine = r.found_configs();
         let selected = r
             .project
             .selected
@@ -102,6 +103,7 @@ impl ConfigDialog {
             jvm_args: field("-Xmx1g -Dkey=value", window, cx),
             env: field("NAME=value; OTHER=value", window, cx),
             profiles: field("dev, local", window, cx),
+            port: field("9229 (empty: run the file)", window, cx),
         };
         let next = list.len() + 1;
         let mut this = Self { runs, list, engine, selected, fields, modules, next, focus: cx.focus_handle() };
@@ -122,6 +124,7 @@ impl ConfigDialog {
         set(&self.fields.jvm_args, config::join_args(&c.jvm_args), window, cx);
         set(&self.fields.env, config::env_text(&c.env), window, cx);
         set(&self.fields.profiles, c.profiles.clone(), window, cx);
+        set(&self.fields.port, c.port.map(|p| p.to_string()).unwrap_or_default(), window, cx);
     }
 
     /// Take what the fields say into the selected configuration.
@@ -140,6 +143,7 @@ impl ConfigDialog {
         next.jvm_args = config::split_args(&jvm);
         next.env = config::parse_env(&env);
         next.profiles = profiles.trim().to_owned();
+        next.port = read(&self.fields.port).trim().parse().ok();
         if next != *c {
             next.user = true;
             *c = next;
@@ -328,6 +332,8 @@ impl ConfigDialog {
         };
         let from_build = self.engine.iter().any(|e| e.id == c.id);
         let pw = c.kind == Kind::Playwright;
+        // Node's kinds have no module, VM or profiles.
+        let node = c.kind.is_node();
         div()
             .id("config-form")
             .size_full()
@@ -338,23 +344,38 @@ impl ConfigDialog {
             .overflow_y_scrollbar()
             .child(row("Name", input(&self.fields.name)))
             .child(row("Kind", div().flex().child(kind_menu).into_any_element()))
-            .when(!pw, |d| d.child(row("Module", div().flex().child(module_menu).into_any_element())))
+            .when(!node, |d| d.child(row("Module", div().flex().child(module_menu).into_any_element())))
             .when(c.kind == Kind::Main, |d| d.child(row("Main class", input(&self.fields.main_class))))
             .when(c.kind != Kind::Main && !pw, |d| {
-                d.child(row(if c.kind == Kind::Maven { "Goals" } else { "Task" }, input(&self.fields.task)))
+                d.child(row(
+                    match c.kind {
+                        Kind::Maven => "Goals",
+                        Kind::Npm => "Script",
+                        Kind::Node => "File",
+                        _ => "Task",
+                    },
+                    input(&self.fields.task),
+                ))
             })
             .child(row(
                 match c.kind {
                     Kind::Gradle => "Gradle arguments",
                     Kind::Maven => "Maven arguments",
                     Kind::Playwright => "Playwright arguments",
+                    Kind::Npm => "Script arguments",
                     _ => "Program arguments",
                 },
                 input(&self.fields.args),
             ))
-            .when(!pw, |d| d.child(row("VM options", input(&self.fields.jvm_args))))
+            .when(!node || c.kind == Kind::Node, |d| {
+                d.child(row(
+                    if c.kind == Kind::Node { "Node options" } else { "VM options" },
+                    input(&self.fields.jvm_args),
+                ))
+            })
             .child(row("Environment variables", input(&self.fields.env)))
-            .when(!pw, |d| d.child(row("Active profiles", self.profiles_field(cx))))
+            .when(c.kind == Kind::Node, |d| d.child(row("Attach to port", input(&self.fields.port))))
+            .when(!node, |d| d.child(row("Active profiles", self.profiles_field(cx))))
             .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(if from_build {
                 if c.user {
                     "From the build, with your changes. Remove puts it back as the build has it."
@@ -410,6 +431,8 @@ impl Render for ConfigDialog {
                         Kind::Maven => Icon::Feather,
                         Kind::Tests => Icon::Check,
                         Kind::Playwright => Icon::TestFolder,
+                        Kind::Npm => Icon::Package,
+                        Kind::Node => Icon::Code,
                     },
                     12.,
                     p.ok,
@@ -448,7 +471,7 @@ impl Render for ConfigDialog {
                     crate::components::Tone::Success,
                     crate::components::IconName::Play,
                     "Run Configurations",
-                    Some("What Run and Debug start: an application, a Gradle task, tests.".into()),
+                    Some("What Run and Debug start: an application, a Gradle task, tests, a script.".into()),
                     &p,
                 )
                 .pb(px(12.))

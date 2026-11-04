@@ -1107,6 +1107,7 @@ fn open_trace(tests: &Entity<PwTests>, path: &Path, cx: &mut App) {
             place: Place::Build,
             report: false,
             debug_node: None,
+            attach: None,
         })
     });
     cx.spawn(async move |cx| {

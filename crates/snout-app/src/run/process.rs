@@ -30,6 +30,9 @@ pub struct ProcessLaunch {
     /// Debug it with js-debug, run on this Node: js-debug says when to start it, and with
     /// what variables (see [`crate::lang::js_debug`]).
     pub debug_node: Option<PathBuf>,
+    /// With `debug_node`: attach to the Node already listening on this port (`--inspect`)
+    /// instead of starting the program.
+    pub attach: Option<u16>,
 }
 
 impl ProcessLaunch {

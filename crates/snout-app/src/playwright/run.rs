@@ -181,6 +181,7 @@ pub fn test_launch(
         place: if options.breakpoints { Place::Debug } else { Place::Run },
         report: true,
         debug_node: options.breakpoints.then(|| node.bin.clone()),
+        attach: None,
     })
 }
 

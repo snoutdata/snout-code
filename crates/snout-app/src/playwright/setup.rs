@@ -83,24 +83,40 @@ pub fn missing_browsers(host: &dyn Host, manifest: &Value, browsers: &Path) -> V
 /// A line about the Playwright project at `root` for the Project view: its Playwright, its
 /// package manager and the Node it runs on (`Playwright 1.64.1 · npm · Node 24.13.0`).
 pub fn summary(host: &dyn Host, root: &Path, stop: Option<&Path>) -> Option<String> {
-    let project = super::project_at(host, root)?;
+    let Some(project) = super::project_at(host, root) else {
+        // A Node project: its package manager and Node (`npm · Node 24.13.0`).
+        if !crate::run::node_run::is_node_project(host, root) {
+            return None;
+        }
+        return Some(format!("{} · {}", PackageManager::of(host, root).name(), node_line(host, root, stop)));
+    };
     let playwright = match (&project.installed, &project.declared) {
         (Some(v), _) => format!("Playwright {v}"),
         (None, Some(v)) => format!("Playwright {v}, not installed"),
         (None, None) => "Playwright".to_owned(),
     };
-    let wanted = node::wanted(host, root, stop);
-    let all = node::discover(host);
-    let node = match node::choose(&wanted, &all) {
-        Some(n) => format!("Node {}", n.version),
-        None => "no Node fits".to_owned(),
-    };
-    Some(format!("{playwright} · {} · {node}", project.package_manager.name()))
+    Some(format!("{playwright} · {} · {}", project.package_manager.name(), node_line(host, root, stop)))
 }
 
-/// What the Playwright project at `root` needs, if anything.
+/// The Node the project at `root` runs on, for the Project view (`Node 24.13.0`).
+fn node_line(host: &dyn Host, root: &Path, stop: Option<&Path>) -> String {
+    let wanted = node::wanted(host, root, stop);
+    let all = node::discover(host);
+    match node::choose(&wanted, &all) {
+        Some(n) => format!("Node {}", n.version),
+        None => "no Node fits".to_owned(),
+    }
+}
+
+/// What the Playwright project (or Node project) at `root` needs, if anything.
 pub fn check(host: &dyn Host, root: &Path) -> Option<Need> {
-    let project = super::project_at(host, root)?;
+    let Some(project) = super::project_at(host, root) else {
+        // A Node project needs its packages once it lists some.
+        let node = crate::run::node_run::is_node_project(host, root);
+        let missing =
+            node && crate::run::node_run::has_dependencies(host, root) && !host.is_dir(&root.join("node_modules"));
+        return missing.then(|| Need::Packages { manager: PackageManager::of(host, root) });
+    };
     let Some(version) = project.installed.clone() else {
         return Some(Need::Packages { manager: project.package_manager });
     };
@@ -127,6 +143,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 place: Place::Build,
                 report: false,
                 debug_node: None,
+                attach: None,
             })
         }
         Need::Packages { manager } => {
@@ -142,6 +159,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 place: Place::Build,
                 report: false,
                 debug_node: None,
+                attach: None,
             })
         }
         Need::Browsers { .. } => {
@@ -158,6 +176,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 place: Place::Build,
                 report: false,
                 debug_node: None,
+                attach: None,
             })
         }
     }
@@ -172,6 +191,8 @@ pub struct Setup {
     pub need: Option<Need>,
     /// What the Project view says of the project (see [`summary`]).
     pub summary: Option<String>,
+    /// The project is a Playwright one (else a Node one, or neither).
+    pub playwright: bool,
     /// The install running, as its session.
     pub installing: Option<u64>,
     /// Why the install could not start.
@@ -215,6 +236,7 @@ impl Setup {
             root,
             need: None,
             summary: None,
+            playwright: false,
             installing: None,
             error: None,
             dismissed: None,
@@ -240,14 +262,15 @@ impl Setup {
         let host = crate::host::host(cx);
         let task = cx.background_executor().spawn(async move {
             let need = check(&*host, &root);
-            (need, summary(&*host, &root, Some(&root)))
+            (need, summary(&*host, &root, Some(&root)), super::is_root(&*host, &root))
         });
         self.looking = Some(cx.spawn(async move |this, cx| {
-            let (need, summary) = task.await;
+            let (need, summary, playwright) = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.need != need || this.summary != summary {
+                if this.need != need || this.summary != summary || this.playwright != playwright {
                     this.need = need;
                     this.summary = summary;
+                    this.playwright = playwright;
                     cx.notify();
                 }
             });

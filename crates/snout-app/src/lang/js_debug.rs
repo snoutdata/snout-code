@@ -150,6 +150,22 @@ pub fn launch_args(launch: &ProcessLaunch) -> Value {
     })
 }
 
+/// The `attach` to the Node listening for a debugger on `port` of this machine (started with
+/// `--inspect`), following the processes it starts.
+pub fn attach_args(launch: &ProcessLaunch, port: u16) -> Value {
+    json!({
+        "type": "pwa-node",
+        "request": "attach",
+        "name": launch.title,
+        "address": "127.0.0.1",
+        "port": port,
+        "cwd": launch.cwd,
+        "continueOnAttach": true,
+        "autoAttachChildProcesses": true,
+        "skipFiles": ["<node_internals>/**"],
+    })
+}
+
 /// `launch` as `runInTerminal` asks it started: its variables, with js-debug's on top
 /// (a variable it sets to null is left as the launch has it).
 pub fn with_terminal_env(launch: &ProcessLaunch, arguments: &Value) -> ProcessLaunch {
@@ -181,6 +197,7 @@ mod tests {
             place: Place::Debug,
             report: true,
             debug_node: Some("/n/bin/node".into()),
+            attach: None,
         };
         let args = launch_args(&launch);
         assert_eq!(args["runtimeExecutable"], "/n/bin/node");
