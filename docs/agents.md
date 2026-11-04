@@ -203,16 +203,7 @@ SnoutCode also passes the console's `claude` extra settings for its hooks (`--se
 
 Ask Claude to open a file, or to show you a line or a method, and it opens it in SnoutCode's editor, with the lines or the text selected. It can also read your open tabs, your selection and the problems of a file, and save a file.
 
-This goes through the **snout-editor** skill, which the console's `claude` loads for its session only (`--plugin-dir`); nothing is installed into your own Claude Code setup. The skill calls a small script, `snout-api`, that the session's settings let run without asking. The script calls SnoutCode's editor API over HTTP, on 127.0.0.1 only, with the same token as the hooks. The API is described by a [UTCP](https://www.utcp.io) manual, so any agent can use it:
-
-| | |
-| --- | --- |
-| The manual | `GET http://127.0.0.1:$SNOUT_HOOK_PORT/utcp` |
-| A call | `POST http://127.0.0.1:$SNOUT_HOOK_PORT/api/<tool>`, its arguments as a JSON body or as query parameters |
-| The token | the header line in the file `$SNOUT_API_HEADER` (`curl -H @"$SNOUT_API_HEADER"`) |
-| The tools | `openFile`, `getCurrentSelection`, `getLatestSelection`, `getOpenEditors`, `getWorkspaceFolders`, `getDiagnostics`, `checkDocumentDirty`, `saveDocument` |
-
-Only the skill's one line description stays in Claude's context; its instructions and the manual are read when Claude needs them, so the editor's tools cost nothing in a session that does not use them. A `codex` started in the console gets the same two variables.
+This goes through an Agent Skill and a [UTCP](https://www.utcp.io) manual over a small HTTP API, not an MCP server, so the editor's tools cost almost nothing in a session that does not use them: about 80 tokens per request instead of about 800. Nothing is installed into your own Claude Code setup. See **[The editor API for agents](editor-api.md)** for how it works, what it saves, and how other agents can use it.
 
 ## Codex
 
