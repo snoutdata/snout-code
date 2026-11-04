@@ -50,7 +50,7 @@ tree-sitter-java = "0.23"
 # Where a Playwright spec's tests are, for the gutter's run icons.
 tree-sitter-typescript = "0.23"
 # Playwright's traces (`trace.zip`): the filmstrip, actions, failed requests, console errors.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.3", default-features = false, features = ["deflate"] }
 tree-sitter-kotlin-sg = "0.4"
 # What a project's .gitignore leaves out (the host walks and watches the tree, and finds text).
 ignore = "0.4"

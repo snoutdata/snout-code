@@ -64,7 +64,7 @@ fn lines(text: &str) -> impl Iterator<Item = Value> + '_ {
 pub fn read(path: &Path) -> anyhow::Result<Trace> {
     let file = std::fs::File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
-    let names: Vec<String> = zip.file_names().map(str::to_owned).collect();
+    let names: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
     let mut trace = Trace::default();
     let mut start: Option<f64> = None;
     let mut open: Vec<(String, usize)> = Vec::new();
