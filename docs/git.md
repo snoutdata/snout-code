@@ -77,7 +77,8 @@ Files lists the changed files of the working tree: name (with the file type's ic
 - **Resize** a column: point at the header and drag the handle that shows between two titles.
 - **Filter** by name with the field in the header.
 - **Select** a file to see its diff in Changes. The selection shows in the accent colour while the table has the keyboard, and in grey once you click elsewhere. ⌘-click adds or removes a file, ⇧-click selects a range, and ⌘A selects every file shown (when no text field has the keyboard).
-- **Right-click** for **Stage**, **Unstage**, **Discard…**, **Delete…**, **Reveal in Finder**, **Open in External Terminal** and **Copy path**. A right-click on a file that is not selected selects it first.
+- **Right-click** for **Stage**, **Unstage**, **Discard…**, **Delete…**, **Add to .gitignore**, **Reveal in Finder**, **Open in External Terminal** and **Copy path**. A right-click on a file that is not selected selects it first.
+- **Add to .gitignore** ignores the selected untracked files: by name (**src/notes.sql**, or **These 3 files**), by their folder (**db/**) when they share one, or by their extension (**All .sql files**) when they share one. The rule goes at the end of the repository's `.gitignore`, which SnoutCode makes when there is none, and the files leave the list. A tracked file stays tracked whatever `.gitignore` says, so the item is greyed out for tracked files.
 
 When nothing has changed, Files says the working tree is clean.
 

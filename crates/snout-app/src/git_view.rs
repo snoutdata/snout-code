@@ -798,7 +798,7 @@ impl GitView {
                                     }
                                 }
                             })
-                            .context_menu(move |menu, _, _| {
+                            .context_menu(move |menu, window, cx| {
                                 let send = |a: Action| {
                                     let model = model.clone();
                                     move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
@@ -829,8 +829,39 @@ impl GitView {
                                             .icon(crate::components::menu_icon(crate::components::IconName::Trash))
                                             .disabled(!entries.iter().any(on_disk))
                                             .on_click(send(Action::AskDeleteFiles(entries.clone()))),
-                                    )
-                                    .separator();
+                                    );
+                                // Add to .gitignore: the untracked files (a rule leaves a
+                                // tracked file tracked), by name, folder or extension.
+                                let untracked: Vec<String> =
+                                    entries.iter().filter(|e| e.is_untracked()).map(|e| e.path.clone()).collect();
+                                let rules = snout_core::ignore_rules(&untracked);
+                                if rules.is_empty() {
+                                    menu = menu.item(
+                                        PopupMenuItem::new("Add to .gitignore")
+                                            .icon(crate::components::menu_icon(crate::components::IconName::EyeOff))
+                                            .disabled(true),
+                                    );
+                                } else {
+                                    let model = model.clone();
+                                    menu = menu.submenu_with_icon(
+                                        Some(crate::components::menu_icon(crate::components::IconName::EyeOff)),
+                                        "Add to .gitignore",
+                                        window,
+                                        cx,
+                                        move |sub, _, _| {
+                                            rules.iter().fold(sub, |sub, r| {
+                                                let (model, pattern) = (model.clone(), r.pattern.clone());
+                                                sub.item(PopupMenuItem::new(r.label.clone()).on_click(
+                                                    move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                                        let a = Action::AddToGitignore(pattern.clone());
+                                                        model.update(cx, |m, cx| m.handle(a, cx))
+                                                    },
+                                                ))
+                                            })
+                                        },
+                                    );
+                                }
+                                menu = menu.separator();
                                 if let Some(root) = &root {
                                     menu = menu
                                         .item(

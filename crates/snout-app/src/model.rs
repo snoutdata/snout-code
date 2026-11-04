@@ -188,6 +188,8 @@ pub enum Action {
     Discard(Vec<FileEntry>),
     AskDeleteFiles(Vec<FileEntry>),
     DeleteFiles(Vec<FileEntry>),
+    /// Append a rule (one or more lines) to the repository's `.gitignore`.
+    AddToGitignore(String),
     Commit,
     DraftMessage,
     CancelDraft,
@@ -1900,6 +1902,15 @@ impl Model {
                     format!("Deleted {n} file(s)")
                 };
                 local(self, label, Box::new(move |r| r.delete_files(&entries, true)), cx);
+            }
+            Action::AddToGitignore(pattern) => {
+                let n = pattern.lines().count();
+                let label = if n == 1 {
+                    format!("Added {pattern} to .gitignore")
+                } else {
+                    format!("Added {n} rules to .gitignore")
+                };
+                local(self, label, Box::new(move |r| r.add_to_gitignore(&pattern).map(|_| ())), cx);
             }
             Action::Commit => {
                 if !self.can_commit() {
