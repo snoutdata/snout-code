@@ -3233,6 +3233,7 @@ const NODE_PACKAGE: &str = r#"{
 }
 "#;
 
+#[cfg(target_os = "macos")]
 const DEBUGGED_SPEC: &str = "import { test, expect } from '@playwright/test';
 import { CartPage } from './pages/cart';
 

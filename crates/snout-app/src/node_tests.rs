@@ -196,7 +196,7 @@ fn typescript_runs_through_the_projects_tsx_when_it_has_it() {
         Vec::new(),
     )
     .unwrap();
-    let tsx = dir.join("node_modules/tsx/dist/cli.mjs").display().to_string();
+    let tsx = dir.join("node_modules").join("tsx").join("dist/cli.mjs").display().to_string();
     assert_eq!(l.args, [tsx, "--inspect".into(), file.display().to_string(), "-v".into()]);
     assert_eq!(l.program, old.bin);
     std::fs::remove_dir_all(dir.join("node_modules")).unwrap();
