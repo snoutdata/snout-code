@@ -1615,6 +1615,11 @@ sleep 30
             Some(Select::NodeScripts) => {
                 let file = repo.join("package.json");
                 std::fs::write(&file, crate::NODE_PACKAGE).unwrap();
+                // Two packages of the workspace, drawn as modules in the tree.
+                for pkg in ["api", "worker"] {
+                    std::fs::create_dir_all(repo.join(pkg)).unwrap();
+                    std::fs::write(repo.join(pkg).join("package.json"), format!("{{ \"name\": \"{pkg}\" }}")).unwrap();
+                }
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((6, 5))), cx)));
                 let runs = cx.update(|cx| ws.read(cx).runs.clone());
                 let host = snout_host::local();

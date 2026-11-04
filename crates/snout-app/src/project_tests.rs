@@ -49,6 +49,16 @@ fn a_folder_inside_a_repository_is_the_project(cx: &mut TestAppContext) {
     let names: Vec<String> =
         rows.iter().map(|(e, _)| e.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
     assert_eq!(names, ["src", "README.md"]);
+    assert!(rows.iter().all(|(_, depth)| *depth == 1), "under the project's own row");
+    // The project's row closes and opens like a folder.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    cx.run_until_parked();
+    crate::quit_tests::click(cx, "file-root");
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| tree.update(cx, |t, cx| t.rows(cx))).is_empty(), "closed");
+    crate::quit_tests::click(cx, "file-root");
+    cx.run_until_parked();
+    assert_eq!(cx.update(|_, cx| tree.update(cx, |t, cx| t.rows(cx))).len(), 2, "open again");
     let marks = cx.update(|_, cx| {
         let m = model.read(cx);
         crate::files::git_marks(&m.repo_root().unwrap(), &m.status.files)

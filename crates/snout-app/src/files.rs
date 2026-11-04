@@ -128,6 +128,10 @@ pub struct FileTree {
     root: Option<PathBuf>,
     /// The folders open.
     pub expanded: HashSet<PathBuf>,
+    /// The project's own row is closed.
+    pub root_closed: bool,
+    /// The Node packages of the project (folders with a `package.json`), drawn as modules.
+    packages: HashSet<PathBuf>,
     /// The file of the editor tab in front, shown selected.
     pub active: Option<PathBuf>,
     /// What each folder read holds; shown, while it is read again, after the watcher says it
@@ -167,6 +171,8 @@ impl FileTree {
             model,
             root: None,
             expanded: HashSet::new(),
+            root_closed: false,
+            packages: HashSet::new(),
             active: None,
             listing: HashMap::new(),
             stale: HashSet::new(),
@@ -184,12 +190,15 @@ impl FileTree {
         self.stale.clear();
         self.reading.clear();
         self.expanded.clear();
+        self.root_closed = false;
+        self.packages.clear();
         self.watcher = None;
         self.root = root.clone();
         let Some(root) = root else {
             self._watch = None;
             return;
         };
+        self.find_packages(cx);
         let host = self.host.clone();
         let watch = cx.background_executor().spawn({
             let root = root.clone();
@@ -205,12 +214,40 @@ impl FileTree {
         }));
     }
 
+    /// Whether `dir` is a Node package of the project, drawn as a module.
+    pub fn is_package(&self, dir: &Path) -> bool {
+        self.packages.contains(dir)
+    }
+
+    /// Look for the project's Node packages off the UI thread.
+    fn find_packages(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else { return };
+        let host = self.host.clone();
+        let found = cx.background_executor().spawn({
+            let root = root.clone();
+            async move { crate::run::node_run::packages(&*host, &root) }
+        });
+        cx.spawn(async move |this, cx| {
+            let found: HashSet<PathBuf> = found.await.into_iter().collect();
+            let _ = this.update(cx, |this, cx| {
+                if this.root.as_ref() == Some(&root) && this.packages != found {
+                    this.packages = found;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Mark the listings of the folders the watcher saw change as old.
     fn take_events(&mut self, cx: &mut Context<Self>) {
         let Some(w) = &self.watcher else { return };
         let mut changed = false;
         let mut all = false;
         let paths: Vec<PathBuf> = w.events.try_iter().flat_map(|e| e.paths).collect();
+        let packages = paths
+            .iter()
+            .any(|p| p.ends_with("package.json") && !p.components().any(|c| c.as_os_str() == "node_modules"));
         for path in paths {
             if path.components().any(|c| c.as_os_str() == ".git") {
                 // A .gitignore or the index changed: what is ignored may have too.
@@ -233,6 +270,9 @@ impl FileTree {
         }
         if changed {
             cx.notify();
+        }
+        if packages {
+            self.find_packages(cx);
         }
     }
 
@@ -283,6 +323,7 @@ impl FileTree {
             return;
         }
         if let (Some(path), Some(root)) = (&path, &self.root) {
+            self.root_closed &= !path.starts_with(root);
             for dir in path.ancestors().skip(1) {
                 if !dir.starts_with(root) || dir == root {
                     break;
@@ -294,11 +335,14 @@ impl FileTree {
         cx.notify();
     }
 
-    /// The rows showing: every entry under an open folder, with its depth.
+    /// The rows showing under the project's own row: every entry under an open folder, with
+    /// its depth (1 for what the project's folder holds).
     pub fn rows(&mut self, cx: &mut Context<Self>) -> Vec<(Entry, usize)> {
         let Some(root) = self.root.clone() else { return Vec::new() };
         let mut out = Vec::new();
-        self.walk(&root, 0, false, &mut out, cx);
+        if !self.root_closed {
+            self.walk(&root, 1, false, &mut out, cx);
+        }
         out
     }
 
@@ -315,6 +359,60 @@ impl FileTree {
     }
 }
 
+impl FileTree {
+    /// The project's folder, as the tree's first row: it opens and closes like a folder,
+    /// with where it is beside its name.
+    fn root_row(&self, root: &Path, name: String, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let home = self.host.info().home.clone();
+        let place = match root.strip_prefix(&home).ok().filter(|_| !home.as_os_str().is_empty()) {
+            Some(rest) => format!("~/{}", rest.display()),
+            None => root.display().to_string(),
+        };
+        let package = self.packages.contains(root);
+        let tip: SharedString = root.display().to_string().into();
+        crate::components::list_row_h("file-root", crate::components::RowState::current(false), ROW, p)
+            .debug_selector(|| "file-root".into())
+            .gap_0()
+            .pl(px(2.))
+            .pr(px(4.))
+            .cursor_pointer()
+            .text_color(p.fg)
+            .child(div().w(px(14.)).h_full().flex_none().child(look::chevron(!self.root_closed, p.fg_dim)))
+            .child(div().w(px(2.)))
+            .child(crate::glyphs::icon(
+                if package { crate::glyphs::Icon::Module } else { crate::glyphs::Icon::Folder },
+                15.,
+                p.lanes()[2],
+            ))
+            .child(
+                div()
+                    .min_w_0()
+                    .ml(px(6.))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(name),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .ml(px(8.))
+                    .h_full()
+                    .flex()
+                    .text_size(px(11.5))
+                    .child(crate::components::path_text("file-root-place", place, p.fg_dim)),
+            )
+            .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.root_closed = !this.root_closed;
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+}
+
 impl Render for FileTree {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
@@ -327,6 +425,7 @@ impl Render for FileTree {
         };
         let model = self.model.clone();
         let guide = mix(p.fg, 0.1, p.panel);
+        let root_row = self.root.clone().zip(name.clone()).map(|(root, name)| self.root_row(&root, name, &p, cx));
         let items: Vec<AnyElement> = rows
             .into_iter()
             .enumerate()
@@ -344,7 +443,12 @@ impl Render for FileTree {
                 let path = e.path.clone();
                 let is_dir = e.dir;
                 let model = model.clone();
-                let tip: SharedString = e.path.display().to_string().into();
+                let package = is_dir && self.packages.contains(&e.path);
+                let tip: SharedString = if package {
+                    format!("Node package: {}", e.path.display()).into()
+                } else {
+                    e.path.display().to_string().into()
+                };
                 let selector = label.clone();
                 crate::components::list_row_h(("file-row", i), crate::components::RowState::current(selected), ROW, &p)
                     .debug_selector(move || format!("file-{selector}"))
@@ -363,7 +467,13 @@ impl Render for FileTree {
                     )
                     .child(div().w(px(2.)))
                     .map(|d| {
-                        if e.dir {
+                        if package {
+                            d.child(crate::glyphs::icon(
+                                crate::glyphs::Icon::Module,
+                                15.,
+                                if e.ignored { ink } else { p.lanes()[2] },
+                            ))
+                        } else if e.dir {
                             d.child(glyph(
                                 Glyph::Folder,
                                 15.,
@@ -391,6 +501,7 @@ impl Render for FileTree {
                             .overflow_hidden()
                             .text_ellipsis()
                             .whitespace_nowrap()
+                            .when(package, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .child(label),
                     )
                     .when_some(
@@ -479,30 +590,6 @@ impl Render for FileTree {
             .size_full()
             .flex()
             .flex_col()
-            // The project's folder: the tree's root row, padded off the edges.
-            .when_some(name.clone(), |d, name| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .h(px(26.))
-                        .mx(px(4.))
-                        .px(px(6.))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .overflow_hidden()
-                        .child(crate::components::icon(crate::components::IconName::FolderRoot, 14., p.accent))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .whitespace_nowrap()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child(name),
-                        ),
-                )
-            })
             .when(name.is_none(), |d| {
                 use crate::components::{EmptyState, IconName};
                 d.child(
@@ -525,7 +612,15 @@ impl Render for FileTree {
                     )
                 }
                 _ => d.child(
-                    div().id("file-tree").flex_1().min_h_0().flex().flex_col().overflow_y_scrollbar().children(items),
+                    div()
+                        .id("file-tree")
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .overflow_y_scrollbar()
+                        .children(root_row)
+                        .children(items),
                 ),
             })
     }

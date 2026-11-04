@@ -586,3 +586,21 @@ fn a_packages_script_runs_in_its_folder_from_its_own_package_json(cx: &mut gpui:
     });
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn the_project_tree_draws_each_package_as_a_module(cx: &mut gpui::TestAppContext) {
+    cx.executor().allow_parking();
+    let repo = workspace("node-workspace-tree");
+    let (_model, ws, cx) = open(cx, with_repo(&repo));
+    let tree = cx.update(|_, cx| ws.read(cx).side.read(cx).files.clone());
+    let web = repo.join("apps/web");
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| tree.read(cx).is_package(&web)));
+    assert!(found, "apps/web is a package");
+    cx.update(|_, cx| {
+        let t = tree.read(cx);
+        assert!(t.is_package(&repo) && t.is_package(&repo.join("apps/api")));
+        assert!(!t.is_package(&repo.join("apps")), "a folder that holds packages is not one");
+        assert!(!t.is_package(&web.join("dist")), "build output is not");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}

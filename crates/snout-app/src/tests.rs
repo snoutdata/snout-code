@@ -919,7 +919,9 @@ fn the_file_tree_lists_the_repository_follows_the_disk_and_opens_files(cx: &mut 
         cx.update(|_, cx| {
             tree.update(cx, |t, cx| t.rows(cx))
                 .into_iter()
-                .map(|(e, depth)| format!("{}{}", "  ".repeat(depth), e.path.file_name().unwrap().to_string_lossy()))
+                .map(|(e, depth)| {
+                    format!("{}{}", "  ".repeat(depth - 1), e.path.file_name().unwrap().to_string_lossy())
+                })
                 .collect::<Vec<_>>()
         })
     };

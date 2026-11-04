@@ -16,6 +16,7 @@ A repository with both a Java build and a `package.json` (a Spring Boot applicat
 
 A project can hold several packages: a workspace (npm, pnpm, Yarn or Bun) whose root lists them, or folders that each have their own `package.json`, such as `frontend/` beside a Java build. SnoutCode finds every `package.json` down to four folders deep, leaving out `node_modules`, build output (`dist`, `build`, `out`, `target`, `coverage`) and hidden folders.
 
+- The project tree draws each package's folder as a module, in bold, under the project's folder.
 - Each package's scripts are configurations of their own, named with the package's folder: `npm run dev (apps/web)`. The project's own scripts come first and have no folder in their name.
 - A script runs in its package's folder, on the Node that package asks for (its `.nvmrc` or `engines`, else the project's).
 - The package manager is the lockfile's: the package's own, else the nearest one above it, which for a workspace is the one at its root.

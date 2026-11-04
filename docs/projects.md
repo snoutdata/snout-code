@@ -182,7 +182,9 @@ note "Reading the build model". If the model cannot be read, the note says why. 
 ### The Files view
 
 The Files view shows the folder's files as they are on disk. Files made or deleted elsewhere
-show up at once.
+show up at once. Its first row is the project's folder, with its path: click it to fold the
+whole tree away. A folder with its own `package.json` (a package of a Node project) is drawn
+as a module, in bold.
 
 In both views:
 
