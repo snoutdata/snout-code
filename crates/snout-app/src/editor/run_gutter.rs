@@ -116,9 +116,13 @@ fn code_x(state: &EditorState) -> Option<Pixels> {
     Some(b.left() - state.scroll_offset().x.min(px(0.)))
 }
 
-/// Files breakpoints can be set in.
+/// Files breakpoints can be set in: the JVM's (java-debug), and JavaScript and TypeScript
+/// (js-debug, through their source maps).
 fn debuggable(path: &std::path::Path) -> bool {
-    matches!(path.extension().and_then(|e| e.to_str()), Some("java" | "scala" | "kt" | "groovy"))
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("java" | "scala" | "kt" | "groovy" | "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs")
+    )
 }
 
 impl EditorPanel {

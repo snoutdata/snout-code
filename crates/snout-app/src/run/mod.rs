@@ -14,6 +14,7 @@ pub mod debug;
 pub mod debug_dialogs;
 pub mod gradle_window;
 pub mod maven_window;
+mod node_debug;
 pub mod process;
 mod pw;
 pub mod test_tree;
@@ -71,7 +72,11 @@ pub enum Launch {
 
 impl Launch {
     pub fn debug(&self) -> bool {
-        matches!(self, Launch::Config { debug: true, .. } | Launch::Tests { debug: true, .. })
+        match self {
+            Launch::Config { debug, .. } | Launch::Tests { debug, .. } => *debug,
+            Launch::Process(p) => p.debug_node.is_some(),
+            _ => false,
+        }
     }
 
     pub fn title(&self) -> String {
@@ -595,6 +600,9 @@ pub struct Runs {
     pub run_to: Option<(u64, PathBuf, u32)>,
     /// What starts once a session ends well (Rebuild Project: the compile after `clean`).
     pub then: HashMap<u64, Launch>,
+    /// The js-debug server script to use instead of the one SnoutCode downloads (the
+    /// tests' stand-in).
+    pub js_debug_server: Option<PathBuf>,
     _tick: Option<Task<()>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -640,6 +648,7 @@ impl Runs {
             scala_error: None,
             run_to: None,
             then: HashMap::new(),
+            js_debug_server: None,
             _tick: None,
             _subscriptions: subscriptions,
         };
@@ -1043,7 +1052,7 @@ impl Runs {
         if let Launch::Config { config, debug } = &launch
             && config.kind == Kind::Playwright
         {
-            let options = crate::playwright::run::Options { debug: *debug, ..Default::default() };
+            let options = crate::playwright::run::Options { breakpoints: *debug, ..Default::default() };
             self.start_playwright_config(config.clone(), options, cx);
             return None;
         }
@@ -1143,7 +1152,11 @@ impl Runs {
         if let Launch::Process(p) = &s.launch {
             let p = p.clone();
             s.push(Stream::System, &format!("Working directory: {}", p.cwd.display()));
-            self.spawn_process(id, p, cx);
+            match p.debug_node.clone() {
+                // js-debug starts first, and asks for the program once it is ready for it.
+                Some(node) => self.start_node_debug(id, p, node, cx),
+                None => self.spawn_process(id, p, cx),
+            }
             return;
         }
         s.engine = engine;
@@ -1684,7 +1697,7 @@ impl Runs {
         let launch = match target {
             Target::Playwright { file, line, .. } => {
                 let scope = crate::playwright::run::Scope::At { file: file.clone(), line: Some(*line), project: None };
-                let options = crate::playwright::run::Options { debug, ..Default::default() };
+                let options = crate::playwright::run::Options { breakpoints: debug, ..Default::default() };
                 self.start_playwright(scope, options, cx);
                 return;
             }

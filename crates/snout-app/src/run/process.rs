@@ -27,6 +27,9 @@ pub struct ProcessLaunch {
     /// It runs Playwright with the SnoutCode reporter: the reporter's lines feed the
     /// session's [`crate::playwright::report::Run`] instead of the console.
     pub report: bool,
+    /// Debug it with js-debug, run on this Node: js-debug says when to start it, and with
+    /// what variables (see [`crate::lang::js_debug`]).
+    pub debug_node: Option<PathBuf>,
 }
 
 impl ProcessLaunch {
@@ -186,7 +189,9 @@ impl Runs {
     }
 
     fn on_process_event(&mut self, id: u64, event: Event, cx: &mut Context<Self>) {
+        let ended = matches!(event, Event::Exit(_) | Event::Failed(_));
         let Some(s) = self.session_mut(id) else { return };
+        let debugged = s.debug.is_some();
         match event {
             Event::Line(Stream::Out, line) if s.playwright.is_some() => {
                 let (shown, event) = crate::playwright::report::split_line(&line);
@@ -227,6 +232,9 @@ impl Runs {
                 if let Some(run) = s.playwright.as_mut() {
                     run.finish();
                 }
+                if let Some(d) = s.debug.as_mut() {
+                    d.end();
+                }
                 cx.emit(super::RunsEvent::Ended(id));
             }
             Event::Failed(why) => {
@@ -241,8 +249,15 @@ impl Runs {
                 if let Some(run) = s.playwright.as_mut() {
                     run.finish();
                 }
+                if let Some(d) = s.debug.as_mut() {
+                    d.end();
+                }
                 cx.emit(super::RunsEvent::Ended(id));
             }
+        }
+        if ended && debugged {
+            // The debugger went with the program, and so does the line it showed.
+            self.sync_marks(cx);
         }
         cx.notify();
     }

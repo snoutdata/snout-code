@@ -72,7 +72,10 @@ pub struct Options {
     /// Watch: the browser windows show, one test at a time.
     pub headed: bool,
     /// Step through it in the Playwright Inspector (`--debug`).
-    pub debug: bool,
+    pub inspector: bool,
+    /// Stop at the breakpoints in the test code: js-debug follows the runner and its worker;
+    /// one worker, headed, with no time limit while it is paused.
+    pub breakpoints: bool,
     /// Take the screenshots the tests compare with as they are now.
     pub update_snapshots: bool,
     /// Run each test this many times (for a flaky one).
@@ -82,10 +85,13 @@ pub struct Options {
 impl Options {
     pub fn args(&self) -> Vec<String> {
         let mut out = Vec::new();
-        if self.headed {
+        if self.headed || self.breakpoints {
             out.extend(["--headed".to_owned(), "--workers=1".to_owned()]);
         }
-        if self.debug {
+        if self.breakpoints {
+            out.push("--timeout=0".into());
+        }
+        if self.inspector {
             out.push("--debug".into());
         }
         if self.update_snapshots {
@@ -172,8 +178,9 @@ pub fn test_launch(
         args,
         cwd: root.to_owned(),
         env: all,
-        place: Place::Run,
+        place: if options.breakpoints { Place::Debug } else { Place::Run },
         report: true,
+        debug_node: options.breakpoints.then(|| node.bin.clone()),
     })
 }
 

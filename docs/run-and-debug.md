@@ -156,7 +156,7 @@ Start a debug session with the title bar's Debug button (⌃D), **Debug '…'** 
 
 ### Breakpoints
 
-Breakpoints go in Java, Scala, Kotlin and Groovy files.
+Breakpoints go in Java, Scala, Kotlin and Groovy files, and in the TypeScript and JavaScript of a Playwright project (see [Debugging tests](playwright.md#debugging-tests)).
 
 - Click on a line number to set a breakpoint. Click again to remove it. **Toggle Breakpoint** (⌘F8, Run menu) does the same for the caret's line.
 - Right click a breakpoint to give it a condition (a right click on a line without one opens the gutter's menu, whose **Breakpoint Condition…** sets one with a condition), or press ⌥⇧⌘F8 (**Edit Breakpoint Condition…**) on its line. In the box **Breakpoint on line N**, type an expression such as `i > 3`, then press Enter or click **Done**. The program stops there only when it is true. Leave it empty to stop every time. **Remove** removes the breakpoint.

@@ -642,8 +642,11 @@ mod running {
         assert_eq!(at.args(root), ["tests/a.spec.ts:12", "--project=webkit"]);
         assert_eq!(at.title(), "a.spec.ts:12 [webkit]");
         assert_eq!(Scope::LastFailed.args(root), ["--last-failed"]);
-        let o = Options { headed: true, update_snapshots: true, repeat: Some(5), debug: false };
+        let o = Options { headed: true, update_snapshots: true, repeat: Some(5), ..Default::default() };
         assert_eq!(o.args(), ["--headed", "--workers=1", "--update-snapshots", "--repeat-each=5"]);
+        let debug = Options { breakpoints: true, ..Default::default() };
+        assert_eq!(debug.args(), ["--headed", "--workers=1", "--timeout=0"]);
+        assert_eq!(Options { inspector: true, ..Default::default() }.args(), ["--debug"]);
     }
 
     /// A `trace.zip` as Playwright 1.64 writes one (format 10), small.
@@ -821,6 +824,124 @@ mod running {
         let _ = std::fs::remove_dir_all(repo);
     }
 
+    /// A fake Playwright project debugged under the fake js-debug, stopped at the breakpoint
+    /// on line 4 of its spec: the project, the server's folder, the runs, the session.
+    fn debug_paused<'a>(
+        name: &str,
+        cx: &'a mut gpui::TestAppContext,
+    ) -> Option<(PathBuf, PathBuf, gpui::Entity<crate::run::Runs>, u64, &'a mut gpui::VisualTestContext)> {
+        use crate::lang_tests::pump_until;
+        use crate::run::Target;
+        use crate::tests::{open, with_repo};
+        if node::discover(&*snout_host::local()).is_empty() {
+            println!("playwright debugging: skipped; needs Node");
+            return None;
+        }
+        cx.executor().allow_parking();
+        let repo = fake_project(name);
+        let spec = "import { test } from '@playwright/test';\n\ntest('buys', async ({ page }) => {\n  const total = 2 * 3;\n  await page.goto('/');\n});\n";
+        write(&repo, "tests/shop.spec.ts", spec);
+        let server = crate::tests::scratch_dir(&format!("{name}-js-debug"));
+        let fixtures = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/playwright"));
+        std::fs::copy(fixtures.join("fake-js-debug.js"), server.join("dapDebugServer.js")).unwrap();
+        let (_, ws, cx) = open(cx, with_repo(&repo));
+        let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+        let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+        let listed = pump_until(cx, 30, |cx| cx.update(|_, cx| tests.read(cx).listing.is_some()));
+        assert!(listed, "the tests are listed");
+        let file = repo.join("tests/shop.spec.ts");
+        cx.update(|_, cx| {
+            runs.update(cx, |r, cx| {
+                r.js_debug_server = Some(server.join("dapDebugServer.js"));
+                r.toggle_breakpoint(&file, 3, cx);
+                let target = Target::Playwright { file: file.clone(), line: 3, title: "buys".into(), group: false };
+                r.run_target(&target, None, true, cx);
+            })
+        });
+        let paused = pump_until(cx, 30, |cx| {
+            cx.update(|_, cx| {
+                let r = runs.read(cx);
+                r.paused_debug().is_some_and(|id| !r.session(id).unwrap().debug.as_ref().unwrap().locals().is_empty())
+            })
+        });
+        let log = std::fs::read_to_string(server.join("js-debug.log")).unwrap_or_default();
+        let console = cx.update(|_, cx| runs.read(cx).sessions.last().map(|s| s.console_text()).unwrap_or_default());
+        assert!(paused, "the worker stops at the breakpoint: {log}\n{console}");
+        let id = cx.update(|_, cx| runs.read(cx).paused_debug().unwrap());
+        Some((repo, server, runs, id, cx))
+    }
+
+    #[gpui::test]
+    fn debugging_a_test_stops_at_its_breakpoint_in_the_worker_js_debug_starts(cx: &mut gpui::TestAppContext) {
+        use crate::lang_tests::pump_until;
+        use crate::run::Place;
+        let Some((repo, server, runs, id, cx)) = debug_paused("pw-debug", cx) else { return };
+        let file = repo.join("tests/shop.spec.ts");
+        let log = || std::fs::read_to_string(server.join("js-debug.log")).unwrap_or_default();
+        cx.update(|_, cx| {
+            let r = runs.read(cx);
+            let s = r.session(id).unwrap();
+            assert_eq!(s.place(), Place::Debug);
+            assert!(s.playwright.is_some(), "the Tests window follows it too");
+            let d = s.debug.as_ref().unwrap();
+            assert_eq!(d.targets.len(), 2, "the launch's connection and the worker's");
+            assert!(d.is_current(&d.targets[1]), "the worker's stopped");
+            assert_eq!(d.exec_point(), Some((file.clone(), 3)));
+            assert_eq!(d.locals(), [("total".to_owned(), "6".to_owned())]);
+        });
+        // The program got js-debug's variables, and Playwright's debugging arguments.
+        let started: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.join("node_modules/@playwright/test/debugged.json")).unwrap(),
+        )
+        .unwrap();
+        let bootloader = server.join("bootloader.js");
+        assert_eq!(started["NODE_OPTIONS"], format!("--require {:?}", bootloader.display().to_string()));
+        let args: Vec<&str> = started["args"].as_array().unwrap().iter().filter_map(|a| a.as_str()).collect();
+        assert!(args.contains(&"--timeout=0") && args.contains(&"--workers=1"), "{args:?}");
+        assert!(args.contains(&"tests/shop.spec.ts:3"), "{args:?}");
+        let said = log();
+        assert!(said.contains(r#""role":"worker","type":"request","command":"setBreakpoints""#), "{said}");
+        assert!(said.contains(r#""__pendingTargetId":"w1""#), "the worker's session launched as asked: {said}");
+
+        // Going on: the worker's session ends, the debugger lets go of it, the run finishes.
+        cx.update(|_, cx| runs.update(cx, |r, cx| r.step(id, "continue", cx)));
+        let ended =
+            pump_until(cx, 30, |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| s.ended.is_some())));
+        assert!(ended, "the run ends once the debugger lets go: {}", log());
+        cx.update(|_, cx| {
+            let r = runs.read(cx);
+            let s = r.session(id).unwrap();
+            let d = s.debug.as_ref().unwrap();
+            assert!(d.ended && !d.live() && d.server.is_none());
+            assert!(s.playwright.as_ref().unwrap().counts().passed > 0);
+        });
+        assert!(log().contains(r#""role":"worker","type":"request","command":"disconnect""#));
+        let _ = std::fs::remove_dir_all(repo);
+        let _ = std::fs::remove_dir_all(server);
+    }
+
+    #[gpui::test]
+    fn stopping_a_paused_test_ends_the_program_and_its_debugger(cx: &mut gpui::TestAppContext) {
+        use crate::lang_tests::pump_until;
+        let Some((repo, server, runs, id, cx)) = debug_paused("pw-debug-stop", cx) else { return };
+        cx.update(|_, cx| runs.update(cx, |r, cx| r.stop(id, cx)));
+        let ended =
+            pump_until(cx, 30, |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| s.ended.is_some())));
+        assert!(ended, "Stop ends it");
+        cx.update(|_, cx| {
+            let r = runs.read(cx);
+            let s = r.session(id).unwrap();
+            assert_eq!(s.ended.as_ref().unwrap().outcome, crate::run::Outcome::Cancelled);
+            let d = s.debug.as_ref().unwrap();
+            assert!(d.ended && !d.paused && d.targets.is_empty());
+            assert!(r.paused_debug().is_none());
+        });
+        let log = std::fs::read_to_string(server.join("js-debug.log")).unwrap_or_default();
+        assert!(log.contains(r#""command":"disconnect","arguments":{"terminateDebuggee":true}"#), "{log}");
+        let _ = std::fs::remove_dir_all(repo);
+        let _ = std::fs::remove_dir_all(server);
+    }
+
     #[gpui::test]
     fn spec_files_get_run_icons_that_run_their_test(cx: &mut gpui::TestAppContext) {
         use crate::lang_tests::{editor_of, pump_until};
@@ -851,6 +972,75 @@ mod running {
         assert_eq!(r.at_line(2), Some(&r.items[0].target), "⌃⇧R runs the test the caret is in");
         let _ = std::fs::remove_dir_all(repo);
     }
+}
+
+/// A real debug of a spec under js-debug (downloaded as the app does, unless
+/// `SNOUT_JS_DEBUG` names a server script): `SNOUT_PW_DEBUG_AT` is a breakpoint of an
+/// installed Playwright project, as `<project>/<spec>:<line from 1>`. Run by hand with
+/// `--ignored`.
+#[gpui::test]
+#[ignore]
+fn a_real_debug_stops_at_a_breakpoint_in_a_spec(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::tests::{open, with_repo};
+    let Some(at) = std::env::var("SNOUT_PW_DEBUG_AT").ok() else {
+        println!("set SNOUT_PW_DEBUG_AT to <project>/<spec>:<line>");
+        return;
+    };
+    let (file, line) = at.rsplit_once(':').unwrap();
+    let (file, line) = (PathBuf::from(file), line.parse::<u32>().unwrap());
+    let dir = file.ancestors().find(|d| d.join("playwright.config.ts").is_file()).unwrap().to_owned();
+    cx.executor().allow_parking();
+    let (_, ws, cx) = open(cx, with_repo(&dir));
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let listed = pump_until(cx, 60, |cx| cx.update(|_, cx| tests.read(cx).listing.is_some()));
+    assert!(listed, "{:?}", cx.update(|_, cx| tests.read(cx).listing_error.clone()));
+    cx.update(|_, cx| {
+        runs.update(cx, |r, cx| {
+            r.js_debug_server = std::env::var_os("SNOUT_JS_DEBUG").map(PathBuf::from);
+            r.toggle_breakpoint(&file, line - 1, cx);
+            let scope = playwright::run::Scope::At { file: file.clone(), line: None, project: None };
+            let options = playwright::run::Options { breakpoints: true, ..Default::default() };
+            r.start_playwright(scope, options, cx);
+        })
+    });
+    let console = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| runs.read(cx).sessions.last().map(|s| s.console_text()).unwrap_or_default())
+    };
+    let started = Instant::now();
+    let paused = pump_until(cx, 180, |cx| {
+        cx.update(|_, cx| {
+            runs.read(cx).paused_debug().is_some_and(|id| {
+                let d = runs.read(cx).session(id).unwrap().debug.as_ref().unwrap();
+                !d.frames.is_empty() && !d.locals().is_empty()
+            })
+        })
+    });
+    assert!(paused, "it stops at the breakpoint:\n{}", console(cx));
+    let id = cx.update(|_, cx| runs.read(cx).paused_debug().unwrap());
+    cx.update(|_, cx| {
+        let d = runs.read(cx).session(id).unwrap().debug.as_ref().unwrap();
+        println!(
+            "paused after {:?} in {:?}, {} connections",
+            started.elapsed(),
+            d.frames[d.frame].name,
+            d.targets.len()
+        );
+        println!("  locals: {:?}", d.locals());
+        assert_eq!(d.exec_point(), Some((file.clone(), line - 1)));
+    });
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.remove_breakpoint(&file, line - 1, cx)));
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.step(id, "continue", cx)));
+    let ended =
+        pump_until(cx, 60, |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| s.ended.is_some())));
+    assert!(ended, "the run ends:\n{}", console(cx));
+    cx.update(|_, cx| {
+        let s = runs.read(cx).session(id).unwrap();
+        let c = s.playwright.as_ref().unwrap().counts();
+        println!("ended: {c:?}, {:?}", s.ended.as_ref().map(|e| e.outcome));
+        assert!(c.passed > 0, "{}", s.console_text());
+    });
 }
 
 /// A real Playwright run through the Tests window, against the installed project at

@@ -114,6 +114,15 @@ function play(t, retry, worker, status, outcome, extra) {
   reporter.onTestEnd(t, result);
 }
 
+// Under the fake js-debug: what the run was started with goes beside this file, and the
+// run waits until the debugger has let go of its worker.
+if (process.env.FAKE_DEBUG_HOLD && !list) {
+  fs.writeFileSync(path.join(here, 'debugged.json'), JSON.stringify({ NODE_OPTIONS: process.env.NODE_OPTIONS, args }));
+  const sleep = new Int32Array(new SharedArrayBuffer(4));
+  const until = Date.now() + 20000;
+  while (!fs.existsSync(process.env.FAKE_DEBUG_HOLD) && Date.now() < until) Atomics.wait(sleep, 0, 0, 50);
+}
+
 if (!list) {
   for (const t of shown) {
     if (t.id === 'b1') {

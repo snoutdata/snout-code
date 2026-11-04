@@ -40,8 +40,6 @@ Three tools help write tests without typing every locator. They start where the 
 - **Pick Locator** opens the browser at the same place. Each element you click puts its locator at the caret, as Playwright would write it: `page.getByRole('button', { name: 'Log in' })`, or the locator alone after a `.`. Click another element without moving the caret and it takes the last one's place; move the caret first to keep both. It needs a Playwright that has `page.pickLocator()` (1.64 has it). **Stop** or closing the browser ends it.
 - **Open UI Mode** (**Run ▸ Open UI Mode**) starts Playwright's own UI Mode (`playwright test --ui`) with the environment's variables, in your browser: its watch mode, its timeline and its locator tools. Stop it from the **Build** window.
 
-To step through a test, use **Debug** on it (its gutter icon, the configuration's Debug, or **Debug in Inspector** in the Tests window): it runs with `--debug` in the Playwright Inspector, which pauses before each action and has its own locator picker.
-
 The recorder and the picker run in the **Build** window, where their output shows.
 
 ## Running tests
@@ -49,7 +47,7 @@ The recorder and the picker run in the **Build** window, where their output show
 A Playwright project runs its tests with its own Playwright, on the Node it asks for, the way `npx playwright test` would. Start a run from any of these:
 
 - **The Tests window**: **Run all**, **Rerun failed** (Playwright's `--last-failed`, which needs Playwright 1.44 or later) and, for the test picked, **Run this test**.
-- **The title bar**: the configurations **All tests** and one per project of the configuration (**Tests in chromium**, …), with Run. Debug runs them in the Playwright Inspector (`--debug`).
+- **The title bar**: the configurations **All tests** and one per project of the configuration (**Tests in chromium**, …), with Run and [Debug](#debugging-tests).
 - **The editor**: each `test(…)` and `test.describe(…)` of a spec file has a run icon in the gutter. ⌃⇧R runs the test the caret is in.
 
 **Edit Configurations…** makes your own: a configuration of the Playwright kind takes Playwright's arguments (`--grep @smoke`, `--repeat-each=5`) and environment variables.
@@ -57,6 +55,20 @@ A Playwright project runs its tests with its own Playwright, on the Node it asks
 The console in the **Run** window reads as Playwright's `list` reporter. The **Tests** window follows the same run test by test.
 
 **Stop** ends the run and the browsers it started: everything the run started goes with it.
+
+## Debugging tests
+
+![A test stopped at a breakpoint in its spec, with the worker's stack and the variables in the Debug window](images/playwright-debugging.png)
+
+**Debug** on a test (**Debug '…'** on its gutter icon, the title bar's Debug for a configuration, or **Debug this test** in the Tests window) runs it under the JavaScript debugger, which stops at the breakpoints in the code the test runs: the spec, its page objects, helpers and fixtures. Click a line number of a TypeScript or JavaScript file to set one; conditions, disabling and **View Breakpoints…** work as they do for Java (see [Run and debug](run-and-debug.md#breakpoints)).
+
+When the test stops, the editor shows its line with the values of the variables there, and the **Debug** window shows the stack and the variables and watches. Step over, into and out, **Run to Cursor**, **Evaluate Expression** and **Resume** work as for Java. Breakpoints in the TypeScript of a spec stop at the TypeScript line, through the source maps Playwright makes.
+
+A debug run has one worker, shows the browser, and has no time limit (`--headed --workers=1 --timeout=0`), so a test paused at a breakpoint does not time out. The Tests window follows it as it follows any run, and **Stop** ends it.
+
+The debugger is js-debug, Microsoft's JavaScript debugger. SnoutCode downloads it the first time you debug (about 1 MB, from its GitHub releases, checked against its checksum) and runs it on the project's Node. It follows every Node process of the run: Playwright's runner and its worker.
+
+**Debug in Inspector** in the Tests window runs the test in the Playwright Inspector instead (`--debug`), which pauses before each Playwright action and has its own locator picker.
 
 ## The Tests window
 
@@ -80,6 +92,7 @@ The **Tests** window opens on its own when a run starts. Its button is at the bo
   - **Open full trace** opens Playwright's own trace viewer, with the DOM at each step.
   - **Video** plays the recording in the system's player.
   - **Run this test** runs it again in its project.
+  - **Debug this test** runs it again under the debugger, which stops at its breakpoints.
   - **Debug in Inspector** runs it in the Playwright Inspector (`--debug`), to step through it.
   - **Show in editor** opens the test at its line.
   - **Copy error** copies the error and its stack.

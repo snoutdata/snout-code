@@ -961,6 +961,7 @@ fn a_process_run_streams_its_output_and_ends_with_its_exit_code(cx: &mut TestApp
             env: vec![("SNOUT_GREETING".into(), "hello there".into())],
             place: Place::Build,
             report: false,
+            debug_node: None,
         })
     };
     let id = cx

@@ -1,8 +1,10 @@
 //! The debugger of a session: a DAP client attached to java-debug (in the engine's jdtls),
-//! which the engine started for the run. Breakpoints are set before the program goes on;
-//! when it stops, the threads, the stack, the variables of the selected frame and the
-//! watches are read; the editor shows the line. A saved change jdtls has built is
-//! reloaded into the running program (`hotcodereplace`, then `redefineClasses`).
+//! which the engine started for the run, or to js-debug for a Node program (see
+//! [`super::node_debug`]), which has a connection per Node process. Breakpoints are set
+//! before the program goes on; when it stops, the threads, the stack, the variables of the
+//! selected frame and the watches are read; the editor shows the line. A saved change jdtls
+//! has built is reloaded into the running program (`hotcodereplace`, then
+//! `redefineClasses`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -65,9 +67,25 @@ pub struct VarRow {
     pub open: bool,
 }
 
+/// Which debugger a session has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Adapter {
+    /// java-debug, in the engine's jdtls: one connection.
+    #[default]
+    Java,
+    /// js-debug: the launch's connection, then one per Node process.
+    Node,
+}
+
 #[derive(Default)]
 pub struct Debugger {
+    pub adapter: Adapter,
+    /// The connection steps, the stack and the variables go to: the one that stopped last.
     pub dap: Option<Dap>,
+    /// Every connection, the first one first (js-debug's launch); breakpoints go to each.
+    pub targets: Vec<Dap>,
+    /// js-debug's server, for this session.
+    pub server: Option<std::sync::Arc<crate::lang::js_debug::Server>>,
     pub ended: bool,
     pub paused: bool,
     pub reason: Option<String>,
@@ -89,14 +107,17 @@ pub struct Debugger {
     /// `snout/debugReady` both offer one, and only the first is taken (a second attach to
     /// the same JVM is refused, and could leave the session on the refused connection).
     pub attaching: bool,
-    _events: Option<Task<()>>,
+    pub(super) events: Vec<Task<()>>,
 }
 
 impl Debugger {
     /// A copy of what the Debug window shows (the connection shared, no event task).
     pub fn snapshot(&self) -> Self {
         Self {
+            adapter: self.adapter,
             dap: self.dap.clone(),
+            targets: self.targets.clone(),
+            server: None,
             ended: self.ended,
             paused: self.paused,
             reason: self.reason.clone(),
@@ -113,21 +134,63 @@ impl Debugger {
             evaluated: self.evaluated.clone(),
             note: self.note.clone(),
             attaching: self.attaching,
-            _events: None,
+            events: Vec::new(),
         }
     }
 
     /// Connected, and the program not ended.
     pub fn live(&self) -> bool {
-        self.dap.as_ref().is_some_and(Dap::is_open) && !self.ended
+        !self.ended && (self.dap.as_ref().is_some_and(Dap::is_open) || self.targets.iter().any(Dap::is_open))
+    }
+
+    /// Take `dap` as a connection of this debugger.
+    pub(super) fn add_target(&mut self, dap: &Dap) {
+        if !self.targets.iter().any(|t| t.same(dap)) {
+            self.targets.push(dap.clone());
+        }
+        if self.dap.is_none() {
+            self.dap = Some(dap.clone());
+        }
+    }
+
+    /// The first connection: its end is the debugger's.
+    pub(super) fn is_first(&self, dap: &Dap) -> bool {
+        self.targets.first().is_none_or(|t| t.same(dap))
+    }
+
+    pub fn is_current(&self, dap: &Dap) -> bool {
+        self.dap.as_ref().is_some_and(|d| d.same(dap))
+    }
+
+    /// Nothing paused to show any more.
+    pub(super) fn resumed(&mut self) {
+        self.paused = false;
+        self.frames.clear();
+        self.scopes.clear();
+        self.children.clear();
     }
 
     pub fn disconnect(&mut self) {
-        if let Some(dap) = self.dap.take() {
-            let bye = dap.request("disconnect", json!({ "terminateDebuggee": true }));
+        // The Node processes' connections before the launch's: the last one ends them all.
+        let mut all: Vec<Dap> = self.targets.drain(..).rev().collect();
+        if let Some(d) = self.dap.take()
+            && !all.iter().any(|t| t.same(&d))
+        {
+            all.push(d);
+        }
+        let byes: Vec<_> = all
+            .into_iter()
+            .filter(Dap::is_open)
+            .map(|dap| (dap.request("disconnect", json!({ "terminateDebuggee": true })), dap))
+            .collect();
+        let server = self.server.take();
+        if !byes.is_empty() || server.is_some() {
             std::thread::spawn(move || {
-                let _ = snout_lang::block_on(bye);
-                dap.close();
+                for (bye, dap) in byes {
+                    let _ = snout_lang::block_on(bye);
+                    dap.close();
+                }
+                drop(server);
             });
         }
         self.end();
@@ -135,13 +198,14 @@ impl Debugger {
 
     pub fn end(&mut self) {
         self.ended = true;
-        self.paused = false;
-        self.frames.clear();
-        self.scopes.clear();
-        self.children.clear();
+        self.resumed();
         if let Some(dap) = self.dap.take() {
             dap.close();
         }
+        for t in self.targets.drain(..) {
+            t.close();
+        }
+        self.server = None;
     }
 
     /// The selected frame's file and line (from 0), while paused.
@@ -253,21 +317,11 @@ impl Runs {
                     return;
                 }
             };
-            let listen = cx.spawn({
-                let this = this.clone();
-                async move |cx| {
-                    while let Ok(m) = events.recv().await {
-                        let closed = m == DapMessage::Closed;
-                        if this.update(cx, |this, cx| this.on_dap(id, m, cx)).is_err() || closed {
-                            return;
-                        }
-                    }
-                }
-            });
             let ok = this.update(cx, |this, cx| {
+                let listen = this.listen(id, dap.clone(), events, cx);
                 let Some(d) = this.dbg(id).filter(|d| !d.ended) else { return false };
-                d.dap = Some(dap.clone());
-                d._events = Some(listen);
+                d.add_target(&dap);
+                d.events.push(listen);
                 if let Some(s) = this.session_mut(id) {
                     s.push(Stream::System, "Debugger attached");
                 }
@@ -299,18 +353,48 @@ impl Runs {
         .detach();
     }
 
-    fn on_dap(&mut self, id: u64, m: DapMessage, cx: &mut Context<Self>) {
+    /// Hand what `dap` says to session `id`'s debugger, until it closes.
+    pub(super) fn listen(
+        &self,
+        id: u64,
+        dap: Dap,
+        events: snout_lang::dap::DapEvents,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            while let Ok(m) = events.recv().await {
+                let closed = m == DapMessage::Closed;
+                if this.update(cx, |this, cx| this.on_dap(id, &dap, m, cx)).is_err() || closed {
+                    return;
+                }
+            }
+        })
+    }
+
+    fn on_dap(&mut self, id: u64, from: &Dap, m: DapMessage, cx: &mut Context<Self>) {
         match m {
             DapMessage::Closed => {
-                if let Some(d) = self.dbg(id) {
+                let Some(d) = self.dbg(id) else { return };
+                if d.is_first(from) {
                     d.end();
+                } else {
+                    // A Node process's connection: the debugger goes on with the others.
+                    d.targets.retain(|t| !t.same(from));
+                    if d.is_current(from) {
+                        d.dap = d.targets.first().cloned();
+                        d.resumed();
+                    }
                 }
                 self.sync_marks(cx);
             }
+            DapMessage::Request { seq, command, arguments } => {
+                self.adapter_asks(id, from, seq, &command, arguments, cx);
+            }
             DapMessage::Event { event, body } => match event.as_str() {
-                "initialized" => self.configure(id, cx),
+                "initialized" => self.configure(id, from, cx),
                 "stopped" => {
                     let Some(d) = self.dbg(id) else { return };
+                    d.dap = Some(from.clone());
                     d.paused = true;
                     d.reason = body.get("reason").and_then(Value::as_str).map(str::to_owned);
                     d.thread = body.get("threadId").and_then(Value::as_i64).or(d.thread);
@@ -320,19 +404,26 @@ impl Runs {
                     cx.emit(RunsEvent::Show(super::Place::Debug));
                 }
                 "continued" => {
-                    if let Some(d) = self.dbg(id) {
-                        d.paused = false;
-                        d.frames.clear();
-                        d.scopes.clear();
-                        d.children.clear();
+                    if let Some(d) = self.dbg(id).filter(|d| d.is_current(from)) {
+                        d.resumed();
                     }
                     self.sync_marks(cx);
                 }
                 "terminated" | "exited" => {
-                    self.run_to.take_if(|(sid, _, _)| *sid == id);
-                    if let Some(d) = self.dbg(id) {
+                    let Some(d) = self.dbg(id) else { return };
+                    let first = d.is_first(from);
+                    if d.is_current(from) {
                         d.paused = false;
                         d.frames.clear();
+                    }
+                    let node = d.adapter == Adapter::Node;
+                    if first {
+                        self.run_to.take_if(|(sid, _, _)| *sid == id);
+                    }
+                    if event == "terminated" && !first && node {
+                        // A Node process waits for its debugger to let go before it exits.
+                        let bye = from.request("disconnect", json!({}));
+                        cx.background_executor().spawn(async move { bye.await.ok() }).detach();
                     }
                     self.sync_marks(cx);
                 }
@@ -348,9 +439,12 @@ impl Runs {
         cx.notify();
     }
 
-    /// Set every breakpoint, then let the program go on.
-    fn configure(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(dap) = self.dap_of(id) else { return };
+    /// Set every breakpoint on `dap`, then let its program go on.
+    fn configure(&mut self, id: u64, dap: &Dap, cx: &mut Context<Self>) {
+        if self.session(id).is_none() || !dap.is_open() {
+            return;
+        }
+        let dap = dap.clone();
         let mut by_file: HashMap<PathBuf, Vec<Breakpoint>> = HashMap::new();
         for b in &self.project.breakpoints {
             by_file.entry(b.path.clone()).or_default().push(b.clone());
@@ -371,17 +465,23 @@ impl Runs {
         .detach();
     }
 
-    /// Send `path`'s breakpoints to session `id`'s debugger.
+    /// Send `path`'s breakpoints to each of session `id`'s connections.
     pub(super) fn send_breakpoints(&mut self, id: u64, path: PathBuf, list: Vec<Breakpoint>, cx: &mut Context<Self>) {
-        let Some(dap) = self.dap_of(id) else { return };
-        let call = dap.request("setBreakpoints", bp_args(&path, &list));
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(e) = call.await {
-                    eprintln!("[debug] setBreakpoints: {e}");
-                }
-            })
-            .detach();
+        let Some(d) = self.dbg(id) else { return };
+        let mut all: Vec<Dap> = d.targets.iter().filter(|t| t.is_open()).cloned().collect();
+        if let Some(cur) = d.dap.clone().filter(|c| c.is_open() && !all.iter().any(|t| t.same(c))) {
+            all.push(cur);
+        }
+        for dap in all {
+            let call = dap.request("setBreakpoints", bp_args(&path, &list));
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(e) = call.await {
+                        eprintln!("[debug] setBreakpoints: {e}");
+                    }
+                })
+                .detach();
+        }
     }
 
     /// Read the threads and the stopped thread's stack, then select its top frame.

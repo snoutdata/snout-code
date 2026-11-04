@@ -8,6 +8,7 @@ pub mod fixes;
 pub mod hierarchy;
 pub mod hub;
 pub mod java;
+pub mod js_debug;
 pub mod node;
 pub mod panels;
 pub mod problems;

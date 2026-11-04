@@ -177,6 +177,7 @@ impl Runs {
             env: Vec::new(),
             place: super::Place::Run,
             report: true,
+            debug_node: None,
         });
         let id = self.adopt(launch, "playwright", cx);
         run.finish();

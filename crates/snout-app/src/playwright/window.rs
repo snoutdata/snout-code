@@ -903,8 +903,14 @@ impl TestsWindow {
             );
             let tests = self.tests.clone();
             actions.push(
-                button("tests-debug-this", "Debug in Inspector", Some(Icon::Bug), p.fg, &p)
+                button("tests-debug-this", "Debug this test", Some(Icon::Bug), p.fg, &p)
                     .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.debug_selected(cx)))
+                    .into_any_element(),
+            );
+            let tests = self.tests.clone();
+            actions.push(
+                button("tests-inspect-this", "Debug in Inspector", Some(Icon::Search), p.fg, &p)
+                    .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.inspect_selected(cx)))
                     .into_any_element(),
             );
         }
@@ -1100,6 +1106,7 @@ fn open_trace(tests: &Entity<PwTests>, path: &Path, cx: &mut App) {
             env: vec![("PATH".into(), crate::lang::typescript::path_with(&*host, &node))],
             place: Place::Build,
             report: false,
+            debug_node: None,
         })
     });
     cx.spawn(async move |cx| {

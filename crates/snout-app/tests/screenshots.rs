@@ -169,6 +169,9 @@ mod shots {
         TestsWindow,
         /// Record at Cursor writing into a spec, its bar above the text.
         Recording,
+        /// A Playwright test stopped at a breakpoint in its spec: the line, the Debug window
+        /// on the worker's stack.
+        PlaywrightDebug,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -377,7 +380,7 @@ sleep 30
         if matches!(select, Some(Select::Commit(..))) {
             with_merge(&repo);
         }
-        if matches!(select, Some(Select::TestsWindow | Select::Recording)) {
+        if matches!(select, Some(Select::TestsWindow | Select::Recording | Select::PlaywrightDebug)) {
             crate::playwright_repo(&repo);
         }
         let mut cx = HeadlessAppContext::with_platform(
@@ -1506,6 +1509,102 @@ sleep 30
                     });
                 })
                 .unwrap();
+            }
+            Some(Select::PlaywrightDebug) => {
+                use snout_app::run::debug::{Frame, Var};
+                let file = repo.join("tests/checkout.spec.ts");
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(&file, crate::DEBUGGED_SPEC).unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((7, 0))), cx)));
+                let runs = cx.update(|cx| ws.read(cx).runs.clone());
+                let launch = snout_app::run::process::ProcessLaunch {
+                    title: "checkout.spec.ts:4".into(),
+                    program: "/usr/local/bin/node".into(),
+                    args: vec!["node_modules/@playwright/test/cli.js".into(), "test".into()],
+                    cwd: repo.clone(),
+                    env: Vec::new(),
+                    place: snout_app::run::Place::Debug,
+                    report: true,
+                    debug_node: Some("/usr/local/bin/node".into()),
+                };
+                cx.update(|cx| {
+                    runs.update(cx, |r, cx| {
+                        r.toggle_breakpoint(&file, 7, cx);
+                        r.toggle_breakpoint(&file, 9, cx);
+                    })
+                });
+                let id = cx.update(|cx| {
+                    runs.update(cx, |r, cx| r.adopt(snout_app::run::Launch::Process(launch), "pw-d1", cx))
+                });
+                // A connection that answers nothing: the worker's session, stopped.
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+                let (_server, _) = listener.accept().unwrap();
+                let (dap, _events) = snout_lang::dap::Dap::over(Box::new(client)).unwrap();
+                let var = |name: &str, value: &str, ty: &str, reference: i64| Var {
+                    name: name.into(),
+                    value: value.into(),
+                    ty: Some(ty.into()),
+                    reference,
+                };
+                cx.update(|cx| {
+                    runs.update(cx, |r, cx| {
+                        let s = r.session_mut(id).unwrap();
+                        s.push(snout_app::run::Stream::Out, "Running 1 test using 1 worker");
+                        let d = s.debug.as_mut().unwrap();
+                        d.adapter = snout_app::run::debug::Adapter::Node;
+                        d.dap = Some(dap.clone());
+                        d.targets = vec![dap];
+                        d.paused = true;
+                        d.reason = Some("breakpoint".into());
+                        d.thread = Some(2);
+                        d.threads = vec![(2, "workerProcessEntry.js [41872]".into())];
+                        let frame = |id: i64, name: &str, source: &str, line: u32| Frame {
+                            id,
+                            name: name.into(),
+                            path: None,
+                            source: Some(source.into()),
+                            line,
+                        };
+                        d.frames = vec![
+                            Frame {
+                                id: 1,
+                                name: "<anonymous>".into(),
+                                path: Some(file.clone()),
+                                source: None,
+                                line: 8,
+                            },
+                            frame(2, "TestInfoImpl._runAsStep", "testInfo.js", 302),
+                            frame(3, "WorkerMain._runTest", "workerMain.js", 345),
+                        ];
+                        d.scopes = vec![
+                            Var { name: "Local".into(), value: String::new(), ty: None, reference: 5 },
+                            Var { name: "Closure".into(), value: String::new(), ty: None, reference: 7 },
+                        ];
+                        d.children.insert(
+                            5,
+                            vec![
+                                var("page", "Page {_type: 'Page', _guid: 'page@1', …}", "Page", 6),
+                                var("cart", "CartPage {page: Page}", "CartPage", 8),
+                                var("total", "'€42.00'", "string", 0),
+                                var("this", "undefined", "undefined", 0),
+                            ],
+                        );
+                        d.children.insert(8, vec![var("page", "Page {_type: 'Page', _guid: 'page@1', …}", "Page", 9)]);
+                        d.expanded.insert("scope:Local".into());
+                        d.expanded.insert("scope:Local/cart".into());
+                        d.watches.push(snout_app::run::debug::Watch {
+                            expr: "page.url()".into(),
+                            value: Some(Ok(var("", "'https://staging.shop.test/cart'", "string", 0))),
+                        });
+                        r.sync_marks(cx);
+                    })
+                });
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.show_bottom(ws.tabs.debug, window, cx));
+                })
+                .unwrap();
+                std::mem::forget(_server);
             }
             Some(Select::TestsWindow) => {
                 let run = crate::playwright_run(&repo);
@@ -3006,6 +3105,7 @@ sleep 30
             shot(&format!("ui-playwright-bar-{mode}"), theme, Activity::Project, Some(Select::PlaywrightBar));
             shot(&format!("ui-tests-window-{mode}"), theme, Activity::Project, Some(Select::TestsWindow));
             shot(&format!("ui-recording-{mode}"), theme, Activity::Project, Some(Select::Recording));
+            shot(&format!("ui-playwright-debug-{mode}"), theme, Activity::Project, Some(Select::PlaywrightDebug));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(
@@ -3057,6 +3157,20 @@ test.describe('checkout', () => {
     await page.getByRole('button', { name: 'Checkout' }).click();
     await page.getByLabel('Card number').fill('4242 4242 4242 4242');
   });
+});
+";
+
+#[cfg(target_os = "macos")]
+const DEBUGGED_SPEC: &str = "import { test, expect } from '@playwright/test';
+import { CartPage } from './pages/cart';
+
+test('pays by card', async ({ page }) => {
+  const cart = new CartPage(page);
+  await cart.open();
+  const total = await cart.total();
+  expect(total).toBe('€42.00');
+  await page.getByRole('button', { name: 'Checkout' }).click();
+  await page.getByLabel('Card number').fill('4242 4242 4242 4242');
 });
 ";
 

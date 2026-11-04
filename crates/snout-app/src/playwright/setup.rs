@@ -126,6 +126,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 env,
                 place: Place::Build,
                 report: false,
+                debug_node: None,
             })
         }
         Need::Packages { manager } => {
@@ -140,6 +141,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 env,
                 place: Place::Build,
                 report: false,
+                debug_node: None,
             })
         }
         Need::Browsers { .. } => {
@@ -155,6 +157,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 env,
                 place: Place::Build,
                 report: false,
+                debug_node: None,
             })
         }
     }

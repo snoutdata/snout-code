@@ -1,10 +1,11 @@
 //! A Debug Adapter Protocol client over TCP: java-debug (inside jdtls) listens on a port of
-//! the host the engine hands out, and speaks DAP there; the [`Host`] connects to it.
+//! the host the engine hands out, js-debug on one its server prints; either speaks DAP there,
+//! and the [`Host`] connects to it.
 //!
 //! The framing is LSP's (`Content-Length`, a blank line, the JSON body). Requests return
 //! futures any executor can await, resolving with the response's `body`; events arrive on a
-//! channel. The adapter's own requests (`runInTerminal` and the like) are answered with a
-//! failure here: SnoutCode launches the debuggee itself.
+//! channel, and so do the adapter's own requests (`runInTerminal`, `startDebugging`), which
+//! the app answers with [`Dap::respond`].
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -24,9 +25,15 @@ use crate::rpc;
 pub enum DapMessage {
     /// An event: `stopped`, `continued`, `output`, `terminated`, `hotcodereplace`…
     Event { event: String, body: Value },
+    /// The adapter asks something of the client (`runInTerminal`, `startDebugging`): answer
+    /// it with [`Dap::respond`].
+    Request { seq: i64, command: String, arguments: Value },
     /// The connection closed.
     Closed,
 }
+
+/// What a connection hears from its adapter.
+pub type DapEvents = async_channel::Receiver<DapMessage>;
 
 /// A request the adapter refused, or a connection that went away.
 #[derive(Clone, Debug, PartialEq)]
@@ -173,6 +180,31 @@ impl Dap {
         }
     }
 
+    /// Answer the adapter's request `seq` (a [`DapMessage::Request`]): `Ok` with its body,
+    /// or `Err` with why it was refused.
+    pub fn respond(&self, seq: i64, command: &str, result: Result<Value, String>) {
+        let own = self.inner.seq.fetch_add(1, Ordering::SeqCst);
+        let mut answer = json!({ "seq": own, "type": "response", "request_seq": seq, "command": command });
+        match result {
+            Ok(body) => {
+                answer["success"] = json!(true);
+                if !body.is_null() {
+                    answer["body"] = body;
+                }
+            }
+            Err(why) => {
+                answer["success"] = json!(false);
+                answer["message"] = json!(why);
+            }
+        }
+        self.send(answer);
+    }
+
+    /// Both are the same connection.
+    pub fn same(&self, other: &Dap) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// Close the connection; pending requests fail.
     pub fn close(&self) {
         self.inner.close();
@@ -205,15 +237,11 @@ fn dispatch(inner: &Inner, message: Value, events: &async_channel::Sender<DapMes
             let _ = events.send_blocking(DapMessage::Event { event, body });
         }
         Some("request") => {
-            let seq = inner.seq.fetch_add(1, Ordering::SeqCst);
-            let answer = json!({
-                "seq": seq, "type": "response", "request_seq": message.get("seq").cloned().unwrap_or(Value::Null),
-                "command": message.get("command").cloned().unwrap_or(Value::Null),
-                "success": false, "message": "not supported by this client"
+            let _ = events.send_blocking(DapMessage::Request {
+                seq: message.get("seq").and_then(Value::as_i64).unwrap_or(0),
+                command: message.get("command").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                arguments: message.get("arguments").cloned().unwrap_or(Value::Null),
             });
-            if let Some(tx) = inner.out.lock().unwrap().as_ref() {
-                let _ = tx.send(answer);
-            }
         }
         _ => {}
     }
@@ -227,7 +255,7 @@ mod tests {
 
     /// A tiny adapter: answers `initialize` with capabilities, refuses `evaluate`, sends an
     /// `initialized` event after `attach`, and asks the client to run something in a
-    /// terminal (which the client refuses).
+    /// terminal.
     fn fake_adapter() -> (u16, std::thread::JoinHandle<Vec<Value>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -273,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn requests_resolve_events_arrive_and_reverse_requests_are_refused() {
+    fn requests_resolve_events_arrive_and_reverse_requests_are_answered() {
         let (port, adapter) = fake_adapter();
         let (dap, events) = Dap::connect(&*snout_host::local(), port, Duration::from_secs(5)).unwrap();
         let caps = block_on(dap.request("initialize", json!({ "adapterID": "java" }))).unwrap();
@@ -281,6 +309,10 @@ mod tests {
         assert_eq!(block_on(dap.request("attach", json!({ "port": 5005 }))).unwrap(), Value::Null);
         let ev = block_on(events.recv()).unwrap();
         assert_eq!(ev, DapMessage::Event { event: "initialized".into(), body: Value::Null });
+        let ask = block_on(events.recv()).unwrap();
+        let DapMessage::Request { seq, command, .. } = ask else { panic!("{ask:?}") };
+        assert_eq!(command, "runInTerminal");
+        dap.respond(seq, &command, Err("not here".into()));
         let err = block_on(dap.request("evaluate", json!({ "expression": "x" }))).unwrap_err();
         assert_eq!(err.message, "x cannot be resolved");
         let _ = block_on(dap.request("disconnect", json!({})));
@@ -288,6 +320,8 @@ mod tests {
         let refused = seen.iter().find(|m| m["type"] == "response").expect("the client answered runInTerminal");
         assert_eq!(refused["command"], "runInTerminal");
         assert_eq!(refused["success"], false);
+        assert_eq!(refused["message"], "not here");
+        assert_eq!(refused["request_seq"], 104, "the ask's own seq");
         loop {
             match block_on(events.recv()) {
                 Ok(DapMessage::Closed) | Err(_) => break,

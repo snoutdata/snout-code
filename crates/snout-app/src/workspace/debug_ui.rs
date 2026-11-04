@@ -28,7 +28,7 @@ impl Workspace {
     pub fn toggle_breakpoint_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.breakpoint_target(window, cx) {
             Some((path, line)) => self.runs.update(cx, |r, cx| r.toggle_breakpoint(&path, line, cx)),
-            None => self.say("Breakpoints go in a Java, Kotlin or Scala file", cx),
+            None => self.say("Breakpoints go in a Java, Kotlin, Scala, TypeScript or JavaScript file", cx),
         }
     }
 
@@ -36,7 +36,7 @@ impl Workspace {
     /// there, or let it stop again.
     pub fn toggle_breakpoint_enabled_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((path, line)) = self.breakpoint_target(window, cx) else {
-            return self.say("Breakpoints go in a Java, Kotlin or Scala file", cx);
+            return self.say("Breakpoints go in a Java, Kotlin, Scala, TypeScript or JavaScript file", cx);
         };
         if !self.runs.update(cx, |r, cx| r.toggle_breakpoint_enabled(&path, line, cx)) {
             self.say(&crate::keymap::shown("There is no breakpoint on this line: ⌘F8 sets one"), cx);
@@ -47,7 +47,7 @@ impl Workspace {
     pub fn edit_breakpoint_condition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = self.active_editor(window, cx) else { return };
         if !editor.update(cx, |e, cx| e.edit_condition_at_caret(window, cx)) {
-            self.say("Breakpoints go in a Java, Kotlin or Scala file", cx);
+            self.say("Breakpoints go in a Java, Kotlin, Scala, TypeScript or JavaScript file", cx);
         }
     }
 
@@ -120,7 +120,7 @@ impl Workspace {
             return self.say("Run to Cursor works while the debugger is stopped", cx);
         };
         let Some((path, line)) = self.breakpoint_target(window, cx) else {
-            return self.say("Put the caret on a line of a Java, Kotlin or Scala file", cx);
+            return self.say("Put the caret on a line of code", cx);
         };
         self.runs.update(cx, |r, cx| r.run_to_cursor(id, &path, line, cx));
     }

@@ -133,6 +133,7 @@ pub fn codegen_launch(
         env: tool_env(host, node, vars),
         place: Place::Build,
         report: false,
+        debug_node: None,
     })
 }
 
@@ -156,6 +157,7 @@ pub fn picker_launch(
         env: tool_env(host, node, vars),
         place: Place::Build,
         report: false,
+        debug_node: None,
     })
 }
 
@@ -175,6 +177,7 @@ pub fn ui_launch(
         env: tool_env(host, node, vars),
         place: Place::Build,
         report: false,
+        debug_node: None,
     })
 }
 
