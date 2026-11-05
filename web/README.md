@@ -35,7 +35,8 @@ on the thing a picture is about, and the warm tones only where warmth is the poi
 - **Section drawings** (`SectionArt`, a `0 0 360 140` box) sit beside each homepage heading.
 - **Card drawings** (`CardArt`, `0 0 200 100`) open the feature and download cards.
 - **Scenes** (`0 0 1200 340`) end a page edge to edge and are cropped, never squashed, on a narrow
-  screen: keep anything that matters below y=60 and between x=100 and x=1100.
+  screen and, past a 2680px window, at the top: keep anything that matters below y=60 and
+  between x=100 and x=1100.
 
 Everything moving in a drawing stops under `prefers-reduced-motion`.
 

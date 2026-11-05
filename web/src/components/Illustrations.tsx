@@ -621,8 +621,8 @@ export function WorkshopScene() {
 		<Scene>
 			<circle className="ill-warm" cx="910" cy="150" r="64" />
 			<path className="ill-ray" d="M910 62V74M982 86L972 96M838 86L848 96M1014 150H1000M806 150H820" />
-			<SkyCloud x={330} y={70} s={1.3} className="ill-drift" />
-			<SkyCloud x={1000} y={70} s={1.1} className="ill-drift ill-drift-slow" />
+			<SkyCloud x={330} y={88} s={1.3} className="ill-drift" />
+			<SkyCloud x={1000} y={82} s={1.1} className="ill-drift ill-drift-slow" />
 			<path d="M520 96L530 104L540 96M556 84L564 90L572 84" />
 			<path className="ill-tint" d="M-10 214C110 152 230 174 340 144C460 110 560 178 680 154C800 130 900 190 1020 152C1100 128 1160 150 1210 146V340H-10Z" />
 			<path className="ill-accent" d="M-10 262C180 214 360 226 520 250C680 274 820 220 1000 230C1100 236 1160 250 1210 246V340H-10Z" />
@@ -676,8 +676,8 @@ export function WorkshopScene() {
 			<path className="ill-thread" d="M560 254C572 276 520 284 540 306" />
 			<path d="M300 300C306 294 312 294 318 300M880 298C886 292 892 292 898 298" />
 
-			<path className="ill-thread" d="M520 120C560 64 610 120 650 76" />
-			<Fly x={640} y={36} w={92} tilt={-10} glasses />
+			<path className="ill-thread" d="M520 146C560 92 610 142 652 104" />
+			<Fly x={640} y={60} w={92} tilt={-10} glasses />
 			<Spark x={760} y={86} s={0.9} />
 			<Spark x={120} y={136} s={0.6} />
 			<Spark x={1150} y={118} s={0.7} />
@@ -691,8 +691,8 @@ export function ParcelScene() {
 	return (
 		<Scene>
 			<circle className="ill-warm" cx="250" cy="140" r="54" />
-			<SkyCloud x={900} y={70} s={1.3} className="ill-drift" />
-			<SkyCloud x={120} y={60} s={1} className="ill-drift ill-drift-slow" />
+			<SkyCloud x={900} y={92} s={1.3} className="ill-drift" />
+			<SkyCloud x={120} y={84} s={1} className="ill-drift ill-drift-slow" />
 			<path className="ill-tint" d="M-10 222C120 170 260 190 380 160C520 124 620 192 760 168C880 148 980 196 1100 166C1150 154 1190 160 1210 158V340H-10Z" />
 			<path className="ill-accent" d="M-10 270C180 228 380 236 560 260C720 282 860 232 1040 240C1120 244 1170 252 1210 250V340H-10Z" />
 
@@ -710,19 +710,21 @@ export function ParcelScene() {
 
 			{/* the balloon and its parcel */}
 			<g className="ill-bob">
+				<g transform="translate(0 44)">
 				<path className="ill-warm" d="M720 24C760 24 784 52 780 84C776 110 748 128 736 142H704C692 128 664 110 660 84C656 52 680 24 720 24Z" />
 				<path d="M720 24C704 44 700 108 712 142M720 24C736 44 740 108 728 142" />
 				<path d="M706 142L710 164M734 142L730 164" />
 				<rect className="ill-sand" x="700" y="164" width="40" height="30" rx="4" />
 				<path d="M700 176H740" />
 				<svg className="ill-fly" style={{ strokeWidth: flyStroke(24) }} x="708" y="178" width="24" height="20" viewBox="0 0 120 100" overflow="visible"><FlyBody /></svg>
+				</g>
 			</g>
-			<path className="ill-thread" d="M640 120C600 160 520 150 470 190" />
+			<path className="ill-thread" d="M652 168C600 196 520 186 470 214" />
 			<RoundTree x={440} y={262} s={0.9} />
 			<Pine x={1040} y={252} s={0.8} />
 			<Pine x={1070} y={248} s={0.6} />
 			<Pine x={160} y={258} s={0.7} />
-			<Spark x={820} y={60} s={0.9} />
+			<Spark x={820} y={92} s={0.9} />
 			<Spark x={180} y={180} s={0.6} />
 		</Scene>
 	)

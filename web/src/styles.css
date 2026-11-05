@@ -1063,7 +1063,10 @@ a.card:hover .card-art .ill {
 	width: 100%;
 }
 
-/* A scene ends a page edge to edge, cropped (never squashed) on a narrow screen. */
+/* A scene ends a page edge to edge, cropped (never squashed). The box keeps the drawing's own
+   1200:340 ratio, so the whole sky shows: a phone (min-height) crops the SIDES, and only a window
+   wider than about 2680px (max-height) crops the top, where the drawings keep nothing but sky
+   above y=60. At 560px the cap cut the balloon and the clouds off on a 2160px window. */
 .ill.page-scene {
 	position: relative;
 	z-index: 1;
@@ -1071,7 +1074,7 @@ a.card:hover .card-art .ill {
 	height: auto;
 	aspect-ratio: 1200 / 340;
 	min-height: 220px;
-	max-height: 560px;
+	max-height: 760px;
 	margin-top: 16px;
 	margin-bottom: -2px;
 	overflow: hidden;
