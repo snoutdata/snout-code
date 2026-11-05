@@ -314,6 +314,52 @@ pub fn find_agent(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
     snout_host::which(host, &[name], &extra)
 }
 
+/// Where the agent `id` is: `configured` (its path in the settings; none when it names a
+/// file that is not there), else on the host's PATH or where its installers put it, else
+/// where the user's shell finds it (a login, interactive shell: npm's folder under nvm is
+/// on its PATH only there). The custom agent runs through the shell and is not looked for.
+pub fn locate(host: &dyn snout_host::Host, id: &str, configured: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(path) = configured {
+        return (!path.is_absolute() || host.is_file(&path)).then_some(path);
+    }
+    let name = match id {
+        CLAUDE => "claude",
+        CODEX => "codex",
+        OPENCODE => "opencode",
+        AMP => "amp",
+        _ => return None,
+    };
+    let found = if id == CLAUDE { snout_core::claude::find_claude(host) } else { find_agent(host, name) };
+    found.or_else(|| from_shell(host, name))
+}
+
+/// The program `name` as the user's shell finds it (not on Windows).
+fn from_shell(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
+    if host.info().is_windows() {
+        return None;
+    }
+    let shell = crate::console::default_shell(host);
+    let cmd = snout_host::Cmd::new(&shell).arg("-ilc").arg(format!("command -v {name}"));
+    let out = host.run(&cmd, None).ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.lines().rev().map(str::trim).filter(|l| l.starts_with('/')).map(PathBuf::from).find(|p| host.is_file(p))
+}
+
+/// What installs the agent `id` on a host like `info`: a line for its shell (PowerShell on
+/// Windows). None for the custom agent.
+pub fn install_command(id: &str, info: &snout_host::HostInfo) -> Option<&'static str> {
+    Some(match (id, info.is_windows()) {
+        (CLAUDE, false) => "curl -fsSL https://claude.ai/install.sh | bash",
+        (CLAUDE, true) => "irm https://claude.ai/install.ps1 | iex",
+        (CODEX, _) => "npm install -g @openai/codex",
+        (OPENCODE, false) => "curl -fsSL https://opencode.ai/install | bash",
+        (OPENCODE, true) => "npm install -g opencode-ai",
+        (AMP, false) => "curl -fsSL https://ampcode.com/install.sh | bash",
+        (AMP, true) => "npm install -g @sourcegraph/amp",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,6 +384,18 @@ mod tests {
         assert_eq!(Agent::custom("", "/opt/bin/aider --model x").name, "Aider");
         assert_eq!(Agent::custom("Gemini", "gemini").short, "Gemini");
         assert_eq!(of_settings(&s).id, CLAUDE, "Claude Code by default");
+    }
+
+    #[test]
+    fn each_agent_but_the_custom_one_has_an_installer() {
+        let mut info = snout_host::HostInfo::default();
+        for os in ["macos", "windows"] {
+            info.os = os.into();
+            for id in [CLAUDE, CODEX, OPENCODE, AMP] {
+                assert!(install_command(id, &info).is_some(), "{id} on {os}");
+            }
+            assert_eq!(install_command(CUSTOM, &info), None);
+        }
     }
 
     #[test]

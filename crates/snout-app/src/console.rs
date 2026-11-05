@@ -27,7 +27,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{BasePanelView, panel_handle};
 use gpui_component::input::{Copy, InputEvent, InputState, Paste};
-use snout_core::claude::{ENV_REMOVE, find_claude};
+use snout_core::claude::ENV_REMOVE;
 use snout_core::pty::{self, KeyInput, Launch, Pty, Rgb};
 use snout_core::term::{Attrs, CursorShape, EngineKind, Frame, Underline, Width};
 
@@ -127,6 +127,17 @@ struct Session {
     agent: Option<crate::agents::Agent>,
     /// The agent's turn: since the Return that began it, while it works.
     turn: Option<Instant>,
+    /// The agent whose installer this session runs, if it runs one.
+    install: Option<&'static str>,
+}
+
+/// Why the console's agent cannot start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Missing {
+    /// The agent `id` is not installed (nor its path set).
+    Program(&'static str),
+    /// The custom agent has no command.
+    Command,
 }
 
 /// After Return, the agent counts as at work this long before it prints anything...
@@ -185,6 +196,14 @@ pub struct ConsolePanel {
     /// The width the header was last laid out at: a console moved to a side dock is
     /// narrow, and its toolbar keeps to icons.
     width: f32,
+    /// Why the agent cannot start, when it is not installed or has no command.
+    missing: Option<Missing>,
+    /// Which agents are installed, as last looked for (the agent menu marks the others).
+    found: HashMap<&'static str, bool>,
+    /// The agents whose installer ran and finished well here.
+    installed_here: std::collections::HashSet<&'static str>,
+    /// Whether the agents have been looked for.
+    probed: bool,
 }
 
 /// Below this width (points) the console's toolbar shows icons only, and its empty state
@@ -288,7 +307,158 @@ impl ConsolePanel {
             ended: Default::default(),
             born: Instant::now(),
             width: f32::MAX,
+            missing: None,
+            found: HashMap::new(),
+            installed_here: Default::default(),
+            probed: false,
         }
+    }
+
+    /// Look for the agents off the UI thread, once, for the menu to mark those not
+    /// installed (not when a test gives the console its program).
+    fn probe(&mut self, cx: &mut Context<Self>) {
+        // Not in the unit tests: it starts the user's shell, which their windows do not need.
+        if self.probed || self.kind != Kind::Claude || self.program.is_some() || cfg!(test) {
+            return;
+        }
+        self.probed = true;
+        let host = crate::host::host(cx);
+        let s = &self.model.read(cx).settings;
+        let paths = [
+            (crate::agents::CLAUDE, s.claude_path.clone()),
+            (crate::agents::CODEX, s.codex_path.clone()),
+            (crate::agents::OPENCODE, s.opencode_path.clone()),
+            (crate::agents::AMP, s.amp_path.clone()),
+        ];
+        let looked = cx
+            .background_executor()
+            .spawn(async move { paths.map(|(id, path)| (id, crate::agents::locate(&*host, id, path).is_some())) });
+        cx.spawn(async move |this, cx| {
+            let found = looked.await;
+            let _ = this.update(cx, |this, cx| {
+                this.found.extend(found);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Run the console's agent `which` from now on: the session in front ends if it runs
+    /// another agent, and the chosen one starts (or the console says how to install it).
+    pub fn switch_agent(&mut self, which: crate::agents::ConsoleAgent, window: &mut Window, cx: &mut Context<Self>) {
+        let root = self.root(cx);
+        // An installer at work keeps going until it is done or ended.
+        if let Some(s) = root.as_ref().and_then(|r| self.sessions.get_mut(r))
+            && s.install.is_some()
+            && s.pty.exit_status().is_none()
+        {
+            self.show_note("The installer is still at work; End stops it", cx);
+            return;
+        }
+        self.model.update(cx, |m, cx| {
+            m.settings.console_agent = which;
+            m.persist();
+            cx.notify();
+        });
+        let Some(root) = root else { return };
+        let agent = self.agent(cx);
+        let mut note = None;
+        if let Some(s) = self.sessions.get_mut(&root) {
+            let same = s.install.is_none() && s.agent.as_ref().is_some_and(|a| *a == agent);
+            if same && s.pty.exit_status().is_none() {
+                return;
+            }
+            if s.install.is_none()
+                && s.pty.exit_status().is_none()
+                && let Some(was) = s.agent.as_ref()
+            {
+                let resume = if continue_args(was).is_empty() { "" } else { "; Continue resumes it" };
+                note = Some(format!("{} ended{resume}", was.name));
+            }
+        }
+        if let Some(text) = note {
+            self.show_note(text, cx);
+        }
+        if let Some(mut s) = self.sessions.remove(&root) {
+            s.pty.kill();
+        }
+        self.start(&root, &[], window, cx);
+    }
+
+    /// Run the installer of the agent `id` in the console, in the user's shell: its output
+    /// shows as it goes, and the agent starts once it is done.
+    pub fn install(&mut self, root: &Path, id: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        let host = crate::host::host(cx);
+        let Some(line) = crate::agents::install_command(id, host.info()) else { return };
+        if let Some(mut s) = self.sessions.remove(root) {
+            s.pty.kill();
+        }
+        self.ended.remove(root);
+        self.error = None;
+        self.missing = None;
+        let settings = &self.model.read(cx).settings;
+        let engine = settings.terminal_engine;
+        let scrollback = settings.terminal_scrollback;
+        let p = palette(cx);
+        let (fg, bg) = (rgb(p.fg), rgb(p.panel));
+        let root = root.to_owned();
+        self.starting.insert(root.clone());
+        let started = cx.background_executor().spawn({
+            let root = root.clone();
+            async move {
+                let (program, args): (PathBuf, Vec<String>) = if host.info().is_windows() {
+                    let ps = snout_host::which(&*host, &["pwsh", "powershell"], &[])
+                        .unwrap_or_else(|| PathBuf::from("powershell.exe"));
+                    (ps, vec!["-NoProfile".into(), "-Command".into(), line.into()])
+                } else {
+                    // Interactive and login: the PATH of the user's own terminal (npm, nvm).
+                    (default_shell(&*host), vec!["-ilc".into(), line.into()])
+                };
+                let launch =
+                    Launch { program: &program, args: &args, cwd: &root, env: &[], env_remove: &[], scrollback };
+                Pty::spawn(&*host, &launch, engine, fg, bg, || {})
+                    .map_err(|e| format!("Could not start {}: {e}", program.display()))
+            }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = started.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.starting.remove(&root);
+                match result {
+                    Ok(pty) => {
+                        let session = Session {
+                            pty,
+                            seen_gen: 0,
+                            refreshed: Instant::now(),
+                            agent: None,
+                            turn: None,
+                            install: Some(id),
+                        };
+                        this.sessions.insert(root.clone(), session);
+                        this.note_engine(&root, cx);
+                        window.focus(&this.focus, cx);
+                    }
+                    Err(e) => this.error = Some(e),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The installer of `root`'s session finished well: start its agent.
+    fn after_install(&mut self, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.sessions.get_mut(root).and_then(|s| {
+            let id = s.install?;
+            (s.pty.exit_status() == Some("exited")).then_some(id)
+        }) else {
+            return;
+        };
+        self.sessions.remove(root);
+        self.installed_here.insert(id);
+        self.found.insert(id, true);
+        self.start(root, &[], window, cx);
     }
 
     fn compact(&self) -> bool {
@@ -472,9 +642,15 @@ impl ConsolePanel {
         self.ended.remove(root);
         self.note_engine(root, cx);
         self.error = None;
+        self.missing = None;
         let host = crate::host::host(cx);
         let kind = self.kind;
         let agent = (kind == Kind::Claude).then(|| self.agent(cx));
+        if agent.as_ref().is_some_and(|a| a.command.as_deref().is_some_and(|c| c.trim().is_empty())) {
+            self.missing = Some(Missing::Command);
+            cx.notify();
+            return;
+        }
         let settings = &self.model.read(cx).settings;
         let configured = match agent.as_ref().map(|a| a.id) {
             Some(crate::agents::CODEX) => settings.codex_path.clone(),
@@ -561,13 +737,11 @@ impl ConsolePanel {
                     eprintln!("Amp integration: could not put the plugin in Amp's plugins folder: {e}");
                 }
                 let found = match kind {
-                    Kind::Claude if matches!(agent_id, Some(crate::agents::CLAUDE) | None) => {
-                        configured.or_else(|| find_claude(&*host))
+                    Kind::Claude if program.is_some() => None,
+                    Kind::Claude if program_name.is_some() || agent_id.is_none() => {
+                        crate::agents::locate(&*host, agent_id.unwrap_or(crate::agents::CLAUDE), configured)
                     }
-                    Kind::Claude => configured.or_else(|| {
-                        let name = program_name?;
-                        crate::agents::find_agent(&*host, name)
-                    }),
+                    Kind::Claude => configured,
                     Kind::Shell => shell.or_else(|| Some(default_shell(&*host))),
                 };
                 let program = program.or(found).ok_or(None)?;
@@ -584,24 +758,32 @@ impl ConsolePanel {
                 this.starting.remove(&root);
                 match result {
                     Ok(pty) => {
-                        let session =
-                            Session { pty, seen_gen: 0, refreshed: Instant::now(), agent: session_agent, turn: None };
+                        if let Some(a) = session_agent.as_ref() {
+                            this.found.insert(a.id, true);
+                        }
+                        let session = Session {
+                            pty,
+                            seen_gen: 0,
+                            refreshed: Instant::now(),
+                            agent: session_agent,
+                            turn: None,
+                            install: None,
+                        };
                         this.sessions.insert(root.clone(), session);
                         this.note_engine(&root, cx);
                         window.focus(&this.focus, cx);
                     }
                     Err(None) => {
-                        this.error = Some(match agent_id.and_then(install_hint) {
-                            Some(install) => format!(
-                                "{agent_name} was not found on PATH or in ~/.local/bin, ~/.npm-global/bin, \
-                                 /opt/homebrew/bin, /usr/local/bin. Install it with {install}, or set its path in \
-                                 Settings, Agents."
-                            ),
-                            _ => "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, \
-                                /opt/homebrew/bin, /usr/local/bin. Install it from \
-                                https://docs.claude.com/en/docs/claude-code, or set its path in Settings, Agents."
-                                .into(),
-                        })
+                        let id = agent_id.unwrap_or(crate::agents::CLAUDE);
+                        this.found.insert(id, false);
+                        if this.installed_here.contains(id) {
+                            this.error = Some(format!(
+                                "The installer finished, but {agent_name} is not on the PATH SnoutCode sees. \
+                                 Set its path in Settings, Agents, or restart SnoutCode."
+                            ));
+                        } else {
+                            this.missing = Some(Missing::Program(id));
+                        }
                     }
                     Err(Some(e)) => this.error = Some(e),
                 }
@@ -903,6 +1085,7 @@ impl Render for ConsolePanel {
                     .compact(),
             );
         };
+        self.probe(cx);
         let wanted = kind == Kind::Shell || self.model.read(cx).settings.console_open;
         // The window's IDE server gives the agent its variables a moment after the window
         // opens: the first session waits for them (a little while at most).
@@ -916,9 +1099,11 @@ impl Render for ConsolePanel {
             && !self.starting.contains(&root)
             && !self.ended.contains(&root)
             && self.error.is_none()
+            && self.missing.is_none()
         {
             self.start(&root, &[], window, cx);
         }
+        self.after_install(&root, window, cx);
         let exit = self.sessions.get_mut(&root).and_then(|s| s.pty.exit_status().map(str::to_owned));
         let body = if self.sessions.contains_key(&root) {
             self.terminal(&root, exit, window, cx).into_any_element()
@@ -950,6 +1135,8 @@ pub enum Status {
     Running,
     /// The agent is at work on a turn.
     Working,
+    /// An agent's installer runs.
+    Installing,
     Exited,
 }
 
@@ -962,6 +1149,7 @@ impl Status {
             Status::NotConnected => "Not connected",
             Status::Running => "Running",
             Status::Working => "Working",
+            Status::Installing => "Installing",
             Status::Exited => "Ended",
         }
     }
@@ -977,6 +1165,7 @@ impl Status {
             Status::NotConnected => format!("{agent} runs, but has not connected to the editor yet"),
             Status::Running => format!("{agent} runs; the files it changes show as it works"),
             Status::Working => format!("{agent} is at work on your prompt"),
+            Status::Installing => format!("{agent} is being installed"),
             Status::Exited => format!("{agent} has ended"),
         }
     }
@@ -995,6 +1184,9 @@ impl ConsolePanel {
         }
         if self.kind == Kind::Shell {
             return Status::Running;
+        }
+        if s.install.is_some() {
+            return Status::Installing;
         }
         if s.turn.is_some() {
             return Status::Working;
@@ -1021,7 +1213,10 @@ impl ConsolePanel {
             None => self.agent(cx),
         };
         let status = self.status(root.map(PathBuf::as_path), cx);
-        let running = matches!(status, Status::Connected | Status::NotConnected | Status::Running | Status::Working);
+        let running = matches!(
+            status,
+            Status::Connected | Status::NotConnected | Status::Running | Status::Working | Status::Installing
+        );
         let title = root
             .and_then(|r| self.sessions.get_mut(r))
             .map(|s| s.pty.title())
@@ -1061,7 +1256,7 @@ impl ConsolePanel {
             Status::Connected => p.ok,
             Status::Working => color,
             Status::NotConnected => p.warn,
-            Status::Running | Status::Starting => p.info(),
+            Status::Running | Status::Starting | Status::Installing => p.info(),
             Status::NotRunning | Status::Exited => p.fg_dim,
         };
         let tip = status.tip(if kind == Kind::Shell { "The shell" } else { agent.name.as_ref() });
@@ -1233,9 +1428,18 @@ impl ConsolePanel {
         use crate::agents::ConsoleAgent;
         use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
         let color = agent.color(p);
-        let model = self.model.clone();
+        let view = cx.entity();
         let chosen = self.model.read(cx).settings.console_agent;
         let agents = crate::agents::known(&self.model.read(cx).settings);
+        // Those not installed, or (the custom agent) with no command yet, say so.
+        let labels: Vec<SharedString> = agents
+            .iter()
+            .map(|a| match a.command.as_deref() {
+                Some(c) if c.trim().is_empty() => format!("{} (set up)", a.name).into(),
+                None if self.found.get(a.id) == Some(&false) => format!("{} (install)", a.name).into(),
+                _ => a.name.clone(),
+            })
+            .collect();
         let hover = p.button_hover;
         look::Trigger(
             div()
@@ -1266,18 +1470,14 @@ impl ConsolePanel {
                 .child(crate::components::icon(crate::components::IconName::ChevronDown, 12., p.fg_dim)),
         )
         .dropdown_menu(move |mut menu, _, _| {
-            for (a, which) in agents.iter().zip(ConsoleAgent::ALL) {
-                let model = model.clone();
+            for ((a, label), which) in agents.iter().zip(&labels).zip(ConsoleAgent::ALL) {
+                let view = view.clone();
                 menu = menu.item(
-                    PopupMenuItem::new(a.name.clone())
+                    PopupMenuItem::new(label.clone())
                         .icon(crate::components::menu_icon(a.icon))
                         .checked(which == chosen)
-                        .on_click(move |_, _, cx| {
-                            model.update(cx, |m, cx| {
-                                m.settings.console_agent = which;
-                                m.persist();
-                                cx.notify();
-                            })
+                        .on_click(move |_, window, cx| {
+                            view.update(cx, |this, cx| this.switch_agent(which, window, cx))
                         }),
                 );
             }
@@ -1301,6 +1501,11 @@ impl ConsolePanel {
     fn not_running(&self, root: &Path, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
         use crate::components::IconName;
         let agent = self.agent(cx);
+        if self.kind == Kind::Claude
+            && let Some(missing) = self.missing
+        {
+            return self.missing_view(root, &agent, missing, p, cx);
+        }
         let (title, hint, start): (String, String, &'static str) = match self.kind {
             Kind::Shell => ("The shell is not running".into(), "Start a shell in the project.".into(), "Start Shell"),
             Kind::Claude => {
@@ -1373,6 +1578,112 @@ impl ConsolePanel {
 }
 
 impl ConsolePanel {
+    /// The console when its agent cannot start: not installed (Install runs its installer
+    /// here), or the custom agent with no command (Settings, Agents names one).
+    fn missing_view(
+        &self,
+        root: &Path,
+        agent: &crate::agents::Agent,
+        missing: Missing,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        use crate::components::IconName;
+        let host = crate::host::host(cx);
+        let line = match missing {
+            Missing::Program(id) => crate::agents::install_command(id, host.info()),
+            Missing::Command => None,
+        };
+        let (title, hint) = match (missing, line) {
+            (Missing::Program(_), Some(line)) => {
+                let needs = if line.starts_with("npm ") { " It needs Node.js." } else { "" };
+                (
+                    format!("{} is not installed", agent.name),
+                    format!(
+                        "Install runs its installer here in the console.{needs} If it is installed somewhere \
+                         else, set its path in Settings, Agents."
+                    ),
+                )
+            }
+            (Missing::Program(_), None) => {
+                (format!("{} is not installed", agent.name), "Set its path in Settings, Agents.".to_owned())
+            }
+            (Missing::Command, _) => (
+                "Your own agent has no command yet".to_owned(),
+                "Name the command line agent to run here, and the name to show for it, in Settings, Agents.".to_owned(),
+            ),
+        };
+        let settings_button = |primary: bool| {
+            let on_click =
+                cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(crate::menus::SettingsAgents), cx));
+            if primary {
+                look::primary_button("console-agent-settings", IconName::Settings, "Agent Settings", true, p)
+                    .debug_selector(|| "console-agent-settings".into())
+                    .on_click(on_click)
+                    .into_any_element()
+            } else {
+                look::small_button("console-agent-settings", IconName::Settings, "Set Its Path", p)
+                    .debug_selector(|| "console-agent-settings".into())
+                    .h(px(28.))
+                    .px(px(12.))
+                    .on_click(on_click)
+                    .into_any_element()
+            }
+        };
+        let mut buttons: Vec<gpui::AnyElement> = Vec::new();
+        if let (Missing::Program(id), Some(_)) = (missing, line) {
+            let r = root.to_owned();
+            buttons.push(
+                look::primary_button("console-install", IconName::Download, install_label(id), true, p)
+                    .debug_selector(|| "console-install".into())
+                    .on_click(cx.listener(move |this, _, window, cx| this.install(&r, id, window, cx)))
+                    .into_any_element(),
+            );
+            buttons.push(settings_button(false));
+        } else {
+            buttons.push(settings_button(true));
+        }
+        div()
+            .id("console-not-running")
+            .debug_selector(|| "console-missing".into())
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(28.))
+            .px(px(24.))
+            .py(px(12.))
+            .when(self.compact(), |d| d.flex_col().gap(px(16.)))
+            .child(crate::art::drawing_on(snout_core::art::spots::agent_console(), 156., 104., p.panel))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .max_w(px(420.))
+                    .when(self.compact(), |d| d.w_full())
+                    .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
+                    .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
+                    .when_some(line, |d, line| {
+                        d.child(
+                            div()
+                                .mt(px(6.))
+                                .px(px(8.))
+                                .py(px(5.))
+                                .rounded(px(5.))
+                                .bg(p.wash(p.fg_dim))
+                                .font_family(look::mono_font(cx))
+                                .text_size(px(11.5))
+                                .child(line),
+                        )
+                    })
+                    .child(div().mt(px(10.)).flex().flex_wrap().gap(px(8.)).children(buttons)),
+            )
+            .into_any_element()
+    }
+
     fn terminal(
         &mut self,
         root: &Path,
@@ -1396,6 +1707,12 @@ impl ConsolePanel {
         let cursor_shown = !(look.blink && focused) || self.blink_shown;
         let (r1, r2, r3) = (root.to_owned(), root.to_owned(), root.to_owned());
         let start = root.to_owned();
+        let install = self.sessions.get(root).and_then(|s| s.install);
+        let (ended, again) = match (self.kind, install) {
+            (_, Some(_)) => ("The installer".to_owned(), "Try again"),
+            (Kind::Claude, None) => (self.session_agent(root, cx).name.to_string(), "Start a new session"),
+            (Kind::Shell, None) => (self.kind.title().to_owned(), "Start a new session"),
+        };
         let find_bar = self.find_bar(&p, cx);
         let grid = div()
             .id("terminal")
@@ -1408,19 +1725,16 @@ impl ConsolePanel {
             .key_context("Terminal")
             .when_some(exit, |d, how| {
                 d.child(
-                    div()
-                        .flex()
-                        .gap(px(6.))
-                        .px(px(8.))
-                        .text_color(p.fg_dim)
-                        .child(format!("{} {how}.", self.kind.title()))
-                        .child(
-                            Button::new("again")
-                                .link()
-                                .icon(crate::components::menu_icon(crate::components::IconName::Play))
-                                .label("Start a new session")
-                                .on_click(cx.listener(move |this, _, window, cx| this.start(&start, &[], window, cx))),
-                        ),
+                    div().flex().gap(px(6.)).px(px(8.)).text_color(p.fg_dim).child(format!("{ended} {how}.")).child(
+                        Button::new("again")
+                            .link()
+                            .icon(crate::components::menu_icon(crate::components::IconName::Play))
+                            .label(again)
+                            .on_click(cx.listener(move |this, _, window, cx| match install {
+                                Some(id) => this.install(&start, id, window, cx),
+                                None => this.start(&start, &[], window, cx),
+                            })),
+                    ),
                 )
             })
             .on_key_down(cx.listener(move |this, e: &KeyDownEvent, w, cx| this.on_key(e, &r1, w, cx)))
@@ -1800,16 +2114,14 @@ pub fn continue_args(agent: &crate::agents::Agent) -> Vec<String> {
     }
 }
 
-/// How to install the agent `id`, for the console to say when it is not found (Claude
-/// Code has its own words).
-fn install_hint(id: &str) -> Option<&'static str> {
+/// The Install button's words for the agent `id`.
+fn install_label(id: &str) -> &'static str {
     match id {
-        crate::agents::CODEX => Some("npm install -g @openai/codex"),
-        crate::agents::OPENCODE => {
-            Some("curl -fsSL https://opencode.ai/install | bash (or npm install -g opencode-ai)")
-        }
-        crate::agents::AMP => Some("curl -fsSL https://ampcode.com/install.sh | bash (or npm install -g @ampcode/cli)"),
-        _ => None,
+        crate::agents::CLAUDE => "Install Claude Code",
+        crate::agents::CODEX => "Install Codex",
+        crate::agents::OPENCODE => "Install opencode",
+        crate::agents::AMP => "Install Amp",
+        _ => "Install",
     }
 }
 

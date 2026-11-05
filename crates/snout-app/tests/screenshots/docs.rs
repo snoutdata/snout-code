@@ -689,6 +689,7 @@ fn claude(projects: &Path) {
     enum Step {
         Console,
         Start,
+        Install,
         Typing,
         CodexTyping,
         Fade,
@@ -698,6 +699,7 @@ fn claude(projects: &Path) {
     for (step, theme, name) in [
         (Step::Console, ThemeChoice::Light, "claude-console-light"),
         (Step::Start, ThemeChoice::Light, "agents-start-light"),
+        (Step::Install, ThemeChoice::Light, "agents-install-light"),
         (Step::Typing, ThemeChoice::Light, "agents-presence-light"),
         (Step::Typing, ThemeChoice::Dark, "agents-presence-dark"),
         (Step::CodexTyping, ThemeChoice::Light, "agents-presence-codex-light"),
@@ -727,6 +729,11 @@ fn claude(projects: &Path) {
         let mut s = settings(theme, vec![shop.clone()], Some(shop.clone()));
         if codex {
             s.console_agent = snout_app::agents::ConsoleAgent::Codex;
+        }
+        if step == Step::Install {
+            // Amp, not installed: its path names nothing, so it is not looked for elsewhere.
+            s.console_agent = snout_app::agents::ConsoleAgent::Amp;
+            s.amp_path = Some(shop.join("no-amp-here"));
         }
         let mut w = Win::new(s, false);
         w.activity(if step == Step::Console { Activity::Git } else { Activity::Project });
@@ -761,12 +768,19 @@ fn claude(projects: &Path) {
              printf '\\033[1m>\\033[0m '"
         };
         let fake = fake_claude(&shop, script);
-        w.cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+        if step != Step::Install {
+            w.cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+        }
         w.act(Action::ToggleConsole);
         if !codex {
             w.cx.update(|cx| cx.set_global(snout_app::claude_ide::IdeStatus { clients: 1 }));
         }
         w.pump(4, &mut |_| false);
+        if step == Step::Install {
+            // The console offers to install it.
+            w.snap(name);
+            continue;
+        }
         if step == Step::Start {
             // The session ended: the console's illustrated Start.
             let root = shop.clone();

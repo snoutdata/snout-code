@@ -63,6 +63,7 @@ SPEC = {
     "blame-agents": ("blame-agents-light", None),
     "agents-console": ("claude-console-light", None),
     "agents-console-start": ("agents-start-light", (720, 1230, 2800, 1745)),
+    "agents-install": ("agents-install-light", (720, 1230, 2800, 1745)),
     "agents-presence": ("agents-presence-light", None),
     "agents-presence-dark": ("agents-presence-dark", None),
     "agents-presence-codex": ("agents-presence-codex-light", None),

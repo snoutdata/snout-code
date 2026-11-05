@@ -111,6 +111,8 @@ mod shots {
         /// A commit (by summary) and one of its files, in a repository with a merge.
         Commit(&'static str, &'static str),
         Console,
+        /// The console's agent not installed: its Install button.
+        ConsoleInstall,
         /// The agent console moved to another dock, in the Project view.
         ConsoleAt(snout_app::workspace::Side),
         /// The console running a program that prints colours, attributes, wide characters
@@ -473,6 +475,15 @@ sleep 30
                 Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
                 cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+            }
+            Some(Select::ConsoleInstall) => {
+                cx.update(|cx| {
+                    model.update(cx, |m, cx| {
+                        m.settings.console_agent = snout_app::agents::ConsoleAgent::Amp;
+                        m.settings.amp_path = Some(repo.join("no-amp-here"));
+                        m.handle(Action::ToggleConsole, cx);
+                    })
+                });
             }
             Some(Select::ConsoleAt(side)) => {
                 let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
@@ -2998,6 +3009,7 @@ sleep 30
         shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
+        shot("console-install", ThemeChoice::Light, Activity::Git, Some(Select::ConsoleInstall));
         shot(
             "console-right",
             ThemeChoice::Light,

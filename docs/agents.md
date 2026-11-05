@@ -2,7 +2,7 @@
 
 SnoutCode runs a coding agent in a console inside the window and follows what it does in the editor, as it does it: Claude Code, OpenAI's Codex, opencode, Amp, or any other command line agent. You see the agent write, in its own colour, and you can review, keep or undo every change it made, by prompt, by file or by change.
 
-The agents are installed and signed in separately. SnoutCode does not ship them.
+SnoutCode does not ship the agents. When the one you pick is not installed, the console offers to install it for you (see [Install an agent](#install-an-agent)); you sign in to it once, in the console, as it asks.
 
 | Agent | How SnoutCode follows it |
 |---|---|
@@ -24,10 +24,30 @@ Open Settings (⌘,) ▸ Tools ▸ Agents. The page lists the agents SnoutCode k
 
 ![Settings, Agents](images/settings-and-keymap-agents.png)
 
-- **Programs**: SnoutCode looks for `claude`, `codex`, `opencode` and `amp` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.amp/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. Enter a path to use another program.
+- **Programs**: SnoutCode looks for `claude`, `codex`, `opencode` and `amp` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.amp/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, then wherever your shell finds them (npm's folder under nvm, say). Enter a path to use another program.
 - **Your agent**: the command line of any other agent, run in the project with `/bin/sh -c`, and the name its caret and marks show. Leave the name empty to use the program's name.
 
-You can also switch agents in the console's header: click the agent's name.
+You can also switch agents in the console's header: click the agent's name and pick another. The console switches at once: the session in front ends (a note says so; **Continue** picks its conversation up again later) and the agent you picked starts in its place. The menu marks the agents that are not installed with **(install)**, and your own agent with **(set up)** until it has a command.
+
+### Install an agent
+
+Pick an agent that is not installed and the console says so, with two buttons:
+
+- **Install**: runs the agent's installer in the console, in your own shell, so you see what it does and can answer it if it asks. When it finishes, the agent starts. If it fails, **Try again** runs it again.
+- **Set Its Path**: opens Settings, Agents, for an agent installed somewhere SnoutCode does not look.
+
+![The console offering to install Amp](images/agents-install.png)
+
+The installers SnoutCode runs:
+
+| Agent | macOS and Linux | Windows |
+|---|---|---|
+| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | `irm https://claude.ai/install.ps1 \| iex` |
+| Codex | `npm install -g @openai/codex` (needs Node.js) | the same |
+| opencode | `curl -fsSL https://opencode.ai/install \| bash` | `npm install -g opencode-ai` |
+| Amp | `curl -fsSL https://ampcode.com/install.sh \| bash` | `npm install -g @sourcegraph/amp` |
+
+Your own agent has nothing to install: until it has a command, the console offers **Agent Settings** to give it one.
 
 ## The console
 
@@ -218,7 +238,7 @@ A `codex` started in the console gets its hooks for that session only (`-c hooks
 
 **Trust the hooks once.** Codex runs a hook only after you have reviewed it. The first time Codex starts in the console, it says new hooks are waiting: type `/hooks` and trust SnoutCode's four. They read the same in every window and every project, so Codex does not ask again. Until you trust them, Codex still works, and SnoutCode follows it as it follows any agent: the files that change while its turn runs.
 
-Install it with `npm install -g @openai/codex` (or as its README says) and sign in once in a terminal.
+Pick it in the console and press **Install**, or install it yourself with `npm install -g @openai/codex` (or as its README says). Sign in once, in the console, as it asks.
 
 ![Codex writing in the editor, its caret and flag in its colour](images/agents-presence-codex.png)
 
@@ -228,7 +248,7 @@ Install it with `npm install -g @openai/codex` (or as its README says) and sign 
 
 An `opencode` started in the console loads a plugin of SnoutCode's for that session only, through the variable `OPENCODE_CONFIG_CONTENT`; your own plugins load as usual, and your `opencode.json` is never changed. Before and after each `edit`, `write` and `apply_patch`, the plugin posts to SnoutCode, which reads the file. It also reports the prompt you send, and when the session goes idle.
 
-Install it with `curl -fsSL https://opencode.ai/install | bash` (or `npm install -g opencode-ai`) and sign in once in a terminal.
+Pick it in the console and press **Install**, or install it yourself with `curl -fsSL https://opencode.ai/install | bash` (or `npm install -g opencode-ai`). Sign in once, in the console, as it asks.
 
 ## Amp
 
@@ -236,7 +256,7 @@ Amp loads plugins only from its plugins folder, so SnoutCode puts its plugin the
 
 Before and after each tool call that changes files (`edit_file`, `create_file`, `apply_patch`, and shell commands that write files), the plugin posts the files to SnoutCode, which reads them. At the end of each turn it reports the turn's prompt. Delete the file to stop it; SnoutCode puts it back the next time its console starts Amp.
 
-Install it with `curl -fsSL https://ampcode.com/install.sh | bash` (or `npm install -g @ampcode/cli`) and sign in once in a terminal.
+Pick it in the console and press **Install**, or install it yourself with `curl -fsSL https://ampcode.com/install.sh | bash` (or `npm install -g @sourcegraph/amp`). Sign in once, in the console, as it asks.
 
 ## Draft a commit message
 

@@ -1238,6 +1238,46 @@ fn the_console_says_its_agent_and_state_and_stays_ended(cx: &mut TestAppContext)
     let _ = std::fs::remove_dir_all(lock_dir);
 }
 
+/// Picking another agent in the console's menu switches to it: the session in front ends
+/// (a note says so) and the chosen agent starts; one that cannot start says why, with the
+/// way to fix it (the custom agent with no command: Settings, Agents).
+#[gpui::test]
+fn picking_an_agent_switches_the_console_to_it(cx: &mut TestAppContext) {
+    use crate::agents::ConsoleAgent;
+    use crate::console::Status;
+    let (repo, lock_dir, model, ws, _client, cx) = connected("console-switch", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    hook_command(&ws, cx);
+    cx.update(|_, cx| cx.set_global(super::IdeArgs::default()));
+    cx.update(|_, cx| cx.set_global(super::CodexArgs::default()));
+    // `tail` stands in for every agent: with no file it reads the terminal, and runs on.
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(crate::tests::unix_tool("/usr/bin/tail"))));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
+    let running = |cx: &mut VisualTestContext| {
+        let status = cx.update(|_, cx| console.update(cx, |c, cx| c.status(Some(&repo), cx)));
+        matches!(status, Status::Connected | Status::NotConnected | Status::Running)
+    };
+    pump_until(cx, "Claude Code's session", |cx| running(cx));
+    let agent_of = |cx: &mut VisualTestContext| cx.update(|_, cx| console.read(cx).session_agent(&repo, cx).id);
+    assert_eq!(agent_of(cx), crate::agents::CLAUDE);
+    cx.update(|w, cx| console.update(cx, |c, cx| c.switch_agent(ConsoleAgent::Codex, w, cx)));
+    pump_until(cx, "Codex's session", |cx| agent_of(cx) == crate::agents::CODEX && running(cx));
+    assert_eq!(cx.update(|_, cx| model.read(cx).settings.console_agent), ConsoleAgent::Codex);
+    assert_eq!(
+        cx.update(|_, cx| console.read(cx).note().map(str::to_owned)).as_deref(),
+        Some("Claude Code ended; Continue resumes it")
+    );
+    // The custom agent with no command does not start: the console says where to give one.
+    cx.update(|w, cx| console.update(cx, |c, cx| c.switch_agent(ConsoleAgent::Custom, w, cx)));
+    pump(cx, 300);
+    let status = cx.update(|_, cx| console.update(cx, |c, cx| c.status(Some(&repo), cx)));
+    assert_eq!(status, Status::NotRunning);
+    assert!(cx.debug_bounds("console-missing").is_some(), "it says why the agent cannot start");
+    assert!(cx.debug_bounds("console-agent-settings").is_some(), "and opens Settings, Agents");
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
 /// The last editor tab closes like any other, and the empty editor shows in its place:
 /// the ways to a file, and the file just closed among the recent ones.
 #[gpui::test]
