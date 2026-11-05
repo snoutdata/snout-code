@@ -386,6 +386,50 @@ const SECTION_ART = {
 			<Spark x={330} y={100} s={0.65} />
 		</>
 	),
+	// Playwright: a browser being recorded (the red dot), a pointer clicking its button, and the
+	// steps flowing into the spec beside it, the newest line in green.
+	playwright: () => (
+		<>
+			<path className="ill-blob" d={WIDE_BLOB} />
+			<Win x={40} y={22} w={150} h={100} />
+			<circle className="ill-clay ill-blink" cx="178" cy="29" r="4" />
+			<rect className="ill-tint" x={56} y={50} width={84} height={10} rx="3" />
+			<rect className="ill-paper" x={56} y={68} width={118} height={12} rx="4" />
+			<rect className="ill-accent" x={56} y={92} width={58} height={18} rx="9" />
+			<path className="ill-paper" d="M104 100L104 124L110 118L115 129L120 127L115 116L123 116Z" />
+			<path className="ill-thread" d="M194 72C210 72 212 60 226 60" />
+			<rect className="ill-paper" x={228} y={30} width={104} height={92} rx="7" />
+			<CodeLines x={240} y={46} lines={[[0, 54], [8, 70], [8, 62], [8, 48], [0, 10]]} gap={14} accent={3} />
+			<Spark x={30} y={30} s={0.6} />
+			<Spark x={340} y={22} s={0.7} />
+		</>
+	),
+	// Node: a package with its Node version on a tag, a script running in the terminal, and the
+	// tests ticked green beside it.
+	node: () => (
+		<>
+			<path className="ill-blob" d={WIDE_BLOB} />
+			<path className="ill-sand" d="M40 58L84 42L128 58V102L84 118L40 102Z" />
+			<path d="M40 58L84 74L128 58M84 74V118" />
+			<path className="ill-paper" d="M54 66L74 73V92L54 85Z" />
+			<path d="M112 44V30" />
+			<rect className="ill-accent" x={98} y={14} width={34} height={18} rx="5" />
+			<text className="ill-label" x="115" y="27" textAnchor="middle">22</text>
+			<Win x={146} y={30} w={116} h={78} fill="ill-ink-panel" />
+			<path className="ill-on-ink" d="M158 60L165 65L158 70" />
+			<path className="ill-on-ink" d="M171 70H226" />
+			<path className="ill-on-ink ill-faint" d="M158 88H240" />
+			<rect className="ill-accent ill-blink" x={230} y={62} width={8} height={11} rx="1.5" />
+			<circle className="ill-accent" cx="296" cy="52" r="10" />
+			<path d="M291.5 52L294.5 55L300.5 48.5" />
+			<circle className="ill-accent" cx="296" cy="80" r="10" />
+			<path d="M291.5 80L294.5 83L300.5 76.5" />
+			<circle className="ill-clay" cx="296" cy="108" r="10" />
+			<path d="M292.5 104.5L299.5 111.5M299.5 104.5L292.5 111.5" />
+			<Spark x={28} y={40} s={0.6} />
+			<Spark x={334} y={26} s={0.7} />
+		</>
+	),
 	// Tests: a clipboard of results, two ticks and one to look at, before three browsers.
 	tests: () => (
 		<>

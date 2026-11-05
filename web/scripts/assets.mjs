@@ -22,6 +22,10 @@ const SHOTS = [
 	'agents-presence.png',
 	'agents-presence-dark.png',
 	'playwright-tests-window.png',
+	'playwright-recording.png',
+	'playwright-debugging.png',
+	'node-scripts.png',
+	'node-vitest.png',
 	'git-view.png',
 	'remote-ssh-project.png'
 ]

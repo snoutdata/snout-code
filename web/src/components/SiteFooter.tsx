@@ -16,6 +16,8 @@ const COLUMNS = [
 		links: [
 			{ href: DOCS_URL, label: 'User guide' },
 			{ href: docs('getting-started.md'), label: 'Getting started' },
+			{ href: docs('playwright.md'), label: 'Playwright projects' },
+			{ href: docs('node.md'), label: 'Node projects' },
 			{ href: docs('agents.md'), label: 'Coding agents' },
 			{ href: docs('remote-ssh.md'), label: 'Remote SSH' }
 		]

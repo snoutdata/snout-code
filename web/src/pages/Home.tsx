@@ -7,7 +7,7 @@ import { Shot } from '../components/Shot'
 import { useScrollReveal } from '../effects'
 import { CONTRIBUTING_URL, GITHUB_URL, ISSUES_URL, docs } from '../site'
 
-const MADE_FOR = ['Java', 'Gradle', 'Maven', 'Spring Boot', 'TypeScript', 'Node', 'Playwright', 'Git']
+const MADE_FOR = ['Java', 'Gradle', 'Maven', 'Spring Boot', 'TypeScript', 'JavaScript', 'Node', 'Playwright', 'Vitest', 'Jest', 'Git']
 
 const MORE: { art: CardArtKind, title: string, body: string, href: string }[] = [
 	{
@@ -23,10 +23,10 @@ const MORE: { art: CardArtKind, title: string, body: string, href: string }[] = 
 		href: docs('terminal.md')
 	},
 	{
-		art: 'node',
-		title: 'Node, Vitest and Jest',
-		body: 'Every package script is a run configuration. Tests get run icons at each test, a live Tests window and a debugger.',
-		href: docs('node.md')
+		art: 'source',
+		title: 'Know what runs',
+		body: 'The Processes window lists everything SnoutCode runs on your machine, engines, builds and servers, and stops any of it.',
+		href: docs('processes.md')
 	},
 	{
 		art: 'settings',
@@ -70,8 +70,9 @@ export function Home() {
 							The native IDE for Java, Gradle and Spring.
 						</h1>
 						<p className="lede">
-							Written in Rust, with its own Java engine. Git and Claude Code are built in, and the window can stay on
-							your desk while the project lives on a Linux machine over SSH.
+							Written in Rust, with its own Java engine, and TypeScript for Node projects and Playwright tests. Git and
+							Claude Code are built in, and the window can stay on your desk while the project lives on a Linux
+							machine over SSH.
 						</p>
 						<div className="hero-cta">
 							<a className="btn btn-lg" href="/download">
@@ -163,6 +164,118 @@ export function Home() {
 					</div>
 				</section>
 
+				<section className="section section-tint" id="playwright" aria-labelledby="pw-title">
+					<SectionHead id="pw-title" art="playwright" eyebrow="Playwright for QA" title="End to end tests, as a project of their own" flip>
+						A repository of Playwright tests opens as its own kind of project and tests the application from the
+						outside, through its URL. It gets TypeScript editing and the Node, packages and browsers it needs, and
+						never starts Java.
+					</SectionHead>
+					<div className="showcase-list">
+						<Showcase
+							title="Write tests by using the app"
+							body="Act in the browser and the steps are written into your spec as you go, right where the caret is."
+							points={[
+								'Record at Cursor: into the test the caret is in, as a new test, or as a whole spec',
+								'Pick Locator: each element you click puts its locator at the caret',
+								'Page addresses written relative to the app, so a test runs against any environment',
+								'Playwright\'s UI Mode and Inspector a click away'
+							]}
+							link={{ href: docs('playwright.md#writing-tests'), label: 'Writing tests in the user guide' }}
+							shot={{ src: 'playwright-recording.png', alt: 'Record at Cursor writing the recorder\'s steps into a Playwright test', w: 1600, h: 514 }}
+						/>
+						<Showcase
+							flip
+							title="Follow every run, test by test"
+							body="Run all, a project, a file or the test at the caret, and watch the Tests window fill in as the run goes."
+							points={[
+								'Progress, time left, each worker\'s step, a grid of tests by browser',
+								'The last ten results of every test and its flaky rate',
+								'A failure\'s error at its line, screenshot comparisons with Accept, steps and a trace filmstrip',
+								'Rerun failed, from the Tests window, the title bar or the gutter'
+							]}
+							link={{ href: docs('playwright.md#running-tests'), label: 'Running tests in the user guide' }}
+							shot={{ src: 'playwright-tests-window.png', alt: 'The Tests window following a Playwright run in three browsers', w: 1600, h: 891 }}
+						/>
+						<Showcase
+							title="Debug a test where it stops"
+							body="Set a breakpoint in a spec, a page object or a helper. The test stops there with its browser showing."
+							points={[
+								'Breakpoints in TypeScript or JavaScript',
+								'The worker\'s stack, variables and watches in the Debug window',
+								'Stepping as for Java, with the same keys',
+								'The debugger is downloaded the first time, nothing to install'
+							]}
+							link={{ href: docs('playwright.md#debugging-tests'), label: 'Debugging tests in the user guide' }}
+							shot={{ src: 'playwright-debugging.png', alt: 'A Playwright test stopped at a breakpoint in its spec, with the stack and variables', w: 1600, h: 812 }}
+						/>
+					</div>
+					<div className="trio">
+						<article className="trio-card" data-reveal>
+							<h3>Ready to run</h3>
+							<p>A bar installs the packages with npm, pnpm, Yarn or Bun, by the lockfile, and the browsers its Playwright version runs. The output shows in the Build window.</p>
+						</article>
+						<article className="trio-card" data-reveal>
+							<h3>Environments</h3>
+							<p>Your machine, staging, a review app: each environment sets BASE_URL, its variables and a .env file. They stay outside the repository, so each tester has their own.</p>
+						</article>
+						<article className="trio-card" data-reveal>
+							<h3>History</h3>
+							<p>Every run is kept, the latest 200 of each project, with its environment, branch and commit, and the tests that broke since the run before.</p>
+						</article>
+					</div>
+				</section>
+
+				<section className="section" id="node" aria-labelledby="node-title">
+					<SectionHead id="node-title" art="node" eyebrow="Node and TypeScript" title="TypeScript, on the Node your project asks for">
+						A package.json project opens as a Node project, without Java. Its scripts run and debug the way a Java
+						project's do, and its editing comes from the project's own TypeScript.
+					</SectionHead>
+					<div className="showcase-list">
+						<Showcase
+							flip
+							title="Every script, one click away"
+							body="The scripts in package.json are run configurations, with a run icon beside each one."
+							points={[
+								'Workspaces and folders with their own package.json, each package\'s scripts named by its folder',
+								'npm, pnpm, Yarn or Bun, by the lockfile',
+								'Any TypeScript file runs as Current File, through tsx, ts-node or Node\'s own type stripping',
+								'Debug follows every Node process a run starts, and attaches to a Node started with --inspect'
+							]}
+							link={{ href: docs('node.md'), label: 'Node projects in the user guide' }}
+							shot={{ src: 'node-scripts.png', alt: 'A package.json with a run icon beside each script, and npm run dev in the Run window', w: 1600, h: 1028 }}
+						/>
+						<Showcase
+							title="Vitest and Jest, live"
+							body="Unit tests get run icons at each test, it and describe, and their runs fill the Tests window as they go."
+							points={[
+								'Each test passed, failed or skipped, its time, and a failure\'s message at its line',
+								'Rerun failed, Run this test and Debug this test',
+								'A switch between the packages that have tests',
+								'Debug stops in the test and in the code it calls'
+							]}
+							link={{ href: docs('node.md#unit-tests-vitest-and-jest'), label: 'Vitest and Jest in the user guide' }}
+							shot={{ src: 'node-vitest.png', alt: 'A Vitest run in the Tests window, a failed test picked, its test file above with run icons', w: 1600, h: 1028 }}
+						/>
+					</div>
+					<div className="trio">
+						<article className="trio-card" data-reveal>
+							<h3>TypeScript editing</h3>
+							<p>Completion with auto imports, hover, go to definition, find references, rename, quick fixes and problems, from the TypeScript your project installs.</p>
+						</article>
+						<article className="trio-card" data-reveal>
+							<h3>The right Node, found</h3>
+							<p>From .nvmrc, .node-version, volta or engines, among the Nodes of nvm, Volta, fnm, asdf, mise and Homebrew. When none fits, it downloads one and checks it.</p>
+						</article>
+						<article className="trio-card" data-reveal>
+							<h3>Beside a Java build</h3>
+							<p>A Spring Boot application with its front end, or with an e2e folder of Playwright tests, gets each language server for its own files.</p>
+						</article>
+					</div>
+					<p className="center-link" data-reveal>
+						<a className="more-link" href={docs('typescript.md')}>TypeScript and JavaScript in the user guide <span aria-hidden="true">&rarr;</span></a>
+					</p>
+				</section>
+
 				<section className="section section-tint" id="agents" aria-labelledby="agents-title">
 					<SectionHead id="agents-title" art="agents" eyebrow="Coding agents" title="Watch your agent type" flip>
 						Claude Code, Codex or your own agent runs in a docked console. Each edit is typed in live, with the
@@ -190,29 +303,8 @@ export function Home() {
 					</p>
 				</section>
 
-				<section className="section" aria-labelledby="ts-title">
-					<SectionHead id="ts-title" art="tests" eyebrow="Not only Java" title="TypeScript, Node and Playwright too">
-						A package.json project opens as a Node project, and a repository of Playwright tests as a project of its
-						own. Both get TypeScript editing and the Node they need, and never start Java.
-					</SectionHead>
-					<div className="showcase-list">
-						<Showcase
-							title="Playwright tests, end to end"
-							body="Record at the cursor, pick locators, run any test in any browser and follow the run live in the Tests window."
-							points={[
-								'Progress, each worker\'s step, and a grid of tests by browser',
-								'The last ten results of every test and its flaky rate',
-								'Screenshot comparisons with Accept, steps, and a trace filmstrip',
-								'Environments that set BASE_URL and variables per run'
-							]}
-							link={{ href: docs('playwright.md'), label: 'Playwright in the user guide' }}
-							shot={{ src: 'playwright-tests-window.png', alt: 'The Tests window following a Playwright run in three browsers', w: 1600, h: 891 }}
-						/>
-					</div>
-				</section>
-
-				<section className="section section-tint" aria-labelledby="git-title">
-					<SectionHead id="git-title" art="git" eyebrow="Built in" title="Git, right where you work" flip>
+				<section className="section" aria-labelledby="git-title">
+					<SectionHead id="git-title" art="git" eyebrow="Built in" title="Git, right where you work">
 						Changes, diffs, commits, branches and history, in a Git view of its own. It runs the git you already have,
 						so hooks, credentials and settings behave as they do in a terminal.
 					</SectionHead>
@@ -233,8 +325,8 @@ export function Home() {
 					</div>
 				</section>
 
-				<section className="section" id="remote" aria-labelledby="remote-title">
-					<SectionHead id="remote-title" art="remote" eyebrow="Remote SSH" title="Your window, their machine">
+				<section className="section section-tint" id="remote" aria-labelledby="remote-title">
+					<SectionHead id="remote-title" art="remote" eyebrow="Remote SSH" title="Your window, their machine" flip>
 						Keep the window on your Mac while the project, Git, the Java engine, builds, runs, terminals and Claude Code
 						are on a Linux machine you reach with ssh.
 					</SectionHead>

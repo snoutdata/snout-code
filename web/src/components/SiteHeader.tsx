@@ -5,6 +5,8 @@ import { DOCS_URL, GITHUB_URL } from '../site'
 
 const LINKS = [
 	{ href: '/#features', label: 'Features' },
+	{ href: '/#playwright', label: 'Playwright' },
+	{ href: '/#node', label: 'Node' },
 	{ href: '/#agents', label: 'Agents' },
 	{ href: '/#open-source', label: 'Open source' },
 	{ href: DOCS_URL, label: 'Docs' },
