@@ -1,6 +1,6 @@
 # SnoutCode
 
-**[Read the user guide](docs/README.md)**
+**[snoutcode.com](https://snoutcode.com)** · **[Read the user guide](docs/README.md)**
 
 A native IDE for Java, Gradle, Maven and Spring Boot, for TypeScript and JavaScript projects on Node, and for end-to-end tests written with Playwright in TypeScript, on macOS, Linux and Windows, written in Rust. It has Git and Claude Code built in, and can work on a Linux machine over SSH while the window stays on your desktop.
 
@@ -128,6 +128,10 @@ cargo fmt --all --check
 The GUI tests render the app headlessly. Set `SNOUT_SCREENSHOT=/path/to/dir` to save PNGs of the renders. The engine has its own tests: `cd engine && ./gradlew build`.
 
 The TypeScript tests run the real vtsls when the machine has Node, and say they are skipped when it has none. The Playwright runs in the tests go through a stand-in for Playwright's test runner (`tests/fixtures/playwright/fake-cli.js`) that drives SnoutCode's own reporter and plays a recorder, and a stand-in for its API (`fake-api.js`) for the locator picker, so they need Node but no browsers. A few tests need the network or a real installed project (a Node download from nodejs.org, a package install, the real Playwright listing a new project's tests, a real run of the project at `SNOUT_PW_PROJECT`); they are ignored by default and run with `cargo test -p snout-app --lib playwright_tests -- --ignored`. Debugging goes through a stand-in for js-debug (`fake-js-debug.js`); `node_tests -- --ignored` debugs an npm script, a TypeScript file and an attach under the real js-debug.
+
+## The website
+
+The site at [snoutcode.com](https://snoutcode.com) is in [`web/`](web/README.md): a static React + Vite site, prerendered at build time, with no backend.
 
 ## Contributing
 

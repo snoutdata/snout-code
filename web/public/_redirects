@@ -1,0 +1,2 @@
+# The www host is an alias; the apex is the site.
+https://www.snoutcode.com/* https://snoutcode.com/:splat 301

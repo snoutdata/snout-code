@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+# Copied from ../docs/images and ../assets/icon by scripts/assets.mjs, so they have one source.
+public/shots/
+public/favicon.svg
+public/apple-touch-icon.png
+public/icon-512.png
+# Deploy credentials are never in this repository; see README.md.
+.env
+.env.*
