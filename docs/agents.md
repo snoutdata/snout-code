@@ -1,14 +1,18 @@
 # Coding agents
 
-SnoutCode runs a coding agent in a console inside the window and follows what it does in the editor, as it does it: Claude Code, OpenAI's Codex, or any other command line agent. You see the agent write, in its own colour, and you can review, keep or undo every change it made, by prompt, by file or by change.
+SnoutCode runs a coding agent in a console inside the window and follows what it does in the editor, as it does it: Claude Code, OpenAI's Codex, opencode, Amp, or any other command line agent. You see the agent write, in its own colour, and you can review, keep or undo every change it made, by prompt, by file or by change.
 
 The agents are installed and signed in separately. SnoutCode does not ship them.
 
 | Agent | How SnoutCode follows it |
 |---|---|
 | [Claude Code](https://docs.claude.com/en/docs/claude-code) | It connects to the editor as its IDE: it sees your selection, open files and problems, and proposes changes there. Its hooks report every edit before and after, and the prompt of each turn. |
-| [Codex](https://github.com/openai/codex) | SnoutCode sets its `notify` program for the session, which reports the end of each turn and its prompt. The files it changes are seen as it works. |
+| [Codex](https://github.com/openai/codex) | SnoutCode gives it hooks for the session, which report every edit before and after, and the prompt of each turn. Its `notify` program reports the end of each turn. |
+| [opencode](https://opencode.ai) | A plugin of SnoutCode's, loaded for the session only, reports every edit before and after, and the prompt of each turn. |
+| [Amp](https://ampcode.com) | A plugin of SnoutCode's in Amp's plugins folder reports every edit before and after, including files a shell command writes, and the prompt of each turn as it ends. |
 | Your own | Any command line agent the console runs. The files that change while it works on a turn (from Return until it goes quiet) are put down to it. |
+
+With Claude Code, Codex, opencode and Amp, SnoutCode hears of each edit before the agent makes it, so the editor plays it out as it lands and **Revert** puts back exactly what the file held. Files the agent changes some other way (a shell command, a build) are seen on disk while its turn runs, and put down to it too.
 
 ![Claude writing in the editor, its caret and flag in its colour](images/agents-presence.png)
 
@@ -20,7 +24,7 @@ Open Settings (⌘,) ▸ Tools ▸ Agents. The page lists the agents SnoutCode k
 
 ![Settings, Agents](images/settings-and-keymap-agents.png)
 
-- **Programs**: SnoutCode looks for `claude` and `codex` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. Enter a path to use another program.
+- **Programs**: SnoutCode looks for `claude`, `codex`, `opencode` and `amp` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.amp/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. Enter a path to use another program.
 - **Your agent**: the command line of any other agent, run in the project with `/bin/sh -c`, and the name its caret and marks show. Leave the name empty to use the program's name.
 
 You can also switch agents in the console's header: click the agent's name.
@@ -45,10 +49,10 @@ One row says which agent runs, how it is, and what you can do:
 | Control | What it does |
 |---|---|
 | The agent's name | Click it to pick another agent for the console. |
-| The status | **Connected**: Claude Code runs and sees the editor. **Working**: the agent is at work on your prompt. **Running**: it runs (Codex, your own agent). **Not connected**: Claude Code runs but has not connected to the editor. **Not running**, **Starting** and **Ended** say what they say. |
+| The status | **Connected**: Claude Code runs and sees the editor. **Working**: the agent is at work on your prompt. **Running**: it runs (Codex, opencode, Amp, your own agent). **Not connected**: Claude Code runs but has not connected to the editor. **Not running**, **Starting** and **Ended** say what they say. |
 | **Follow** | Turns following of the agent's edits on or off (see [Follow the agent](#follow-the-agent)). |
 | **New** | Starts the agent again on a new conversation. |
-| **Continue** | Starts it again on the most recent conversation in this folder (`claude --continue`, `codex resume --last`). |
+| **Continue** | Starts it again on the most recent conversation in this folder (`claude --continue`, `codex resume --last`, `opencode --continue`, `amp threads continue --last`). |
 | **End** | Ends the session. |
 
 When no session runs, the console says so, with **Start** and **Continue last session**. Ending a session keeps it ended until you start it again.
@@ -100,7 +104,7 @@ Nothing is sent until you press ↩, so you can add to it first. The lines light
 
 With **Follow** on (the default), the editor follows the files the agent changes:
 
-- The agent's caret shows in its colour with a small flag of its name (**Claude**, **Codex**), and moves along as the text types itself in.
+- The agent's caret shows in its colour with a small flag of its name (**Claude**, **Codex**, **opencode**, **Amp**), and moves along as the text types itself in.
 - The lines it writes light up in its colour and fade to normal over about a second. Only those lines change; the rest of the file stays as it is.
 - It opens the file it changes and keeps the view on the typing. It never jumps while you are typing. A file that changes while another is in front gets its turn a moment later.
 - Each tab the agent writes in shows the agent's dot, pulsing.
@@ -111,7 +115,7 @@ With **Follow** off, the editor stays where it is, and a dot in the agent's colo
 
 Only the agent's own edits count. Files Git changes (a pull, a checkout, a discard, from SnoutCode or from a terminal) are never put down to an agent, even with it connected: nothing opens, and nothing waits for review in the Agent Changes window.
 
-While Claude Code edits, a note floats over the lower right of the editor: **Claude is editing** with the file and the tool, or **Claude is waiting for your review**. Click it to open that file.
+While an agent edits, a note floats over the lower right of the editor, in its colour: **Claude is editing** (or **Codex**, **opencode**, **Amp**) with the file and the tool, or **Claude is waiting for your review**. Click it to open that file.
 
 ## Who wrote which lines
 
@@ -156,7 +160,7 @@ Accept Claude's Change and Reject Claude's Change are also in the command palett
 
 Agent Changes, on the right tool window stripe, lists what the agents changed in the session that you have not reviewed yet, grouped by prompt (turn), the latest first. The count on its stripe icon is the number of files.
 
-- **Editing** at the top shows the file Claude Code is working on, and the tool it uses.
+- **Editing** at the top shows the file the agent is working on, and the tool it uses.
 - **Waiting for your review** lists the changes Claude Code asks to make. Click **Accept** or **Reject** on one, or click it to open its tab.
 - Each turn shows its agent, its prompt (or its number, when the agent does not say), when it began and how many files it changed, with **Accept** and **Revert** for all of them.
 - Under it, each changed file shows its lines added and removed, and **new** when the agent created it. A file marked **seen** was changed on disk while the agent worked, but no hook reported it.
@@ -210,9 +214,25 @@ This goes through an Agent Skill and a [UTCP](https://www.utcp.io) manual over a
 
 ## Codex
 
-A `codex` started in the console gets `-c notify=[…]` for that session only: Codex runs it at the end of each turn with the turn's prompt, and it posts them to SnoutCode with `curl`. Your `~/.codex/config.toml` is never changed. The files Codex changes are seen on disk while its turn runs, played out in its colour, and listed by turn in the Agent Changes window.
+A `codex` started in the console gets its hooks for that session only (`-c hooks.PreToolUse=…` and the like): before and after each `apply_patch`, Codex's way of changing files, the hook posts the patch to SnoutCode with `curl`, and SnoutCode reads each file the patch names. The prompt of each turn comes the same way. It also gets `-c notify=[…]`, which Codex runs at the end of each turn. Your `~/.codex/config.toml` is never changed.
+
+**Trust the hooks once.** Codex runs a hook only after you have reviewed it. The first time Codex starts in the console, it says new hooks are waiting: type `/hooks` and trust SnoutCode's four. They read the same in every window and every project, so Codex does not ask again. Until you trust them, Codex still works, and SnoutCode follows it as it follows any agent: the files that change while its turn runs.
 
 Install it with `npm install -g @openai/codex` (or as its README says) and sign in once in a terminal.
+
+## opencode
+
+An `opencode` started in the console loads a plugin of SnoutCode's for that session only, through the variable `OPENCODE_CONFIG_CONTENT`; your own plugins load as usual, and your `opencode.json` is never changed. Before and after each `edit`, `write` and `apply_patch`, the plugin posts to SnoutCode, which reads the file. It also reports the prompt you send, and when the session goes idle.
+
+Install it with `curl -fsSL https://opencode.ai/install | bash` (or `npm install -g opencode-ai`) and sign in once in a terminal.
+
+## Amp
+
+Amp loads plugins only from its plugins folder, so SnoutCode puts its plugin there, as `~/.config/amp/plugins/snoutcode.js`, when the console starts Amp. The plugin does nothing in an Amp started anywhere else: it works only when SnoutCode's console runs it. The console also starts Amp with `PLUGINS=all`, unless you set `PLUGINS` yourself.
+
+Before and after each tool call that changes files (`edit_file`, `create_file`, `apply_patch`, and shell commands that write files), the plugin posts the files to SnoutCode, which reads them. At the end of each turn it reports the turn's prompt. Delete the file to stop it; SnoutCode puts it back the next time its console starts Amp.
+
+Install it with `curl -fsSL https://ampcode.com/install.sh | bash` (or `npm install -g @ampcode/cli`) and sign in once in a terminal.
 
 ## Draft a commit message
 
@@ -222,6 +242,6 @@ Draft runs `claude` on its own in print mode, with its tools turned off, and sen
 
 ## On a remote machine
 
-In a project on a remote machine, the console runs the agent on that machine, and everything on this page works as it does on your Mac: proposed changes, the selection, the agent's caret and marks, the Agent Changes window, Accept All and Revert All. Install the agent (and `curl`, for the hooks) on that machine.
+In a project on a remote machine, the console runs the agent on that machine, and everything on this page works as it does on your Mac: proposed changes, the selection, the agent's caret and marks, the Agent Changes window, Accept All and Revert All. Install the agent (and `curl`, for Claude Code's and Codex's hooks) on that machine. opencode's plugin is written on that machine too, and so is Amp's, into that machine's `~/.config/amp/plugins`.
 
 SnoutCode writes Claude Code's lock file into that machine's `~/.claude/ide/`, and the agent reaches the window through ports of that machine's loopback that the SSH connection carries back to your Mac. A revert writes the file on that machine. See [Remote SSH](remote-ssh.md#claude-code-on-the-remote-machine).

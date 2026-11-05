@@ -305,15 +305,16 @@ See [Terminal](terminal.md#open-in-external-terminal).
 
 **The console runs**
 
-- The agents SnoutCode knows: Claude Code, Codex, and your own. Each card shows the agent's
-  colour (its caret, its marks in the gutter, its dots) and icon, and how SnoutCode follows it.
-  Click one to have the console run it (`console_agent`: `claude`, `codex` or `custom`).
+- The agents SnoutCode knows: Claude Code, Codex, opencode, Amp, and your own. Each card shows
+  the agent's colour (its caret, its marks in the gutter, its dots) and icon, and how SnoutCode
+  follows it. Click one to have the console run it (`console_agent`: `claude`, `codex`,
+  `opencode`, `amp` or `custom`).
 
 **Programs**
 
-- **Claude Code** and **Codex**: the `claude` and `codex` programs to run (`claude_path`,
-  `codex_path`). Leave them empty to find them on your `PATH`, in `~/.local/bin` and the usual
-  places.
+- **Claude Code**, **Codex**, **opencode** and **Amp**: the `claude`, `codex`, `opencode` and
+  `amp` programs to run (`claude_path`, `codex_path`, `opencode_path`, `amp_path`). Leave them
+  empty to find them on your `PATH`, in `~/.local/bin` and the usual places.
 - **Your agent** and **Its name**: the command line of any other agent, run in the project with
   `/bin/sh -c` (`custom_agent_command`), and the name its caret and marks show
   (`custom_agent_name`).

@@ -1,5 +1,5 @@
 //! The agent console in the bottom dock: the coding agent of the settings (Claude Code,
-//! Codex or a command of the user's) running in the open repository on
+//! Codex, opencode, Amp or a command of the user's) running in the open repository on
 //! the pseudo-terminal of `snout_core::pty`, painted cell by cell from the frame its
 //! terminal engine publishes (the built-in one or Ghostty's, as Settings ▸ Terminal says
 //! when the session starts). One session per repository, kept alive while switching between
@@ -478,6 +478,8 @@ impl ConsolePanel {
         let settings = &self.model.read(cx).settings;
         let configured = match agent.as_ref().map(|a| a.id) {
             Some(crate::agents::CODEX) => settings.codex_path.clone(),
+            Some(crate::agents::OPENCODE) => settings.opencode_path.clone(),
+            Some(crate::agents::AMP) => settings.amp_path.clone(),
             Some(crate::agents::CUSTOM) => {
                 Some(PathBuf::from(if host.info().is_windows() { "cmd.exe" } else { "/bin/sh" }))
             }
@@ -494,19 +496,36 @@ impl ConsolePanel {
         let (fg, bg) = (rgb(p.fg), rgb(p.panel));
         // The settings' variables, then for Claude Code those that connect it to this
         // window's IDE server, and its hooks report its edits.
-        // Codex gets the hooks' port, to tell the end of each turn, and the editor's API; a command of the
-        // user's runs through the shell.
+        // Codex, opencode and Amp get the hooks' port and the token's file, for their hooks
+        // or SnoutCode's plugin to report their edits, and for the editor's API; opencode the
+        // variable that loads the plugin. A command of the user's runs through the shell.
         let mut env = added;
         let agent_id = agent.as_ref().map(|a| a.id);
+        let mut hooked = false;
         if let Some(ide) = cx.try_global::<crate::claude_ide::IdeEnv>() {
             let take = |k: &str| match agent_id {
                 Some(crate::agents::CLAUDE) => true,
-                Some(crate::agents::CODEX) => {
+                Some(crate::agents::CODEX | crate::agents::OPENCODE | crate::agents::AMP) => {
                     k == crate::claude_ide::hooks::PORT_ENV || k == crate::claude_ide::api::HEADER_ENV
                 }
                 _ => false,
             };
+            hooked = ide.0.iter().any(|(k, _)| *k == crate::claude_ide::hooks::PORT_ENV);
             env.extend(ide.0.iter().filter(|(k, _)| take(k)).map(|(k, v)| ((*k).to_owned(), v.clone())));
+        }
+        match agent_id {
+            Some(crate::agents::OPENCODE) => {
+                if let Some(extra) = cx.try_global::<crate::claude_ide::OpencodeEnv>() {
+                    env.extend(extra.0.iter().map(|(k, v)| ((*k).to_owned(), v.clone())));
+                }
+            }
+            // Amp loads plugins only with PLUGINS=all, unless the user says otherwise.
+            Some(crate::agents::AMP)
+                if hooked && host.info().var("PLUGINS").is_none() && !env.iter().any(|(k, _)| k == "PLUGINS") =>
+            {
+                env.push(("PLUGINS".into(), "all".into()));
+            }
+            _ => {}
         }
         let mut args = args;
         match agent.as_ref() {
@@ -527,16 +546,28 @@ impl ConsolePanel {
             None => {}
         }
         let session_agent = agent.clone();
+        let program_name = agent.as_ref().and_then(|a| a.program());
+        let agent_name = agent.as_ref().map(|a| a.name.to_string()).unwrap_or_default();
         let root = root.to_owned();
         self.starting.insert(root.clone());
         let started = cx.background_executor().spawn({
             let root = root.clone();
             async move {
+                // SnoutCode's plugin in Amp's plugins folder, for its edits to be reported.
+                if agent_id == Some(crate::agents::AMP)
+                    && hooked
+                    && let Err(e) = crate::claude_ide::hooks::install_amp_plugin(&*host)
+                {
+                    eprintln!("Amp integration: could not put the plugin in Amp's plugins folder: {e}");
+                }
                 let found = match kind {
-                    Kind::Claude if agent_id == Some(crate::agents::CODEX) => {
-                        configured.or_else(|| crate::agents::find_codex(&*host))
+                    Kind::Claude if matches!(agent_id, Some(crate::agents::CLAUDE) | None) => {
+                        configured.or_else(|| find_claude(&*host))
                     }
-                    Kind::Claude => configured.or_else(|| find_claude(&*host)),
+                    Kind::Claude => configured.or_else(|| {
+                        let name = program_name?;
+                        crate::agents::find_agent(&*host, name)
+                    }),
                     Kind::Shell => shell.or_else(|| Some(default_shell(&*host))),
                 };
                 let program = program.or(found).ok_or(None)?;
@@ -560,11 +591,12 @@ impl ConsolePanel {
                         window.focus(&this.focus, cx);
                     }
                     Err(None) => {
-                        this.error = Some(match agent_id {
-                            Some(crate::agents::CODEX) => "Codex was not found on PATH or in ~/.local/bin, \
-                                ~/.npm-global/bin, /opt/homebrew/bin, /usr/local/bin. Install it with \
-                                npm install -g @openai/codex, or set its path in Settings, Agents."
-                                .into(),
+                        this.error = Some(match agent_id.and_then(install_hint) {
+                            Some(install) => format!(
+                                "{agent_name} was not found on PATH or in ~/.local/bin, ~/.npm-global/bin, \
+                                 /opt/homebrew/bin, /usr/local/bin. Install it with {install}, or set its path in \
+                                 Settings, Agents."
+                            ),
                             _ => "Claude Code was not found on PATH or in ~/.local/bin, ~/.claude/local, \
                                 /opt/homebrew/bin, /usr/local/bin. Install it from \
                                 https://docs.claude.com/en/docs/claude-code, or set its path in Settings, Agents."
@@ -1275,6 +1307,8 @@ impl ConsolePanel {
                 let start = match agent.id {
                     crate::agents::CLAUDE => "Start Claude",
                     crate::agents::CODEX => "Start Codex",
+                    crate::agents::OPENCODE => "Start opencode",
+                    crate::agents::AMP => "Start Amp",
                     _ => "Start Agent",
                 };
                 let hint = match agent.id {
@@ -1760,7 +1794,22 @@ pub fn continue_args(agent: &crate::agents::Agent) -> Vec<String> {
     match agent.id {
         crate::agents::CLAUDE => vec!["--continue".into()],
         crate::agents::CODEX => vec!["resume".into(), "--last".into()],
+        crate::agents::OPENCODE => vec!["--continue".into()],
+        crate::agents::AMP => vec!["threads".into(), "continue".into(), "--last".into()],
         _ => Vec::new(),
+    }
+}
+
+/// How to install the agent `id`, for the console to say when it is not found (Claude
+/// Code has its own words).
+fn install_hint(id: &str) -> Option<&'static str> {
+    match id {
+        crate::agents::CODEX => Some("npm install -g @openai/codex"),
+        crate::agents::OPENCODE => {
+            Some("curl -fsSL https://opencode.ai/install | bash (or npm install -g opencode-ai)")
+        }
+        crate::agents::AMP => Some("curl -fsSL https://ampcode.com/install.sh | bash (or npm install -g @ampcode/cli)"),
+        _ => None,
     }
 }
 

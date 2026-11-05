@@ -33,6 +33,8 @@ pub const ACTIVE: Duration = Duration::from_secs(20);
 pub struct Activity {
     pub path: PathBuf,
     pub tool: String,
+    /// The agent at work ([`crate::agents::CLAUDE`], ...).
+    pub agent: &'static str,
     pub at: Instant,
     /// The tool ran; Claude goes on with something else.
     pub done: bool,
@@ -329,9 +331,10 @@ impl Render for ChangesPanel {
             .text_color(p.fg);
         let mut rows: Vec<AnyElement> = Vec::new();
 
-        // What Claude is doing.
+        // What the agent is doing, in its colour.
         if let Some(a) = changes.busy() {
             let (name, _) = changes.display(&a.path);
+            let mark = crate::agents::by_id(a.agent, cx).color(&p);
             rows.push(
                 div()
                     .debug_selector(|| "claude-activity".into())
@@ -343,12 +346,12 @@ impl Render for ChangesPanel {
                     .items_center()
                     .gap(px(8.))
                     .rounded(px(6.))
-                    .bg(c.mark_wash)
-                    .child(super::bridge::pulse_dot(c.mark, "claude-activity-dot"))
+                    .bg(p.wash(mark))
+                    .child(super::bridge::pulse_dot(mark, "claude-activity-dot"))
                     .child(div().text_color(p.fg_dim).child("Editing"))
                     .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
                     .child(div().flex_1())
-                    .child(look::chip(a.tool.clone(), c.mark, &p))
+                    .child(look::chip(a.tool.clone(), mark, &p))
                     .into_any_element(),
             );
         }

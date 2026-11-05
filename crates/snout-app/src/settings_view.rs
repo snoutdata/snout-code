@@ -155,7 +155,9 @@ impl Page {
                 "tools engine ghostty built-in builtin shell console emulator vt font cursor blink scrollback \
                  environment variables copy select option meta external iterm wezterm alacritty kitty warp"
             }
-            Page::ClaudeCode => "tools agents ai claude code codex openai console program path command colour color",
+            Page::ClaudeCode => {
+                "tools agents ai claude code codex openai opencode amp ampcode console program path command colour color"
+            }
         }
     }
 
@@ -200,6 +202,8 @@ pub struct SettingsView {
     pub search: Entity<InputState>,
     claude: Entity<InputState>,
     codex: Entity<InputState>,
+    opencode: Entity<InputState>,
+    amp: Entity<InputState>,
     agent_command: Entity<InputState>,
     agent_name: Entity<InputState>,
     /// The Terminal page's shell, its arguments, and a variable to add (`NAME=value`).
@@ -295,6 +299,20 @@ impl SettingsView {
             cx,
             |s, t| s.codex_path = (!t.is_empty()).then(|| PathBuf::from(t)),
         );
+        let opencode = text_field(
+            "Found on PATH and the usual places",
+            draft.opencode_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+            window,
+            cx,
+            |s, t| s.opencode_path = (!t.is_empty()).then(|| PathBuf::from(t)),
+        );
+        let amp = text_field(
+            "Found on PATH and the usual places",
+            draft.amp_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+            window,
+            cx,
+            |s, t| s.amp_path = (!t.is_empty()).then(|| PathBuf::from(t)),
+        );
         let agent_command =
             text_field("aider --model sonnet", draft.custom_agent_command.clone(), window, cx, |s, t| {
                 s.custom_agent_command = t
@@ -372,6 +390,8 @@ impl SettingsView {
             search,
             claude,
             codex,
+            opencode,
+            amp,
             agent_command,
             agent_name,
             shell,
@@ -456,6 +476,8 @@ impl SettingsView {
         next.daemon_idle_minutes = d.daemon_idle_minutes;
         next.claude_path = d.claude_path.clone();
         next.codex_path = d.codex_path.clone();
+        next.opencode_path = d.opencode_path.clone();
+        next.amp_path = d.amp_path.clone();
         next.console_agent = d.console_agent;
         next.custom_agent_command = d.custom_agent_command.clone();
         next.custom_agent_name = d.custom_agent_name.clone();
@@ -1708,7 +1730,8 @@ impl SettingsView {
             let color = agent.color(&p);
             let how = match agent.channel {
                 Channel::ClaudeIde => "Sees the editor; its hooks report each edit and prompt",
-                Channel::CodexNotify => "Its turns and prompts reported; files seen as it works",
+                Channel::Hooks => "Its hooks report each edit and prompt",
+                Channel::Plugin => "A plugin of SnoutCode's reports each edit and prompt",
                 Channel::Watcher => "Files seen on disk while it works in the console",
             };
             let hover = p.button_hover;
@@ -1764,7 +1787,7 @@ impl SettingsView {
             .flex()
             .flex_col()
             .child(section("The console runs", &p))
-            .child(div().flex().gap(px(8.)).children(cards))
+            .child(div().flex().flex_wrap().gap(px(8.)).children(cards))
             .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
                 "Each agent writes in its own colour: a caret with its name while it types, a mark in the gutter \
                  beside the lines it changed, and a dot on the tabs and files it changed until you review them.",
@@ -1772,7 +1795,9 @@ impl SettingsView {
             .child(section("Programs", &p))
             .child(row("Claude Code", div().w(px(360.)).child(look::field(&self.claude, false, None, &p)), &p))
             .child(row("Codex", div().w(px(360.)).child(look::field(&self.codex, false, None, &p)), &p))
-            .child(note("Leave them empty to find claude and codex on PATH, in ~/.local/bin and the usual places."))
+            .child(row("opencode", div().w(px(360.)).child(look::field(&self.opencode, false, None, &p)), &p))
+            .child(row("Amp", div().w(px(360.)).child(look::field(&self.amp, false, None, &p)), &p))
+            .child(note("Leave them empty to find each program on PATH, in ~/.local/bin and the usual places."))
             .child(row("Your agent", div().w(px(360.)).child(look::field(&self.agent_command, false, None, &p)), &p))
             .child(row("Its name", div().w(px(200.)).child(look::field(&self.agent_name, false, None, &p)), &p))
             .child(note("Any command line agent: the console runs it in the project with /bin/sh -c."))

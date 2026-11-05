@@ -5,8 +5,11 @@
 //!
 //! - Claude Code: the IDE connection (an MCP server it finds through a lock file) and its
 //!   hooks, which report every edit before and after, and the prompt of each turn.
-//! - Codex: its `notify` program, which hears the end of each turn with the prompt that
-//!   started it, and the file watcher while its turn runs in the console.
+//! - Codex: its hooks, set for the session, which report every edit before and after and
+//!   the prompt of each turn; its `notify` program, which hears the end of each turn with
+//!   the prompt that started it; and the file watcher while its turn runs in the console.
+//! - opencode and Amp: a plugin of SnoutCode's, which reports every edit before and after
+//!   and the prompts, and the file watcher while the turn runs.
 //! - Any other command line agent run in the console: the file watcher, while its turn runs
 //!   (the console busy after Return).
 
@@ -20,6 +23,8 @@ use crate::theme::{Palette, hex};
 
 pub const CLAUDE: &str = "claude";
 pub const CODEX: &str = "codex";
+pub const OPENCODE: &str = "opencode";
+pub const AMP: &str = "amp";
 pub const CUSTOM: &str = "custom";
 
 /// How the app learns what an agent does.
@@ -27,8 +32,12 @@ pub const CUSTOM: &str = "custom";
 pub enum Channel {
     /// Claude Code's IDE connection and hooks: every edit before and after, and its turns.
     ClaudeIde,
-    /// Codex's `notify` at the end of each turn, the watcher for the files.
-    CodexNotify,
+    /// The agent's own hooks (Codex's), set for the session: every edit before and after,
+    /// and its turns.
+    Hooks,
+    /// A plugin of SnoutCode's in the agent (opencode, Amp): every edit before and after,
+    /// and its turns.
+    Plugin,
     /// The file watcher while the console's turn runs.
     Watcher,
 }
@@ -42,17 +51,24 @@ pub enum ConsoleAgent {
     Claude,
     /// OpenAI's Codex CLI (`codex`).
     Codex,
+    /// opencode (`opencode`).
+    Opencode,
+    /// Amp (`amp`).
+    Amp,
     /// A command of your own (`custom_agent_command`).
     Custom,
 }
 
 impl ConsoleAgent {
-    pub const ALL: [ConsoleAgent; 3] = [ConsoleAgent::Claude, ConsoleAgent::Codex, ConsoleAgent::Custom];
+    pub const ALL: [ConsoleAgent; 5] =
+        [ConsoleAgent::Claude, ConsoleAgent::Codex, ConsoleAgent::Opencode, ConsoleAgent::Amp, ConsoleAgent::Custom];
 
     pub fn id(self) -> &'static str {
         match self {
             Self::Claude => CLAUDE,
             Self::Codex => CODEX,
+            Self::Opencode => OPENCODE,
+            Self::Amp => AMP,
             Self::Custom => CUSTOM,
         }
     }
@@ -102,10 +118,55 @@ impl Agent {
             short: "Codex".into(),
             icon: IconName::Hexagon,
             glyph: '\u{2B22}',
-            channel: Channel::CodexNotify,
+            channel: Channel::Hooks,
             light: 0x6E56CF,
             dark: 0xA594F0,
             command: None,
+        }
+    }
+
+    pub fn opencode() -> Self {
+        Self {
+            id: OPENCODE,
+            name: "opencode".into(),
+            short: "opencode".into(),
+            icon: IconName::SquareCode,
+            glyph: '\u{25A0}',
+            channel: Channel::Plugin,
+            light: 0x2F7D32,
+            dark: 0x6CC070,
+            command: None,
+        }
+    }
+
+    pub fn amp() -> Self {
+        Self {
+            id: AMP,
+            name: "Amp".into(),
+            short: "Amp".into(),
+            icon: IconName::Zap,
+            glyph: '\u{25B2}',
+            channel: Channel::Plugin,
+            light: 0xC2255C,
+            dark: 0xF06595,
+            command: None,
+        }
+    }
+
+    /// The agent reports each of its edits, before and after, and starts its turns itself
+    /// (its prompt reported as it is sent): the watcher does not start them.
+    pub fn reports_prompts(&self) -> bool {
+        reports_prompts(self.id)
+    }
+
+    /// The program's name, as SnoutCode looks for it.
+    pub fn program(&self) -> Option<&'static str> {
+        match self.id {
+            CLAUDE => Some("claude"),
+            CODEX => Some("codex"),
+            OPENCODE => Some("opencode"),
+            AMP => Some("amp"),
+            _ => None,
         }
     }
 
@@ -143,10 +204,19 @@ impl Agent {
     pub fn of(id: &str, s: &crate::settings::Settings) -> Self {
         match id {
             CODEX => Self::codex(),
+            OPENCODE => Self::opencode(),
+            AMP => Self::amp(),
             CUSTOM => Self::custom(&s.custom_agent_name, &s.custom_agent_command),
             _ => Self::claude(),
         }
     }
+}
+
+/// The agent `id` reports its prompts as it sends them, and so starts its turns itself
+/// (Claude Code's and Codex's hooks, SnoutCode's plugin in opencode). Amp's plugin hears
+/// a turn's prompt only as it ends.
+pub fn reports_prompts(id: &str) -> bool {
+    matches!(id, CLAUDE | CODEX | OPENCODE)
 }
 
 /// The agent behind `id` as the window knows it (a custom agent with the name the
@@ -161,7 +231,13 @@ pub fn by_id(id: &str, cx: &App) -> Agent {
 
 /// Every agent the app knows, for the settings.
 pub fn known(s: &crate::settings::Settings) -> Vec<Agent> {
-    vec![Agent::claude(), Agent::codex(), Agent::custom(&s.custom_agent_name, &s.custom_agent_command)]
+    vec![
+        Agent::claude(),
+        Agent::codex(),
+        Agent::opencode(),
+        Agent::amp(),
+        Agent::custom(&s.custom_agent_name, &s.custom_agent_command),
+    ]
 }
 
 /// The agent the console runs, as the settings say.
@@ -222,18 +298,20 @@ pub struct Following(pub bool);
 
 impl Global for Following {}
 
-/// `codex` on the host's PATH or where its installers put it.
-pub fn find_codex(host: &dyn snout_host::Host) -> Option<PathBuf> {
+/// The agent's program `name` (`codex`, `opencode`, `amp`) on the host's PATH or where
+/// its installers put it (npm, bun, Homebrew, opencode's and Amp's install scripts).
+pub fn find_agent(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
     let home = &host.info().home;
-    let extra: Vec<PathBuf> = [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", ".volta/bin"]
-        .iter()
-        .filter(|_| !home.as_os_str().is_empty())
-        .map(|d| home.join(d))
-        .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from))
-        // Windows: npm's global folder.
-        .chain(host.info().var("APPDATA").map(|d| PathBuf::from(d).join("npm")))
-        .collect();
-    snout_host::which(host, &["codex"], &extra)
+    let extra: Vec<PathBuf> =
+        [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", ".volta/bin", ".opencode/bin", ".amp/bin"]
+            .iter()
+            .filter(|_| !home.as_os_str().is_empty())
+            .map(|d| home.join(d))
+            .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from))
+            // Windows: npm's global folder.
+            .chain(host.info().var("APPDATA").map(|d| PathBuf::from(d).join("npm")))
+            .collect();
+    snout_host::which(host, &[name], &extra)
 }
 
 #[cfg(test)]
@@ -244,10 +322,19 @@ mod tests {
     fn each_agent_has_its_own_colour_and_name() {
         let s = crate::settings::Settings::default();
         let all = known(&s);
-        assert_eq!(all.iter().map(|a| a.id).collect::<Vec<_>>(), [CLAUDE, CODEX, CUSTOM]);
-        let p = crate::theme::Palette::new(crate::settings::ColorTheme::Classic, false);
-        let colours: Vec<Hsla> = all.iter().map(|a| a.color(&p)).collect();
-        assert!(colours[0] != colours[1] && colours[1] != colours[2] && colours[0] != colours[2]);
+        assert_eq!(all.iter().map(|a| a.id).collect::<Vec<_>>(), [CLAUDE, CODEX, OPENCODE, AMP, CUSTOM]);
+        assert_eq!(ConsoleAgent::ALL.map(ConsoleAgent::id), [CLAUDE, CODEX, OPENCODE, AMP, CUSTOM]);
+        for dark in [false, true] {
+            let p = crate::theme::Palette::new(crate::settings::ColorTheme::Classic, dark);
+            let colours: Vec<Hsla> = all.iter().map(|a| a.color(&p)).collect();
+            for (i, a) in colours.iter().enumerate() {
+                assert!(colours[i + 1..].iter().all(|b| b != a), "each agent has a colour of its own");
+            }
+        }
+        let glyphs: std::collections::HashSet<char> = all.iter().map(|a| a.glyph).collect();
+        assert_eq!(glyphs.len(), all.len(), "and a mark of its own");
+        assert_eq!(Agent::of(AMP, &s).channel, Channel::Plugin);
+        assert_eq!(Agent::of(OPENCODE, &s).program(), Some("opencode"));
         assert_eq!(Agent::custom("", "/opt/bin/aider --model x").name, "Aider");
         assert_eq!(Agent::custom("Gemini", "gemini").short, "Gemini");
         assert_eq!(of_settings(&s).id, CLAUDE, "Claude Code by default");

@@ -1,0 +1,14 @@
+{
+  "session_id": "0199a1b2-7c3d-7e10-9f2a-5b6c7d8e9f01",
+  "transcript_path": null,
+  "cwd": "/home/alex/projects/shop",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.5-codex",
+  "permission_mode": "default",
+  "turn_id": "12",
+  "tool_name": "apply_patch",
+  "tool_use_id": "call_6Yb1",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: src/main/java/shop/OrderService.java\n@@ public Order place(Order order) {\n+        Objects.requireNonNull(order, \"order\");\n*** Add File: src/test/java/shop/OrderServiceTest.java\n+class OrderServiceTest {}\n*** Update File: README.md\n*** Move to: docs/README.md\n@@\n-Shop\n+Shop service\n*** End Patch\n"
+  }
+}

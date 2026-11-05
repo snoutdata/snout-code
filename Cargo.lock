@@ -6386,6 +6386,7 @@ dependencies = [
  "snout-lang",
  "snout-remote",
  "tempfile",
+ "toml 0.8.23",
  "tree-sitter",
  "tree-sitter-java",
  "tree-sitter-kotlin-sg",

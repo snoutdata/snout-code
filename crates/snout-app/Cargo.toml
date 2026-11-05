@@ -93,6 +93,8 @@ embed-resource = "3"
 gpui = { workspace = true, features = ["test-support"] }
 gpui-component = { workspace = true, features = ["test-support"] }
 gpui-platform = { workspace = true, features = ["test-support"] }
+# Reads the `-c` values the console gives Codex, as Codex reads them.
+toml = "0.8"
 
 [[test]]
 name = "screenshots"

@@ -942,7 +942,7 @@ fn codex_in_the_console_gets_its_turns_and_its_edits(cx: &mut TestAppContext) {
     settings.console_agent = crate::agents::ConsoleAgent::Codex;
     let (model, ws, cx) = open_with_ide(cx, settings, &lock_dir);
     pump_until(cx, "Codex's notify", |cx| {
-        cx.update(|_, cx| cx.try_global::<super::CodexArgs>().is_some_and(|a| a.0.len() == 2))
+        cx.update(|_, cx| cx.try_global::<super::CodexArgs>().is_some_and(|a| a.0.len() == 10))
     });
     let notify = cx.update(|_, cx| cx.global::<super::CodexArgs>().0.clone());
     assert_eq!(notify[0], "-c");
@@ -995,6 +995,81 @@ fn codex_in_the_console_gets_its_turns_and_its_edits(cx: &mut TestAppContext) {
         cx.update(|_, cx| c.read(cx).set.current().is_some_and(|t| t.prompt.as_deref() == Some("Count the others")))
     });
     cx.update(|_, cx| console.update(cx, |c, _| c.program = None));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// opencode in the console: SnoutCode's plugin reports its prompt and each edit before and
+/// after (posted here as the plugin posts them), and the edit plays out in opencode's name
+/// and colour, is put down to it line by line, and waits for review as its.
+#[gpui::test]
+fn opencode_edits_reported_by_the_plugin_play_out_as_its_own(cx: &mut TestAppContext) {
+    let repo = demo_repo("opencode-plugin");
+    std::fs::create_dir_all(repo.join("src/demo")).unwrap();
+    let hello = repo.join("src/demo/Hello.java");
+    std::fs::write(&hello, HELLO).unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "Hello"]);
+    let lock_dir = scratch_dir("opencode-plugin-ide");
+    let mut settings = with_repo(&repo);
+    settings.console_agent = crate::agents::ConsoleAgent::Opencode;
+    let (_model, ws, cx) = open_with_ide(cx, settings, &lock_dir);
+    pump_until(cx, "the plugin's variable", |cx| {
+        cx.update(|_, cx| cx.try_global::<super::OpencodeEnv>().is_some_and(|e| !e.0.is_empty()))
+    });
+    // The console's opencode loads the plugin written beside the hooks' settings.
+    let (k, v) = cx.update(|_, cx| cx.global::<super::OpencodeEnv>().0[0].clone());
+    assert_eq!(k, "OPENCODE_CONFIG_CONTENT");
+    let config: Value = serde_json::from_str(&v).unwrap();
+    let url = config["plugin"][0].as_str().unwrap();
+    let plugin = std::fs::read_to_string(url.strip_prefix("file://").unwrap()).unwrap();
+    assert_eq!(plugin, super::hooks::OPENCODE_PLUGIN);
+    // And Codex its hooks.
+    let codex = cx.update(|_, cx| cx.global::<super::CodexArgs>().0.clone());
+    assert!(codex.iter().any(|a| a.starts_with("hooks.PreToolUse=")), "{codex:?}");
+
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(hello.clone(), None, false, w, cx)));
+    let editor = editor_of(&ws, &hello, cx).unwrap();
+    pump_until(cx, "the file", |cx| text_of(&editor, cx) == HELLO);
+    let (port, token) = cx.update(|_, cx| {
+        let h = ws.read(cx).claude.as_ref().unwrap().hooks.as_ref().unwrap();
+        (h.port(), h.token().to_owned())
+    });
+    let post = |body: Value| super::hooks::tests::post_to(port, &token, "/agent", &body);
+    let base = json!({ "agent": "opencode", "session": "ses_1", "cwd": repo });
+    let with = |extra: Value| {
+        let mut b = base.clone();
+        b.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        b
+    };
+    post(with(json!({ "event": "prompt", "prompt": "Check the name" })));
+    let edit = json!({ "filePath": "src/demo/Hello.java", "oldString": "name;", "newString": "name + \"!\";" });
+    post(with(json!({ "event": "pre", "tool": "edit", "input": edit })));
+    std::fs::write(&hello, HELLO_V2).unwrap();
+    post(with(json!({ "event": "post", "tool": "edit", "input": edit })));
+    let mut caret = None;
+    pump_until(cx, "the edit played and listed", |cx| {
+        if caret.is_none() {
+            caret = cx.update(|_, cx| editor.read(cx).presence.as_ref().map(|p| p.writer.name.to_string()));
+        }
+        cx.update(|_, cx| editor.read(cx).live.is_none()) && settled(&ws, cx) && listed(&ws, cx).len() == 1
+    });
+    assert_eq!(caret.as_deref(), Some("opencode"), "its caret says its name");
+    let c = changes(&ws, cx);
+    cx.update(|_, cx| {
+        let c = c.read(cx);
+        let turn = c.set.current().unwrap();
+        assert_eq!((turn.agent, turn.prompt.as_deref()), ("opencode", Some("Check the name")));
+        assert_eq!(c.set.file(&hello).unwrap().agent, "opencode");
+        let owners = c.ledger.owners(&hello).expect("the ledger has the file");
+        let edit = c.ledger.edit(owners.runs()[0].1).unwrap();
+        assert_eq!(edit.agent.as_str(), "opencode");
+        assert_eq!(cx.global::<super::AgentFiles>().0.get(&hello), Some(&"opencode"));
+    });
+    // Revert All puts back exactly what the plugin's `pre` saw.
+    assert_eq!(text_of(&editor, cx), HELLO_V2);
+    cx.update(|w, cx| ws.update(cx, |ws, cx| super::bridge::revert_all(ws, w, cx)));
+    pump_until(cx, "the revert", |_| std::fs::read_to_string(&hello).unwrap() == HELLO);
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }

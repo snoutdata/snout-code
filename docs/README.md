@@ -1,6 +1,6 @@
 # SnoutCode user guide
 
-SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScript and JavaScript projects on Node, and for end-to-end tests written with Playwright in TypeScript, on macOS, Linux and Windows, with Git and coding agents (Claude Code, Codex, your own) built in. These pages show how to use each part of it.
+SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScript and JavaScript projects on Node, and for end-to-end tests written with Playwright in TypeScript, on macOS, Linux and Windows, with Git and coding agents (Claude Code, Codex, opencode, Amp, your own) built in. These pages show how to use each part of it.
 
 ## Start here
 
@@ -34,7 +34,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScrip
 
 - [Git](git.md): the Git view, its panes and dialogs.
 - [Annotate with Git Blame](blame.md): who changed each line and when, beside it; a line's commit, earlier revisions, and who wrote each class and method.
-- [Coding agents](agents.md): Claude Code, Codex or your own agent in the console; watching it write in its colour, sending it the selection, who wrote which lines, and reviewing its changes by prompt in the Agent Changes window.
+- [Coding agents](agents.md): Claude Code, Codex, opencode, Amp or your own agent in the console; watching it write in its colour, sending it the selection, who wrote which lines, and reviewing its changes by prompt in the Agent Changes window.
 - [The editor API for agents](editor-api.md): how an agent in the console opens files and reads the editor through an Agent Skill, a UTCP manual and plain HTTP, and the tokens that saves over an MCP server.
 - [Terminal](terminal.md): the Terminal tab and the console as terminals: keys, scrollback, find, links, and the terminal engine (Built-in or Ghostty).
 - [Remote SSH](remote-ssh.md): keep the window on your Mac and work on a Linux machine over SSH.

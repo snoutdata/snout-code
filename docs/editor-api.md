@@ -101,7 +101,7 @@ curl -s -X POST -H @"$SNOUT_API_HEADER" -H 'content-type: application/json' \
 ## Other agents
 
 The API is not Claude's alone. Any agent started in the console can read the manual and make
-the calls: Codex gets the same two variables, and so does a command of your own. A UTCP client
+the calls: Codex, opencode and Amp get the same two variables, and so does a command of your own. A UTCP client
 reads `GET /utcp` and calls the tools from it directly; the manual names the port
 (`${SNOUT_HOOK_PORT}`) and the token (`${SNOUT_API_TOKEN}`, the value in the header file) as
 variables, so nothing secret is written into it.

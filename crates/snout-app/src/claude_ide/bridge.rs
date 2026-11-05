@@ -24,7 +24,7 @@ use super::hooks::{self, HookEvent, HookKind, HookServer, Snapshot};
 use super::panel::{Activity, ClaudeChanges, PendingDiff, Updated};
 use super::server::{Call, Event, Reply, Server};
 use super::tools::{self, INVALID_PARAMS, TOOL_ERROR};
-use super::{CodexArgs, IdeArgs, IdeConfig, IdeEnv, IdeStatus, review};
+use super::{CodexArgs, IdeArgs, IdeConfig, IdeEnv, IdeStatus, OpencodeEnv, review};
 use crate::agents::{self, ConsoleTurn};
 use crate::editor::{Answer, ClaudeRequest, EditorPanel, Outcome};
 use crate::lang::text::to_lsp;
@@ -79,6 +79,8 @@ pub struct Bridge {
     own_writes: HashMap<PathBuf, Instant>,
     /// When Claude Code's hooks were last heard: a Claude that has them reports its edits.
     pub hooks_heard: Option<Instant>,
+    /// The agents whose hooks (or SnoutCode's plugin in them) have been heard in this window.
+    heard: std::collections::HashSet<&'static str>,
     /// Each file's text before the edit under way (the hooks' `PreToolUse`).
     pre: HashMap<PathBuf, Snapshot>,
     /// The file last brought forward to follow Claude, and when; the one waiting its turn.
@@ -193,6 +195,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         let mut env = Server::env(ide_port);
         let mut args = Vec::new();
         let mut codex = Vec::new();
+        let mut opencode = Vec::new();
         if let Some(task) = hooks_ready {
             match task.await {
                 Ok((forward, file, plugin)) => {
@@ -207,6 +210,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
                         let header = dir.join("hook-header");
                         env.push((super::api::HEADER_ENV, header.to_string_lossy().into_owned()));
                         codex = hooks::codex_args(&header, forward.port);
+                        opencode = vec![hooks::opencode_env(&hooks::opencode_plugin(dir))];
                     }
                     let _ = ws.update(cx, |ws, _| {
                         if let Some(b) = ws.claude.as_mut() {
@@ -221,6 +225,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             cx.set_global(IdeEnv(env));
             cx.set_global(IdeArgs(args));
             cx.set_global(CodexArgs(codex));
+            cx.set_global(OpencodeEnv(opencode));
         });
     })
     .detach();
@@ -229,6 +234,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
     cx.set_global(IdeEnv::default());
     cx.set_global(IdeArgs::default());
     cx.set_global(CodexArgs::default());
+    cx.set_global(OpencodeEnv::default());
     cx.set_global(IdeStatus::default());
     let hook_events = cx.spawn_in(window, async move |this, cx| {
         while let Some(event) = hrx.next().await {
@@ -283,6 +289,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         hooked: HashMap::new(),
         own_writes: HashMap::new(),
         hooks_heard: None,
+        heard: Default::default(),
         pre: HashMap::new(),
         last_reveal: None,
         queued: None,
@@ -742,7 +749,8 @@ fn tick(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
 }
 
 /// A turn of an agent the console runs begins (Return, and it went to work): a new turn in
-/// the change set, unless the agent's own hooks start turns themselves (Claude Code's).
+/// the change set, unless the agent's own hooks start turns themselves (Claude Code's,
+/// Codex's, opencode's plugin) and have been heard.
 fn track_console_turn(ws: &mut Workspace, cx: &mut Context<Workspace>) {
     let Some(turn) = cx.try_global::<ConsoleTurn>().cloned() else { return };
     let Some(b) = ws.claude.as_mut() else { return };
@@ -752,7 +760,7 @@ fn track_console_turn(ws: &mut Workspace, cx: &mut Context<Workspace>) {
     }
     b.turn_seen = started;
     let (Some(_), Some(agent)) = (started, turn.agent) else { return };
-    let hooked = agent == agents::CLAUDE && changes_of(ws, cx).read(cx).hooks_heard;
+    let hooked = agents::reports_prompts(agent) && b.heard.contains(agent);
     if !hooked {
         changes_of(ws, cx).update(cx, |c, cx| {
             c.set.new_turn(agent, None);
@@ -1290,10 +1298,11 @@ fn user_typing(ws: &Workspace, window: &Window, cx: &App) -> bool {
 }
 
 pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut Context<Workspace>) {
-    if e.agent == agents::CLAUDE
-        && let Some(b) = ws.claude.as_mut()
-    {
-        b.hooks_heard = Some(Instant::now());
+    if let Some(b) = ws.claude.as_mut() {
+        if e.agent == agents::CLAUDE {
+            b.hooks_heard = Some(Instant::now());
+        }
+        b.heard.insert(e.agent);
     }
     let changes = changes_of(ws, cx);
     match e.kind {
@@ -1323,8 +1332,13 @@ pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut C
                     Snapshot::Missing => c.set.before_edit(&path, None),
                     Snapshot::Unread => {}
                 }
-                c.activity =
-                    Some(Activity { path: path.clone(), tool: e.tool.clone(), at: Instant::now(), done: false });
+                c.activity = Some(Activity {
+                    path: path.clone(),
+                    tool: e.tool.clone(),
+                    agent: e.agent,
+                    at: Instant::now(),
+                    done: false,
+                });
                 cx.notify();
             });
             // An open tab waits for the report rather than reloading on its own.
@@ -1350,8 +1364,13 @@ pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut C
             }
             changes.update(cx, |c, cx| {
                 c.hooks_heard = true;
-                c.activity =
-                    Some(Activity { path: path.clone(), tool: e.tool.clone(), at: Instant::now(), done: true });
+                c.activity = Some(Activity {
+                    path: path.clone(),
+                    tool: e.tool.clone(),
+                    agent: e.agent,
+                    at: Instant::now(),
+                    done: true,
+                });
                 let now = match &after {
                     Snapshot::Text(t) => Some(Some(t.clone())),
                     Snapshot::Missing => Some(None),
@@ -1362,18 +1381,20 @@ pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut C
                 }
                 cx.notify();
             });
-            show_edit(ws, &path, before.as_ref().and_then(Snapshot::text).cloned(), after.text().cloned(), window, cx);
+            let (before, after) = (before.as_ref().and_then(Snapshot::text).cloned(), after.text().cloned());
+            show_edit(ws, &path, before, after, e.agent, window, cx);
         }
     }
 }
 
-/// Bring Claude's edit of `path` into view and play it out, or mark the tab when the
+/// Bring `agent`'s edit of `path` into view and play it out, or mark the tab when the
 /// editor should stay where it is.
 fn show_edit(
     ws: &mut Workspace,
     path: &Path,
     before: Option<Arc<String>>,
     after: Option<Arc<String>>,
+    agent: &'static str,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
@@ -1405,7 +1426,7 @@ fn show_edit(
                 note_reveal(ws);
             }
             let visible = front || active;
-            let writer = Some(writer_of(ws, agents::CLAUDE, cx));
+            let writer = Some(writer_of(ws, agent, cx));
             let shown = editor.update(cx, |e, cx| e.animate_edit(&after, visible, writer, window, cx));
             if shown && !visible {
                 editor.update(cx, |e, cx| {
@@ -1418,7 +1439,7 @@ fn show_edit(
             let editor = ws.reveal_file(path.to_owned(), true, true, window, cx);
             note_reveal(ws);
             let before = before.map(|b| b.as_str().to_owned()).unwrap_or_default();
-            let writer = Some(writer_of(ws, agents::CLAUDE, cx));
+            let writer = Some(writer_of(ws, agent, cx));
             editor.update(cx, |e, cx| e.animate_from(&before, &after, writer, window, cx));
         }
         None => {}
@@ -1822,19 +1843,20 @@ pub fn pulse_dot(color: gpui::Hsla, id: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-/// The floating note of what Claude is doing: the file it edits and the tool, or the
-/// change waiting for review.
+/// The floating note of what an agent is doing: the file it edits and the tool, or the
+/// change Claude Code waits to have reviewed. In the agent's colour, with its name.
 pub fn indicator(changes: &ClaudeChanges, cx: &App) -> Option<(gpui::Stateful<gpui::Div>, PathBuf)> {
     let p = palette(cx);
     let c = p.claude();
-    let (what, path, tool) = if let Some(d) = changes.pending.iter().find(|d| d.front) {
-        ("Claude is waiting for your review", d.path.clone(), None)
+    let (what, path, tool, mark) = if let Some(d) = changes.pending.iter().find(|d| d.front) {
+        ("Claude is waiting for your review".to_owned(), d.path.clone(), None, c.mark)
     } else {
         let a = changes
             .activity
             .as_ref()
             .filter(|a| (!a.done && a.at.elapsed() < super::panel::ACTIVE) || (a.done && a.at.elapsed() < LINGER))?;
-        ("Claude is editing", a.path.clone(), Some(a.tool.clone()))
+        let agent = agents::by_id(a.agent, cx);
+        (format!("{} is editing", agent.short), a.path.clone(), Some(a.tool.clone()), agent.color(&p))
     };
     let (name, _) = changes.display(&path);
     let el = div()
@@ -1850,16 +1872,16 @@ pub fn indicator(changes: &ClaudeChanges, cx: &App) -> Option<(gpui::Stateful<gp
         .rounded(px(8.))
         .bg(c.indicator)
         .border_1()
-        .border_color(crate::theme::mix(c.mark, 0.45, p.border))
+        .border_color(crate::theme::mix(mark, 0.45, p.border))
         .shadow_md()
         .text_size(px(12.5))
         .text_color(p.fg)
         .font_family(crate::look::ui_font(cx))
         .cursor_pointer()
-        .child(pulse_dot(c.mark, "claude-indicator-dot"))
+        .child(pulse_dot(mark, "claude-indicator-dot"))
         .child(div().text_color(p.fg_dim).whitespace_nowrap().child(what))
         .child(crate::icons::file_icon(&path, 13., &p))
         .child(div().max_w(px(220.)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
-        .when_some(tool, |d, tool| d.child(crate::look::chip(tool, c.mark, &p)));
+        .when_some(tool, |d, tool| d.child(crate::look::chip(tool, mark, &p)));
     Some((el, path))
 }

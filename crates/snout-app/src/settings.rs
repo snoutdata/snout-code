@@ -128,10 +128,14 @@ pub struct Settings {
     pub fetch_minutes: u64,
     /// The `claude` program to run; looked up on the usual paths when unset.
     pub claude_path: Option<PathBuf>,
-    /// The agent the console runs: Claude Code, Codex, or a command of your own.
+    /// The agent the console runs: Claude Code, Codex, opencode, Amp, or a command of your own.
     pub console_agent: crate::agents::ConsoleAgent,
     /// The `codex` program to run; looked up on the usual paths when unset.
     pub codex_path: Option<PathBuf>,
+    /// The `opencode` program to run; looked up on the usual paths when unset.
+    pub opencode_path: Option<PathBuf>,
+    /// The `amp` program to run; looked up on the usual paths when unset.
+    pub amp_path: Option<PathBuf>,
     /// The command line of your own agent (run by `/bin/sh -c` in the project), and its name.
     pub custom_agent_command: String,
     pub custom_agent_name: String,
@@ -318,6 +322,8 @@ impl Default for Settings {
             claude_path: None,
             console_agent: Default::default(),
             codex_path: None,
+            opencode_path: None,
+            amp_path: None,
             custom_agent_command: String::new(),
             custom_agent_name: String::new(),
             follow_claude: true,

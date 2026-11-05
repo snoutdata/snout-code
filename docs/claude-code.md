@@ -1,7 +1,7 @@
 # Claude Code
 
 This page has moved: Claude Code is one of the coding agents SnoutCode runs and follows, beside
-Codex and your own. See **[Coding agents](agents.md)**:
+Codex, opencode, Amp and your own. See **[Coding agents](agents.md)**:
 
 - [The console](agents.md#the-console), and [choosing the agent](agents.md#choose-the-agent)
 - [Send the selection to the agent](agents.md#send-the-selection-to-the-agent) (⌥⌘K)

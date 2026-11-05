@@ -278,7 +278,7 @@ export function Home() {
 
 				<section className="section section-tint" id="agents" aria-labelledby="agents-title">
 					<SectionHead id="agents-title" art="agents" eyebrow="Coding agents" title="Watch your agent type" flip>
-						Claude Code, Codex or your own agent runs in a docked console. Each edit is typed in live, with the
+						Claude Code, Codex, opencode, Amp or your own agent runs in a docked console. Each edit is typed in live, with the
 						agent's own caret and colour, and every line it wrote stays marked.
 					</SectionHead>
 					<div className="agents-shot" data-reveal>

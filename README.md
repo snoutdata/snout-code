@@ -29,7 +29,7 @@ Each item links to its page in the user guide.
 - **[Run and debug](docs/run-and-debug.md):** run configurations, run icons in the gutter, tests with their results in a tree, and a debugger with breakpoints, stepping, variables and expressions.
 - **[Spring](docs/spring.md):** beans and where they are injected, endpoints, the Spring window, and help in `application.properties` and `application.yml`.
 - **[Git](docs/git.md):** changes, diffs, commit, branches, history, pull, fetch and push.
-- **[Coding agents](docs/agents.md):** Claude Code, Codex or your own agent in a docked console; each edit typed in live with the agent's caret and colour, every line it wrote marked, and its changes reviewed by prompt.
+- **[Coding agents](docs/agents.md):** Claude Code, Codex, opencode, Amp or your own agent in a docked console; each edit typed in live with the agent's caret and colour, every line it wrote marked, and its changes reviewed by prompt.
 - **[The editor API for agents](docs/editor-api.md):** an agent in the console opens files at a line, reads your selection, your tabs and the problems, and saves files, through an Agent Skill, a [UTCP](https://www.utcp.io) manual and a plain HTTP API instead of an MCP server. Only the skill's one line description stays in the agent's context, about 80 tokens per request where MCP tool definitions would take about 800; the rest is read when the agent needs it.
 - **[Terminal](docs/terminal.md):** your shell in the bottom dock, with scrollback, find and links, on the built-in terminal engine or Ghostty's.
 - **[Remote SSH](docs/remote-ssh.md):** the project, Git, the Java engine, builds, runs and terminals on a Linux machine you reach with `ssh`.

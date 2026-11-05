@@ -777,7 +777,13 @@ fn claude(projects: &Path) {
                 c.record(y2.clone(), Some(Arc::new(yml_v2.clone())), old, String::new(), Source::Watcher, "claude", cx);
                 c.expanded.insert(f2.clone());
                 let tool = if step == Step::Typing { "Edit" } else { "Write" };
-                c.activity = Some(Doing { path: f2.clone(), tool: tool.into(), at: Instant::now(), done: false });
+                c.activity = Some(Doing {
+                    path: f2.clone(),
+                    tool: tool.into(),
+                    agent: snout_app::agents::CLAUDE,
+                    at: Instant::now(),
+                    done: false,
+                });
                 if matches!(step, Step::Fade | Step::Card | Step::Inline) {
                     c.activity = None;
                     c.pending.push(PendingDiff {

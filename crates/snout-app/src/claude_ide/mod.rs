@@ -85,12 +85,20 @@ pub struct IdeArgs(pub Vec<String>);
 
 impl Global for IdeArgs {}
 
-/// The arguments a `codex` started in the console gets: its `notify` program, which tells
-/// the hooks' endpoint when a turn ends.
+/// The arguments a `codex` started in the console gets: its hooks, which report each edit
+/// and prompt to the hooks' endpoint, and its `notify` program, which tells it when a turn
+/// ends.
 #[derive(Clone, Debug, Default)]
 pub struct CodexArgs(pub Vec<String>);
 
 impl Global for CodexArgs {}
+
+/// The variables an `opencode` started in the console gets besides the hooks' port: the one
+/// that loads SnoutCode's plugin for the session.
+#[derive(Clone, Debug, Default)]
+pub struct OpencodeEnv(pub Vec<(&'static str, String)>);
+
+impl Global for OpencodeEnv {}
 
 /// How many Claude Code sessions are connected, for the console's header.
 #[derive(Clone, Copy, Debug, Default)]

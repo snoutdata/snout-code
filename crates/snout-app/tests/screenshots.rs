@@ -1260,7 +1260,7 @@ sleep 30
                         c.expanded.insert(file.clone());
                         let tool = if which == ClaudeShot::Strike || which == ClaudeShot::Typing { "Edit" } else { "Write" };
                         c.activity =
-                            Some(Activity { path: file.clone(), tool: tool.into(), at: std::time::Instant::now(), done: false });
+                            Some(Activity { path: file.clone(), tool: tool.into(), agent: snout_app::agents::CLAUDE, at: std::time::Instant::now(), done: false });
                         if matches!(which, ClaudeShot::Fade | ClaudeShot::Inline) {
                             c.activity = None;
                             c.pending.push(PendingDiff {
