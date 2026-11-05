@@ -440,7 +440,7 @@ code, pre {
 	background: none;
 	box-shadow: var(--shadow-window);
 	line-height: 0;
-	cursor: zoom-in;
+	cursor: pointer;
 	transition: translate var(--dur-3) var(--ease-out-quart), box-shadow var(--dur-3);
 }
 .shot-window:hover {
@@ -492,7 +492,7 @@ code, pre {
 	background: color-mix(in srgb, var(--bg) 72%, transparent);
 	backdrop-filter: blur(10px) saturate(1.2);
 	-webkit-backdrop-filter: blur(10px) saturate(1.2);
-	cursor: zoom-out;
+	cursor: pointer;
 	animation: lightbox-in var(--dur-3) var(--ease-out-quart);
 }
 .lightbox-figure {
