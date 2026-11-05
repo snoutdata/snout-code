@@ -1529,14 +1529,7 @@ pub fn sync_bases(ws: &mut Workspace, cx: &mut Context<Workspace>) {
     // The Project tree's dots and the status bar's note.
     let files: std::collections::HashMap<PathBuf, &'static str> =
         changes.read(cx).set.files.iter().map(|f| (f.path.clone(), f.agent)).collect();
-    let mut count: std::collections::HashMap<&'static str, usize> = Default::default();
-    for a in files.values() {
-        *count.entry(a).or_default() += 1;
-    }
-    let summary = super::AgentSummary {
-        files: files.len(),
-        agent: count.into_iter().max_by_key(|(a, n)| (*n, *a == agents::CLAUDE)).map(|(a, _)| a),
-    };
+    let summary = super::AgentSummary::of(files.values());
     if cx.try_global::<super::AgentFiles>().is_none_or(|f| f.0 != files) {
         cx.set_global(super::AgentFiles(files));
     }

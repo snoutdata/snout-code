@@ -55,14 +55,47 @@ pub struct AgentFiles(pub std::collections::HashMap<PathBuf, &'static str>);
 impl Global for AgentFiles {}
 
 /// What the status bar says of the agents' changes: how many files wait for review, and
-/// the agent that changed the most of them.
+/// the agents that changed them, the one that changed the most first (Claude Code first of
+/// equals).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AgentSummary {
     pub files: usize,
-    pub agent: Option<&'static str>,
+    pub agents: Vec<&'static str>,
 }
 
 impl Global for AgentSummary {}
+
+impl AgentSummary {
+    /// The summary of `files`, each with the agent that changed it.
+    pub fn of<'a>(files: impl IntoIterator<Item = &'a &'static str>) -> Self {
+        let mut count: Vec<(&'static str, usize)> = Vec::new();
+        let mut total = 0;
+        for a in files {
+            total += 1;
+            match count.iter_mut().find(|(b, _)| b == a) {
+                Some((_, n)) => *n += 1,
+                None => count.push((a, 1)),
+            }
+        }
+        count.sort_by_key(|(a, n)| (std::cmp::Reverse(*n), *a != crate::agents::CLAUDE, *a));
+        Self { files: total, agents: count.into_iter().map(|(a, _)| a).collect() }
+    }
+
+    /// What the status bar says: "Claude changed 3 files", "Claude and opencode changed
+    /// 4 files", "3 agents changed 5 files"; `short` names an agent as its caret does.
+    pub fn text(&self, short: impl Fn(&'static str) -> String) -> String {
+        let who = match self.agents.as_slice() {
+            [] => "Agents".to_owned(),
+            [a] => short(a),
+            [a, b] => format!("{} and {}", short(a), short(b)),
+            more => format!("{} agents", more.len()),
+        };
+        match self.files {
+            1 => format!("{who} changed 1 file"),
+            n => format!("{who} changed {n} files"),
+        }
+    }
+}
 
 /// Where the window's server writes its lock file. Set by the app; tests set a scratch
 /// folder, and without it no server starts.

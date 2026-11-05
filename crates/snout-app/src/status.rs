@@ -513,11 +513,14 @@ fn agent_item(cx: &gpui::App) -> Option<gpui::AnyElement> {
         return None;
     }
     let p = palette(cx);
-    let agent = crate::agents::by_id(s.agent.unwrap_or(crate::agents::CLAUDE), cx);
-    let color = agent.color(&p);
-    let what = match s.files {
-        1 => format!("{} changed 1 file", agent.short),
-        n => format!("{} changed {n} files", agent.short),
+    let what = s.text(|id| crate::agents::by_id(id, cx).short.to_string());
+    // One agent: its icon and colour; several: the agents' icon, and the accent.
+    let (icon, color) = match s.agents.as_slice() {
+        [one] => {
+            let agent = crate::agents::by_id(one, cx);
+            (agent.icon, agent.color(&p))
+        }
+        _ => (crate::components::IconName::Bot, p.accent),
     };
     let hover_bg = p.button_hover;
     Some(
@@ -538,7 +541,7 @@ fn agent_item(cx: &gpui::App) -> Option<gpui::AnyElement> {
             .tooltip(|w, cx| {
                 gpui_component::tooltip::Tooltip::new("Changes the agents made that wait for your review").build(w, cx)
             })
-            .child(crate::components::icon(agent.icon, 12., color))
+            .child(crate::components::icon(icon, 12., color))
             .child(div().text_color(p.fg).child(what))
             .child(div().child("\u{00b7}"))
             .child(div().text_color(color).font_weight(gpui::FontWeight::MEDIUM).child("Review"))

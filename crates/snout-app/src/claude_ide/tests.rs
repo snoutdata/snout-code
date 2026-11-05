@@ -1136,7 +1136,7 @@ fn the_lines_an_agent_wrote_keep_its_name(cx: &mut TestAppContext) {
         assert_eq!(c.set.current().unwrap().prompt.as_deref(), Some("Check the name"));
         // The dots and the note.
         assert_eq!(cx.global::<super::AgentFiles>().0.get(&hello), Some(&"claude"));
-        assert_eq!(cx.global::<super::AgentSummary>(), &super::AgentSummary { files: 1, agent: Some("claude") });
+        assert_eq!(cx.global::<super::AgentSummary>(), &super::AgentSummary { files: 1, agents: vec!["claude"] });
     });
     cx.update(|_, cx| {
         let e = editor.read(cx);

@@ -339,4 +339,21 @@ mod tests {
         assert_eq!(Agent::custom("Gemini", "gemini").short, "Gemini");
         assert_eq!(of_settings(&s).id, CLAUDE, "Claude Code by default");
     }
+
+    #[test]
+    fn the_status_bar_names_every_agent_with_changes_waiting() {
+        use crate::claude_ide::AgentSummary;
+        let s = crate::settings::Settings::default();
+        let short = |id: &'static str| Agent::of(id, &s).short.to_string();
+        let one = AgentSummary::of(&[CLAUDE]);
+        assert_eq!(one.text(short), "Claude changed 1 file");
+        // The one that changed the most first; Claude first of equals.
+        let two = AgentSummary::of(&[CLAUDE, OPENCODE, OPENCODE, OPENCODE]);
+        assert_eq!(two.agents, [OPENCODE, CLAUDE]);
+        assert_eq!(two.text(short), "opencode and Claude changed 4 files");
+        assert_eq!(AgentSummary::of(&[OPENCODE, CLAUDE]).agents, [CLAUDE, OPENCODE]);
+        let three = AgentSummary::of(&[CODEX, AMP, CLAUDE, AMP, CODEX]);
+        assert_eq!(three.text(short), "3 agents changed 5 files");
+        assert_eq!(AgentSummary::of(&[]), AgentSummary::default());
+    }
 }
