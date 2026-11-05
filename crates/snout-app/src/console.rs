@@ -206,9 +206,12 @@ pub struct ConsolePanel {
     probed: bool,
 }
 
-/// Below this width (points) the console's toolbar shows icons only, and its empty state
-/// stacks.
+/// Below this width (points) the console's toolbar shows icons only.
 const COMPACT_W: f32 = 560.;
+
+/// Below this width (points) the console's empty states stack: the drawing, the gap and
+/// the words beside it take some 650.
+const STACKED_W: f32 = 700.;
 
 /// How long the first session waits for the IDE server's variables at most.
 const IDE_WAIT: Duration = Duration::from_secs(4);
@@ -463,6 +466,12 @@ impl ConsolePanel {
 
     fn compact(&self) -> bool {
         self.width < COMPACT_W
+    }
+
+    /// The empty states stack their drawing over their words: side by side they would not
+    /// fit.
+    fn stacked(&self) -> bool {
+        self.width < STACKED_W
     }
 
     /// A toolbar chip: its glyph and label, or its glyph alone when the console is narrow
@@ -1407,9 +1416,9 @@ impl ConsolePanel {
             move |bounds, _, cx| {
                 let w = f32::from(bounds.size.width);
                 view.update(cx, |this, cx| {
-                    let was = this.compact();
+                    let was = (this.compact(), this.stacked());
                     this.width = w;
-                    if was != this.compact() {
+                    if was != (this.compact(), this.stacked()) {
                         cx.notify();
                     }
                 });
@@ -1548,7 +1557,7 @@ impl ConsolePanel {
             .gap(px(28.))
             .px(px(24.))
             .py(px(12.))
-            .when(self.compact(), |d| d.flex_col().gap(px(16.)))
+            .when(self.stacked(), |d| d.flex_col().gap(px(16.)))
             .child(crate::art::drawing_on(snout_core::art::spots::agent_console(), 156., 104., p.panel))
             .child(
                 div()
@@ -1556,7 +1565,8 @@ impl ConsolePanel {
                     .flex_col()
                     .gap(px(4.))
                     .max_w(px(420.))
-                    .when(self.compact(), |d| d.w_full())
+                    .min_w_0()
+                    .when(self.stacked(), |d| d.w_full())
                     .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
                     .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
                     .child(
@@ -1655,7 +1665,7 @@ impl ConsolePanel {
             .gap(px(28.))
             .px(px(24.))
             .py(px(12.))
-            .when(self.compact(), |d| d.flex_col().gap(px(16.)))
+            .when(self.stacked(), |d| d.flex_col().gap(px(16.)))
             .child(crate::art::drawing_on(snout_core::art::spots::agent_console(), 156., 104., p.panel))
             .child(
                 div()
@@ -1663,7 +1673,8 @@ impl ConsolePanel {
                     .flex_col()
                     .gap(px(4.))
                     .max_w(px(420.))
-                    .when(self.compact(), |d| d.w_full())
+                    .min_w_0()
+                    .when(self.stacked(), |d| d.w_full())
                     .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
                     .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
                     .when_some(line, |d, line| {

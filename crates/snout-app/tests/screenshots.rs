@@ -111,8 +111,8 @@ mod shots {
         /// A commit (by summary) and one of its files, in a repository with a merge.
         Commit(&'static str, &'static str),
         Console,
-        /// The console's agent not installed: its Install button.
-        ConsoleInstall,
+        /// The console's agent not installed: its Install button (in a side dock, narrow).
+        ConsoleInstall(Option<snout_app::workspace::Side>),
         /// The agent console moved to another dock, in the Project view.
         ConsoleAt(snout_app::workspace::Side),
         /// The console running a program that prints colours, attributes, wide characters
@@ -476,14 +476,25 @@ sleep 30
                 cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
                 cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
             }
-            Some(Select::ConsoleInstall) => {
+            Some(Select::ConsoleInstall(side)) => {
                 cx.update(|cx| {
                     model.update(cx, |m, cx| {
                         m.settings.console_agent = snout_app::agents::ConsoleAgent::Amp;
                         m.settings.amp_path = Some(repo.join("no-amp-here"));
-                        m.handle(Action::ToggleConsole, cx);
+                        if side.is_none() {
+                            m.handle(Action::ToggleConsole, cx);
+                        }
                     })
                 });
+                if let Some(side) = side {
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        ws.update(cx, |w, cx| {
+                            w.move_tool(snout_app::workspace::Tool::Claude, side, window, cx);
+                            w.show_activity(Activity::Project, window, cx);
+                        })
+                    })
+                    .unwrap();
+                }
             }
             Some(Select::ConsoleAt(side)) => {
                 let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
@@ -3009,7 +3020,13 @@ sleep 30
         shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
-        shot("console-install", ThemeChoice::Light, Activity::Git, Some(Select::ConsoleInstall));
+        shot("console-install", ThemeChoice::Light, Activity::Git, Some(Select::ConsoleInstall(None)));
+        shot(
+            "console-install-right",
+            ThemeChoice::Light,
+            Activity::Project,
+            Some(Select::ConsoleInstall(Some(snout_app::workspace::Side::Right))),
+        );
         shot(
             "console-right",
             ThemeChoice::Light,
