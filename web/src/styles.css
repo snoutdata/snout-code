@@ -47,6 +47,12 @@
 	--ill-term-ink: #f1efe6;
 	/* The heading stroke and the caret: the app's own clay, so the site and the window agree. */
 	--mark: #d9825b;
+	/* The coding agents' colours, as the app draws their carets and marks. */
+	--agent-claude: #c15f3c;
+	--agent-codex: #6e56cf;
+	--agent-opencode: #2f7d32;
+	--agent-amp: #c2255c;
+	--agent-custom: #0f8a80;
 
 	--radius: 16px;
 	--radius-sm: 10px;
@@ -91,6 +97,11 @@
 	--ill-term: #090b0e;
 	--ill-term-ink: #ece9e1;
 	--mark: #d9825b;
+	--agent-claude: #d97757;
+	--agent-codex: #a594f0;
+	--agent-opencode: #6cc070;
+	--agent-amp: #f06595;
+	--agent-custom: #4cc5ba;
 }
 
 * {
@@ -713,10 +724,50 @@ code, pre {
 }
 
 /* ---------- agents ---------- */
-.agents-shot {
-	max-width: 1000px;
-	margin: 0 auto;
+.agent-roster {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: 12px;
+	margin: 0 0 44px;
+	padding: 0;
+	list-style: none;
 }
+.agent-roster li {
+	position: relative;
+	padding: 16px 16px 16px 18px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--panel);
+	overflow: hidden;
+}
+.agent-roster li::before {
+	content: '';
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 4px;
+	background: var(--agent);
+}
+.agent-name {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 600;
+}
+.agent-mark {
+	color: var(--agent);
+	font-size: 15px;
+	line-height: 1;
+}
+.agent-how {
+	margin-top: 6px;
+	font-size: 14px;
+	color: var(--body);
+}
+.agent-claude { --agent: var(--agent-claude); }
+.agent-codex { --agent: var(--agent-codex); }
+.agent-opencode { --agent: var(--agent-opencode); }
+.agent-amp { --agent: var(--agent-amp); }
+.agent-custom { --agent: var(--agent-custom); }
 .trio {
 	display: grid;
 	grid-template-columns: repeat(3, 1fr);
@@ -1215,6 +1266,7 @@ a.card:hover .card-art .ill {
 	}
 	.showcase.flip .showcase-copy { order: 0; }
 	.card-grid { grid-template-columns: repeat(2, 1fr); }
+	.agent-roster { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.trio,
 	.platform-grid,
 	.download-grid { grid-template-columns: 1fr; max-width: 560px; margin-left: auto; margin-right: auto; }

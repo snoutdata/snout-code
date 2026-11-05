@@ -648,6 +648,30 @@ fn price_v2(v1: &str) -> String {
         )
 }
 
+/// OrderService logging the discount it applies: the opencode turn of the Agent Changes shot.
+fn order_logged(v1: &str) -> String {
+    let edits = [
+        (
+            "import java.util.List;\n",
+            "import java.util.List;\nimport org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;\n",
+        ),
+        (
+            "    private final ProductService productService;\n",
+            "    private static final Logger log = LoggerFactory.getLogger(OrderService.class);\n\n    private final ProductService productService;\n",
+        ),
+        (
+            "        BigDecimal total = prices.withTax(net.subtract(prices.discount(net, items)));\n",
+            "        BigDecimal discount = prices.discount(net, items);\n        log.info(\"Order for {}: {} items, discount {}\", customer, items, discount);\n        BigDecimal total = prices.withTax(net.subtract(discount));\n",
+        ),
+    ];
+    let mut v2 = v1.to_owned();
+    for (from, to) in edits {
+        assert!(v2.contains(from), "OrderService has {from:?}");
+        v2 = v2.replacen(from, to, 1);
+    }
+    v2
+}
+
 fn fake_claude(dir: &Path, body: &str) -> PathBuf {
     let fake = dir.parent().unwrap().join("fake-claude");
     std::fs::write(&fake, format!("#!/bin/sh\n{body}\nsleep 60\n")).unwrap();
@@ -655,7 +679,9 @@ fn fake_claude(dir: &Path, body: &str) -> PathBuf {
     fake
 }
 
-/// The console with Claude Code (a stand-in that prints what it would), and its live edits.
+/// The console with Claude Code (a stand-in that prints what it would), and its live edits;
+/// Codex typing the same change in; and the Agent Changes window with an opencode turn above
+/// Claude's.
 fn claude(projects: &Path) {
     use snout_app::claude_ide::changes::Source;
     use snout_app::claude_ide::panel::{Activity as Doing, PendingDiff};
@@ -664,6 +690,7 @@ fn claude(projects: &Path) {
         Console,
         Start,
         Typing,
+        CodexTyping,
         Fade,
         Card,
         Inline,
@@ -673,6 +700,8 @@ fn claude(projects: &Path) {
         (Step::Start, ThemeChoice::Light, "agents-start-light"),
         (Step::Typing, ThemeChoice::Light, "agents-presence-light"),
         (Step::Typing, ThemeChoice::Dark, "agents-presence-dark"),
+        (Step::CodexTyping, ThemeChoice::Light, "agents-presence-codex-light"),
+        (Step::CodexTyping, ThemeChoice::Dark, "agents-presence-codex-dark"),
         (Step::Fade, ThemeChoice::Light, "claude-changes-light"),
         (Step::Fade, ThemeChoice::Dark, "claude-changes-dark"),
         (Step::Card, ThemeChoice::Light, "agents-review-light"),
@@ -693,7 +722,13 @@ fn claude(projects: &Path) {
         let file = shop.join("src/main/java/com/example/shop/service/PriceCalculator.java");
         let v1 = std::fs::read_to_string(&file).unwrap();
         let v2 = price_v2(&v1);
-        let mut w = Win::new(settings(theme, vec![shop.clone()], Some(shop.clone())), false);
+        let codex = step == Step::CodexTyping;
+        let agent = if codex { snout_app::agents::CODEX } else { snout_app::agents::CLAUDE };
+        let mut s = settings(theme, vec![shop.clone()], Some(shop.clone()));
+        if codex {
+            s.console_agent = snout_app::agents::ConsoleAgent::Codex;
+        }
+        let mut w = Win::new(s, false);
         w.activity(if step == Step::Console { Activity::Git } else { Activity::Project });
         w.act(Action::Refresh);
         let e = w.open(&file, Some((0, 0)));
@@ -711,6 +746,13 @@ fn claude(projects: &Path) {
              printf '  ⎿  Updated with 3 additions\\n\\n'\n\
              printf '\\033[32m●\\033[0m The bulk discount now reads shop.bulk.items and\\n  shop.bulk.discount, with the old values as defaults.\\n\\n'\n\
              printf '\\033[1m>\\033[0m '"
+        } else if codex {
+            "sleep 1\n\
+             printf '\\033]0;Bulk discount settings\\007'\n\
+             printf '\\033[1m›\\033[0m Make the bulk discount configurable in application.yml\\n\\n'\n\
+             printf '\\033[2m•\\033[0m Explored\\n  └ Read PriceCalculator.java, application.yml\\n\\n'\n\
+             printf '\\033[35m•\\033[0m Editing \\033[36msrc/main/java/com/example/shop/service/PriceCalculator.java\\033[0m\\n\\n'\n\
+             printf '\\033[1m›\\033[0m '"
         } else {
             "sleep 1\n\
              printf '\\033]0;Bulk discount settings\\007'\n\
@@ -721,7 +763,9 @@ fn claude(projects: &Path) {
         let fake = fake_claude(&shop, script);
         w.cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
         w.act(Action::ToggleConsole);
-        w.cx.update(|cx| cx.set_global(snout_app::claude_ide::IdeStatus { clients: 1 }));
+        if !codex {
+            w.cx.update(|cx| cx.set_global(snout_app::claude_ide::IdeStatus { clients: 1 }));
+        }
         w.pump(4, &mut |_| false);
         if step == Step::Start {
             // The session ended: the console's illustrated Start.
@@ -755,16 +799,19 @@ fn claude(projects: &Path) {
         let yml_v2 = yml_v1.clone() + "  bulk:\n    items: 3\n    discount: 0.10\n";
         let test = shop.join("src/test/java/com/example/shop/service/BulkDiscountTest.java");
         let (f2, s2, y2, t2) = (file.clone(), shop.clone(), yml.clone(), test.clone());
+        let o2 = shop.join("src/main/java/com/example/shop/service/OrderService.java");
+        let o_v1 = std::fs::read_to_string(&o2).unwrap();
+        let o_v2 = order_logged(&o_v1);
         let (v1b, v2b) = (v1.clone(), v2.clone());
         w.cx.update(|cx| {
             changes.update(cx, |c, cx| {
                 c.root = Some(s2.clone());
-                c.set.new_turn("claude", Some("Make the bulk discount configurable in application.yml".into()));
+                c.set.new_turn(agent, Some("Make the bulk discount configurable in application.yml".into()));
                 c.hooks_heard = true;
                 c.set.before_edit(&f2, Some(Arc::new(v1b.clone())));
-                c.record(f2.clone(), Some(Arc::new(v2b.clone())), None, "Edit".into(), Source::Hook, "claude", cx);
+                c.record(f2.clone(), Some(Arc::new(v2b.clone())), None, "Edit".into(), Source::Hook, agent, cx);
                 let edit = snout_app::claude_ide::ledger::EditRecord::now(
-                    "claude",
+                    agent,
                     c.set.turn,
                     Some("Make the bulk discount configurable in application.yml".into()),
                     "Edit",
@@ -772,15 +819,19 @@ fn claude(projects: &Path) {
                 c.ledger.record(&f2, Some(&v1b), &v2b, edit);
                 c.set.before_edit(&t2, None);
                 let text = "package com.example.shop.service;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport java.math.BigDecimal;\nimport org.junit.jupiter.api.Test;\n\nclass BulkDiscountTest {\n\n    @Test\n    void usesTheConfiguredThreshold() {\n        PriceCalculator prices = new PriceCalculator(new BigDecimal(\"0.20\"), 5, new BigDecimal(\"0.15\"));\n        assertEquals(BigDecimal.ZERO, prices.discount(new BigDecimal(\"40.00\"), 4));\n        assertEquals(new BigDecimal(\"7.50\"), prices.discount(new BigDecimal(\"50.00\"), 5));\n    }\n}\n";
-                c.record(t2.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, "claude", cx);
+                c.record(t2.clone(), Some(Arc::new(text.into())), None, "Write".into(), Source::Hook, agent, cx);
                 let old = Some(Some(Arc::new(yml_v1.clone())));
-                c.record(y2.clone(), Some(Arc::new(yml_v2.clone())), old, String::new(), Source::Watcher, "claude", cx);
+                c.record(y2.clone(), Some(Arc::new(yml_v2.clone())), old, String::new(), Source::Watcher, agent, cx);
                 c.expanded.insert(f2.clone());
-                let tool = if step == Step::Typing { "Edit" } else { "Write" };
+                let tool = match step {
+                    Step::Typing => "Edit",
+                    Step::CodexTyping => "apply_patch",
+                    _ => "Write",
+                };
                 c.activity = Some(Doing {
                     path: f2.clone(),
                     tool: tool.into(),
-                    agent: snout_app::agents::CLAUDE,
+                    agent,
                     at: Instant::now(),
                     done: false,
                 });
@@ -798,23 +849,33 @@ fn claude(projects: &Path) {
             })
         });
         w.pump(1, &mut |_| false);
+        if step == Step::Fade {
+            // A later prompt to opencode, in a file of its own, once Claude's are listed: the
+            // window shows both agents' turns, the latest first.
+            w.cx.update(|cx| {
+                changes.update(cx, |c, cx| {
+                    c.set.new_turn(snout_app::agents::OPENCODE, Some("Log the discount applied to each order".into()));
+                    c.set.before_edit(&o2, Some(Arc::new(o_v1.clone())));
+                    let (path, now) = (o2.clone(), Some(Arc::new(o_v2.clone())));
+                    c.record(path, now, None, "edit".into(), Source::Hook, snout_app::agents::OPENCODE, cx);
+                })
+            });
+            w.pump(1, &mut |_| false);
+        }
         let (e2, v2c) = (e.clone(), v2.clone());
         w.with(|ws, window, cx| {
-            if !matches!(step, Step::Typing | Step::Card) {
+            if !matches!(step, Step::Typing | Step::CodexTyping | Step::Card) {
                 ws.update(cx, |ws, cx| ws.toggle_tool(Tool::ClaudeChanges, window, cx));
             }
             e2.update(cx, |e, cx| match step {
-                Step::Typing => {
-                    e.animate_edit(
-                        &v2c,
-                        true,
-                        Some(snout_app::editor::Writer {
-                            name: "Claude".into(),
-                            color: snout_app::theme::palette(cx).claude().mark,
-                        }),
-                        window,
-                        cx,
-                    );
+                Step::Typing | Step::CodexTyping => {
+                    let who = if step == Step::CodexTyping {
+                        snout_app::agents::Agent::codex()
+                    } else {
+                        snout_app::agents::Agent::claude()
+                    };
+                    let writer = snout_app::editor::Writer::of(&who, &snout_app::theme::palette(cx));
+                    e.animate_edit(&v2c, true, Some(writer), window, cx);
                     e.hold_live_at(0.55, window, cx);
                 }
                 _ => {

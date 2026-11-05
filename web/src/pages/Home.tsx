@@ -9,6 +9,16 @@ import { CONTRIBUTING_URL, GITHUB_URL, ISSUES_URL, docs } from '../site'
 
 const MADE_FOR = ['Java', 'Gradle', 'Maven', 'Spring Boot', 'TypeScript', 'JavaScript', 'Node', 'Playwright', 'Vitest', 'Jest', 'Git']
 
+// The agents the console runs, each with the mark the app's gutter gives its lines, in its app
+// colour (styles.css, --agent-*), and how SnoutCode hears its edits (docs/agents.md).
+const AGENTS: { id: string, name: string, mark: string, how: string }[] = [
+	{ id: 'claude', name: 'Claude Code', mark: '\u2733', how: 'Connects as its IDE, and its hooks report each edit.' },
+	{ id: 'codex', name: 'Codex', mark: '\u2B22', how: 'Hooks for the session report each edit.' },
+	{ id: 'opencode', name: 'opencode', mark: '\u25A0', how: 'A plugin loaded for the session reports each edit.' },
+	{ id: 'amp', name: 'Amp', mark: '\u25B2', how: 'A plugin of SnoutCode\'s reports each edit, shell writes too.' },
+	{ id: 'custom', name: 'Your own', mark: '\u25C6', how: 'Any command line agent: what changes during its turn is put down to it.' }
+]
+
 const MORE: { art: CardArtKind, title: string, body: string, href: string }[] = [
 	{
 		art: 'search',
@@ -70,9 +80,9 @@ export function Home() {
 							The native IDE for Java, Gradle and Spring.
 						</h1>
 						<p className="lede">
-							Written in Rust, with its own Java engine, and TypeScript for Node projects and Playwright tests. Git and
-							Claude Code are built in, and the window can stay on your desk while the project lives on a Linux
-							machine over SSH.
+							Written in Rust, with its own Java engine, and TypeScript for Node projects and Playwright tests. Git is
+							built in, Claude Code, Codex, opencode and Amp edit live in your editor, and the window can stay on your
+							desk while the project lives on a Linux machine over SSH.
 						</p>
 						<div className="hero-cta">
 							<a className="btn btn-lg" href="/download">
@@ -281,26 +291,54 @@ export function Home() {
 						Claude Code, Codex, opencode, Amp or your own agent runs in a docked console. Each edit is typed in live, with the
 						agent's own caret and colour, and every line it wrote stays marked.
 					</SectionHead>
-					<div className="agents-shot" data-reveal>
-						<Shot src="agents-presence.png" dark="agents-presence-dark.png" alt="Claude Code editing a Java file in SnoutCode, its caret and name tag on the line it is typing" />
+					<ul className="agent-roster" data-reveal aria-label="The agents SnoutCode follows">
+						{AGENTS.map((a) => (
+							<li key={a.id} className={`agent-${a.id}`}>
+								<span className="agent-name"><span className="agent-mark" aria-hidden="true">{a.mark}</span>{a.name}</span>
+								<p className="agent-how">{a.how}</p>
+							</li>
+						))}
+					</ul>
+					<div className="showcase-list">
+						<Showcase
+							title="Every edit, as it lands"
+							body="Claude Code, Codex, opencode and Amp tell SnoutCode about each edit before and after it is made, so the editor plays it out in the agent's caret and colour."
+							points={[
+								'The caret and its name flag move as the text types itself in',
+								'Follow the agent from file to file, or keep your own place',
+								'Its lines keep its mark in the gutter and in Annotate with Agents',
+								'Revert puts back exactly what the file held'
+							]}
+							link={{ href: docs('agents.md'), label: 'Coding agents in the user guide' }}
+							shot={{ src: 'agents-presence-codex.png', dark: 'agents-presence-codex-dark.png', alt: 'Codex editing a Java file in SnoutCode, its caret and name flag on the line it is typing' }}
+						/>
+						<Showcase
+							flip
+							title="Reviewed by prompt"
+							body="Every change the agents made, grouped by the prompt behind it and marked with the agent that made it, to keep or undo."
+							points={[
+								'Keep or undo a prompt, a file or one change at a time',
+								'Accept All and Revert All for everything at once',
+								'A change Claude Code asks to make waits at the top for your answer'
+							]}
+							link={{ href: docs('agents.md#the-agent-changes-window'), label: 'The Agent Changes window' }}
+							shot={{ src: 'agents-changes.png', alt: 'The Agent Changes window: an opencode prompt with its files, and a change Claude Code asks to make' }}
+						/>
 					</div>
 					<div className="trio">
 						<article className="trio-card" data-reveal>
-							<h3>Live, in your editor</h3>
-							<p>Follow the agent from file to file as it works, or keep your own place. Its lines carry its colour in the gutter and in blame.</p>
+							<h3>Set up for the session</h3>
+							<p>The console starts each agent with what it needs to report its edits; Codex asks you to trust its hooks once. Your own Codex and opencode settings are never changed.</p>
 						</article>
 						<article className="trio-card" data-reveal>
-							<h3>Reviewed by prompt</h3>
-							<p>Every change the agent made, with the prompt behind it, to review, keep or undo: by prompt, by file or one change at a time.</p>
+							<h3>Ask it from the editor</h3>
+							<p>Send the selection, or ask the agent to fix a problem, from the code itself. The file and lines arrive in its prompt.</p>
 						</article>
 						<article className="trio-card" data-reveal>
 							<h3>An editor API, not a token bill</h3>
 							<p>The agent opens files, reads your selection and the problems through an Agent Skill, a UTCP manual and plain HTTP. About 80 tokens a request, where MCP tool definitions take about 800.</p>
 						</article>
 					</div>
-					<p className="center-link" data-reveal>
-						<a className="more-link" href={docs('agents.md')}>Coding agents in the user guide <span aria-hidden="true">&rarr;</span></a>
-					</p>
 				</section>
 
 				<section className="section" aria-labelledby="git-title">
@@ -327,7 +365,7 @@ export function Home() {
 
 				<section className="section section-tint" id="remote" aria-labelledby="remote-title">
 					<SectionHead id="remote-title" art="remote" eyebrow="Remote SSH" title="Your window, their machine" flip>
-						Keep the window on your Mac while the project, Git, the Java engine, builds, runs, terminals and Claude Code
+						Keep the window on your Mac while the project, Git, the Java engine, builds, runs, terminals and your coding agent
 						are on a Linux machine you reach with ssh.
 					</SectionHead>
 					<div className="showcase-list">

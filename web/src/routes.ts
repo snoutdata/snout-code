@@ -13,7 +13,7 @@ export const ROUTES: Route[] = [
 		file: 'index.html',
 		title: 'SnoutCode: the native IDE for Java, Gradle and Spring',
 		description:
-			'SnoutCode is a free, open source IDE written in Rust for Java, Gradle, Maven and Spring Boot, TypeScript on Node and Playwright tests. Git and Claude Code are built in, and it works on a Linux machine over SSH. For macOS, Linux and Windows.'
+			'SnoutCode is a free, open source IDE written in Rust for Java, Gradle, Maven and Spring Boot, TypeScript on Node and Playwright tests. Git is built in, Claude Code, Codex, opencode and Amp edit live in its editor, and it works on a Linux machine over SSH. For macOS, Linux and Windows.'
 	},
 	{
 		path: '/download',

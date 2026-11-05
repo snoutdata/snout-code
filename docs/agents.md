@@ -156,7 +156,7 @@ Accept Claude's Change and Reject Claude's Change are also in the command palett
 
 ![The Agent Changes window, by prompt](images/agents-changes.png)
 
-*The changes of a prompt, with its files; a change Claude asks to make waits at the top.*
+*Each prompt with its agent and its files, the latest first (here opencode's, after Claude's); a change Claude asks to make waits at the top.*
 
 Agent Changes, on the right tool window stripe, lists what the agents changed in the session that you have not reviewed yet, grouped by prompt (turn), the latest first. The count on its stripe icon is the number of files.
 
@@ -219,6 +219,10 @@ A `codex` started in the console gets its hooks for that session only (`-c hooks
 **Trust the hooks once.** Codex runs a hook only after you have reviewed it. The first time Codex starts in the console, it says new hooks are waiting: type `/hooks` and trust SnoutCode's four. They read the same in every window and every project, so Codex does not ask again. Until you trust them, Codex still works, and SnoutCode follows it as it follows any agent: the files that change while its turn runs.
 
 Install it with `npm install -g @openai/codex` (or as its README says) and sign in once in a terminal.
+
+![Codex writing in the editor, its caret and flag in its colour](images/agents-presence-codex.png)
+
+*Codex at work: each change its patch makes types itself in, in Codex's colour, as for Claude Code.*
 
 ## opencode
 

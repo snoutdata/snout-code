@@ -65,6 +65,8 @@ SPEC = {
     "agents-console-start": ("agents-start-light", (720, 1230, 2800, 1745)),
     "agents-presence": ("agents-presence-light", None),
     "agents-presence-dark": ("agents-presence-dark", None),
+    "agents-presence-codex": ("agents-presence-codex-light", None),
+    "agents-presence-codex-dark": ("agents-presence-codex-dark", None),
     "agents-review": ("agents-review-light", None),
     "agents-changes": ("claude-changes-light", None),
     "agents-inline": ("claude-inline-light", None),

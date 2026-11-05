@@ -73,7 +73,7 @@ export function Download() {
 								<li>A build without a suitable JDK gets one offered as a download.</li>
 								<li>Maven builds need no Maven install.</li>
 								<li>The TypeScript server installs itself on first use, with the Node the project asks for.</li>
-								<li>Git on your PATH, for the Git view. Claude Code is optional, for the console.</li>
+								<li>Git on your PATH, for the Git view. A coding agent (Claude Code, Codex, opencode or Amp) is optional, for the console.</li>
 							</ul>
 						</div>
 						<div className="source-card" data-reveal>
