@@ -328,7 +328,7 @@ export function Home() {
 					<div className="trio">
 						<article className="trio-card" data-reveal>
 							<h3>Set up for the session</h3>
-							<p>The console starts each agent with what it needs to report its edits; Codex asks you to trust its hooks once. Your own Codex and opencode settings are never changed.</p>
+							<p>Pick an agent in the console and it starts with what it needs to report its edits; one not installed yet installs from there with a click. Codex asks you to trust its hooks once. Your own Codex and opencode settings are never changed.</p>
 						</article>
 						<article className="trio-card" data-reveal>
 							<h3>Ask it from the editor</h3>
