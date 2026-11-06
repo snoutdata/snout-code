@@ -67,7 +67,8 @@ Windows has no menu bar shared by every app, so SnoutCode draws its menus in the
 title bar, left of the project's name: File, Edit, View, Code, Navigate, Refactor, Run, Build,
 Git, Tools, Window and Help. They are the macOS menus, item for item, and each item shows its
 shortcut. **Settings…** and **Exit** are at the end of File, and **About SnoutCode** at the
-end of Help.
+end of Help. In a narrow window the menus fold into one button, with each menu as a submenu, so
+Run and Search stay in sight.
 
 The minimize, maximize and close buttons are at the right of the title bar, and Windows's snap
 layouts open from the maximize button. Drag the title bar to move the window and double-click

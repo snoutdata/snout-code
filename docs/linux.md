@@ -67,7 +67,9 @@ Linux has no menu bar shared by every app, so SnoutCode draws its menus in the w
 bar, left of the project's name: File, Edit, View, Code, Navigate, Refactor, Run, Build, Git,
 Tools, Window and Help. They are the macOS menus, item for item, with the same icons, and each
 item shows its shortcut. There is no app menu: **Settings…** and **Quit** are at the end of
-File, and **About SnoutCode** at the end of Help, where IntelliJ IDEA has them on Linux.
+File, and **About SnoutCode** at the end of Help, where IntelliJ IDEA has them on Linux. In a
+narrow window the menus fold into one button, with each menu as a submenu, so Run and Search
+stay in sight.
 
 Click a menu to open it; with one open, moving the pointer to another opens that one. Esc or a
 click elsewhere closes it.

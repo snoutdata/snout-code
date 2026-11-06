@@ -66,6 +66,16 @@ fn pump(cx: &mut VisualTestContext, ms: u64) {
     cx.run_until_parked();
 }
 
+/// A stand-in agent in `bin`, running the `sh` script. On Windows a batch file hands it to Git for
+/// Windows's shell: the agents npm installs there are batch files too.
+fn fake_agent(bin: &Path, sh: &str) -> PathBuf {
+    if cfg!(windows) {
+        std::fs::write(bin.join("agent.sh"), sh).unwrap();
+    }
+    let cmd = "@\"C:\\Program Files\\Git\\bin\\bash.exe\" \"%~dp0agent.sh\" %*\n";
+    crate::tests::fake_program(bin, "agent", sh, cmd)
+}
+
 /// Pump until `done` holds.
 fn pump_until(cx: &mut VisualTestContext, what: &str, mut done: impl FnMut(&mut VisualTestContext) -> bool) {
     let start = Instant::now();
@@ -1027,7 +1037,9 @@ fn opencode_edits_reported_by_the_plugin_play_out_as_its_own(cx: &mut TestAppCon
     assert_eq!(k, "OPENCODE_CONFIG_CONTENT");
     let config: Value = serde_json::from_str(&v).unwrap();
     let url = config["plugin"][0].as_str().unwrap();
-    let plugin = std::fs::read_to_string(url.strip_prefix("file://").unwrap()).unwrap();
+    // `file:///C:/…` on Windows names `C:/…`; `file:///tmp/…` elsewhere names `/tmp/…`.
+    let path = url.strip_prefix(if cfg!(windows) { "file:///" } else { "file://" }).unwrap();
+    let plugin = std::fs::read_to_string(path).unwrap();
     assert_eq!(plugin, super::hooks::OPENCODE_PLUGIN);
     // And Codex its hooks.
     let codex = cx.update(|_, cx| cx.global::<super::CodexArgs>().0.clone());
@@ -1327,9 +1339,7 @@ fn opencode_and_amp_get_their_own_arguments(cx: &mut TestAppContext) {
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
     // A stand-in that prints the arguments it got, then runs on.
     let bin = crate::tests::scratch_dir("console-args-bin");
-    let fake = bin.join("agent");
-    std::fs::write(&fake, "#!/bin/sh\necho \"args=[$*]\"\nexec cat\n").unwrap();
-    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let fake = fake_agent(&bin, "#!/bin/sh\necho \"args=[$*]\"\nexec cat\n");
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
     pump_until(cx, "the first session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
@@ -1364,13 +1374,10 @@ fn an_agent_in_a_sandbox_drafts_through_the_session_folder(cx: &mut TestAppConte
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
     hook_command(&ws, cx);
     let bin = crate::tests::scratch_dir("draft-sandbox-bin");
-    let fake = bin.join("agent");
-    std::fs::write(
-        &fake,
+    let fake = fake_agent(
+        &bin,
         "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  export SNOUT_HOOK_PORT=1\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
-    )
-    .unwrap();
-    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    );
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
     pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
@@ -1400,13 +1407,10 @@ fn draft_asks_the_agent_in_the_console_and_takes_its_message(cx: &mut TestAppCon
     // A stand-in for an agent: it reads the prompt, runs the script it names for the change,
     // and hands back a message that shows it saw the change.
     let bin = crate::tests::scratch_dir("draft-bin");
-    let fake = bin.join("agent");
-    std::fs::write(
-        &fake,
+    let fake = fake_agent(
+        &bin,
         "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
-    )
-    .unwrap();
-    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    );
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
     pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
@@ -1436,9 +1440,7 @@ fn picking_another_agent_ends_a_draft_that_waits_on_the_first(cx: &mut TestAppCo
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
     hook_command(&ws, cx);
     // An agent that stays up and never answers.
-    let fake = crate::tests::scratch_dir("draft-swap-bin").join("agent");
-    std::fs::write(&fake, "#!/bin/sh\necho ready\nsleep 60\n").unwrap();
-    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let fake = fake_agent(&crate::tests::scratch_dir("draft-swap-bin"), "#!/bin/sh\necho ready\nsleep 60\n");
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
     pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
@@ -1492,8 +1494,9 @@ fn draft_with_no_agent_installed_points_to_the_console(cx: &mut TestAppContext) 
     cx.update(|_, cx| console.update(cx, |c, _| c.program = None));
     cx.update(|_, cx| {
         model.update(cx, |m, cx| {
-            // A path that is not there, so the agent counts as not installed.
-            m.settings.claude_path = Some(std::path::PathBuf::from("/nonexistent/claude"));
+            // A path that is not there, so the agent counts as not installed. Absolute on every
+            // system: a relative one is left for the system to find.
+            m.settings.claude_path = Some(lock_dir.join("nonexistent").join("claude"));
             m.handle(crate::model::Action::Refresh, cx)
         })
     });

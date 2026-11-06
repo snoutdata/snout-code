@@ -3,7 +3,8 @@
 //! is made from), with the icons `menu_icons` gives the Mac's items (as Lucide icons) and
 //! each command's shortcut. A click opens a menu; while one is open, moving to another
 //! opens that one; Esc, a click elsewhere or a command closes it. The keyboard goes back to
-//! where it was, so the command runs there (the editor's Undo in the editor).
+//! where it was, so the command runs there (the editor's Undo in the editor). In a narrow window
+//! the menus fold into one button, each a submenu of it: Run and Search keep their place.
 //!
 //! Modelled on GPUI Kit's `AppMenuBar`, which draws no icons.
 
@@ -18,6 +19,13 @@ use gpui_component::menu::PopupMenu;
 
 use crate::components::menu_icon;
 use crate::theme::palette;
+
+/// Below this window width, the menus are one button. Wide enough for the whole bar beside the
+/// project, the branch, Run and Search, and the window's own buttons.
+pub const FOLD_BELOW_W: f32 = 1280.;
+
+/// The place in `MenuBar::open` of the one button that holds every menu.
+const ALL: usize = usize::MAX;
 
 /// The in-window menu bar.
 pub struct MenuBar {
@@ -66,11 +74,17 @@ impl MenuBar {
 
     /// Open the menu at `ix`.
     pub fn open(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(menu) = self.menus.get(ix) else { return };
+        if ix != ALL && ix >= self.menus.len() {
+            return;
+        }
         if self.open.is_none() {
             self.action_context = window.focused(cx);
         }
-        let items = menu.items.clone();
+        // One menu's items, or every menu as a submenu.
+        let items: Vec<OwnedMenuItem> = match self.menus.get(ix) {
+            Some(menu) => menu.items.clone(),
+            None => self.menus.iter().cloned().map(OwnedMenuItem::Submenu).collect(),
+        };
         let context = self.action_context.clone();
         let popup = PopupMenu::build(window, cx, move |m, window, cx| {
             let m = match context {
@@ -137,8 +151,17 @@ fn with_items(
 }
 
 impl Render for MenuBar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        let folded = f32::from(window.viewport_size().width) < FOLD_BELOW_W;
+        // The window was resized past the line: what was open has no button left to hang from.
+        if self.open.as_ref().is_some_and(|(i, _)| (*i == ALL) != folded) {
+            self.open = None;
+            self._dismiss = None;
+        }
+        if folded {
+            return self.folded_button(&p, cx).into_any_element();
+        }
         let open = self.open.clone();
         let entity = cx.entity();
         let buttons: Vec<AnyElement> = self
@@ -204,5 +227,92 @@ impl Render for MenuBar {
             .text_size(px(crate::look::BODY))
             .text_color(p.fg)
             .children(buttons)
+            .into_any_element()
+    }
+}
+
+impl MenuBar {
+    /// The one button of a narrow window, and the menu of all the menus.
+    fn folded_button(&self, p: &crate::theme::Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let open = self.open.as_ref().map(|(_, popup)| popup.clone());
+        let hover = p.button_hover;
+        let toggle = cx.entity();
+        div()
+            .relative()
+            .flex_none()
+            .child(
+                div()
+                    .id("menu-bar-all")
+                    .debug_selector(|| "menu-bar-all".into())
+                    .size(px(26.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(5.))
+                    .cursor_pointer()
+                    .when(open.is_some(), |d| d.bg(hover))
+                    .when(open.is_none(), |d| d.hover(move |s| s.bg(hover)))
+                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Menu").build(w, cx))
+                    .child(crate::components::icon(crate::components::IconName::Menu, 15., p.fg))
+                    // Down, not up: a press in the title bar would move the window.
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        toggle.update(cx, |bar, cx| bar.toggle(ALL, window, cx));
+                    }),
+            )
+            .when_some(open, |d, popup| {
+                d.child(deferred(
+                    anchored()
+                        .anchor(gpui::Anchor::TopLeft)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(div().occlude().mt(px(28.)).child(popup)),
+                ))
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext as _, Modifiers, TestAppContext, px, size};
+
+    use super::*;
+
+    /// Whatever the system: the Mac has no in-window bar, but this one draws there all the same.
+    #[gpui::test]
+    fn a_narrow_window_folds_the_menus_into_one_button_that_still_opens_them(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(&crate::settings::Settings::default(), cx));
+        let (bar, cx) = cx.add_window_view(|window, cx| {
+            let bar = MenuBar::new(cx);
+            gpui_component::Root::new(bar, window, cx)
+        });
+        let menu = cx.update(|_, cx| bar.read(cx).view().clone().downcast::<MenuBar>().unwrap());
+        cx.update(|_, cx| {
+            menu.update(cx, |m, cx| {
+                m.menus = vec![
+                    OwnedMenu { name: "File".into(), items: vec![], disabled: false },
+                    OwnedMenu { name: "Edit".into(), items: vec![], disabled: false },
+                ];
+                cx.notify();
+            })
+        });
+        cx.simulate_resize(size(px(FOLD_BELOW_W + 100.), px(700.)));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("menu-bar-0").is_some() && cx.debug_bounds("menu-bar-1").is_some());
+        assert!(cx.debug_bounds("menu-bar-all").is_none(), "a wide window shows every menu");
+
+        cx.simulate_resize(size(px(800.), px(500.)));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("menu-bar-0").is_none(), "a narrow window folds them");
+        let button = cx.debug_bounds("menu-bar-all").expect("into one button");
+        assert!(button.size.width <= px(26.));
+        cx.simulate_click(button.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(cx.update(|_, cx| menu.read(cx).open_menu()), Some(ALL), "and it opens");
+
+        // Wide again, with that menu open: nothing is left hanging from a button that went.
+        cx.simulate_resize(size(px(FOLD_BELOW_W + 100.), px(700.)));
+        cx.run_until_parked();
+        assert_eq!(cx.update(|_, cx| menu.read(cx).open_menu()), None);
     }
 }
