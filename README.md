@@ -34,6 +34,7 @@ Each item links to its page in the user guide.
 - **[Terminal](docs/terminal.md):** your shell in the bottom dock, with scrollback, find and links, on the built-in terminal engine or Ghostty's.
 - **[Remote SSH](docs/remote-ssh.md):** the project, Git, the Java engine, builds, runs and terminals on a Linux machine you reach with `ssh`.
 - **[Processes](docs/processes.md):** what SnoutCode runs on your machine, and stopping it.
+- **[Updates](docs/updates.md):** SnoutCode downloads a new version in the background and installs it when you restart or quit, from a feed it checks is signed.
 
 The Java features come from SnoutCode's Java engine (`engine/`, see [engine/README.md](engine/README.md)). The macOS app, the Linux packages and the Windows installer carry the engine with its own Java runtime, so you need no Java installed to start.
 
