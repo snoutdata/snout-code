@@ -125,6 +125,9 @@ fn fit_rows(body: f32, branches: f32, changes: f32, journal: f32, commit_changes
     FittedRows { branches: branches.min(body * 0.5), changes, journal, commit_changes }
 }
 
+/// A pane shorter than this says what it has to say without its drawing.
+const ART_LEAST_H: f32 = 190.;
+
 /// What the title bar, the toolbar, the status bar and the gaps take from the window's height.
 const CHROME_H: f32 = 110.;
 
@@ -1165,15 +1168,17 @@ impl GitView {
             .child(compare)
             .child(look::vseparator(&p))
             .child(diff_controls(&self.model, self.middle_w < DIFF_WORDS_W, cx));
+        let short = self.rows.is_some_and(|r| r.changes < ART_LEAST_H);
         let body = if base == DiffBase::HeadToIndex && m.status.staged_count() == 0 && m.diff.is_none() {
-            look::art_note(
+            pane_note(
+                short,
                 snout_core::art::spots::nothing_staged(),
                 "Nothing staged",
                 "Stage files to see what the next commit holds.",
                 cx,
             )
         } else {
-            diff_body("diff-lines", m.diff.as_ref(), base.sides(), m.settings.side_by_side, &empty, cx)
+            diff_body("diff-lines", m.diff.as_ref(), base.sides(), m.settings.side_by_side, &empty, short, cx)
         };
         pane(&p).child(header).child(separator(&p)).child(body).into_any_element()
     }
@@ -1248,9 +1253,13 @@ impl GitView {
                         .map(|l| div().text_color(if l.error { p.error } else { p.fg }).child(l.text.clone())),
                 )
                 .into_any_element(),
-            BottomTab::Journal if m.log.is_empty() => {
-                look::art_note(snout_core::art::seed(), "No commits yet", "Stage some files and make the first one", cx)
-            }
+            BottomTab::Journal if m.log.is_empty() => pane_note(
+                self.rows.is_some_and(|r| r.journal < ART_LEAST_H),
+                snout_core::art::seed(),
+                "No commits yet",
+                "Stage some files and make the first one",
+                cx,
+            ),
             BottomTab::Journal => self.journal_table(cx),
         };
         pane(&p).child(tabs).child(separator(&p)).child(body).into_any_element()
@@ -1498,6 +1507,7 @@ impl GitView {
                 .on_any_mouse_down(move |_, window, cx| focus.focus(window, cx))
                 .into_any_element()
         };
+        let show_commit_id = self.middle_w - self.details_width() >= 260.;
         let files = pane(&p)
             .child(
                 div()
@@ -1506,10 +1516,13 @@ impl GitView {
                     .items_center()
                     .gap(px(8.))
                     .child(back)
-                    .child(div().w(px(4.)))
-                    .child(glyph(Glyph::Commit, 18., p.ill_ink))
-                    .child(div().font_family(MONO).text_size(px(MONO_SIZE)).child(d.short_id.clone()))
-                    .child(div().overflow_hidden().whitespace_nowrap().child(d.summary().to_owned())),
+                    // In a tight pane the way back keeps its room: the status bar names the commit.
+                    .when(show_commit_id, |h| {
+                        h.child(div().w(px(4.)))
+                            .child(glyph(Glyph::Commit, 18., p.ill_ink))
+                            .child(div().font_family(MONO).text_size(px(MONO_SIZE)).child(d.short_id.clone()))
+                            .child(div().min_w_0().truncate().child(d.summary().to_owned()))
+                    }),
             )
             .child(div().flex_none().h(px(8.)))
             .child(
@@ -1638,6 +1651,7 @@ impl GitView {
                 (parent, "This commit"),
                 m.settings.side_by_side,
                 empty,
+                self.rows.is_some_and(|r| r.commit_changes < ART_LEAST_H),
                 cx,
             ));
 
@@ -1835,6 +1849,25 @@ fn diff_title(diff: Option<&Result<Rc<DiffLayout>, String>>, p: &Palette) -> Any
         .into_any_element()
 }
 
+/// What a pane says instead of its content: with its drawing, or in a short pane the words
+/// alone, as the drawing would be cut off and push them out of sight.
+fn pane_note(
+    short: bool,
+    art: &'static snout_core::art::Drawing,
+    title: &str,
+    text: impl Into<SharedString>,
+    cx: &App,
+) -> AnyElement {
+    let text: SharedString = text.into();
+    if short {
+        let p = palette(cx);
+        let words = if title.is_empty() { text } else { format!("{title}. {text}").into() };
+        look::centered_note(words, &p).px(px(8.)).into_any_element()
+    } else {
+        look::art_note(art, title.to_owned(), text, cx)
+    }
+}
+
 /// Layout toggles shared by every diff.
 fn diff_controls(model: &Entity<Model>, narrow: bool, cx: &App) -> AnyElement {
     let p = palette(cx);
@@ -1882,20 +1915,22 @@ fn diff_body(
     (left, right): (&str, &str),
     side_by_side: bool,
     empty: &str,
+    short: bool,
     cx: &App,
 ) -> AnyElement {
     let p = palette(cx);
     let view = match diff {
-        None => return look::art_note(snout_core::art::pick(), "", empty.to_owned(), cx),
-        Some(Err(e)) => return look::art_note(snout_core::art::spots::warning(), "No diff", e.clone(), cx),
+        None => return pane_note(short, snout_core::art::pick(), "", empty.to_owned(), cx),
+        Some(Err(e)) => return pane_note(short, snout_core::art::spots::warning(), "No diff", e.clone(), cx),
         Some(Ok(view)) => view.clone(),
     };
     let d = &view.diff;
     if d.binary {
-        return look::art_note(snout_core::art::spots::info(), "Binary file", "Its versions differ, as bytes.", cx);
+        return pane_note(short, snout_core::art::spots::info(), "Binary file", "Its versions differ, as bytes.", cx);
     }
     if d.too_large {
-        return look::art_note(
+        return pane_note(
+            short,
             snout_core::art::spots::info(),
             "Too large to show",
             "The file is too large to diff here.",
@@ -1903,7 +1938,8 @@ fn diff_body(
         );
     }
     if d.is_identical() {
-        return look::art_note(
+        return pane_note(
+            short,
             snout_core::art::clean(),
             "No differences",
             format!("{left} and {right} are the same."),

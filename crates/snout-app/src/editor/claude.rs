@@ -850,12 +850,7 @@ impl EditorPanel {
                                 .child(div().text_color(p.removed).child(format!("−{minus}"))),
                         )
                         .when(waiting > 0, |d| {
-                            let text = if waiting == 1 {
-                                "1 more waiting".to_owned()
-                            } else {
-                                format!("{waiting} more waiting")
-                            };
-                            d.child(div().flex_none().child(look::chip(text, p.accent, &p)))
+                            d.child(div().flex_none().child(look::chip(format!("{waiting} more"), p.accent, &p)))
                         }),
                 )
                 .child(

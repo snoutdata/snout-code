@@ -64,6 +64,22 @@ fn side_docks_give_way_in_a_small_window() {
 }
 
 #[gpui::test]
+fn the_welcome_page_stacks_its_actions_in_a_narrow_pane(cx: &mut TestAppContext) {
+    let (_model, _ws, vcx) = open(cx, Settings::default());
+
+    vcx.simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+    vcx.run_until_parked();
+    let (open_card, clone) = (vcx.debug_bounds("welcome-open").unwrap(), vcx.debug_bounds("welcome-clone").unwrap());
+    assert_eq!(open_card.top(), clone.top(), "side by side with room");
+
+    vcx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(500.)));
+    vcx.run_until_parked();
+    let (open_card, clone) = (vcx.debug_bounds("welcome-open").unwrap(), vcx.debug_bounds("welcome-clone").unwrap());
+    assert!(clone.top() >= open_card.bottom(), "one above the other in a narrow pane");
+    assert!(open_card.size.width > gpui::px(200.), "each card keeps a readable width");
+}
+
+#[gpui::test]
 fn the_app_opens_on_the_view_it_closed_on(cx: &mut TestAppContext) {
     let repo = demo_repo("session-activity");
     let (model, ws, vcx) = open(cx, with_repo(&repo));

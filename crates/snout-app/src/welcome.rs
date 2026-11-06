@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, px,
 };
 use gpui_component::input::{InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement as _;
@@ -27,6 +27,16 @@ pub struct WelcomePanel {
     /// project's head moves.
     branches: crate::host::Facts<Option<String>>,
     head: Option<String>,
+    /// How wide the page was last drawn: a narrow one stacks its actions.
+    width: f32,
+}
+
+/// Below this the page stacks its actions and leaves out the drawing and the branches.
+const NARROW_W: f32 = 620.;
+
+/// Whether a page `width` wide is laid out for a narrow pane.
+fn is_narrow(width: f32) -> bool {
+    width < NARROW_W
 }
 
 impl WelcomePanel {
@@ -47,7 +57,7 @@ impl WelcomePanel {
             }
         })
         .detach();
-        Self { model, search, focus: cx.focus_handle(), branches: Default::default(), head: None }
+        Self { model, search, focus: cx.focus_handle(), branches: Default::default(), head: None, width: 1000. }
     }
 
     /// The recent projects the search box lets through.
@@ -248,6 +258,8 @@ impl Render for WelcomePanel {
             return self.empty_editor(&root, window, cx);
         }
         let model = self.model.clone();
+        let narrow = is_narrow(self.width);
+        let view = cx.entity();
         let recent = self.shown(cx);
         let branches: std::collections::HashMap<PathBuf, Option<String>> = recent
             .iter()
@@ -276,9 +288,10 @@ impl Render for WelcomePanel {
             div()
                 .id(id)
                 .debug_selector(move || id.to_owned())
-                .flex_1()
+                .when(narrow, |d| d.flex_none().w_full())
+                .when(!narrow, |d| d.flex_1())
                 .min_w_0()
-                .h(px(74.))
+                .h(px(if narrow { 58. } else { 74. }))
                 .px(px(14.))
                 .flex()
                 .items_center()
@@ -303,12 +316,13 @@ impl Render for WelcomePanel {
                 )
                 .child(
                     div()
+                        .flex_1()
                         .min_w_0()
                         .flex()
                         .flex_col()
                         .gap(px(2.))
-                        .child(div().font_weight(FontWeight::MEDIUM).child(title))
-                        .child(div().text_size(px(12.)).text_color(p.fg_dim).whitespace_nowrap().child(note)),
+                        .child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(title))
+                        .child(div().min_w_0().truncate().text_size(px(12.)).text_color(p.fg_dim).child(note)),
                 )
                 .when_some(a, |d, a| {
                     d.on_click(move |_, _, cx| {
@@ -322,7 +336,7 @@ impl Render for WelcomePanel {
             .flex()
             .items_center()
             .gap(px(20.))
-            .child(crate::art::drawing(snout_core::art::welcome(), 165., 110., None))
+            .when(!narrow, |d| d.child(crate::art::drawing(snout_core::art::welcome(), 165., 110., None)))
             .child(
                 div().flex().flex_col().gap(px(2.)).child(crate::git_view::wordmark(&p)).child(
                     div()
@@ -335,6 +349,7 @@ impl Render for WelcomePanel {
 
         let actions = div()
             .flex()
+            .when(narrow, |d| d.flex_col())
             .gap(px(10.))
             .child(action(
                 "welcome-open",
@@ -401,14 +416,14 @@ impl Render for WelcomePanel {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().font_weight(FontWeight::MEDIUM).child(name))
+                            .child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(name))
                             .child(div().h(px(16.)).flex().text_size(px(12.)).child(crate::components::path_text(
                                 ("welcome-recent-path", i),
                                 tilde(path, &host.info().home),
                                 p.fg_dim,
                             ))),
                     )
-                    .children(branch.map(|b| {
+                    .children(branch.filter(|_| !narrow).map(|b| {
                         div()
                             .flex_none()
                             .flex()
@@ -423,7 +438,8 @@ impl Render for WelcomePanel {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(110.))
+                            .w(px(if narrow { 84. } else { 110. }))
+                            .whitespace_nowrap()
                             .text_right()
                             .text_size(px(12.))
                             .text_color(p.fg_dim)
@@ -456,23 +472,69 @@ impl Render for WelcomePanel {
             .text_color(p.fg)
             .overflow_y_scrollbar()
             .child(
-                div().w_full().flex().justify_center().px(px(32.)).pt(px(48.)).pb(px(32.)).child(
-                    div().w_full().max_w(px(760.)).flex().flex_col().gap(px(22.)).child(header).child(actions).child(
+                div()
+                    .relative()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .px(px(if narrow { 16. } else { 32. }))
+                    .pt(px(if narrow { 20. } else { 48. }))
+                    .pb(px(32.))
+                    .child(
+                        canvas(
+                            move |bounds, _, cx| {
+                                let w = f32::from(bounds.size.width);
+                                view.update(cx, |this, cx| {
+                                    let was = is_narrow(this.width);
+                                    this.width = w;
+                                    if was != is_narrow(w) {
+                                        cx.notify();
+                                    }
+                                });
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    )
+                    .child(
                         div()
+                            .w_full()
+                            .max_w(px(760.))
                             .flex()
                             .flex_col()
-                            .gap(px(8.))
+                            .gap(px(22.))
+                            .child(header)
+                            .child(actions)
                             .child(
                                 div()
                                     .flex()
-                                    .items_center()
-                                    .gap(px(12.))
-                                    .child(div().flex_1().font_weight(FontWeight::MEDIUM).child("Recent Projects"))
-                                    .child(crate::look::field(&self.search, true, Some(260.), &p)),
-                            )
-                            .child(list),
+                                    .flex_col()
+                                    .gap(px(8.))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(12.))
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .whitespace_nowrap()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .child("Recent Projects"),
+                                            )
+                                            .child(div().flex_1())
+                                            .child(
+                                                crate::look::field(&self.search, true, Some(260.), &p)
+                                                    .flex_shrink(1.)
+                                                    .min_w(px(100.)),
+                                            ),
+                                    )
+                                    .child(list),
+                            ),
                     ),
-                ),
             )
             .into_any_element()
     }

@@ -1381,3 +1381,21 @@ mod writing {
         assert!(pump_until(cx, 20, |cx| cx.update(|_, cx| !runs.read(cx).sessions.iter().any(|s| s.running()))));
     }
 }
+
+#[gpui::test]
+fn the_title_bar_keeps_run_and_search_with_an_environment_in_a_small_window(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::tests::{open, with_repo};
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-title");
+    write(&repo, "package.json", r#"{ "devDependencies": { "@playwright/test": "1.64.1" } }"#);
+    write(&repo, "playwright.config.ts", "export default {};\n");
+    let (_, _ws, cx) = open(cx, with_repo(&repo));
+    cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(500.)));
+    let shown = pump_until(cx, 10, |cx| cx.debug_bounds("title-environment").is_some());
+    assert!(shown, "the project has its environment switch");
+    for id in ["title-run", "title-search", "title-settings"] {
+        let b = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id}"));
+        assert!(b.right() <= gpui::px(800.), "{id} is on the window: {b:?}");
+    }
+}

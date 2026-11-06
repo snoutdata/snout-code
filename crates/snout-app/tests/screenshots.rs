@@ -1929,8 +1929,9 @@ sleep 30
             let (a, z) = e.lanes.get().spring();
             let s = e.state.read(cx);
             let off = s.text().to_string().find(find).unwrap();
-            let b = s.range_to_bounds(&(off..off)).unwrap();
-            gpui::point((a + z) / 2., b.center().y)
+            // A short window (`SNOUT_SHOT_SIZE`) may not have the line in sight.
+            let y = s.range_to_bounds(&(off..off)).map_or(gpui::px(200.), |b| b.center().y);
+            gpui::point((a + z) / 2., y)
         })
     }
 

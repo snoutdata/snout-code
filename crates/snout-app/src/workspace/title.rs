@@ -104,6 +104,9 @@ fn tip_button(
         .child(icon(g, 16., ink))
 }
 
+/// Below this window width, the title bar's environment switch is its icon alone.
+const COMPACT_ENVIRONMENT_W: f32 = 1200.;
+
 impl Workspace {
     /// Show or hide the branch popup.
     pub fn toggle_branches(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -130,7 +133,8 @@ impl Workspace {
 
     pub(super) fn title_bar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         // The project's name gives way in a small window, leaving its menu's arrow in sight.
-        let name_w = (f32::from(window.viewport_size().width) * 0.28 - 60.).max(60.);
+        let window_w = f32::from(window.viewport_size().width);
+        let name_w = (window_w * 0.28 - 60.).max(60.);
         let p = palette(cx);
         let m = self.model.read(cx);
         // The project's own: its name and its repository's branch, whichever repository
@@ -354,13 +358,13 @@ impl Workspace {
             .items_center()
             .gap(px(2.))
             .when(playwright, |d| {
-                // A long environment gives way first: Run and Search always show.
-                d.child(
-                    div()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .child(crate::playwright::window::TestsWindow::environment_switch("title-environment", cx)),
-                )
+                // The environment gives way first: Run and Search always show.
+                let compact = window_w < COMPACT_ENVIRONMENT_W;
+                d.child(div().flex_none().child(crate::playwright::window::TestsWindow::environment_switch(
+                    "title-environment",
+                    compact,
+                    cx,
+                )))
                 .child(div().flex_none().w(px(4.)))
             })
             .child(div().flex_none().child(run_config))

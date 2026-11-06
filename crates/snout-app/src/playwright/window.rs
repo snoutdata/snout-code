@@ -217,7 +217,7 @@ impl TestsWindow {
         // Environments and Watch are Playwright's; a project with suites switches between
         // them.
         let unit = t.unit(cx).is_some();
-        let env = (!unit).then(|| Self::environment_switch("tests-environment", cx));
+        let env = (!unit).then(|| Self::environment_switch("tests-environment", false, cx));
         let suites = self.suite_switch(cx);
         let tests = self.tests.clone();
         let failed_any = c.failed > 0 && !running;
@@ -367,7 +367,7 @@ impl TestsWindow {
     }
 
     /// The environment switcher: the one runs go against, and Edit Environments.
-    pub fn environment_switch(id: &'static str, cx: &App) -> AnyElement {
+    pub fn environment_switch(id: &'static str, compact: bool, cx: &App) -> AnyElement {
         let p = palette(cx);
         let runs = crate::run::runs(cx);
         let (current, all) = runs
@@ -380,11 +380,24 @@ impl TestsWindow {
         let label = current.as_ref().map_or_else(|| "No environment".to_owned(), |e| e.name.clone());
         let detail = current.as_ref().map(|e| e.detail()).filter(|d| !d.is_empty());
         let current_name = current.map(|e| e.name);
-        let trigger = button(id, label, Some(Icon::Endpoint), p.accent, &p)
-            .children(
-                detail.map(|d| div().text_color(p.fg_dim).max_w(px(180.)).overflow_hidden().text_ellipsis().child(d)),
-            )
-            .child(icon(Icon::ChevronDown, 11., p.fg_dim));
+        // Compact: its icon alone, the title bar's Run and Search keeping their room. The
+        // tooltip says what it is set to.
+        let trigger = if compact {
+            let tip = match &detail {
+                Some(d) => format!("Environment: {label}, {d}"),
+                None => format!("Environment: {label}"),
+            };
+            button(id, "", Some(Icon::Endpoint), p.accent, &p)
+                .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
+                .child(icon(Icon::ChevronDown, 11., p.fg_dim))
+        } else {
+            button(id, label, Some(Icon::Endpoint), p.accent, &p)
+                .children(
+                    detail
+                        .map(|d| div().text_color(p.fg_dim).max_w(px(180.)).overflow_hidden().text_ellipsis().child(d)),
+                )
+                .child(icon(Icon::ChevronDown, 11., p.fg_dim))
+        };
         crate::look::Trigger(trigger)
             .dropdown_menu(move |mut menu, _, _| {
                 let pick = |name: Option<String>| {

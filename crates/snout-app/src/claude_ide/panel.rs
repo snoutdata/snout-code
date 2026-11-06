@@ -275,7 +275,16 @@ impl ChangesPanel {
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .child(title),
                     )
-                    .child(div().text_size(px(11.)).text_color(p.fg_dim).whitespace_nowrap().child(sub)),
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .text_size(px(11.))
+                            .text_color(p.fg_dim)
+                            .whitespace_nowrap()
+                            .child(sub),
+                    ),
             )
             .child(
                 row_button(("claude-revert-turn", i), Glyph::Discard, "Revert what this prompt changed", p)
