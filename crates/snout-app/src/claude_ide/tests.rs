@@ -87,6 +87,24 @@ fn pump_until(cx: &mut VisualTestContext, what: &str, mut done: impl FnMut(&mut 
     }
 }
 
+/// Pump until the draft is over; if it never is, say what the agent's terminal shows.
+fn pump_until_drafted(
+    cx: &mut VisualTestContext,
+    model: &Entity<crate::model::Model>,
+    console: &Entity<crate::console::ConsolePanel>,
+    repo: &Path,
+) {
+    let start = Instant::now();
+    while cx.update(|_, cx| model.read(cx).draft.is_some()) {
+        if start.elapsed() > Duration::from_secs(60) {
+            let shown = cx.update(|_, cx| console.read(cx).session_text(repo));
+            panic!("timed out waiting for the agent's message; its terminal shows: {shown:?}");
+        }
+        pump(cx, 16);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
 /// Claude Code's side: a socket on its own thread, so the window keeps running while
 /// a request waits for its answer.
 struct Client {
@@ -1376,7 +1394,7 @@ fn an_agent_in_a_sandbox_drafts_through_the_session_folder(cx: &mut TestAppConte
     let bin = crate::tests::scratch_dir("draft-sandbox-bin");
     let fake = fake_agent(
         &bin,
-        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  export SNOUT_HOOK_PORT=1\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
+        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  api=${api#\'}\n  api=${api%\'}\n  export SNOUT_HOOK_PORT=1\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
     );
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
@@ -1387,7 +1405,7 @@ fn an_agent_in_a_sandbox_drafts_through_the_session_folder(cx: &mut TestAppConte
     let header = env.iter().find(|(k, _)| *k == super::api::HEADER_ENV).map(|(_, v)| PathBuf::from(v)).unwrap();
     let dir = header.parent().unwrap().to_owned();
     pump_until(cx, "the change laid out", |_| dir.join(super::api::COMMIT_CHANGE).exists());
-    pump_until(cx, "the agent's message", |cx| cx.update(|_, cx| model.read(cx).draft.is_none()));
+    pump_until_drafted(cx, &model, &console, &repo);
     cx.update(|_, cx| assert_eq!(model.read(cx).commit_msg, "Change Hello\n\nIt didn't change before."));
     pump_until(cx, "the draft's files cleared", |_| {
         !dir.join(super::api::COMMIT_CHANGE).exists() && !dir.join(super::api::COMMIT_MESSAGE).exists()
@@ -1409,7 +1427,7 @@ fn draft_asks_the_agent_in_the_console_and_takes_its_message(cx: &mut TestAppCon
     let bin = crate::tests::scratch_dir("draft-bin");
     let fake = fake_agent(
         &bin,
-        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
+        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  api=${api#\'}\n  api=${api%\'}\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
     );
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
@@ -1417,7 +1435,7 @@ fn draft_asks_the_agent_in_the_console_and_takes_its_message(cx: &mut TestAppCon
     assert!(!cx.update(|_, cx| model.read(cx).settings.console_open), "the console starts closed");
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::DraftMessage, cx)));
     pump_until(cx, "the draft under way", |cx| cx.update(|_, cx| model.read(cx).draft.is_some()));
-    pump_until(cx, "the agent's message", |cx| cx.update(|_, cx| model.read(cx).draft.is_none()));
+    pump_until_drafted(cx, &model, &console, &repo);
     cx.update(|_, cx| {
         let m = model.read(cx);
         assert!(m.settings.console_open, "it opens as the toolbar's button opens it");
