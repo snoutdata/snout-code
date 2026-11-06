@@ -134,6 +134,12 @@ Claude Code finds SnoutCode in `%USERPROFILE%\.claude\ide` as it does on a Mac, 
 report each edit through `curl`, which Windows has. Claude Code on Windows runs its hooks with
 Git for Windows's bash, so install Git for Windows (you need it for the Git panel anyway).
 
+## Updates
+
+SnoutCode downloads a new version in the background and runs its installer when you press Restart,
+or silently when you quit. An install for all users asks for an administrator, so it updates only
+on Restart. See [Updates](updates.md).
+
 ## Where SnoutCode keeps its files
 
 | What | Where |

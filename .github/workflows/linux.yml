@@ -64,6 +64,9 @@ jobs:
         with:
           platforms: amd64
       - name: Build the .deb and the Arch Linux package
+        env:
+          # A tag's build is a release: it announces new versions (docs/updates.md).
+          SNOUT_OFFICIAL_BUILD: ${{ github.ref_type == 'tag' && '1' || '' }}
         run: scripts/package-linux.sh ${{ matrix.arch }}
       - name: Install them in clean containers and start the app
         run: scripts/linux/install-test.sh ${{ matrix.arch }}

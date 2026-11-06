@@ -132,6 +132,12 @@ a word. The terminal's own commands take Shift as well:
 | Ctrl+Shift+F | Find |
 | Ctrl+click | Open the link under the pointer |
 
+## Updates
+
+SnoutCode tells you when a new version is out, and **Download** opens the download page. The
+packages do not replace themselves: install the new one as you did the first (`sudo apt install
+./snout-code_<version>_amd64.deb`, or `sudo pacman -U`). See [Updates](updates.md).
+
 ## Where SnoutCode keeps its files
 
 SnoutCode follows the XDG base directories. A variable that is set moves its folder.

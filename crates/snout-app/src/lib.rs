@@ -49,6 +49,7 @@ pub mod tabs;
 pub mod theme;
 pub mod tool_windows;
 pub mod ui;
+pub mod updates;
 pub mod welcome;
 pub mod workspace;
 
@@ -174,6 +175,10 @@ pub fn run() {
     // A quitting app hands its processes to this program again, run as the reaper.
     if std::env::var_os(workspace::quit::REAP_ENV).is_some() {
         workspace::quit::reap();
+        return;
+    }
+    // An update starts this program to check a new build, to put it in place, or finds one going on.
+    if updates::run_helper_mode() {
         return;
     }
     platform::app_started();
@@ -326,6 +331,8 @@ pub fn open_window(
 pub fn after_first_paint(ws: &Entity<workspace::Workspace>, cx: &mut App) {
     ws.update(cx, |ws, cx| ws.release_menus(cx));
     startup::mark("menus installed");
+    let model = ws.read(cx).model.clone();
+    updates::start(&model, cx);
     // SNOUT_NO_FETCH=1 keeps the app from fetching on its own (a read only look at a
     // repository).
     if std::env::var_os("SNOUT_NO_FETCH").is_none() {

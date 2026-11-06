@@ -185,6 +185,8 @@ jobs:
       # snout-code.exe, the installer and its uninstaller through scripts/windows/sign.ps1.
       - name: Build the installer
         env:
+          # A tag's build is a release: it updates itself (docs/updates.md).
+          SNOUT_OFFICIAL_BUILD: ${{ github.ref_type == 'tag' && '1' || '' }}
           AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
           AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}

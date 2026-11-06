@@ -100,6 +100,8 @@ pub fn for_action(name: &str) -> Option<Icon> {
     match short {
         // The app menu.
         "About" => sf("info.circle", L::Info),
+        "CheckForUpdates" => sf("arrow.down.circle", L::CloudDownload),
+        "ReleaseNotes" => sf("book", L::BookOpen),
         "OpenSettings" => sf("gearshape", L::Settings),
         "OpenSettingsJson" => sf("curlybraces", L::FileBraces),
         "OpenProjectSettingsJson" => sf("curlybraces.square", L::FolderCog),

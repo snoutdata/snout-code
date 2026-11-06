@@ -63,6 +63,7 @@ for arch in "${ARCHES[@]}"; do
     -v "snout-linux-zig-$arch":/root/.cache \
     -e CARGO_TARGET_DIR=/target \
     -e SNOUT_NO_GHOSTTY="${SNOUT_NO_GHOSTTY:-}" \
+    -e SNOUT_OFFICIAL_BUILD="${SNOUT_OFFICIAL_BUILD:-}" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     "$tag" \
     bash -c '/src/scripts/linux/build-package.sh /src /out /src/target/snout-server-dist; s=$?; chown -R "$HOST_UID:$HOST_GID" /out; exit $s'

@@ -182,6 +182,10 @@ pub struct Settings {
     /// Ask before quitting, even when nothing would be lost or stopped (when something
     /// would, SnoutCode always asks).
     pub confirm_quit: bool,
+    /// Look for a new version by itself, and download it in the background.
+    pub update_check: bool,
+    /// The version that ran last, to say so when an update has landed. The app writes it.
+    pub last_version: Option<String>,
     /// The profiles each project's Spring model is evaluated under (none kept: any profile).
     pub spring_profiles: std::collections::BTreeMap<PathBuf, crate::spring::ProfileMode>,
     /// The JDKs added by hand in Project Structure, by their home folders, on this Mac.
@@ -353,6 +357,8 @@ impl Default for Settings {
             keymap: Default::default(),
             daemon_idle_minutes: crate::processes::DEFAULT_IDLE_MINUTES,
             confirm_quit: true,
+            update_check: true,
+            last_version: None,
             spring_profiles: Default::default(),
             sdks: Vec::new(),
             remote_sdks: Default::default(),

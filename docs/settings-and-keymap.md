@@ -144,6 +144,11 @@ and warnings differ in lightness as well as colour.
   Off, SnoutCode quits at once, unless quitting would lose unsaved changes or stop something
   running: then it always asks. See [Quitting](getting-started.md#quitting).
 
+**Updates**
+
+- **Check for updates automatically** (on by default): SnoutCode looks for a new version by itself
+  and downloads it in the background. See [Updates](updates.md).
+
 ## Editor
 
 **Indentation**

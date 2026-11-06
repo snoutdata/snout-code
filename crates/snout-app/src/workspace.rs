@@ -91,6 +91,8 @@ pub struct Workspace {
     head: Option<String>,
     /// The status bar under the docks; it follows the editor in front.
     pub status: Entity<StatusBar>,
+    /// What an update has to say, at the window's bottom right.
+    update_toast: Entity<crate::updates::UpdateToast>,
     /// The language servers.
     pub hub: Entity<crate::lang::LangHub>,
     /// The bottom dock's Problems and References tabs.
@@ -518,6 +520,7 @@ impl Workspace {
         ];
         let status = cx.new(|cx| StatusBar::new(model.clone(), cx));
         status.update(cx, |s, cx| s.set_hub(hub.clone(), cx));
+        let update_toast = cx.new(crate::updates::UpdateToast::new);
         let mut this = Self {
             model,
             dock,
@@ -535,6 +538,7 @@ impl Workspace {
             editors: Vec::new(),
             head: None,
             status,
+            update_toast,
             hub,
             problems,
             references,
@@ -2428,6 +2432,7 @@ impl Render for Workspace {
                     .child(self.right_stripe(cx)),
             )
             .child(self.status.clone())
+            .child(self.update_toast.clone())
             .child(self.claude_changes.read(cx).indicator.clone())
             .child(drop_hint)
             .children(self.settings_sheet.clone().map(|sheet| {
@@ -2587,4 +2592,5 @@ pub fn app_actions(cx: &mut App) {
     cx.on_action(|_: &Source, cx| cx.open_url(SOURCE_URL));
     cx.on_action(|_: &Issues, cx| cx.open_url(ISSUES_URL));
     cx.on_action(|_: &Website, cx| cx.open_url(WEBSITE_URL));
+    crate::updates::app_actions(cx);
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build SnoutCode.app and a .dmg to install it from, in target/release/bundle/.
+# Build SnoutCode.app, a .dmg to install it from, and the .zip an installed app updates itself
+# from, in target/release/bundle/.
 #
 #   scripts/package-mac.sh
 #
@@ -62,6 +63,9 @@ if [[ "${SNOUT_NO_GHOSTTY:-}" != 1 ]]; then
   export PATH="$(dirname "$ZIG"):$PATH"
   features=(--features ghostty)
 fi
+# A build signed with the Developer ID is a release, and updates itself (see docs/updates.md). One
+# signed ad hoc has no signature a new version could be checked against.
+if [[ -n "${SNOUT_APPLE_DIR:-}" ]]; then export SNOUT_OFFICIAL_BUILD=1; else unset SNOUT_OFFICIAL_BUILD; fi
 cargo build --release -p snout-app ${features[@]+"${features[@]}"}
 BIN="${CARGO_TARGET_DIR:-$ROOT/target}/release/snout-code"
 
@@ -306,5 +310,13 @@ if [[ -n "$IDENTITY" ]]; then
   fi
 fi
 
+# --- The update ---------------------------------------------------------------------------
+
+# What an installed app downloads to update itself: the same signed and stapled app, zipped.
+ZIP="$OUT/SnoutCode-$VERSION-$ARCH-mac.zip"
+rm -f "$ZIP"
+ditto -c -k --keepParent "$APP" "$ZIP"
+
+echo "Built $ZIP ($(du -sh "$ZIP" | cut -f1))"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"
 echo "Built $DMG ($(du -sh "$DMG" | cut -f1))"

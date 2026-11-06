@@ -124,6 +124,10 @@ mod shots {
         TerminalColors,
         /// No repository open: the welcome page.
         Nothing,
+        /// What an update has to say, as it stands.
+        Update(snout_update::status::UpdateStatus, bool),
+        /// A ready update put off with Later.
+        UpdateLater,
         /// A Java file in an editor tab.
         Editor,
         /// The Settings sheet on a page.
@@ -1850,6 +1854,22 @@ sleep 30
                 })
                 .unwrap();
             }
+            Some(Select::Update(status, manual)) => cx.update(|cx| {
+                snout_app::updates::updater(cx).update(cx, |u, cx| {
+                    u.manual = manual;
+                    u.set_status(status);
+                    cx.notify();
+                })
+            }),
+            Some(Select::UpdateLater) => cx.update(|cx| {
+                snout_app::updates::updater(cx).update(cx, |u, cx| {
+                    u.set_status(snout_update::status::UpdateStatus::Downloaded {
+                        version: "1.0.1".into(),
+                        notes: None,
+                    });
+                    u.dismiss(cx);
+                })
+            }),
             Some(Select::Nothing) | None => {}
         }
         // Let async work (the highlighter, the survey) finish and draw a few frames.
@@ -3100,6 +3120,30 @@ sleep 30
             Activity::Project,
             Some(Select::ConsoleAt(snout_app::workspace::Side::Left)),
         );
+        {
+            use snout_update::failure::describe;
+            use snout_update::status::{ManualReason, UpdateStatus as U};
+            let v = || "1.0.1".to_owned();
+            let ready = U::Downloaded { version: v(), notes: None };
+            let linux = U::Manual { version: v(), reason: ManualReason::PackageManager };
+            let cannot = U::Manual { version: v(), reason: ManualReason::CannotReplace };
+            let up = U::NotAvailable { version: "1.0.0".into(), from_source: false };
+            let source = U::NotAvailable { version: "1.0.0".into(), from_source: true };
+            let failed = U::Error(describe("HTTP 504", Some(504)));
+            let refused = U::Error(describe("the download's SHA-256 is not the feed's", None));
+            let progress = U::Downloading { percent: Some(42), preparing: false };
+            let (a, p) = (Activity::Project, Some(Select::UpdateLater));
+            shot("update-ready-dark", ThemeChoice::Dark, a, Some(Select::Update(ready.clone(), false)));
+            shot("update-ready-light", ThemeChoice::Light, a, Some(Select::Update(ready, false)));
+            shot("update-later", ThemeChoice::Dark, a, p);
+            shot("update-progress", ThemeChoice::Dark, a, Some(Select::Update(progress, false)));
+            shot("update-uptodate", ThemeChoice::Dark, a, Some(Select::Update(up, true)));
+            shot("update-fromsource", ThemeChoice::Dark, a, Some(Select::Update(source, true)));
+            shot("update-failed", ThemeChoice::Light, a, Some(Select::Update(failed, true)));
+            shot("update-refused", ThemeChoice::Dark, a, Some(Select::Update(refused, true)));
+            shot("update-linux", ThemeChoice::Dark, a, Some(Select::Update(linux, false)));
+            shot("update-cannot", ThemeChoice::Dark, a, Some(Select::Update(cannot, false)));
+        }
         // The same colourful output under each terminal engine this build has.
         for engine in snout_core::term::EngineKind::available() {
             let name = engine.label().to_lowercase().replace('-', "");

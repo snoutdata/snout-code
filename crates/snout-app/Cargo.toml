@@ -20,6 +20,7 @@ snout-core.workspace = true
 snout-lang.workspace = true
 snout-host.workspace = true
 snout-remote.workspace = true
+snout-update.workspace = true
 # The protocol's types, the version GPUI Kit's editor speaks.
 lsp-types = { version = "0.97", features = ["proposed"] }
 serde.workspace = true

@@ -36,6 +36,7 @@ pub struct StatusBar {
     pub git: bool,
     _hub_watch: Option<Subscription>,
     _processes_watch: Option<Subscription>,
+    _update_watch: Subscription,
     _watch: Vec<Subscription>,
 }
 
@@ -84,6 +85,8 @@ impl StatusBar {
         // Whether the engine is there is asked of the host off the UI thread.
         Self::look_for_engine(cx);
         let java_missing = false;
+        let updater = crate::updates::updater(cx);
+        let update_watch = cx.observe(&updater, |_, _, cx| cx.notify());
         Self {
             model,
             editor: None,
@@ -95,6 +98,7 @@ impl StatusBar {
             tasks_open: false,
             _hub_watch: None,
             _processes_watch: None,
+            _update_watch: update_watch,
             _watch: watch,
         }
     }
@@ -626,6 +630,7 @@ impl Render for StatusBar {
             .text_color(p.fg_dim)
             .child(div().flex_1().min_w_0().child(left))
             .children(agent_item(cx))
+            .children(crate::updates::status_item(cx))
             .when_some(status, |d, s| {
                 d.child(item("status-position", s.position.into()).when(p.tinted, |d| {
                     d.h(px(18.))

@@ -55,6 +55,8 @@ pub fn quit_requested(cx: &mut App) {
 
 /// Quit the app as ⌘Q does once answered: from a signal, without asking.
 pub fn quit_from_signal(cx: &mut App) {
+    // The system may be going down: a swap now could be cut off, and the next launch has it still.
+    crate::updates::skip_install(cx);
     match cx.try_global::<CurrentWorkspace>().and_then(|w| w.0.upgrade()) {
         Some(ws) => ws.update(cx, |ws, cx| ws.quit_now(cx)),
         None => cx.quit(),
@@ -107,11 +109,32 @@ impl Workspace {
         if self.quitting {
             return;
         }
+        // A Restart answered with Cancel is over: this quit is a plain one.
+        crate::updates::set_restart(false, cx);
         let info = self.quit_info(cx);
         if info.is_empty() && !self.model.read(cx).settings.confirm_quit {
             self.quit_now(cx);
             return;
         }
+        self.ask_to_quit(info, cx);
+    }
+
+    /// Restart, on an update that is ready. Asked for by name, so Confirm before quitting is not
+    /// for this; quitting would still lose or stop something only if the user says so.
+    pub fn restart_to_update(&mut self, cx: &mut Context<Self>) {
+        if self.quitting {
+            return;
+        }
+        crate::updates::set_restart(true, cx);
+        let info = self.quit_info(cx);
+        if info.is_empty() {
+            self.quit_now(cx);
+        } else {
+            self.ask_to_quit(info, cx);
+        }
+    }
+
+    fn ask_to_quit(&mut self, info: QuitInfo, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| {
             m.dialog = Some(Dialog::Quit(info));
             cx.emit(ModelEvent::Dialog);
@@ -182,6 +205,8 @@ impl Workspace {
         let known = self.processes.read(cx).known(cx);
         let host = crate::host::host(cx);
         let remote = crate::remote::is_remote(cx);
+        // An update that is ready goes in place once the app is gone.
+        let waiter = crate::updates::waiter_at_quit(cx).filter(|_| real);
         let job = cx.background_executor().spawn(async move {
             let snap = crate::processes::scan::Scanner::new(host.clone()).quick_snapshot(&known.cache);
             let own = (!real).then(|| started_here(&snap, &known));
@@ -201,6 +226,10 @@ impl Workspace {
             } else if let Err(e) = spawn_reaper(&targets, REAP_GRACE, &[]) {
                 eprintln!("[quit] could not hand the processes over: {e}; stopping them here");
                 host.stop_processes(&targets, Duration::from_millis(1500));
+            }
+            // After the processes to stop were listed, so it is not one of them.
+            if let Some(waiter) = waiter {
+                waiter.start();
             }
             targets.len()
         });

@@ -150,6 +150,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
         out.extend(runs.read(cx).tasks());
     }
     out.extend(crate::remote::tasks(cx));
+    out.extend(crate::updates::task(cx));
     if let Some((stage, percent)) = &model.reload {
         out.push(BgTask {
             title: "Reload from Disk".into(),

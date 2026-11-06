@@ -145,6 +145,14 @@ later open reuses all of it and is ready in a few seconds. If every open is slow
 SnoutCode's caches are kept (see below). `scripts/bench-open.sh` times each phase of an open;
 see [Supported versions and performance](versions-and-performance.md#measure-it-yourself).
 
+## An update does not arrive
+
+**Check for Updates…** says why, in a sentence: whether this computer is offline, GitHub is not
+answering, or the download was refused. Hover the sentence for the error behind it. Every step goes
+to `update.log`, in `~/Library/Logs/SnoutCode/` on a Mac, `~/.local/state/SnoutCode/` on Linux and
+`%LOCALAPPDATA%\SnoutCode\logs\` on Windows. See [Updates](updates.md) for what is checked and what
+each system does.
+
 ## Logs
 
 SnoutCode writes its log to standard error. To read it:

@@ -144,7 +144,7 @@ impl Page {
     fn keywords(self) -> &'static str {
         match self {
             Page::Appearance => {
-                "theme colors studio vivid deep classic dark light system font size interface quit quitting confirm"
+                "theme colors studio vivid deep classic dark light system font size interface quit quitting confirm update updates version"
             }
             Page::Keymap => "shortcuts keys bindings",
             Page::Editor => "tab size indent soft wrap whitespace font navigation click declaration modifier",
@@ -485,6 +485,7 @@ impl SettingsView {
         next.spring_profiles = d.spring_profiles.clone();
         next.keymap = d.keymap.clone();
         next.confirm_quit = d.confirm_quit;
+        next.update_check = d.update_check;
         next.terminal_engine = d.terminal_engine;
         next.terminal_font = d.terminal_font.clone();
         next.terminal_font_size = d.terminal_font_size;
@@ -1284,6 +1285,23 @@ impl SettingsView {
                     )
                     .child(div().text_size(px(12.)).text_color(p.fg_dim).child(
                         "SnoutCode always asks when quitting would lose unsaved changes or stop something running.",
+                    ))
+                    .child(section("Updates", &p))
+                    .child(
+                        div().py(px(6.)).child(
+                            look::checkbox(
+                                "settings-update-check",
+                                "Check for updates automatically",
+                                d.update_check,
+                                true,
+                                &p,
+                            )
+                            .debug_selector(|| "settings-update-check".into())
+                            .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.update_check = !s.update_check))),
+                        ),
+                    )
+                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(
+                        "A new version downloads in the background and installs when you restart or quit. Help has Check for Updates at any time.",
                     ))
                     .into_any_element()
             }

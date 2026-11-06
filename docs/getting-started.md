@@ -36,8 +36,8 @@ To build the app and its disk image yourself, run this from a clone of the repos
 scripts/package-mac.sh
 ```
 
-It puts `SnoutCode.app` and a `.dmg` in `target/release/bundle/`, for the architecture of the
-Mac that builds it. Building the Java engine needs JDK 21: the script uses `SNOUT_JDK21`, else
+It puts `SnoutCode.app`, a `.dmg` and the `.zip` apps update from in `target/release/bundle/`,
+for the architecture of the Mac that builds it. Building the Java engine needs JDK 21: the script uses `SNOUT_JDK21`, else
 `JAVA_HOME` when it is 21, else one that `/usr/libexec/java_home` finds.
 
 While you work on SnoutCode itself, `./snout.sh` builds the app and the engine when their

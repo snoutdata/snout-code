@@ -8,6 +8,7 @@ members = [
     "crates/snout-remote",
     "crates/snout-server",
     "crates/snout-host",
+    "crates/snout-update",
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ snout-lang = { path = "crates/snout-lang" }
 snout-host = { path = "crates/snout-host" }
 snout-remote-proto = { path = "crates/snout-remote-proto" }
 snout-remote = { path = "crates/snout-remote" }
+snout-update = { path = "crates/snout-update" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # JSON schemas made from the settings' types (Settings as text).

@@ -44,6 +44,9 @@ actions!(
         Source,
         Issues,
         Website,
+        CheckForUpdates,
+        ReleaseNotes,
+        RestartToUpdate,
         Minimize,
         Zoom,
         ShowProject,
@@ -372,6 +375,8 @@ fn fixed_commands() -> Vec<(&'static str, Box<dyn gpui::Action>)> {
         (crate::platform::REVEAL, Box::new(Reveal)),
         ("Open in External Terminal", Box::new(OpenInTerminal)),
         ("About SnoutCode", Box::new(About)),
+        ("Check for Updates…", Box::new(CheckForUpdates)),
+        ("Release Notes", Box::new(ReleaseNotes)),
         ("Quit SnoutCode", Box::new(Quit)),
     ]
 }
@@ -427,11 +432,22 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
         .flatten()
         .collect()
     };
-    let help_end: Vec<MenuItem> =
-        if app_menu { Vec::new() } else { vec![MenuItem::separator(), MenuItem::action("About SnoutCode", About)] };
+    let help_end: Vec<MenuItem> = if app_menu {
+        Vec::new()
+    } else {
+        vec![
+            MenuItem::separator(),
+            MenuItem::action("Check for Updates…", CheckForUpdates),
+            MenuItem::action("About SnoutCode", About),
+        ]
+    };
     let app = Menu::new("SnoutCode").items(
         [
-            vec![MenuItem::action("About SnoutCode", About), MenuItem::separator()],
+            vec![
+                MenuItem::action("About SnoutCode", About),
+                MenuItem::action("Check for Updates…", CheckForUpdates),
+                MenuItem::separator(),
+            ],
             settings_items().into(),
             vec![
                 MenuItem::separator(),
@@ -679,6 +695,7 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
                 MenuItem::action("SnoutCode on GitHub", Source),
                 MenuItem::action("Report an Issue", Issues),
                 MenuItem::action("SnoutData Website", Website),
+                MenuItem::action("Release Notes", ReleaseNotes),
             ]
             .into_iter()
             .chain(help_end),
