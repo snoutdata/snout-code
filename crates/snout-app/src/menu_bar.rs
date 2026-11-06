@@ -274,7 +274,7 @@ impl MenuBar {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AppContext as _, Modifiers, TestAppContext, px, size};
+    use gpui::{Modifiers, TestAppContext, px, size};
 
     use super::*;
 
