@@ -41,16 +41,39 @@ impl PartialEq for Repo {
 
 impl Eq for Repo {}
 
+/// Why a folder has no repository to open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoRepo {
+    /// Git looked, and it is not in a repository.
+    NotOne,
+    /// Git could not say: it is not installed, or refused the folder (a repository owned by
+    /// another user, as one in WSL looks from Windows). In Git's own words.
+    GitFailed(String),
+}
+
 impl Repo {
     /// Open the working tree on `host` containing `path`.
     pub fn open(host: &HostRef, path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
+        Self::find(host, path).map_err(|_| Error::NotARepo(path.to_owned()))
+    }
+
+    /// The working tree on `host` containing `path`, or why there is none to open.
+    pub fn find(host: &HostRef, path: impl AsRef<Path>) -> std::result::Result<Self, NoRepo> {
+        let path = path.as_ref();
         if !host.is_dir(path) {
-            return Err(Error::NotARepo(path.to_owned()));
+            return Err(NoRepo::NotOne);
         }
-        let out = run_raw(&**host, path, &["rev-parse", "--show-toplevel"], None)?;
+        let out = run_raw(&**host, path, &["rev-parse", "--show-toplevel"], None)
+            .map_err(|e| NoRepo::GitFailed(e.to_string()))?;
         if !out.success {
-            return Err(Error::NotARepo(path.to_owned()));
+            let said = out.text();
+            // LC_ALL is C, so this is always in these words.
+            return Err(if said.contains("not a git repository") {
+                NoRepo::NotOne
+            } else {
+                NoRepo::GitFailed(said.trim().to_owned())
+            });
         }
         let root = out.stdout_str().trim_end().to_owned();
         // Git for Windows writes the folder with slashes: backslashes, like every other path there.

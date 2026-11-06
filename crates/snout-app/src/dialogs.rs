@@ -130,7 +130,6 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
             (Tone::Warning, Some(spots::merge_conflict()), None)
         }
         Dialog::PullProblem { .. } => (Tone::Warning, Some(spots::push_rejected()), None),
-        Dialog::InitRepo(path) => (Tone::Git, Some(spots::no_project()), Some(path.display().to_string().into())),
         Dialog::GroupName { .. } => (Tone::Info, Some(spots::no_project()), None),
         Dialog::Clone { .. } => (
             Tone::Git,
@@ -171,7 +170,6 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
         Dialog::ConfirmDeleteFiles(_) => "Delete files?".into(),
         Dialog::PullProblem { problem: PullProblem::Divergent, .. } => "Both sides have new commits".into(),
         Dialog::PullProblem { .. } => "No shared history".into(),
-        Dialog::InitRepo(_) => "Not a Git repository".into(),
         Dialog::GroupName { rename: Some(_), .. } => "Rename group".into(),
         Dialog::GroupName { .. } => "New group".into(),
         Dialog::Clone { .. } => {
@@ -718,32 +716,6 @@ impl Render for DialogBody {
                         .disabled(has_tracked),
                     Action::ResetToUpstream
                 ));
-            }
-            Dialog::InitRepo(path) => {
-                let (a, b) = (path.clone(), path.clone());
-                body.push(
-                    choice_card(
-                        "find",
-                        IconName::Search,
-                        "Find repositories inside",
-                        "Look through its subfolders and add every repository found.",
-                        &p,
-                    )
-                    .on_click(cx.listener(move |this, _, w, cx| this.act(Action::Scan(a.clone()), w, cx)))
-                    .into_any_element(),
-                );
-                body.push(
-                    choice_card(
-                        "init",
-                        IconName::Sparkles,
-                        "Initialize a repository here",
-                        "Start a fresh history in this folder with git init.",
-                        &p,
-                    )
-                    .on_click(cx.listener(move |this, _, w, cx| this.act(Action::InitRepo(b.clone()), w, cx)))
-                    .into_any_element(),
-                );
-                buttons.push(cancel);
             }
             Dialog::NewBranch(start) => {
                 let from = start.as_ref().map_or("HEAD".to_owned(), |s| s.label.clone());

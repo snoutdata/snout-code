@@ -1719,6 +1719,88 @@ impl GitView {
 
     /// No project open: the Git view says so and offers to open one (the Welcome page, with
     /// the recent projects, is the Project view's).
+    /// The Git view of a project with no repository: what Git says, and what to do about it.
+    fn no_repository(
+        &mut self,
+        root: std::path::PathBuf,
+        trouble: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = palette(cx);
+        let button = |id: &'static str, g: Glyph, label: &'static str, action: Action| {
+            look::glyph_button(id, g, crate::keymap::shown(label), true, &p)
+                .debug_selector(move || id.to_owned())
+                .w(px(240.))
+                .h(px(34.))
+                .on_click(self.on_click(action))
+        };
+        // Git refused the folder, so there may well be a repository: nothing here starts another.
+        let refused = trouble.is_some();
+        let (title, line) = if refused {
+            ("Git could not read this folder", "The project works without it, but its changes and history cannot show.")
+        } else {
+            (
+                "This folder has no Git repository",
+                "The project works without Git. Start a repository to track its changes and history.",
+            )
+        };
+        pane(&p)
+            .child(
+                div()
+                    .id("git-no-repository")
+                    .debug_selector(|| "git-no-repository".into())
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(6.))
+                    .child(drawing(snout_core::art::welcome(), 240., 152., None))
+                    .child(div().mt(px(6.)).text_size(px(16.)).child(title))
+                    .child(div().text_color(p.fg_dim).child(line))
+                    .when_some(trouble, |d, said| {
+                        d.child(
+                            div()
+                                .debug_selector(|| "git-trouble".into())
+                                .mt(px(6.))
+                                .max_w(px(620.))
+                                .p(px(10.))
+                                .rounded(px(6.))
+                                .bg(p.card)
+                                .border_1()
+                                .border_color(p.border)
+                                .font_family(crate::look::MONO)
+                                .text_size(px(12.))
+                                .child(said),
+                        )
+                    })
+                    .child(div().h(px(10.)))
+                    .when(refused, |d| {
+                        d.child(button(
+                            "git-no-repo-retry",
+                            Glyph::Refresh,
+                            "Try Again",
+                            Action::OpenRepo(root.clone()),
+                        ))
+                    })
+                    .when(!refused, |d| {
+                        d.child(button(
+                            "git-no-repo-init",
+                            Glyph::Branch,
+                            "Initialize a Repository Here",
+                            Action::InitRepo(root.clone()),
+                        ))
+                        .child(button(
+                            "git-no-repo-find",
+                            Glyph::Open,
+                            "Find Repositories Inside",
+                            Action::Scan(root.clone()),
+                        ))
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let button = |id: &'static str, g: Glyph, label: &'static str, action: Action| {
@@ -1758,6 +1840,7 @@ impl Render for GitView {
         let p = palette(cx);
         let m = self.model.read(cx);
         let has_repo = m.repo.is_some();
+        let no_git = m.no_git.clone().zip(m.project_root());
         let in_commit = m.commit_view.is_some();
         let console_open = m.settings.console_open;
         let width = f32::from(window.viewport_size().width) - crate::workspace::ACTIVITY_W;
@@ -1798,7 +1881,9 @@ impl Render for GitView {
             .child(self.handle(Split::Branches, cx))
             .child(div().flex_none().h(px(branches_h)).flex().flex_col().child(self.branches(cx)));
 
-        let center = if !has_repo {
+        let center = if let Some((no_git, root)) = no_git.filter(|_| !has_repo) {
+            self.no_repository(root, no_git.trouble, cx)
+        } else if !has_repo {
             self.welcome(cx)
         } else {
             let top = if in_commit {

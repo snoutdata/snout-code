@@ -42,7 +42,7 @@ pub use github::github_web_url;
 pub use gitignore::{IgnoreRule, ignore_rules};
 pub use log::{Commit, CommitDetails, CommitFile};
 pub use pull::{PullMode, PullProblem};
-pub use repo::{Repo, Tracking, can_trash};
+pub use repo::{NoRepo, Repo, Tracking, can_trash};
 pub use snout_host::{Host, HostRef};
 pub use status::{BranchInfo, Change, FileEntry, Status};
 pub use tags::Tag;

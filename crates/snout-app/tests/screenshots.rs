@@ -124,6 +124,8 @@ mod shots {
         TerminalColors,
         /// No repository open: the welcome page.
         Nothing,
+        /// A project with no repository; what Git said about it, if it could not read it.
+        NoGit(Option<&'static str>),
         /// What an update has to say, as it stands.
         Update(snout_update::status::UpdateStatus, bool),
         /// A ready update put off with Later.
@@ -417,6 +419,12 @@ sleep 30
         }
         if matches!(select, Some(Select::TestsWindow | Select::Recording | Select::PlaywrightDebug)) {
             crate::playwright_repo(&repo);
+        }
+        if let Some(Select::NoGit(trouble)) = &select {
+            std::fs::remove_dir_all(repo.join(".git")).unwrap();
+            if let Some(said) = trouble {
+                std::fs::write(repo.join(".git"), said).unwrap();
+            }
         }
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
@@ -1854,6 +1862,7 @@ sleep 30
                 })
                 .unwrap();
             }
+            Some(Select::NoGit(_)) => {}
             Some(Select::Update(status, manual)) => cx.update(|cx| {
                 snout_app::updates::updater(cx).update(cx, |u, cx| {
                     u.manual = manual;
@@ -3120,6 +3129,10 @@ sleep 30
             Activity::Project,
             Some(Select::ConsoleAt(snout_app::workspace::Side::Left)),
         );
+        shot("nogit-project-dark", ThemeChoice::Dark, Activity::Project, Some(Select::NoGit(None)));
+        shot("nogit-git-dark", ThemeChoice::Dark, Activity::Git, Some(Select::NoGit(None)));
+        shot("nogit-git-light", ThemeChoice::Light, Activity::Git, Some(Select::NoGit(None)));
+        shot("nogit-trouble", ThemeChoice::Light, Activity::Git, Some(Select::NoGit(Some("not a gitdir line\n"))));
         {
             use snout_update::failure::describe;
             use snout_update::status::{ManualReason, UpdateStatus as U};

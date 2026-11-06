@@ -798,7 +798,7 @@ impl Workspace {
     /// File ▸ Close Project: ask about unsaved changes first, then keep the project's tabs
     /// for when it opens again, close them and the project, and show the Welcome page.
     pub fn close_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.model.read(cx).project_repo().is_none() {
+        if !self.model.read(cx).project_open() {
             return;
         }
         self.settle_unsaved(window, cx, |this, _, cx| {
@@ -2051,6 +2051,7 @@ impl Render for Workspace {
         let m = self.model.read(cx);
         let free = m.dialog.is_none();
         let has_repo = m.repo.is_some();
+        let project_open = m.project_open();
         let idle = m.job.is_none();
         let entries = m.selected_entries();
         let in_tree = m.commit_view.is_none();
@@ -2365,7 +2366,7 @@ impl Render for Workspace {
         let root = act!(root, Discard, free && discard, Action::AskDiscard);
         let root = act!(root, Trash, free && trash, Action::AskDeleteFiles);
         let root = act!(root, Github, has_github, |_| Action::OpenGithub);
-        let root = root.when(free && has_repo, |d| {
+        let root = root.when(free && project_open, |d| {
             d.on_action(cx.listener(|this, _: &Reveal, _, cx| {
                 if let Some(root) = this.model.read(cx).project_root() {
                     this.send(Action::Reveal(root), cx);

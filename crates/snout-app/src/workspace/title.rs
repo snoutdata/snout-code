@@ -139,7 +139,7 @@ impl Workspace {
         let m = self.model.read(cx);
         // The project's own: its name and its repository's branch, whichever repository
         // the Git panel shows.
-        let name = m.project_repo().and(m.project_root()).map(|r| Model::dir_name(&r));
+        let name = m.project_root().filter(|_| m.project_open()).map(|r| Model::dir_name(&r));
         let branch = m.project_repo().map(|_| m.project_head_label());
         let recent = m.recent_projects();
         let model = self.model.clone();

@@ -1482,3 +1482,143 @@ fn the_new_project_dialog_makes_java_and_spring_boot_projects_and_opens_them(cx:
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(place);
 }
+
+/// A folder with no repository: it opens as the project all the same.
+fn plain_folder(name: &str) -> PathBuf {
+    let dir = scratch_dir(name);
+    std::fs::write(dir.join("notes.txt"), "plain\n").unwrap();
+    dir
+}
+
+fn wait_for_open(model: &Entity<Model>, cx: &mut VisualTestContext) {
+    cx.executor().allow_parking();
+    let start = std::time::Instant::now();
+    while !cx.update(|_, cx| model.read(cx).project_open()) {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "the project opens");
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn any_folder_opens_as_a_project_and_git_is_only_what_it_may_also_have(cx: &mut TestAppContext) {
+    let dir = plain_folder("plain-project");
+    let (model, ws, cx) = open(cx, Settings::default());
+    act(&model, cx, Action::OpenPath(dir.clone()));
+    wait_for_open(&model, cx);
+    let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(m.dialog.is_none(), "nothing asks: it is a project");
+        assert_eq!(m.project_root().as_deref(), Some(dir.as_path()));
+        assert_eq!(m.settings.current.as_deref(), Some(dir.as_path()));
+        assert_eq!(m.title(), format!("{name} · SnoutCode"));
+        assert_eq!(m.no_git, Some(crate::model::NoGit { trouble: None }));
+        assert!(m.repo.is_none() && m.project_repo().is_none(), "nothing can run Git on it");
+        assert!(m.recent_projects().contains(&dir), "it is a recent project");
+        assert!(m.settings.repos.is_empty(), "and not a repository in the list");
+    });
+    assert!(cx.debug_bounds("title-project").is_some());
+    assert!(cx.debug_bounds("title-branch").is_none(), "no branch to show");
+
+    // The Git view says so, and starts a repository in the project.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("git-no-repository").is_some());
+    assert!(cx.debug_bounds("git-trouble").is_none(), "Git had no trouble: there is no repository");
+    assert!(cx.debug_bounds("git-no-repo-init").is_some() && cx.debug_bounds("git-no-repo-find").is_some());
+    assert!(cx.debug_bounds("git-no-repo-retry").is_none());
+    act(&model, cx, Action::InitRepo(dir.clone()));
+    let start = std::time::Instant::now();
+    while !cx.update(|_, cx| model.read(cx).project_repo().is_some()) {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "the repository opens");
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.no_git, None);
+        assert_eq!(m.project_root().as_deref(), Some(dir.as_path()), "the same project");
+        assert_eq!(m.settings.repos, std::slice::from_ref(&dir));
+    });
+    assert!(cx.debug_bounds("git-no-repository").is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn git_refusing_a_folder_does_not_stop_it_opening_and_its_words_show(cx: &mut TestAppContext) {
+    let dir = plain_folder("plain-refused");
+    // Git takes this for a repository, and cannot read it.
+    std::fs::write(dir.join(".git"), "not a gitdir line\n").unwrap();
+    let (model, ws, cx) = open(cx, Settings::default());
+    act(&model, cx, Action::OpenPath(dir.clone()));
+    wait_for_open(&model, cx);
+    let trouble = cx.update(|_, cx| model.read(cx).no_git.clone().and_then(|n| n.trouble)).expect("Git's words");
+    assert!(trouble.contains("gitfile"), "{trouble}");
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("git-trouble").is_some(), "the Git view shows them");
+    assert!(cx.debug_bounds("git-no-repo-init").is_none(), "and offers no `git init` over what may be a repository");
+    assert!(cx.debug_bounds("git-no-repo-retry").is_some());
+    // Once what Git refused is put right, Try Again finds the repository.
+    std::fs::remove_file(dir.join(".git")).unwrap();
+    git(&dir, &["init", "-q", "-b", "main"]);
+    act(&model, cx, Action::OpenRepo(dir.clone()));
+    let start = std::time::Instant::now();
+    while !cx.update(|_, cx| model.read(cx).project_repo().is_some()) {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "the repository opens");
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    cx.update(|_, cx| assert_eq!(model.read(cx).no_git, None));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn a_plain_folder_comes_back_after_a_restart_and_closes_like_any_project(cx: &mut TestAppContext) {
+    let dir = plain_folder("plain-restart");
+    let settings = Settings { current: Some(dir.clone()), ..Settings::default() };
+    let (model, ws, cx) = open(cx, settings);
+    wait_for_open(&model, cx);
+    cx.update(|_, cx| assert_eq!(model.read(cx).project_root().as_deref(), Some(dir.as_path())));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.close_project(w, cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(!m.project_open() && m.project.is_none() && m.settings.current.is_none());
+        assert_eq!(m.title(), "SnoutCode");
+        assert!(m.recent_projects().contains(&dir), "it stays among the recent projects");
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn a_file_outside_any_repository_opens_with_its_folder_as_the_project(cx: &mut TestAppContext) {
+    let dir = plain_folder("plain-file");
+    let (model, _ws, cx) = open(cx, Settings::default());
+    act(&model, cx, Action::OpenPath(dir.join("notes.txt")));
+    wait_for_open(&model, cx);
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.project_root().as_deref(), Some(dir.as_path()));
+        assert!(m.dialog.is_none());
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn a_folder_that_is_gone_still_says_so(cx: &mut TestAppContext) {
+    let dir = scratch_dir("plain-gone").join("not-there");
+    let (model, _ws, cx) = open(cx, Settings::default());
+    act(&model, cx, Action::OpenPath(dir.clone()));
+    cx.executor().allow_parking();
+    let start = std::time::Instant::now();
+    while !cx.update(|_, cx| model.read(cx).message.contains("does not exist")) {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "it says so");
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    cx.update(|_, cx| assert!(!model.read(cx).project_open()));
+}

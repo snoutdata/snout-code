@@ -116,7 +116,6 @@ pub enum Dialog {
         problem: PullProblem,
         details: String,
     },
-    InitRepo(PathBuf),
     GroupName {
         rename: Option<String>,
         repo: Option<PathBuf>,
@@ -358,26 +357,44 @@ impl Snapshot {
     }
 }
 
-/// A project opened off the UI thread: its folder, its repository and what that shows.
+/// A project opened off the UI thread: its folder, and its repository if it has one.
 struct Opened {
     /// The folder as it was asked for.
     asked: PathBuf,
     /// The folder as opened, in the form Git gives the root (symbolic links resolved).
     project: PathBuf,
+    git: Result<OpenedRepo, snout_core::NoRepo>,
+}
+
+/// The repository of a project opened, and what it shows.
+struct OpenedRepo {
     repo: Repo,
     github_url: Option<String>,
     snapshot: Snapshot,
 }
 
 impl Opened {
-    /// Open the folder `path` on `host` as a project, with the repository at or above it.
+    /// Open the folder `path` on `host` as a project, with the repository at or above it if
+    /// there is one. A project is a folder: Git is only what it may also have.
     fn load(host: &snout_core::HostRef, path: &Path) -> snout_core::Result<Self> {
-        let repo = Repo::open(host, path)?;
+        if !host.is_dir(path) {
+            return Err(snout_core::Error::Invalid(format!("{} does not exist", path.display())));
+        }
         let project = host.canonicalize(path).unwrap_or_else(|_| path.to_owned());
-        let github_url = repo.github_url();
-        let snapshot = Snapshot::read(&repo);
-        Ok(Self { asked: path.to_owned(), project, repo, github_url, snapshot })
+        let git = Repo::find(host, path).map(|repo| {
+            let github_url = repo.github_url();
+            let snapshot = Snapshot::read(&repo);
+            OpenedRepo { repo, github_url, snapshot }
+        });
+        Ok(Self { asked: path.to_owned(), project, git })
     }
+}
+
+/// The open project has no repository.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoGit {
+    /// Git could not say, in its own words; none when it simply is not a repository.
+    pub trouble: Option<String>,
 }
 
 /// What a Git job hands back to the model, on the UI thread.
@@ -468,6 +485,8 @@ pub struct Model {
     /// The folder opened as the project, as it was opened: the repository's root or any
     /// folder inside it. Git works on the repository found at or above it.
     pub project: Option<PathBuf>,
+    /// The project that is open has no repository: the Git view says why, and offers one.
+    pub no_git: Option<NoGit>,
     pub status: Status,
     pub branches: Vec<Branch>,
     pub tags: Vec<Tag>,
@@ -592,6 +611,7 @@ impl Model {
             dialog_on_project: false,
             job_on_project: false,
             project: None,
+            no_git: None,
             status: Status::default(),
             branches: Vec::new(),
             tags: Vec::new(),
@@ -652,6 +672,12 @@ impl Model {
     /// The open project's folder: the folder opened, else the repository's root.
     pub fn project_root(&self) -> Option<PathBuf> {
         self.project.clone().or_else(|| self.repo.as_ref().map(|r| r.root().to_owned()))
+    }
+
+    /// A project is open, with a repository or without one. (While a project remembered from
+    /// last time is still being read, [`Model::project`] is set and this is not yet.)
+    pub fn project_open(&self) -> bool {
+        self.project_repo.is_some() || self.no_git.is_some()
     }
 
     /// The root of the repository the Git panel shows.
@@ -769,6 +795,7 @@ impl Model {
             (Some(_), Some(project)) => {
                 format!("{} ({}) · SnoutCode", dir_name(&project), self.project_head_label())
             }
+            (None, Some(project)) if self.no_git.is_some() => format!("{} · SnoutCode", dir_name(&project)),
             _ => "SnoutCode".into(),
         }
     }
@@ -924,7 +951,7 @@ impl Model {
             let opened = load.await;
             let _ = this.update(cx, |m, cx| {
                 match opened {
-                    Ok(o) if m.confirm_switch && m.repo.is_some() && m.project.as_ref() != Some(&o.project) => {
+                    Ok(o) if m.confirm_switch && m.project_open() && m.project.as_ref() != Some(&o.project) => {
                         let asked = o.asked.clone();
                         m.pending_open = Some(o);
                         cx.emit(ModelEvent::Switch(asked));
@@ -935,7 +962,7 @@ impl Model {
                     }
                     Err(e) => {
                         // A project remembered from last time that is gone: none is open.
-                        if m.repo.is_none() {
+                        if !m.project_open() {
                             m.project = None;
                         }
                         m.pending_file = None;
@@ -950,14 +977,28 @@ impl Model {
 
     /// Make `o` the open project.
     fn apply_opened(&mut self, o: Opened, cx: &mut Context<Self>) {
-        let root = o.repo.root().to_owned();
-        self.remember(&root, &o.project);
+        let root = o.git.as_ref().ok().map(|g| g.repo.root().to_owned());
+        self.remember(root.as_deref(), &o.project);
         self.settings.current = Some(o.project.clone());
         self.project = Some(o.project);
-        self.project_repo = Some(o.repo.clone());
         self.project_side = None;
         self.git_jobs.clear();
-        self.show_opened(o.repo, o.github_url, o.snapshot, cx);
+        match o.git {
+            Ok(g) => {
+                self.no_git = None;
+                self.project_repo = Some(g.repo.clone());
+                self.show_opened(g.repo, g.github_url, g.snapshot, cx);
+            }
+            Err(why) => {
+                let trouble = match why {
+                    snout_core::NoRepo::NotOne => None,
+                    snout_core::NoRepo::GitFailed(said) => Some(said),
+                };
+                self.no_git = Some(NoGit { trouble });
+                self.project_repo = None;
+                self.show_no_repo(cx);
+            }
+        }
         self.message = format!("Opened {}", o.asked.display());
         cx.emit(ModelEvent::Message);
         // Whatever follows the project (its engine, runs, models) sees the change now.
@@ -978,6 +1019,21 @@ impl Model {
         self.amend = false;
         self.draft = None;
         self.apply_snapshot(snapshot, cx);
+    }
+
+    /// The Git panel with nothing in it: the project has no repository.
+    fn show_no_repo(&mut self, cx: &mut Context<Self>) {
+        self.github_url = None;
+        self.repo = None;
+        self.refresh_queued = false;
+        self.selected.clear();
+        self.anchor = None;
+        self.dir_filter = None;
+        self.journal_filter.clear();
+        self.commit_msg.clear();
+        self.amend = false;
+        self.draft = None;
+        self.refresh_this(cx);
     }
 
     /// Show the repository at `path` in the Git panel, off the UI thread; the project stays.
@@ -1104,25 +1160,24 @@ impl Model {
             async move {
                 let is_file = host.is_file(&path);
                 let dir = if is_file { path.parent().unwrap_or(&path).to_owned() } else { path.clone() };
-                let root = Repo::open(&host, &dir).ok().map(|r| r.root().to_owned());
-                let is_dir = root.is_some() || host.is_dir(&dir);
-                (is_file, dir, root, is_dir)
+                // A file's project is its repository, else its folder.
+                let root = if is_file { Repo::open(&host, &dir).ok().map(|r| r.root().to_owned()) } else { None };
+                let is_dir = host.is_dir(&dir);
+                (is_file, root.unwrap_or_else(|| dir.clone()), dir, is_dir)
             }
         });
         cx.spawn(async move |this, cx| {
-            let (is_file, dir, root, is_dir) = look.await;
+            let (is_file, project, dir, is_dir) = look.await;
             let _ = this.update(cx, |m, cx| {
-                match root {
-                    Some(root) => {
-                        // A folder is the project as it is; a file opens in its repository
-                        // (once the window is there, or once the switch to its project is done).
-                        if is_file {
-                            m.pending_file = Some((path, at));
-                        }
-                        m.open_repo(if is_file { &root } else { &dir }, cx);
+                if is_dir {
+                    // A folder is the project as it is, Git or no Git. A file opens once the
+                    // window is there, or once the switch to its project is done.
+                    if is_file {
+                        m.pending_file = Some((path, at));
                     }
-                    None if is_dir => m.ask(Dialog::InitRepo(dir), cx),
-                    None => m.fail(format!("{} does not exist", dir.display()), cx),
+                    m.open_repo(&project, cx);
+                } else {
+                    m.fail(format!("{} does not exist", dir.display()), cx);
                 }
                 cx.notify();
             });
@@ -1130,10 +1185,12 @@ impl Model {
         .detach();
     }
 
-    /// Keep the repository at `root` in the list, and `project` (the folder opened) first
-    /// among the recent projects.
-    fn remember(&mut self, root: &Path, project: &Path) {
-        if !self.settings.repos.iter().any(|p| p == root) {
+    /// Keep the repository at `root`, if there is one, in the list, and `project` (the folder
+    /// opened) first among the recent projects.
+    fn remember(&mut self, root: Option<&Path>, project: &Path) {
+        if let Some(root) = root
+            && !self.settings.repos.iter().any(|p| p == root)
+        {
             self.settings.repos.push(root.to_owned());
         }
         let mut recent = self.recent_projects();
@@ -1157,7 +1214,14 @@ impl Model {
 
     /// Close the open project.
     fn close_repo(&mut self, cx: &mut Context<Self>) {
-        let Some(repo) = self.project_repo.take() else { return };
+        let closed = match self.project_repo.take() {
+            Some(repo) => repo.root().to_owned(),
+            None => match (self.no_git.is_some(), self.project.clone()) {
+                (true, Some(project)) => project,
+                _ => return,
+            },
+        };
+        self.no_git = None;
         self.repo = None;
         self.project_side = None;
         self.project = None;
@@ -1171,7 +1235,7 @@ impl Model {
         self.git_jobs.clear();
         self.refresh_queued = false;
         self.refresh(cx);
-        self.message = format!("Closed {}", repo.root().display());
+        self.message = format!("Closed {}", closed.display());
         cx.emit(ModelEvent::Closed);
         cx.notify();
     }
@@ -1666,10 +1730,11 @@ impl Model {
         }
         let before = self.settings.repos.len();
         for r in &repos {
-            self.remember(r, r);
+            self.remember(Some(r), r);
         }
         let added = self.settings.repos.len() - before;
-        if self.repo.is_none() {
+        // A folder open without a repository stays the project: what was found is in the recents.
+        if self.repo.is_none() && !self.project_open() {
             self.open_repo(&repos[0], cx);
         }
         self.done(format!("Found {} repositories in {} ({added} new)", repos.len(), root.display()));

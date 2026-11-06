@@ -24,12 +24,19 @@ Any of these opens a folder:
 - **Open Project…** in the project menu, at the left of the title bar
 - drag a folder from Finder onto the window ("Drop a folder to open it")
 
-A folder outside any Git repository opens the "Not a Git repository" dialog:
+Any folder opens as a project, whether it is a Git repository or not. Without one, everything but
+Git works as usual: the files, the editor, the language support, builds, runs and terminals. The
+Git view then says so, and offers two things:
 
-- **Find repositories inside** looks through its subfolders, 4 levels deep, and adds every
+- **Initialize a Repository Here** runs `git init` in the folder, and the Git view fills in.
+- **Find Repositories Inside** looks through its subfolders, 4 levels deep, and adds every
   repository it finds to your recent projects. File ▸ Find Repositories in Folder… does the
   same for a folder you choose.
-- **Initialize a repository here** runs `git init` in the folder and opens it.
+
+If Git could not read the folder rather than finding no repository there, the Git view shows what
+Git said, and **Try Again** once you have put it right. A repository owned by another user is the
+usual case, such as one in WSL opened from Windows: Git refuses it until you add it with
+`git config --global --add safe.directory`.
 
 When you open another project while one is open and a tab has unsaved changes, SnoutCode asks
 first: **Save**, **Don't Save** or **Cancel**.
