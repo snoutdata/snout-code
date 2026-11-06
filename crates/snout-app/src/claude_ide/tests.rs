@@ -1394,7 +1394,7 @@ fn an_agent_in_a_sandbox_drafts_through_the_session_folder(cx: &mut TestAppConte
     let bin = crate::tests::scratch_dir("draft-sandbox-bin");
     let fake = fake_agent(
         &bin,
-        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  api=${api#\'}\n  api=${api%\'}\n  export SNOUT_HOOK_PORT=1\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
+        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  api=${api#\\'}\n  api=${api%\\'}\n  export SNOUT_HOOK_PORT=1\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
     );
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
@@ -1427,7 +1427,7 @@ fn draft_asks_the_agent_in_the_console_and_takes_its_message(cx: &mut TestAppCon
     let bin = crate::tests::scratch_dir("draft-bin");
     let fake = fake_agent(
         &bin,
-        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  api=${api#\'}\n  api=${api%\'}\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
+        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  api=${api#\\'}\n  api=${api%\\'}\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
     );
     cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
     cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
