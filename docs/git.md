@@ -122,6 +122,8 @@ Click **Draft** (or **Git ▸ Draft Commit Message**) to have the agent in the c
 
 You do not need the console open first. If it is closed, it opens as the agent's toolbar button opens it, and if the agent is not running, it starts. An agent busy on something else finishes that first, and one asking you a question gets your answer first. If the agent is not installed, the console offers to install it; click **Draft** again once it has. See [Coding agents](agents.md).
 
+Picking another agent or starting a new session while a Draft is writing ends that Draft, and the Commit pane says so. Click **Draft** again to ask the new agent.
+
 ## Check Out
 
 Press ⇧⌘O (outside an editor), click **Check Out…** on the toolbar, or use **Git ▸ Check Out…**.

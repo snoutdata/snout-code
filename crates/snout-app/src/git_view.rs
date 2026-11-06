@@ -229,7 +229,7 @@ fn file_columns(state_w: f32) -> Vec<Column> {
     vec![
         Column::new("Name", Some(260.)).min(80.),
         Column::new("State", Some(state_w)).min(92.),
-        Column::new("Relative Directory", None).min(60.).drop_below(370.),
+        Column::new("Relative Directory", None).min(60.).drop_below(430.),
     ]
 }
 const DIFF_ROW: f32 = 17.;
@@ -319,7 +319,7 @@ impl GitView {
                     Column::new("", Some(14.)),
                     Column::new("Message", None).min(300.),
                     Column::new("Author", Some(160.)).min(70.).drop_below(500.),
-                    Column::new("Date", Some(130.)).min(110.),
+                    Column::new("Date", Some(130.)).min(124.),
                     Column::new("SHA", Some(80.)).min(60.).drop_below(440.),
                 ],
                 cx,
@@ -896,10 +896,10 @@ impl GitView {
                         ];
                         let state = RowState::new(is_selected, focused).lead(lead.as_deref() == Some(f.path.as_str()));
                         let full_path = f.path.clone();
+                        // A long name is cut short: the tooltip tells such files apart.
+                        let cut_short = no_directory || f.file_name().chars().count() > 30;
                         table_row(("file", i), state, &widths, cells, &p)
-                            .when(no_directory, |r| {
-                                r.tooltip(move |w, cx| Tooltip::new(full_path.clone()).build(w, cx))
-                            })
+                            .when(cut_short, |r| r.tooltip(move |w, cx| Tooltip::new(full_path.clone()).build(w, cx)))
                             .on_click({
                                 let model = model.clone();
                                 move |e: &ClickEvent, _, cx| {
@@ -1321,25 +1321,56 @@ impl GitView {
                         },
                     )
                     .size_full();
-                    let cells = vec![
-                        lanes.into_any_element(),
-                        div()
-                            .flex()
-                            .items_center()
-                            .min_w_0()
-                            .gap(px(8.))
-                            .children(c.refs.iter().map(|r| look::ref_badge(r, &p)))
-                            .child(div().min_w_0().truncate().child(c.summary.clone()))
-                            .into_any_element(),
-                        crate::components::dim(c.author.clone(), &p).into_any_element(),
-                        crate::components::dim(c.date.clone(), &p).into_any_element(),
-                        div()
-                            .font_family(MONO)
-                            .text_size(px(MONO_SIZE - 1.))
-                            .text_color(p.fg_dim)
-                            .child(c.short_id.clone())
-                            .into_any_element(),
-                    ];
+                    let cells =
+                        vec![
+                            lanes.into_any_element(),
+                            div()
+                                .flex()
+                                .items_center()
+                                .min_w_0()
+                                .w_full()
+                                .gap(px(8.))
+                                // A long branch must not push the message out: two refs at most,
+                                // each cut short, and the message keeps some of the row.
+                                .when(!c.refs.is_empty(), |d| {
+                                    d.child(
+                                        div()
+                                            .flex()
+                                            .flex_shrink(1.)
+                                            .min_w_0()
+                                            .items_center()
+                                            .gap(px(4.))
+                                            .overflow_hidden()
+                                            .children(c.refs.iter().take(2).map(|r| {
+                                                look::ref_badge(r, &p).flex_shrink(1.).min_w_0().max_w(px(150.))
+                                            }))
+                                            .when(c.refs.len() > 2, |d| {
+                                                d.child(
+                                                    div()
+                                                        .flex_none()
+                                                        .text_color(p.fg_dim)
+                                                        .child(format!("+{}", c.refs.len() - 2)),
+                                                )
+                                            }),
+                                    )
+                                })
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(if c.refs.is_empty() { 0. } else { 90. }))
+                                        .truncate()
+                                        .child(c.summary.clone()),
+                                )
+                                .into_any_element(),
+                            crate::components::dim(c.author.clone(), &p).into_any_element(),
+                            crate::components::dim(c.date.clone(), &p).into_any_element(),
+                            div()
+                                .font_family(MONO)
+                                .text_size(px(MONO_SIZE - 1.))
+                                .text_color(p.fg_dim)
+                                .child(c.short_id.clone())
+                                .into_any_element(),
+                        ];
                     table_row(("commit", k), RowState::new(selected, focused), &columns, cells, &p)
                         .on_click({
                             let (model, id) = (model.clone(), id.clone());
@@ -1452,10 +1483,9 @@ impl GitView {
                             path_text(("cfile-dir", i), dir, p.fg_dim).into_any_element(),
                         ];
                         let full_path = f.path.clone();
+                        let cut_short = no_directory || f.file_name().chars().count() > 30;
                         table_row(("cfile", i), RowState::new(is_sel, focused), &widths, cells, &p)
-                            .when(no_directory, |r| {
-                                r.tooltip(move |w, cx| Tooltip::new(full_path.clone()).build(w, cx))
-                            })
+                            .when(cut_short, |r| r.tooltip(move |w, cx| Tooltip::new(full_path.clone()).build(w, cx)))
                             .on_click({
                                 let (model, path) = (model.clone(), path.clone());
                                 move |_, _, cx| model.update(cx, |m, cx| m.select_commit_file(path.clone(), cx))
@@ -1611,9 +1641,18 @@ impl GitView {
                                     .flex()
                                     .items_center()
                                     .gap(px(8.))
-                                    .child(div().font_family(MONO).text_size(px(look::SMALL)).child(d.id.clone()))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .font_family(MONO)
+                                            .text_size(px(look::SMALL))
+                                            .child(d.id.clone()),
+                                    )
                                     .child(
                                         look::small_button("copy-sha", crate::components::IconName::Copy, "Copy", &p)
+                                            .flex_none()
                                             .on_click(self.on_click(Action::Copy(d.id.clone()))),
                                     )
                                     .into_any_element(),

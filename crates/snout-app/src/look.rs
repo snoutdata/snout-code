@@ -342,6 +342,7 @@ pub fn ref_badge(r: &str, p: &Palette) -> Div {
     };
     div()
         .flex_none()
+        .max_w(gpui::relative(1.))
         .px(px(6.))
         .h(px(18.))
         .flex()
@@ -353,7 +354,7 @@ pub fn ref_badge(r: &str, p: &Palette) -> Div {
         .text_color(color)
         .text_size(px(SMALL))
         .whitespace_nowrap()
-        .child(text.to_owned())
+        .child(div().min_w_0().truncate().child(text.to_owned()))
 }
 
 /// A centred drawing above a short message: how an empty pane says what goes there. With

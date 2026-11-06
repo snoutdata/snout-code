@@ -99,7 +99,14 @@ fn agent_up(s: &Session) -> bool {
 /// the user something first. Return must not answer "Do you trust this folder?" for them.
 fn agent_idle(s: &Session) -> bool {
     let quiet = s.pty.last_output().is_some_and(|t| t.elapsed() >= IDLE_QUIET);
-    quiet && s.turn.is_none() && !asks_the_user(&s.pty.contents())
+    settled(quiet, s.started.elapsed()) && s.turn.is_none() && !asks_the_user(&s.pty.contents())
+}
+
+/// Whether a session up for `age` has done with starting. Going quiet says so, but some agents
+/// never do: Amp animates its welcome screen for as long as it waits. A turn at work still
+/// counts as a turn (see `agent_idle`), so an agent past this is not taken for idle while busy.
+fn settled(quiet: bool, age: Duration) -> bool {
+    quiet || age >= STARTED_AFTER
 }
 
 /// The screen `text` shows the agent asking the user something: a menu of answers (a tool to
@@ -162,6 +169,8 @@ struct Session {
     agent: Option<crate::agents::Agent>,
     /// The agent's turn: since the Return that began it, while it works.
     turn: Option<Instant>,
+    /// When the session began.
+    started: Instant,
     /// The agent whose installer this session runs, if it runs one.
     install: Option<&'static str>,
 }
@@ -276,6 +285,8 @@ const STACKED_W: f32 = 700.;
 const SEND_WAIT: Duration = Duration::from_secs(300);
 /// ...how long the agent must have been quiet to count as idle...
 const IDLE_QUIET: Duration = Duration::from_millis(800);
+/// ...or how long it must have been up, for an agent that animates while it waits.
+const STARTED_AFTER: Duration = Duration::from_secs(8);
 /// ...and how long after the text Return follows.
 const AFTER_PASTE: Duration = Duration::from_millis(300);
 
@@ -528,10 +539,23 @@ impl ConsolePanel {
         if let Some(text) = note {
             self.show_note(text, cx);
         }
+        self.drop_draft_of_session(&root, cx);
         if let Some(mut s) = self.sessions.remove(&root) {
             s.pty.kill();
         }
         self.start(&root, &[], window, cx);
+    }
+
+    /// A live session is about to be replaced (another agent picked, a new session): the
+    /// agent a draft asked is going, so nobody would answer. Say so now, not after the wait.
+    fn drop_draft_of_session(&self, root: &Path, cx: &mut Context<Self>) {
+        let alive = self.sessions.get(root).is_some_and(|s| s.pty.is_running());
+        let waits = self.model.read(cx).draft.as_ref().is_some_and(|d| d.root == root);
+        if alive && waits {
+            let name = self.agent(cx).name;
+            let why = format!("Draft stopped: the console started a new session. Click Draft to ask {name}.");
+            self.model.update(cx, |m, cx| m.draft_gone(why, cx));
+        }
     }
 
     /// Run the installer of the agent `id` in the console, in the user's shell: its output
@@ -583,6 +607,7 @@ impl ConsolePanel {
                             refreshed: Instant::now(),
                             agent: None,
                             turn: None,
+                            started: Instant::now(),
                             install: Some(id),
                         };
                         this.sessions.insert(root.clone(), session);
@@ -804,6 +829,7 @@ impl ConsolePanel {
     /// the UI thread, the session shows once it runs.
     pub fn start(&mut self, root: &Path, args: &[String], window: &mut Window, cx: &mut Context<Self>) {
         let focus = std::mem::replace(&mut self.focus_next, true);
+        self.drop_draft_of_session(root, cx);
         self.sessions.remove(root);
         self.ended.remove(root);
         self.note_engine(root, cx);
@@ -952,6 +978,7 @@ impl ConsolePanel {
                             refreshed: Instant::now(),
                             agent: session_agent,
                             turn: None,
+                            started: Instant::now(),
                             install: None,
                         };
                         this.sessions.insert(root.clone(), session);
@@ -989,6 +1016,16 @@ impl ConsolePanel {
 
     pub fn session_text(&self, root: &Path) -> Option<String> {
         self.sessions.get(root).map(|s| s.pty.contents())
+    }
+
+    /// How long `root`'s session has printed nothing.
+    pub fn quiet_for(&self, root: &Path) -> Option<Duration> {
+        self.sessions.get(root)?.pty.last_output().map(|t| t.elapsed())
+    }
+
+    /// Whether `root`'s session runs an agent's installer.
+    pub fn installing(&self, root: &Path) -> bool {
+        self.sessions.get(root).is_some_and(|s| s.install.is_some())
     }
 
     /// Send `bytes` to the session of `root`, as keys typed.
@@ -2057,16 +2094,23 @@ impl ConsolePanel {
             .key_context("Terminal")
             .when_some(exit, |d, how| {
                 d.child(
-                    div().flex().gap(px(6.)).px(px(8.)).text_color(p.fg_dim).child(format!("{ended} {how}.")).child(
-                        Button::new("again")
-                            .link()
-                            .icon(crate::components::menu_icon(crate::components::IconName::Play))
-                            .label(again)
-                            .on_click(cx.listener(move |this, _, window, cx| match install {
-                                Some(id) => this.install(&start, id, window, cx),
-                                None => this.start(&start, &[], window, cx),
-                            })),
-                    ),
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .px(px(8.))
+                        .text_color(p.fg_dim)
+                        .child(format!("{ended} {how}."))
+                        .child(
+                            Button::new("again")
+                                .link()
+                                .icon(crate::components::menu_icon(crate::components::IconName::Play))
+                                .label(again)
+                                .on_click(cx.listener(move |this, _, window, cx| match install {
+                                    Some(id) => this.install(&start, id, window, cx),
+                                    None => this.start(&start, &[], window, cx),
+                                })),
+                        ),
                 )
             })
             .on_key_down(cx.listener(move |this, e: &KeyDownEvent, w, cx| this.on_key(e, &r1, w, cx)))
@@ -2482,6 +2526,13 @@ fn default_shell_name(info: &snout_host::HostInfo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_agent_that_never_goes_quiet_still_counts_as_started() {
+        assert!(!super::settled(false, Duration::from_secs(1)), "still starting");
+        assert!(super::settled(true, Duration::from_secs(1)), "quiet says so");
+        assert!(super::settled(false, super::STARTED_AFTER), "Amp's welcome screen animates");
+    }
 
     #[test]
     fn a_menu_or_a_question_of_trust_on_the_screen_keeps_a_prompt_back() {

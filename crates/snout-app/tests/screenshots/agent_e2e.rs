@@ -14,6 +14,12 @@
 //! SNOUT_SCREENSHOT=<where the frames go>
 //! cargo test -p snout-app --test screenshots
 //! ```
+//!
+//! `SNOUT_E2E_INSTALL=<codex, opencode or amp>` instead runs that agent's real installer from
+//! the console, as its Install button does, on this machine, and shoots what follows.
+//! `SNOUT_E2E_AGENT=<id>` runs Draft (`SNOUT_E2E_DRAFT=1`) with that agent. `SNOUT_E2E_SWAP=1`
+//! swaps between the real agents, fast and mid-Draft, and reports what it finds.
+//! `SNOUT_E2E_LOOK=1` shoots the Git view of the project, without starting an agent.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,12 +36,28 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
         Arc::new(gpui_kit_assets::AllAssets),
         gpui_platform::current_headless_renderer,
     );
+    let install = std::env::var("SNOUT_E2E_INSTALL").ok();
+    let picked = install.clone().or_else(|| std::env::var("SNOUT_E2E_AGENT").ok());
+    let console_agent = snout_app::agents::ConsoleAgent::ALL
+        .into_iter()
+        .find(|a| picked.as_deref() == Some(a.id()))
+        .unwrap_or_default();
+    let look = std::env::var_os("SNOUT_E2E_LOOK").is_some();
+    let window_size = std::env::var("SNOUT_SHOT_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some(size(px(w.parse().ok()?), px(h.parse().ok()?)))
+        })
+        .unwrap_or(size(px(1400.), px(900.)));
     let settings = Settings {
+        console_agent,
         theme: ThemeChoice::Light,
         repos: vec![project.clone()],
         current: Some(project.clone()),
         // Draft opens the console itself.
-        console_open: std::env::var_os("SNOUT_E2E_DRAFT").is_none(),
+        console_open: std::env::var_os("SNOUT_E2E_DRAFT").is_none() && !look,
+        activity: look.then_some(snout_app::panels::Activity::Git),
         follow_claude: true,
         claude_path: Some(claude.clone()),
         ..Settings::default()
@@ -50,7 +72,7 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
     });
     let mut ws = None;
     let handle = cx
-        .open_window(size(px(1400.), px(900.)), |window, cx| {
+        .open_window(window_size, |window, cx| {
             let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
             ws = Some(view.clone());
             cx.new(|cx| gpui_component::Root::new(view, window, cx))
@@ -98,6 +120,220 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
             }
         };
 
+    // An agent's real installer, from the console's offer to what the agent asks first.
+    if install.is_some() {
+        let id = console_agent.id();
+        let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+        pump(&mut cx, 4_000);
+        shoot(&mut cx, &format!("install-{id}-1-offer"));
+        cx.update_window(window, |_, window, cx| {
+            console.update(cx, |c, cx| c.install(&project, id, window, cx));
+        })
+        .unwrap();
+        wait(&mut cx, "the installer to start", 30, &mut |cx| cx.update(|cx| console.read(cx).installing(&project)));
+        let start = Instant::now();
+        let mut frame = 0;
+        while cx.update(|cx| console.read(cx).installing(&project)) {
+            assert!(start.elapsed() < Duration::from_secs(420), "e2e: the installer is still at work");
+            pump(&mut cx, 5_000);
+            frame += 1;
+            if frame == 2 {
+                shoot(&mut cx, &format!("install-{id}-2-working"));
+            }
+            if frame % 6 == 0 {
+                println!("e2e: installing, {:?}:\n{}", start.elapsed(), session(&mut cx));
+            }
+            let text = session(&mut cx);
+            if text.contains("ended") || text.contains("exited") {
+                println!("e2e: the installer says:\n{text}");
+            }
+        }
+        println!("e2e: the installer finished after {:?}", start.elapsed());
+        pump(&mut cx, 12_000);
+        shoot(&mut cx, &format!("install-{id}-3-after"));
+        println!("e2e: the console now:\n{}", session(&mut cx));
+        return;
+    }
+
+    // The project's Git view, as it looks: long names, many files.
+    if look {
+        use snout_app::model::Action;
+        pump(&mut cx, 3_000);
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+        wait(&mut cx, "the files", 30, &mut |cx| cx.update(|cx| !model.read(cx).status.files.is_empty()));
+        pump(&mut cx, 1_500);
+        let first = cx.update(|cx| model.read(cx).status.files[0].path.clone());
+        cx.update(|cx| model.update(cx, |m, cx| m.click_file(&first, false, false, cx)));
+        pump(&mut cx, 1_500);
+        let frame = Instant::now();
+        shoot(&mut cx, "look-git");
+        println!(
+            "e2e: a frame and its image took {:?}, {} files",
+            frame.elapsed(),
+            cx.update(|cx| model.read(cx).status.files.len())
+        );
+        let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+        cx.update(|cx| console.update(cx, |c, _| c.program = Some(PathBuf::from("/bin/cat"))));
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx)));
+        pump(&mut cx, 1_500);
+        shoot(&mut cx, "look-git-console");
+        let id = cx.update(|cx| model.read(cx).log.last().map(|c| c.id.clone())).unwrap();
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ShowCommit(id), cx)));
+        pump(&mut cx, 2_500);
+        shoot(&mut cx, "look-commit-console");
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::CloseCommit, cx)));
+        cx.update_window(window, |_, window, cx| {
+            ws.update(cx, |w, cx| w.set_activity(snout_app::panels::Activity::Project, window, cx));
+        })
+        .unwrap();
+        pump(&mut cx, 2_000);
+        shoot(&mut cx, "look-project");
+        return;
+    }
+
+    // Swapping between the real agents, fast and in the middle of a Draft. It goes through it
+    // all and then says what went wrong.
+    if std::env::var_os("SNOUT_E2E_SWAP").is_some() {
+        use snout_app::agents::ConsoleAgent;
+        use snout_app::model::Action;
+        let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+        let mut trouble: Vec<String> = Vec::new();
+        let agent_named = |id: &str| ConsoleAgent::ALL.into_iter().find(|a| a.id() == id).unwrap();
+        // The agents this window's consoles run, by what the system says.
+        let children = || {
+            let me = std::process::id().to_string();
+            let out = std::process::Command::new("pgrep").args(["-P", &me, "-l"]).output().unwrap();
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| l.split_whitespace().nth(1).map(str::to_owned))
+                // Claude's process goes by its version number.
+                .filter(|n| {
+                    n.starts_with(|c: char| c.is_ascii_digit())
+                        || ["claude", "codex", "node", "opencode", "amp"].iter().any(|a| n.contains(a))
+                })
+                .collect::<Vec<_>>()
+        };
+        let swap = |cx: &mut HeadlessAppContext, id: &str| {
+            let which = agent_named(id);
+            cx.update_window(window, |_, window, cx| {
+                console.update(cx, |c, cx| c.switch_agent(which, window, cx));
+            })
+            .unwrap();
+        };
+
+        pump(&mut cx, 3_000);
+        wait(&mut cx, "the first agent", 60, &mut |cx| !session(cx).trim().is_empty());
+
+        // 1. Fast: one pick after another, none waited for. The last one counts.
+        for id in ["codex", "amp", "opencode", "claude", "amp", "codex", "opencode"] {
+            swap(&mut cx, id);
+            pump(&mut cx, 150);
+        }
+        pump(&mut cx, 12_000);
+        shoot(&mut cx, "swap-1-fast");
+        let now = cx.update(|cx| console.read(cx).agent(cx).id);
+        let kids = children();
+        println!("e2e: after the fast swaps: {now}, running {kids:?}\n{}", session(&mut cx));
+        if now != "opencode" {
+            trouble.push(format!("fast swaps ended on {now}, not opencode"));
+        }
+        if kids.len() != 1 {
+            trouble.push(format!("fast swaps left {kids:?} running"));
+        }
+
+        // 2. Each in turn, given time to come up.
+        for id in ["claude", "codex", "amp", "opencode"] {
+            swap(&mut cx, id);
+            pump(&mut cx, 9_000);
+            shoot(&mut cx, &format!("swap-2-{id}"));
+            let (now, kids) = (cx.update(|cx| console.read(cx).agent(cx).id), children());
+            let text = session(&mut cx);
+            println!("e2e: {id}: {now}, running {kids:?}, {} characters on screen", text.len());
+            if now != id || kids.len() != 1 || text.trim().is_empty() {
+                trouble.push(format!("{id}: shows {now}, running {kids:?}, screen empty: {}", text.trim().is_empty()));
+            }
+        }
+
+        // 3. Draft with opencode, Stop at once: nothing in the box, and the prompt taken back.
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+        wait(&mut cx, "the change", 20, &mut |cx| cx.update(|cx| model.read(cx).can_draft()));
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::DraftMessage, cx)));
+        pump(&mut cx, 300);
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::CancelDraft, cx)));
+        pump(&mut cx, 25_000);
+        let (drafting, message) = cx.update(|cx| (model.read(cx).draft.is_some(), model.read(cx).commit_msg.clone()));
+        shoot(&mut cx, "swap-3-stop");
+        println!("e2e: stopped: drafting {drafting}, message {message:?}");
+        if drafting || !message.trim().is_empty() {
+            trouble.push(format!("after Stop: drafting {drafting}, message {message:?}"));
+        }
+
+        // 4. Draft, then swap to another agent while it waits: it ends or goes on, never hangs.
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::DraftMessage, cx)));
+        pump(&mut cx, 500);
+        swap(&mut cx, "amp");
+        let start = Instant::now();
+        while cx.update(|cx| model.read(cx).draft.is_some()) && start.elapsed() < Duration::from_secs(120) {
+            pump(&mut cx, 500);
+        }
+        shoot(&mut cx, "swap-4-mid-draft");
+        let (drafting, message, status) = cx.update(|cx| {
+            let m = model.read(cx);
+            (m.draft.is_some(), m.commit_msg.clone(), m.message.clone())
+        });
+        println!(
+            "e2e: swapped mid-Draft after {:?}: drafting {drafting}, message {message:?}, status {status:?}",
+            start.elapsed()
+        );
+        if drafting {
+            trouble.push("a Draft whose agent was swapped away still waits after 2 minutes".into());
+        }
+        cx.update(|cx| model.update(cx, |m, _| m.commit_msg.clear()));
+
+        // 5. Draft, then end the session: the Draft ends with it.
+        swap(&mut cx, "opencode");
+        pump(&mut cx, 6_000);
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::DraftMessage, cx)));
+        pump(&mut cx, 400);
+        cx.update(|cx| console.update(cx, |c, cx| c.end_session(&project, cx)));
+        pump(&mut cx, 3_000);
+        let (drafting, status) = cx.update(|cx| (model.read(cx).draft.is_some(), model.read(cx).message.clone()));
+        shoot(&mut cx, "swap-5-end-session");
+        println!("e2e: session ended mid-Draft: drafting {drafting}, status {status:?}");
+        if drafting {
+            trouble.push("a Draft outlived the session it was waiting on".into());
+        }
+
+        // 6. Draft, then open another project: the message must not land in that one's box.
+        if let Some(other) = std::env::var_os("SNOUT_E2E_OTHER").map(PathBuf::from) {
+            cx.update_window(window, |_, window, cx| {
+                console.update(cx, |c, cx| c.ensure_session(&project, window, cx));
+            })
+            .unwrap();
+            pump(&mut cx, 6_000);
+            cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::DraftMessage, cx)));
+            pump(&mut cx, 500);
+            cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenRepo(other.clone()), cx)));
+            let start = Instant::now();
+            while cx.update(|cx| model.read(cx).draft.is_some()) && start.elapsed() < Duration::from_secs(60) {
+                pump(&mut cx, 500);
+            }
+            pump(&mut cx, 25_000);
+            let (root, drafting, message) = cx.update(|cx| {
+                let m = model.read(cx);
+                (m.project_root(), m.draft.is_some(), m.commit_msg.clone())
+            });
+            shoot(&mut cx, "swap-6-other-project");
+            println!("e2e: other project {root:?}: drafting {drafting}, message {message:?}");
+            if drafting || !message.trim().is_empty() {
+                trouble.push(format!("after changing project: drafting {drafting}, message {message:?}"));
+            }
+        }
+
+        println!("e2e: trouble: {trouble:#?}");
+        return;
+    }
+
     // Draft, with the real agent: `SNOUT_E2E_DRAFT=1`, a project with something to commit, and
     // a folder Claude has not been told to trust, so its question comes first. Draft must wait
     // for the answer, then get the message through the editor's API. The console starts closed.
@@ -114,9 +350,12 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
         if snout_app::console::asks_the_user(&session(&mut cx)) {
             println!("e2e: it asks first, and the prompt has not gone");
             assert!(!cx.update(|cx| model.read(cx).draft.as_ref().is_some_and(|d| d.sent)));
-            // Answer as the user would: down to "Yes, I trust this folder", Return.
-            cx.update(|cx| console.read(cx).send_keys(&project, b"\x1b[B"));
-            pump(&mut cx, 500);
+            println!("e2e: it asks:\n{}", session(&mut cx));
+            // Answer as the user would. Claude's first answer is "No": down to "Yes", Return.
+            if console_agent.id() == "claude" {
+                cx.update(|cx| console.read(cx).send_keys(&project, b"\x1b[B"));
+                pump(&mut cx, 500);
+            }
             cx.update(|cx| console.read(cx).send_keys(&project, b"\r"));
             pump(&mut cx, 3_000);
         }
@@ -128,6 +367,18 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
                 panic!("e2e: no message after 180 s");
             }
             pump(&mut cx, 500);
+            let quiet = cx.update(|cx| console.read(cx).quiet_for(&project));
+            if start.elapsed().as_secs().is_multiple_of(10) {
+                println!("e2e: {:?} in, quiet for {quiet:?}", start.elapsed());
+            }
+            // `SNOUT_E2E_ANSWER=1`: say yes as the user would, and go on.
+            if std::env::var_os("SNOUT_E2E_ANSWER").is_some() && snout_app::console::asks_the_user(&session(&mut cx)) {
+                println!("e2e: answering yes after {:?}:\n{}", start.elapsed(), session(&mut cx));
+                shoot(&mut cx, &format!("e2e-draft-asks-{}", start.elapsed().as_secs()));
+                cx.update(|cx| console.read(cx).send_keys(&project, b"\r"));
+                pump(&mut cx, 2_000);
+                continue;
+            }
             // A permission question would be the user's to answer: say so, it is what we test.
             if snout_app::console::asks_the_user(&session(&mut cx)) {
                 println!("e2e: the agent asks:\n{}", session(&mut cx));

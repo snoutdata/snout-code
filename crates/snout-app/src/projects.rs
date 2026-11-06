@@ -314,7 +314,8 @@ impl ProjectsView {
         let mut tree = None;
         if current {
             let b = &m.status.branch;
-            let mut head = short(&m.head_label(), 20);
+            // Short: the row is the repository's, and the title bar names the branch in full.
+            let mut head = short(&m.head_label(), 10);
             if b.ahead > 0 {
                 head += &format!(" ↑{}", b.ahead);
             }
@@ -575,7 +576,7 @@ fn list_row(
         .child(
             div()
                 .flex_1()
-                .min_w_0()
+                .min_w(px(48.))
                 .ml(px(7.))
                 .mr(px(4.))
                 .overflow_hidden()

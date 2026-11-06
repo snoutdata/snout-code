@@ -1398,6 +1398,35 @@ fn draft_asks_the_agent_in_the_console_and_takes_its_message(cx: &mut TestAppCon
 
 /// Stop takes the prompt back while it waits, and the Draft button returns.
 #[gpui::test]
+fn picking_another_agent_ends_a_draft_that_waits_on_the_first(cx: &mut TestAppContext) {
+    let (_repo, _lock_dir, model, ws, _client, cx) = connected("draft-swap", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    hook_command(&ws, cx);
+    // An agent that stays up and never answers.
+    let fake = crate::tests::scratch_dir("draft-swap-bin").join("agent");
+    std::fs::write(&fake, "#!/bin/sh\necho ready\nsleep 60\n").unwrap();
+    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
+    pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::DraftMessage, cx)));
+    pump_until(cx, "the draft under way", |cx| cx.update(|_, cx| model.read(cx).draft.is_some()));
+    // The first agent is up, so its session is what the swap replaces.
+    let root = cx.update(|_, cx| model.read(cx).project_root()).unwrap();
+    pump_until(cx, "the agent", |cx| {
+        cx.update(|_, cx| console.read(cx).session_text(&root).is_some_and(|t| t.contains("ready")))
+    });
+    let which = crate::agents::ConsoleAgent::ALL.into_iter().find(|a| a.id() == crate::agents::AMP).unwrap();
+    cx.update(|w, cx| console.update(cx, |c, cx| c.switch_agent(which, w, cx)));
+    pump(cx, 100);
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(m.draft.is_none(), "it does not wait on an agent that is gone");
+        assert!(m.message.contains("Click Draft to ask Amp"), "{}", m.message);
+    });
+}
+
+#[gpui::test]
 fn stop_takes_back_a_draft_that_is_waiting(cx: &mut TestAppContext) {
     let (repo, lock_dir, model, ws, _client, cx) = connected("draft-stop", cx);
     let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();

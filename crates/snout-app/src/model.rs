@@ -1765,7 +1765,9 @@ impl Model {
         if self.draft.take().is_some() {
             self._draft_watch = None;
             self.message = why.clone();
-            self.ask(Dialog::Error(why), cx);
+            // The agent's, not Git's: the error dialog would say Git stopped.
+            let title = "No commit message yet".to_owned();
+            self.ask(Dialog::Info { title, text: why, mood: Mood::Warning }, cx);
             cx.notify();
         }
     }
