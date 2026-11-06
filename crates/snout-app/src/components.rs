@@ -788,11 +788,10 @@ impl RenderOnce for EmptyState {
         let p = palette(cx);
         let w = if self.compact { 132. } else { 176. };
         let ratio = self.art.size.x / self.art.size.y;
-        div()
-            .debug_selector(|| "empty-state".into())
-            .size_full()
-            .min_h_0()
-            .overflow_hidden()
+        // Centred when it fits; in a shorter pane it scrolls from its top, rather than losing
+        // the top of the drawing and the buttons under the words.
+        let content = div()
+            .min_h_full()
             .flex()
             .flex_col()
             .items_center()
@@ -800,7 +799,7 @@ impl RenderOnce for EmptyState {
             .px(px(24.))
             .py(px(12.))
             .gap(px(4.))
-            .child(div().debug_selector(|| "empty-state-art".into()).child(crate::art::drawing_on(
+            .child(div().flex_none().debug_selector(|| "empty-state-art".into()).child(crate::art::drawing_on(
                 self.art,
                 w,
                 w / ratio,
@@ -828,7 +827,14 @@ impl RenderOnce for EmptyState {
             })
             .when(!self.actions.is_empty(), |d| {
                 d.child(div().mt(px(10.)).flex().flex_wrap().justify_center().gap(px(8.)).children(self.actions))
-            })
+            });
+        div()
+            .id("empty-state")
+            .debug_selector(|| "empty-state".into())
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(content)
     }
 }
 

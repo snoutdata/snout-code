@@ -425,14 +425,20 @@ impl NewProjectView {
         let mut body = div()
             .flex()
             .flex_col()
-            .child(row("Name", div().w(px(360.)).child(look::field(&self.name, false, None, &p)), &p))
+            .child(row(
+                "Name",
+                div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.name, false, None, &p)),
+                &p,
+            ))
             .child(row(
                 "Location",
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .flex()
                     .items_center()
                     .gap(px(6.))
-                    .child(div().w(px(360.)).child(look::field(&self.location, false, None, &p)))
+                    .child(div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.location, false, None, &p)))
                     .child(
                         look::small_button(
                             "new-project-browse",
@@ -440,6 +446,7 @@ impl NewProjectView {
                             "Choose…",
                             &p,
                         )
+                        .flex_none()
                         .px(px(8.))
                         .h(px(24.))
                         .on_click(cx.listener(|this, _, w, cx| this.pick_location(w, cx))),
@@ -463,7 +470,7 @@ impl NewProjectView {
                 .child(section("Tests", &p))
                 .child(row(
                     "Application URL",
-                    div().w(px(360.)).child(look::field(&self.base_url, false, None, &p)),
+                    div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.base_url, false, None, &p)),
                     &p,
                 ))
                 .child(
@@ -556,9 +563,21 @@ impl NewProjectView {
         }
         body = body
             .child(section("Coordinates", &p))
-            .child(row("Group", div().w(px(360.)).child(look::field(&self.group, false, None, &p)), &p))
-            .child(row("Artifact", div().w(px(360.)).child(look::field(&self.artifact, false, None, &p)), &p))
-            .child(row("Package", div().w(px(360.)).child(look::field(&self.package, false, None, &p)), &p));
+            .child(row(
+                "Group",
+                div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.group, false, None, &p)),
+                &p,
+            ))
+            .child(row(
+                "Artifact",
+                div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.artifact, false, None, &p)),
+                &p,
+            ))
+            .child(row(
+                "Package",
+                div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.package, false, None, &p)),
+                &p,
+            ));
         body.child(
             div().pt(px(14.)).child(
                 look::checkbox("new-project-git", "Create a Git repository", self.git, true, &p)

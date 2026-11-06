@@ -83,6 +83,41 @@ impl TermLook {
 }
 
 /// The cursor's rectangle at `at`, one cell of `cell` in size, in `shape`.
+/// The rows and columns of a terminal painted in `inner`, cells of `cell`.
+fn grid_size(inner: Bounds<Pixels>, cell: gpui::Size<Pixels>) -> (u16, u16) {
+    let rows = ((inner.size.height / cell.height).floor() as u16).max(2);
+    let cols = ((inner.size.width / cell.width).floor() as u16).max(10);
+    (rows, cols)
+}
+
+/// The session's agent is up to take text: it runs, it is not an installer, it has printed.
+fn agent_up(s: &Session) -> bool {
+    s.install.is_none() && s.pty.is_running() && !s.pty.contents().trim().is_empty()
+}
+
+/// The agent has nothing else on: its turn is over, it has gone quiet, and it is not asking
+/// the user something first. Return must not answer "Do you trust this folder?" for them.
+fn agent_idle(s: &Session) -> bool {
+    let quiet = s.pty.last_output().is_some_and(|t| t.elapsed() >= IDLE_QUIET);
+    quiet && s.turn.is_none() && !asks_the_user(&s.pty.contents())
+}
+
+/// The screen `text` shows the agent asking the user something: a menu of answers (a tool to
+/// allow, say), or whether to trust a folder. Return would answer it for them.
+pub fn asks_the_user(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_matches(|c: char| c.is_whitespace() || "│┃|".contains(c)).to_lowercase();
+        let menu = line.strip_prefix('❯').or_else(|| line.strip_prefix('›')).map(str::trim_start);
+        let answer = |m: &str| {
+            let first = m.split(|c: char| !c.is_alphanumeric() && c != '.').next().unwrap_or_default();
+            matches!(first, "1." | "yes" | "no")
+        };
+        menu.is_some_and(answer)
+            || (line.contains("trust")
+                && ["folder", "directory", "files", "hook", "project"].iter().any(|w| line.contains(w)))
+    })
+}
+
 fn cursor_rect(at: Point<Pixels>, cell: gpui::Size<Pixels>, shape: CursorShape) -> Bounds<Pixels> {
     match shape {
         CursorShape::Block => Bounds::new(at, cell),
@@ -131,6 +166,17 @@ struct Session {
     install: Option<&'static str>,
 }
 
+/// Text waiting to go to a folder's session.
+struct Queued {
+    root: PathBuf,
+    text: String,
+    /// Press Return after it, once the agent is idle: the prompt is sent, not just typed.
+    submit: bool,
+    /// When the text went in, for the Return that follows.
+    pasted: Option<Instant>,
+    deadline: Instant,
+}
+
 /// Why the console's agent cannot start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Missing {
@@ -167,15 +213,21 @@ pub struct ConsolePanel {
     sessions: HashMap<PathBuf, Session>,
     /// Program override (tests); otherwise `claude` is looked up.
     pub program: Option<PathBuf>,
-    error: Option<String>,
+    /// Why the session of a folder could not start.
+    error: Option<(PathBuf, String)>,
     /// Anchor and end of a mouse selection, in cells (row, col).
     selection: Option<((u16, u16), (u16, u16))>,
     selecting: bool,
     /// Where the grid was last painted, and its cell size, for the pointer.
     grid: Option<(Bounds<Pixels>, gpui::Size<Pixels>)>,
     shown_gen: u64,
-    /// The folders whose session is being started.
-    starting: std::collections::HashSet<PathBuf>,
+    /// The folders whose session is being started: the attempt that counts, and the agent it
+    /// starts. A later attempt replaces an earlier one, whose result is then dropped.
+    starting: HashMap<PathBuf, (u64, Option<&'static str>)>,
+    /// The last attempt given out.
+    attempts: u64,
+    /// The next session takes the keyboard (the user asked for it, not the Draft button).
+    focus_next: bool,
     find: Option<Find>,
     focus: FocusHandle,
     /// Whether the terminal had the keyboard when last drawn, and the blinking cursor's
@@ -191,13 +243,15 @@ pub struct ConsolePanel {
     /// its first session starts connected, with the hooks.
     born: Instant,
     /// Text to type into a session once its agent is up (it has printed), by folder.
-    queued: Vec<(PathBuf, String)>,
+    queued: Vec<Queued>,
     _queue: Option<gpui::Task<()>>,
     /// The width the header was last laid out at: a console moved to a side dock is
     /// narrow, and its toolbar keeps to icons.
     width: f32,
-    /// Why the agent cannot start, when it is not installed or has no command.
-    missing: Option<Missing>,
+    /// Why a folder's agent cannot start, when it is not installed or has no command.
+    missing: Option<(PathBuf, Missing)>,
+    /// The agent the settings named when last looked: Settings can change it under a session.
+    named: crate::agents::ConsoleAgent,
     /// Which agents are installed, as last looked for (the agent menu marks the others).
     found: HashMap<&'static str, bool>,
     /// The agents whose installer ran and finished well here.
@@ -209,9 +263,21 @@ pub struct ConsolePanel {
 /// Below this width (points) the console's toolbar shows icons only.
 const COMPACT_W: f32 = 560.;
 
+/// Below this width (points) the console's header shows the agent's icon alone, and no pill.
+const TINY_W: f32 = 340.;
+/// Under this, the header's status pill gives way to its buttons.
+const PILL_W: f32 = 480.;
+
 /// Below this width (points) the console's empty states stack: the drawing, the gap and
 /// the words beside it take some 650.
 const STACKED_W: f32 = 700.;
+
+/// How long a prompt waits for its agent (it may be installing, or finishing a turn)...
+const SEND_WAIT: Duration = Duration::from_secs(300);
+/// ...how long the agent must have been quiet to count as idle...
+const IDLE_QUIET: Duration = Duration::from_millis(800);
+/// ...and how long after the text Return follows.
+const AFTER_PASTE: Duration = Duration::from_millis(300);
 
 /// How long the first session waits for the IDE server's variables at most.
 const IDE_WAIT: Duration = Duration::from_secs(4);
@@ -270,7 +336,12 @@ fn hsla((r, g, b): Rgb) -> Hsla {
 
 impl ConsolePanel {
     fn new(model: Entity<Model>, kind: Kind, cx: &mut Context<Self>) -> Self {
-        cx.observe(&model, |_, _, cx| cx.notify()).detach();
+        let named = model.read(cx).settings.console_agent;
+        cx.observe(&model, |this: &mut Self, _, cx| {
+            this.agent_named(cx);
+            cx.notify();
+        })
+        .detach();
         cx.observe_global::<crate::claude_ide::IdeStatus>(|_, cx| cx.notify()).detach();
         cx.observe_global::<crate::claude_ide::IdeEnv>(|_, cx| cx.notify()).detach();
         cx.spawn(async move |this, cx| {
@@ -301,6 +372,8 @@ impl ConsolePanel {
             grid: None,
             shown_gen: 0,
             starting: Default::default(),
+            attempts: 0,
+            focus_next: true,
             find: None,
             focus: cx.focus_handle(),
             focused: false,
@@ -311,10 +384,79 @@ impl ConsolePanel {
             born: Instant::now(),
             width: f32::MAX,
             missing: None,
+            named,
             found: HashMap::new(),
             installed_here: Default::default(),
             probed: false,
         }
+    }
+
+    /// The settings may name another agent now (Settings, Agents, or the settings file): what
+    /// kept the last one from starting no longer holds, and a session at work is left alone.
+    fn agent_named(&mut self, cx: &mut Context<Self>) {
+        if self.kind != Kind::Claude {
+            return;
+        }
+        let named = self.model.read(cx).settings.console_agent;
+        if named == self.named {
+            return;
+        }
+        self.named = named;
+        self.missing = None;
+        self.error = None;
+        let agent = self.agent(cx);
+        let root = self.root(cx);
+        if root.as_ref().and_then(|r| self.sessions.get(r)).and_then(|s| s.agent.as_ref()).is_some_and(|a| *a != agent)
+        {
+            self.show_note(format!("{} starts with the next session", agent.name), cx);
+        }
+    }
+
+    /// The window's IDE server gives the agent its variables a moment after the window opens:
+    /// the first session waits for them (a little while at most).
+    fn ide_ready(&self, cx: &App) -> bool {
+        self.kind == Kind::Shell
+            || cx.try_global::<crate::claude_ide::IdeConfig>().is_none()
+            || cx.try_global::<crate::claude_ide::IdeEnv>().is_some_and(|e| !e.0.is_empty())
+            || self.born.elapsed() >= IDE_WAIT
+    }
+
+    /// A new attempt at starting `root`'s session; the one before it, if any, no longer counts.
+    fn begin_start(&mut self, root: &Path, agent: Option<&'static str>) -> u64 {
+        self.attempts += 1;
+        self.starting.insert(root.to_owned(), (self.attempts, agent));
+        self.attempts
+    }
+
+    /// The attempt `attempt` at starting `root`'s session is over: whether it still counts.
+    fn finish_start(&mut self, root: &Path, attempt: u64) -> bool {
+        if self.starting.get(root).is_none_or(|(a, _)| *a != attempt) {
+            return false;
+        }
+        self.starting.remove(root);
+        true
+    }
+
+    /// Why `root`'s session could not start, if it could not.
+    fn error_of(&self, root: &Path) -> Option<&str> {
+        self.error.as_ref().filter(|(r, _)| r == root).map(|(_, e)| e.as_str())
+    }
+
+    /// Why `root`'s agent cannot start, if it cannot.
+    fn missing_of(&self, root: &Path) -> Option<Missing> {
+        self.missing.as_ref().filter(|(r, _)| r == root).map(|(_, m)| *m)
+    }
+
+    /// Forget why `root`'s session could not start.
+    fn clear_trouble(&mut self, root: &Path) {
+        self.error.take_if(|(r, _)| r == root);
+        self.missing.take_if(|(r, _)| r == root);
+    }
+
+    /// The size the next session starts at: the terminal's as last painted, so an agent draws
+    /// for the pane from its first frame instead of being resized under it.
+    fn start_size(&self) -> Option<(u16, u16)> {
+        self.grid.map(|(inner, cell)| grid_size(inner, cell))
     }
 
     /// Look for the agents off the UI thread, once, for the menu to mark those not
@@ -365,6 +507,10 @@ impl ConsolePanel {
         });
         let Some(root) = root else { return };
         let agent = self.agent(cx);
+        // It is on its way already: a second click must not start it twice.
+        if !self.sessions.contains_key(&root) && self.starting.get(&root).is_some_and(|(_, a)| *a == Some(agent.id)) {
+            return;
+        }
         let mut note = None;
         if let Some(s) = self.sessions.get_mut(&root) {
             let same = s.install.is_none() && s.agent.as_ref().is_some_and(|a| *a == agent);
@@ -397,15 +543,15 @@ impl ConsolePanel {
             s.pty.kill();
         }
         self.ended.remove(root);
-        self.error = None;
-        self.missing = None;
+        self.clear_trouble(root);
         let settings = &self.model.read(cx).settings;
         let engine = settings.terminal_engine;
         let scrollback = settings.terminal_scrollback;
         let p = palette(cx);
         let (fg, bg) = (rgb(p.fg), rgb(p.panel));
         let root = root.to_owned();
-        self.starting.insert(root.clone());
+        let attempt = self.begin_start(&root, Some(id));
+        let size = self.start_size();
         let started = cx.background_executor().spawn({
             let root = root.clone();
             async move {
@@ -418,7 +564,7 @@ impl ConsolePanel {
                     (default_shell(&*host), vec!["-ilc".into(), line.into()])
                 };
                 let launch =
-                    Launch { program: &program, args: &args, cwd: &root, env: &[], env_remove: &[], scrollback };
+                    Launch { program: &program, args: &args, cwd: &root, env: &[], env_remove: &[], scrollback, size };
                 Pty::spawn(&*host, &launch, engine, fg, bg, || {})
                     .map_err(|e| format!("Could not start {}: {e}", program.display()))
             }
@@ -426,7 +572,9 @@ impl ConsolePanel {
         cx.spawn_in(window, async move |this, cx| {
             let result = started.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.starting.remove(&root);
+                if !this.finish_start(&root, attempt) {
+                    return;
+                }
                 match result {
                     Ok(pty) => {
                         let session = Session {
@@ -441,7 +589,7 @@ impl ConsolePanel {
                         this.note_engine(&root, cx);
                         window.focus(&this.focus, cx);
                     }
-                    Err(e) => this.error = Some(e),
+                    Err(e) => this.error = Some((root.clone(), e)),
                 }
                 cx.notify();
             });
@@ -466,6 +614,12 @@ impl ConsolePanel {
 
     fn compact(&self) -> bool {
         self.width < COMPACT_W
+    }
+
+    /// The console is too narrow for the agent's name and the status pill as well as the
+    /// toolbar: the toolbar stays.
+    fn tiny(&self) -> bool {
+        self.width < TINY_W
     }
 
     /// The empty states stack their drawing over their words: side by side they would not
@@ -572,6 +726,7 @@ impl ConsolePanel {
         }
         if self.kind == Kind::Claude {
             self.track_turn(cx);
+            self.watch_draft(cx);
         }
         let Some(root) = self.root(cx) else { return };
         let Some(s) = self.sessions.get_mut(&root) else { return };
@@ -607,11 +762,12 @@ impl ConsolePanel {
     /// whether the agent of the session in front is at work on a turn.
     fn track_turn(&mut self, cx: &mut Context<Self>) {
         use crate::agents::{ConsoleAgentNow, ConsoleTurn};
-        let agent = self.agent(cx);
+        let root = self.root(cx);
+        // What Ask to Fix and the like name, and reach: the agent showing in the console.
+        let agent = root.as_ref().map_or_else(|| self.agent(cx), |r| self.session_agent(r, cx));
         if cx.try_global::<ConsoleAgentNow>().is_none_or(|a| a.0 != agent) {
             cx.set_global(ConsoleAgentNow(agent));
         }
-        let root = self.root(cx);
         let mut ended = None;
         let now = match root.as_ref().and_then(|r| self.sessions.get_mut(r)) {
             Some(s) => {
@@ -647,16 +803,20 @@ impl ConsolePanel {
     /// Start the console's program in `root`, on the workspace's host: found and started off
     /// the UI thread, the session shows once it runs.
     pub fn start(&mut self, root: &Path, args: &[String], window: &mut Window, cx: &mut Context<Self>) {
+        let focus = std::mem::replace(&mut self.focus_next, true);
         self.sessions.remove(root);
         self.ended.remove(root);
         self.note_engine(root, cx);
-        self.error = None;
-        self.missing = None;
+        self.clear_trouble(root);
+        // What was selected or searched for belongs to the session just gone.
+        self.selection = None;
+        self.find = None;
+        self.starting.remove(root);
         let host = crate::host::host(cx);
         let kind = self.kind;
         let agent = (kind == Kind::Claude).then(|| self.agent(cx));
         if agent.as_ref().is_some_and(|a| a.command.as_deref().is_some_and(|c| c.trim().is_empty())) {
-            self.missing = Some(Missing::Command);
+            self.missing = Some((root.to_owned(), Missing::Command));
             cx.notify();
             return;
         }
@@ -693,6 +853,10 @@ impl ConsolePanel {
                 Some(crate::agents::CODEX | crate::agents::OPENCODE | crate::agents::AMP) => {
                     k == crate::claude_ide::hooks::PORT_ENV || k == crate::claude_ide::api::HEADER_ENV
                 }
+                // A command of the user's own can call the editor's API too.
+                Some(crate::agents::CUSTOM) => {
+                    k == crate::claude_ide::hooks::PORT_ENV || k == crate::claude_ide::api::HEADER_ENV
+                }
                 _ => false,
             };
             hooked = ide.0.iter().any(|(k, _)| *k == crate::claude_ide::hooks::PORT_ENV);
@@ -724,17 +888,24 @@ impl ConsolePanel {
                     args.splice(0..0, extra.0.iter().cloned());
                 }
             }
-            Some(a) if host.info().is_windows() => {
-                args = vec!["/d".into(), "/c".into(), a.command.clone().unwrap_or_default()]
+            // A command of the user's own runs through the shell; the other agents take
+            // their arguments as they are (Continue's among them).
+            Some(a) if a.id == crate::agents::CUSTOM => {
+                let command = a.command.clone().unwrap_or_default();
+                args = if host.info().is_windows() {
+                    vec!["/d".into(), "/c".into(), command]
+                } else {
+                    vec!["-c".into(), command]
+                };
             }
-            Some(a) => args = vec!["-c".into(), a.command.clone().unwrap_or_default()],
-            None => {}
+            Some(_) | None => {}
         }
         let session_agent = agent.clone();
         let program_name = agent.as_ref().and_then(|a| a.program());
         let agent_name = agent.as_ref().map(|a| a.name.to_string()).unwrap_or_default();
         let root = root.to_owned();
-        self.starting.insert(root.clone());
+        let attempt = self.begin_start(&root, agent_id);
+        let size = self.start_size();
         let started = cx.background_executor().spawn({
             let root = root.clone();
             async move {
@@ -756,7 +927,8 @@ impl ConsolePanel {
                 let program = program.or(found).ok_or(None)?;
                 let env_remove: &[&str] = if kind == Kind::Claude { ENV_REMOVE } else { &[] };
                 let env: Vec<(&str, String)> = env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-                let launch = Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove, scrollback };
+                let launch =
+                    Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove, scrollback, size };
                 Pty::spawn(&*host, &launch, engine, fg, bg, || {})
                     .map_err(|e| Some(format!("Could not start {}: {e}", program.display())))
             }
@@ -764,7 +936,11 @@ impl ConsolePanel {
         cx.spawn_in(window, async move |this, cx| {
             let result = started.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.starting.remove(&root);
+                // Another attempt took over meanwhile (the user picked another agent): this
+                // one's session ends here, and neither its result nor its trouble counts.
+                if !this.finish_start(&root, attempt) {
+                    return;
+                }
                 match result {
                     Ok(pty) => {
                         if let Some(a) = session_agent.as_ref() {
@@ -780,21 +956,24 @@ impl ConsolePanel {
                         };
                         this.sessions.insert(root.clone(), session);
                         this.note_engine(&root, cx);
-                        window.focus(&this.focus, cx);
+                        if focus {
+                            window.focus(&this.focus, cx);
+                        }
                     }
                     Err(None) => {
                         let id = agent_id.unwrap_or(crate::agents::CLAUDE);
                         this.found.insert(id, false);
                         if this.installed_here.contains(id) {
-                            this.error = Some(format!(
+                            let e = format!(
                                 "The installer finished, but {agent_name} is not on the PATH SnoutCode sees. \
                                  Set its path in Settings, Agents, or restart SnoutCode."
-                            ));
+                            );
+                            this.error = Some((root.clone(), e));
                         } else {
-                            this.missing = Some(Missing::Program(id));
+                            this.missing = Some((root.clone(), Missing::Program(id)));
                         }
                     }
-                    Err(Some(e)) => this.error = Some(e),
+                    Err(Some(e)) => this.error = Some((root.clone(), e)),
                 }
                 cx.notify();
             });
@@ -805,7 +984,7 @@ impl ConsolePanel {
 
     /// Why the program could not start, if it could not.
     pub fn error(&self) -> Option<&str> {
-        self.error.as_deref()
+        self.error.as_ref().map(|(_, e)| e.as_str())
     }
 
     pub fn session_text(&self, root: &Path) -> Option<String> {
@@ -829,38 +1008,136 @@ impl ConsolePanel {
     /// Type `text` into the session of `root` as a paste once its agent is up (the session
     /// runs and has printed): at once when it is, else as soon as it is (within 30 seconds).
     pub fn type_when_ready(&mut self, root: &Path, text: &str, cx: &mut Context<Self>) {
-        let up = |s: Option<&Session>| s.is_some_and(|s| !s.pty.contents().trim().is_empty());
-        if up(self.sessions.get(root)) {
+        if self.sessions.get(root).is_some_and(agent_up) {
             return self.type_text(root, text);
         }
-        self.queued.push((root.to_owned(), text.to_owned()));
+        self.enqueue(root, text, false, Duration::from_secs(30), cx);
+    }
+
+    /// Send `text` to the agent of `root` as a prompt: typed and Return pressed once the agent
+    /// is up and has nothing else on (its turn over, no question of its own on the screen).
+    pub fn send_when_ready(&mut self, root: &Path, text: &str, cx: &mut Context<Self>) {
+        self.enqueue(root, text, true, SEND_WAIT, cx);
+    }
+
+    /// Take back a prompt that is waiting, or stop the turn it began: whether it was sent.
+    pub fn take_back(&mut self, root: &Path) -> bool {
+        let before = self.queued.len();
+        self.queued.retain(|q| !(q.submit && q.root == root));
+        let waiting = self.queued.len() != before;
+        if !waiting && let Some(s) = self.sessions.get(root) {
+            s.pty.send(b"\x1b");
+        }
+        !waiting
+    }
+
+    fn enqueue(&mut self, root: &Path, text: &str, submit: bool, wait: Duration, cx: &mut Context<Self>) {
+        let deadline = Instant::now() + wait;
+        self.queued.push(Queued { root: root.to_owned(), text: text.to_owned(), submit, pasted: None, deadline });
         if self._queue.is_some() {
             return;
         }
-        let deadline = Instant::now() + Duration::from_secs(30);
         self._queue = Some(cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_millis(200)).await;
-                let left = this.update(cx, |this, _| {
-                    let sessions = &this.sessions;
-                    this.queued.retain(|(root, text)| match sessions.get(root) {
-                        Some(s) if up(Some(s)) => {
-                            s.pty.paste(text);
-                            false
-                        }
-                        _ => true,
-                    });
-                    if Instant::now() > deadline {
-                        this.queued.clear();
-                    }
-                    !this.queued.is_empty()
-                });
+                let left = this.update(cx, |this, cx| this.send_queued(cx));
                 if !matches!(left, Ok(true)) {
                     break;
                 }
             }
             let _ = this.update(cx, |this, _| this._queue = None);
         }));
+    }
+
+    /// Send what can go now: whether anything is still waiting.
+    fn send_queued(&mut self, cx: &mut Context<Self>) -> bool {
+        let now = Instant::now();
+        let mut sent = false;
+        // A prompt goes only while its draft waits: stopped or given up, it stays unsent.
+        let asked = self.model.read(cx).draft.as_ref().map(|d| d.root.clone());
+        let sessions = &mut self.sessions;
+        self.queued.retain_mut(|q| {
+            if now > q.deadline || (q.submit && asked.as_ref() != Some(&q.root)) {
+                return false;
+            }
+            let Some(s) = sessions.get_mut(&q.root) else { return true };
+            if let Some(at) = q.pasted {
+                // Return a moment after the text, or the agent takes it as part of the paste.
+                if at.elapsed() < AFTER_PASTE {
+                    return true;
+                }
+                s.pty.send(b"\r");
+                s.turn = Some(Instant::now());
+                sent = true;
+                return false;
+            }
+            if !agent_up(s) || (q.submit && !agent_idle(s)) {
+                return true;
+            }
+            s.pty.paste(&q.text);
+            if q.submit {
+                q.pasted = Some(Instant::now());
+            }
+            q.submit
+        });
+        if sent {
+            self.model.update(cx, |m, cx| m.draft_sent(cx));
+        }
+        !self.queued.is_empty()
+    }
+
+    /// Make sure `root` has a session for a prompt to go to, without taking the keyboard: the
+    /// user may be typing in the commit message.
+    pub fn ensure_session(&mut self, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let alive = self.sessions.get_mut(root).is_some_and(|s| s.pty.exit_status().is_none());
+        if alive || self.starting.contains_key(root) {
+            return;
+        }
+        self.focus_next = false;
+        if self.ide_ready(cx) {
+            self.start(root, &[], window, cx);
+        } else {
+            // The window's IDE server is still on its way: the first draw starts the agent.
+            self.ended.remove(root);
+            self.clear_trouble(root);
+        }
+    }
+
+    /// Why a prompt waiting for `root`'s session will not reach it, while it is waiting: what
+    /// the Draft button tells the user when the agent is not there to ask.
+    fn prompt_stuck(&mut self, root: &Path, agent: &crate::agents::Agent, cx: &App) -> Option<String> {
+        if self.starting.contains_key(root) || (!self.sessions.contains_key(root) && !self.ide_ready(cx)) {
+            return None;
+        }
+        if let Some(missing) = self.missing_of(root) {
+            return Some(match missing {
+                Missing::Program(_) => {
+                    format!("{} is not installed yet. Install it in the console, then click Draft again.", agent.name)
+                }
+                Missing::Command => {
+                    "Your own agent has no command yet. Give it one in Settings, Agents, then click Draft again."
+                        .to_owned()
+                }
+            });
+        }
+        if let Some(e) = self.error_of(root) {
+            return Some(e.to_owned());
+        }
+        let alive = self.sessions.get_mut(root).is_some_and(|s| s.pty.exit_status().is_none());
+        (!alive).then(|| format!("{} is not running.", agent.name))
+    }
+
+    /// While a draft of the commit message waits on the agent: give up when the agent is gone.
+    fn watch_draft(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.model.read(cx).draft.as_ref().map(|d| d.root.clone()) else { return };
+        let agent = self.session_agent(&root, cx);
+        let asking = self.sessions.get(&root).is_some_and(|s| s.pty.is_running() && asks_the_user(&s.pty.contents()));
+        self.model.update(cx, |m, cx| m.draft_asking(asking, &agent.short, cx));
+        if let Some(why) = self.prompt_stuck(&root, &agent, cx) {
+            self.queued.retain(|q| !(q.submit && q.root == root));
+            self.show_note(why.clone(), cx);
+            self.model.update(cx, |m, cx| m.draft_gone(why, cx));
+        }
     }
 
     /// Send `bytes` to the session of `root` as keys typed (`\r` for Return).
@@ -1096,19 +1373,13 @@ impl Render for ConsolePanel {
         };
         self.probe(cx);
         let wanted = kind == Kind::Shell || self.model.read(cx).settings.console_open;
-        // The window's IDE server gives the agent its variables a moment after the window
-        // opens: the first session waits for them (a little while at most).
-        let ide_ready = kind == Kind::Shell
-            || cx.try_global::<crate::claude_ide::IdeConfig>().is_none()
-            || cx.try_global::<crate::claude_ide::IdeEnv>().is_some_and(|e| !e.0.is_empty())
-            || self.born.elapsed() >= IDE_WAIT;
         if wanted
-            && ide_ready
+            && self.ide_ready(cx)
             && !self.sessions.contains_key(&root)
-            && !self.starting.contains(&root)
+            && !self.starting.contains_key(&root)
             && !self.ended.contains(&root)
-            && self.error.is_none()
-            && self.missing.is_none()
+            && self.error_of(&root).is_none()
+            && self.missing_of(&root).is_none()
         {
             self.start(&root, &[], window, cx);
         }
@@ -1116,8 +1387,8 @@ impl Render for ConsolePanel {
         let exit = self.sessions.get_mut(&root).and_then(|s| s.pty.exit_status().map(str::to_owned));
         let body = if self.sessions.contains_key(&root) {
             self.terminal(&root, exit, window, cx).into_any_element()
-        } else if self.starting.contains(&root) {
-            div().flex_1().into_any_element()
+        } else if self.starting.contains_key(&root) {
+            self.starting_view(&root, &p, cx)
         } else {
             self.not_running(&root, &p, cx)
         };
@@ -1184,7 +1455,7 @@ impl ConsolePanel {
     /// What the pill in the header says for the session of `root`.
     pub fn status(&mut self, root: Option<&Path>, cx: &App) -> Status {
         let Some(root) = root else { return Status::NotRunning };
-        if self.starting.contains(root) {
+        if self.starting.contains_key(root) {
             return Status::Starting;
         }
         let Some(s) = self.sessions.get_mut(root) else { return Status::NotRunning };
@@ -1389,7 +1660,7 @@ impl ConsolePanel {
             .font_family(look::ui_font(cx))
             .text_size(px(12.5))
             .child(who)
-            .child(pill)
+            .when(self.width >= PILL_W, |d| d.child(pill))
             .when(show_title, |d| {
                 d.child(
                     div()
@@ -1416,9 +1687,9 @@ impl ConsolePanel {
             move |bounds, _, cx| {
                 let w = f32::from(bounds.size.width);
                 view.update(cx, |this, cx| {
-                    let was = (this.compact(), this.stacked());
+                    let was = (this.compact(), this.stacked(), this.tiny(), this.width >= PILL_W);
                     this.width = w;
-                    if was != (this.compact(), this.stacked()) {
+                    if was != (this.compact(), this.stacked(), this.tiny(), this.width >= PILL_W) {
                         cx.notify();
                     }
                 });
@@ -1438,7 +1709,8 @@ impl ConsolePanel {
         use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
         let color = agent.color(p);
         let view = cx.entity();
-        let chosen = self.model.read(cx).settings.console_agent;
+        // The agent showing, which a project's session can keep after the settings moved on.
+        let chosen = agent.id;
         let agents = crate::agents::known(&self.model.read(cx).settings);
         // Those not installed, or (the custom agent) with no command yet, say so.
         let labels: Vec<SharedString> = agents
@@ -1475,7 +1747,9 @@ impl ConsolePanel {
                         .bg(mix(color, 0.2, p.panel))
                         .child(crate::components::icon(agent.icon, 12., color)),
                 )
-                .child(div().whitespace_nowrap().font_weight(gpui::FontWeight::MEDIUM).child(agent.name.clone()))
+                .when(!self.tiny(), |d| {
+                    d.child(div().whitespace_nowrap().font_weight(gpui::FontWeight::MEDIUM).child(agent.name.clone()))
+                })
                 .child(crate::components::icon(crate::components::IconName::ChevronDown, 12., p.fg_dim)),
         )
         .dropdown_menu(move |mut menu, _, _| {
@@ -1484,7 +1758,7 @@ impl ConsolePanel {
                 menu = menu.item(
                     PopupMenuItem::new(label.clone())
                         .icon(crate::components::menu_icon(a.icon))
-                        .checked(which == chosen)
+                        .checked(which.id() == chosen)
                         .on_click(move |_, window, cx| {
                             view.update(cx, |this, cx| this.switch_agent(which, window, cx))
                         }),
@@ -1501,9 +1775,34 @@ impl ConsolePanel {
         if let Some(mut s) = self.sessions.remove(root) {
             s.pty.kill();
         }
+        self.starting.remove(root);
         self.ended.insert(root.to_owned());
         self.note_engine(root, cx);
         cx.notify();
+    }
+
+    /// The console while a session is on its way: looking for an agent can take a moment
+    /// (the user's shell may be asked), and an empty pane looks like nothing happened.
+    fn starting_view(&self, root: &Path, p: &Palette, cx: &App) -> gpui::AnyElement {
+        let what = match self.starting.get(root) {
+            _ if self.kind == Kind::Shell => "Starting the shell\u{2026}".to_owned(),
+            Some((_, Some(id))) => {
+                format!("Starting {}\u{2026}", crate::agents::Agent::of(id, &self.model.read(cx).settings).name)
+            }
+            _ => format!("Starting {}\u{2026}", self.agent(cx).name),
+        };
+        div()
+            .debug_selector(|| "console-starting".into())
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(8.))
+            .px(px(16.))
+            .child(gpui_component::Sizable::xsmall(gpui_component::spinner::Spinner::new()))
+            .child(div().min_w_0().text_size(px(12.5)).text_color(p.fg_dim).child(what))
+            .into_any_element()
     }
 
     /// The console with no session: the agent's drawing, what it does, Start and Continue.
@@ -1511,7 +1810,7 @@ impl ConsolePanel {
         use crate::components::IconName;
         let agent = self.agent(cx);
         if self.kind == Kind::Claude
-            && let Some(missing) = self.missing
+            && let Some(missing) = self.missing_of(root)
         {
             return self.missing_view(root, &agent, missing, p, cx);
         }
@@ -1534,7 +1833,7 @@ impl ConsolePanel {
                 (format!("{} is not running", agent.name), hint, start)
             }
         };
-        let hint = self.error.clone().unwrap_or(hint);
+        let hint = self.error_of(root).map_or(hint, str::to_owned);
         let (r1, r2) = (root.to_owned(), root.to_owned());
         let resume = continue_args(&agent);
         let continue_button = (self.kind == Kind::Claude && !resume.is_empty()).then(|| {
@@ -1550,37 +1849,50 @@ impl ConsolePanel {
             .debug_selector(|| "console-not-running".into())
             .flex_1()
             .min_h_0()
-            .overflow_hidden()
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(28.))
-            .px(px(24.))
-            .py(px(12.))
-            .when(self.stacked(), |d| d.flex_col().gap(px(16.)))
-            .child(crate::art::drawing_on(snout_core::art::spots::agent_console(), 156., 104., p.panel))
+            .overflow_y_scroll()
             .child(
                 div()
+                    .min_h_full()
                     .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .max_w(px(420.))
-                    .min_w_0()
-                    .when(self.stacked(), |d| d.w_full())
-                    .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
-                    .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
+                    .items_center()
+                    .justify_center()
+                    .gap(px(28.))
+                    .px(px(24.))
+                    .py(px(12.))
+                    .when(self.stacked(), |d| d.flex_col().gap(px(16.)))
+                    .child(div().flex_none().child(crate::art::drawing_on(
+                        snout_core::art::spots::agent_console(),
+                        156.,
+                        104.,
+                        p.panel,
+                    )))
                     .child(
                         div()
-                            .mt(px(10.))
                             .flex()
-                            .flex_wrap()
-                            .gap(px(8.))
+                            .flex_col()
+                            .gap(px(4.))
+                            .max_w(px(420.))
+                            .min_w_0()
+                            .when(self.stacked(), |d| d.w_full())
+                            .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
+                            .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
                             .child(
-                                look::primary_button("console-start", IconName::Play, start, true, p)
-                                    .debug_selector(|| "console-start".into())
-                                    .on_click(cx.listener(move |this, _, window, cx| this.start(&r1, &[], window, cx))),
-                            )
-                            .children(continue_button),
+                                div()
+                                    .mt(px(10.))
+                                    .flex()
+                                    .flex_wrap()
+                                    .gap(px(8.))
+                                    .child(
+                                        look::primary_button("console-start", IconName::Play, start, true, p)
+                                            .debug_selector(|| "console-start".into())
+                                            .on_click(
+                                                cx.listener(move |this, _, window, cx| {
+                                                    this.start(&r1, &[], window, cx)
+                                                }),
+                                            ),
+                                    )
+                                    .children(continue_button),
+                            ),
                     ),
             )
             .into_any_element()
@@ -1658,39 +1970,48 @@ impl ConsolePanel {
             .debug_selector(|| "console-missing".into())
             .flex_1()
             .min_h_0()
-            .overflow_hidden()
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(28.))
-            .px(px(24.))
-            .py(px(12.))
-            .when(self.stacked(), |d| d.flex_col().gap(px(16.)))
-            .child(crate::art::drawing_on(snout_core::art::spots::agent_console(), 156., 104., p.panel))
+            .overflow_y_scroll()
             .child(
                 div()
+                    .min_h_full()
                     .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .max_w(px(420.))
-                    .min_w_0()
-                    .when(self.stacked(), |d| d.w_full())
-                    .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
-                    .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
-                    .when_some(line, |d, line| {
-                        d.child(
-                            div()
-                                .mt(px(6.))
-                                .px(px(8.))
-                                .py(px(5.))
-                                .rounded(px(5.))
-                                .bg(p.wash(p.fg_dim))
-                                .font_family(look::mono_font(cx))
-                                .text_size(px(11.5))
-                                .child(line),
-                        )
-                    })
-                    .child(div().mt(px(10.)).flex().flex_wrap().gap(px(8.)).children(buttons)),
+                    .items_center()
+                    .justify_center()
+                    .gap(px(28.))
+                    .px(px(24.))
+                    .py(px(12.))
+                    .when(self.stacked(), |d| d.flex_col().gap(px(16.)))
+                    .child(div().flex_none().child(crate::art::drawing_on(
+                        snout_core::art::spots::agent_console(),
+                        156.,
+                        104.,
+                        p.panel,
+                    )))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .max_w(px(420.))
+                            .min_w_0()
+                            .when(self.stacked(), |d| d.w_full())
+                            .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
+                            .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
+                            .when_some(line, |d, line| {
+                                d.child(
+                                    div()
+                                        .mt(px(6.))
+                                        .px(px(8.))
+                                        .py(px(5.))
+                                        .rounded(px(5.))
+                                        .bg(p.wash(p.fg_dim))
+                                        .font_family(look::mono_font(cx))
+                                        .text_size(px(11.5))
+                                        .child(line),
+                                )
+                            })
+                            .child(div().mt(px(10.)).flex().flex_wrap().gap(px(8.)).children(buttons)),
+                    ),
             )
             .into_any_element()
     }
@@ -1857,9 +2178,7 @@ impl ConsolePanel {
             point(bounds.left() + px(6.), bounds.top() + px(4.)),
             size(bounds.size.width - px(12.), bounds.size.height - px(8.)),
         );
-        let rows = ((inner.size.height / cell_h).floor() as u16).max(2);
-        let cols = ((inner.size.width / cell_w).floor() as u16).max(10);
-        if s.pty.resize((rows, cols)) {
+        if s.pty.resize(grid_size(inner, size(cell_w, cell_h))) {
             self.selection = None;
         }
         self.grid = Some((inner, size(cell_w, cell_h)));
@@ -2157,5 +2476,30 @@ fn default_shell_name(info: &snout_host::HostInfo) -> String {
         Some(shell) => shell.to_owned(),
         None if info.is_windows() => "powershell".into(),
         None => "zsh".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_menu_or_a_question_of_trust_on_the_screen_keeps_a_prompt_back() {
+        for screen in [
+            " Do you trust the files in this folder?\n ❯ 1. Yes, proceed\n   2. No, exit\n",
+            "│ Do you want to run this command?\n│ ❯ 1. Yes\n│   2. No\n",
+            "› 1. Yes, proceed\n  2. No\n",
+            "Do you trust the contents of this directory?\n",
+        ] {
+            assert!(asks_the_user(screen), "{screen}");
+        }
+        for screen in [
+            "❯ now fix the test\n",
+            "❯ \n  ? for shortcuts\n",
+            "Claude Code\n> Try \"fix the test\"\n",
+            "We trust you have read the docs.\n",
+        ] {
+            assert!(!asks_the_user(screen), "{screen}");
+        }
     }
 }

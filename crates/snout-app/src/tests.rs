@@ -447,36 +447,6 @@ fn git_panel_commits_without_staging_what_is_selected(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn claude_drafts_the_commit_message_from_the_patch(cx: &mut TestAppContext) {
-    let repo = demo_repo("draft");
-    let bin = scratch_dir("draft-bin");
-    // A stand-in for `claude -p`: it reads the patch and answers with a message naming a
-    // file in it.
-    let fake = fake_program(
-        &bin,
-        "claude",
-        "#!/bin/sh\nif grep -q 'src/main.rs' ; then echo 'Greet snout'; else echo 'Wrong patch'; fi\n",
-        "@echo off\nfindstr /c:\"src/main.rs\" >nul && (echo Greet snout) || (echo Wrong patch)\n",
-    );
-    let (model, _, cx) = open(cx, with_repo(&repo));
-    cx.update(|_, cx| model.update(cx, |m, _| m.claude = Some(fake.clone())));
-    act(&model, cx, Action::DraftMessage);
-    cx.update(|_, cx| assert!(model.read(cx).draft.is_some()));
-    for _ in 0..100 {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        cx.executor().advance_clock(std::time::Duration::from_millis(100));
-        cx.run_until_parked();
-        if cx.update(|_, cx| model.read(cx).draft.is_none()) {
-            break;
-        }
-    }
-    cx.update(|_, cx| assert_eq!(model.read(cx).commit_msg, "Greet snout"));
-    for dir in [repo, bin] {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-}
-
-#[gpui::test]
 fn background_fetch_counts_what_there_is_to_pull(cx: &mut TestAppContext) {
     let work = demo_repo("fetch");
     // A remote with one commit more than the working copy knows about.

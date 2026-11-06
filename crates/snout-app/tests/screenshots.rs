@@ -111,6 +111,10 @@ mod shots {
         /// A commit (by summary) and one of its files, in a repository with a merge.
         Commit(&'static str, &'static str),
         Console,
+        /// A file's changes in the Git view, with the console open beside them.
+        ConsoleBeside(&'static str),
+        /// A commit in the Git view (as `Commit`), with the console open beside it.
+        ConsoleOnCommit(&'static str, &'static str),
         /// The console's agent not installed: its Install button (in a side dock, narrow).
         ConsoleInstall(Option<snout_app::workspace::Side>),
         /// The agent console moved to another dock, in the Project view.
@@ -375,6 +379,24 @@ sleep 30
         COLORS.set(ColorTheme::default());
     }
 
+    /// The window of a shot: `SNOUT_SHOT_SIZE=<width>x<height>` to read the app in a small one.
+    fn window_size() -> gpui::Size<gpui::Pixels> {
+        let asked = std::env::var("SNOUT_SHOT_SIZE").ok();
+        let (w, h) = asked
+            .as_deref()
+            .and_then(|s| s.split_once('x'))
+            .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
+            .unwrap_or((1400., 900.));
+        size(px(w), px(h))
+    }
+
+    /// `SNOUT_SHOT_COLORS=<a theme's name>` takes every shot in that theme, to read the whole
+    /// app in it.
+    fn colors_of_this_run() -> Option<ColorTheme> {
+        let name = std::env::var("SNOUT_SHOT_COLORS").ok()?;
+        ColorTheme::ALL.into_iter().find(|t| t.label() == name)
+    }
+
     /// Whether `SNOUT_SHOT_ONLY` (parts of names, separated by commas) takes the shot `name`.
     fn only(name: &str) -> bool {
         std::env::var("SNOUT_SHOT_ONLY").map_or(true, |only| only.split(',').any(|o| name.contains(o)))
@@ -386,7 +408,7 @@ sleep 30
             return;
         }
         let repo = demo_repo(name);
-        if matches!(select, Some(Select::Commit(..))) {
+        if matches!(select, Some(Select::Commit(..) | Select::ConsoleOnCommit(..))) {
             with_merge(&repo);
         }
         if matches!(select, Some(Select::TestsWindow | Select::Recording | Select::PlaywrightDebug)) {
@@ -400,7 +422,7 @@ sleep 30
         let current = (!matches!(select, Some(Select::Nothing))).then(|| repo.clone());
         let mut settings = Settings {
             theme,
-            colors: COLORS.get(),
+            colors: colors_of_this_run().unwrap_or(COLORS.get()),
             terminal_engine: ENGINE.get(),
             repos: vec![repo.clone()],
             current,
@@ -439,7 +461,7 @@ sleep 30
         });
         let mut ws = None;
         let handle = cx
-            .open_window(size(px(1400.), px(900.)), |window, cx| {
+            .open_window(window_size(), |window, cx| {
                 let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
                 ws = Some(view.clone());
                 cx.new(|cx| gpui_component::Root::new(view, window, cx))
@@ -459,6 +481,37 @@ sleep 30
         }
         match select {
             Some(Select::File(path)) => cx.update(|cx| model.update(cx, |m, cx| m.click_file(path, false, false, cx))),
+            Some(Select::ConsoleOnCommit(summary, file)) => {
+                cx.update(|cx| {
+                    let id = model.read(cx).log.iter().find(|c| c.summary == summary).unwrap().id.clone();
+                    model.update(cx, |m, cx| m.handle(Action::ShowCommit(id), cx));
+                });
+                cx.run_until_parked();
+                let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+                let fake = repo.join("fake-claude");
+                std::fs::write(&fake, "#!/bin/sh\nprintf '> '\nsleep 30\n").unwrap();
+                Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+                cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+                cx.update(|cx| {
+                    model.update(cx, |m, cx| {
+                        m.select_commit_file(file.into(), cx);
+                        m.handle(Action::ToggleConsole, cx);
+                    })
+                });
+            }
+            Some(Select::ConsoleBeside(path)) => {
+                let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+                let fake = repo.join("fake-claude");
+                std::fs::write(&fake, "#!/bin/sh\nprintf '> '\nsleep 30\n").unwrap();
+                Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+                cx.update(|cx| console.update(cx, |c, _| c.program = Some(fake)));
+                cx.update(|cx| {
+                    model.update(cx, |m, cx| {
+                        m.click_file(path, false, false, cx);
+                        m.handle(Action::ToggleConsole, cx);
+                    })
+                });
+            }
             Some(Select::Commit(summary, file)) => {
                 cx.update(|cx| {
                     let id = model.read(cx).log.iter().find(|c| c.summary == summary).unwrap().id.clone();
@@ -3020,6 +3073,13 @@ sleep 30
         shot("git-light", ThemeChoice::Light, Activity::Git, Some(Select::File("status.rs")));
         shot("commit-dark", ThemeChoice::Dark, Activity::Git, Some(Select::Commit("Initial import", "status.rs")));
         shot("console-light", ThemeChoice::Light, Activity::Git, Some(Select::Console));
+        shot("git-console-dark", ThemeChoice::Dark, Activity::Git, Some(Select::ConsoleBeside("status.rs")));
+        shot(
+            "git-console-commit",
+            ThemeChoice::Light,
+            Activity::Git,
+            Some(Select::ConsoleOnCommit("Initial import", "status.rs")),
+        );
         shot("console-install", ThemeChoice::Light, Activity::Git, Some(Select::ConsoleInstall(None)));
         shot(
             "console-install-right",

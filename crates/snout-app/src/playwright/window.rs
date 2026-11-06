@@ -241,18 +241,18 @@ impl TestsWindow {
             .border_b_1()
             .border_color(p.border)
             .child(
+                // In a narrow window the buttons go under the state, whole.
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(10.))
                     .child(tab_button("tests-tab-live", "Live run", Tab::Live))
                     .child(tab_button("tests-tab-history", "History", Tab::History))
                     .child(div().w(px(8.)))
                     .child(div().font_weight(FontWeight::SEMIBOLD).text_color(ink).child(state_text))
-                    .child(
-                        div().text_color(p.fg_dim).whitespace_nowrap().overflow_hidden().text_ellipsis().child(detail),
-                    )
-                    .child(div().flex_1())
+                    // The detail gives way first; below this the buttons take a row of their own.
+                    .child(div().flex_1().min_w(px(120.)).text_color(p.fg_dim).truncate().child(detail))
                     .children(suites)
                     .children(env)
                     .when(!unit, |d| {

@@ -136,7 +136,9 @@ pub fn table_row(
     cells: Vec<AnyElement>,
     p: &Palette,
 ) -> Stateful<Div> {
-    list_row(id, state, p).gap(px(CELL_GAP)).children(widths.iter().zip(cells).map(|(w, c)| cell(*w).child(c)))
+    list_row(id, state, p)
+        .gap(px(CELL_GAP))
+        .children(widths.iter().zip(cells).filter(|(w, _)| **w != Some(0.)).map(|(w, c)| cell(*w).child(c)))
 }
 
 // ----- Paths shortened in their middle ----------------------------------------------------
@@ -292,21 +294,47 @@ pub fn state_pills(states: &[StatePill], p: &Palette) -> Div {
     div().flex().items_center().gap(px(4.)).children(states.iter().map(|s| state_pill(*s, p)))
 }
 
+/// Several pills where a table's column is tight: the first in full, the others by their
+/// icon alone (Staged's check, say).
+pub fn tight_state_pills(states: &[StatePill], p: &Palette) -> Div {
+    div().flex().items_center().gap(px(4.)).children(states.iter().enumerate().map(|(i, s)| {
+        match s.icon().filter(|_| i > 0) {
+            None => state_pill(*s, p),
+            Some(ico) => {
+                let color = s.color(p);
+                div()
+                    .flex_none()
+                    .size(px(18.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(9.))
+                    .bg(p.wash(color))
+                    .border_1()
+                    .border_color(mix(color, 0.28, p.panel))
+                    .child(icon(ico, 10., p.pill_ink(color)))
+            }
+        }
+    }))
+}
+
 // ----- Tables -----------------------------------------------------------------------------
 
 /// A table's column: its title, its width (`None`: the rest of the row), and how narrow a
-/// drag may make it.
+/// drag or a tight pane may make it (the rest of the row: how much of it is kept).
 #[derive(Clone, Debug)]
 pub struct Column {
     pub title: SharedString,
     pub width: Option<f32>,
     pub min: f32,
     pub right: bool,
+    /// A table narrower than this leaves the column out.
+    pub drop_below: f32,
 }
 
 impl Column {
     pub fn new(title: impl Into<SharedString>, width: Option<f32>) -> Self {
-        Self { title: title.into(), width, min: 48., right: false }
+        Self { title: title.into(), width, min: 48., right: false, drop_below: 0. }
     }
 
     /// Its title and cells on the right (numbers).
@@ -319,26 +347,74 @@ impl Column {
         self.min = min;
         self
     }
+
+    /// Leave the column out of a table narrower than `room`.
+    pub fn drop_below(mut self, room: f32) -> Self {
+        self.drop_below = room;
+        self
+    }
 }
 
 /// A table's columns, as the user has sized them. Keep it in the view (an entity, so the
 /// header's handles can change it) and lay the rows out by [`TableColumns::widths`].
 pub struct TableColumns {
     columns: Vec<Column>,
+    /// How wide the table is laid out, when its view knows.
+    room: Option<f32>,
 }
 
 impl TableColumns {
     pub fn new(columns: Vec<Column>, cx: &mut App) -> Entity<Self> {
-        cx.new(|_| Self { columns })
+        cx.new(|_| Self { columns, room: None })
     }
 
     pub fn columns(&self) -> &[Column] {
         &self.columns
     }
 
-    /// Every column's width now (`None`: the rest of the row).
+    /// Every column's width as sized by hand (`None`: the rest of the row).
     pub fn widths(&self) -> Vec<Option<f32>> {
         self.columns.iter().map(|c| c.width).collect()
+    }
+
+    /// Tell the table how wide it is laid out, for [`TableColumns::shown`].
+    pub fn fit_room(&mut self, room: f32) {
+        self.room = Some(room);
+    }
+
+    /// How narrow a tight table may make column `i`.
+    pub fn set_min(&mut self, i: usize, min: f32) {
+        if let Some(c) = self.columns.get_mut(i) {
+            c.min = min;
+        }
+    }
+
+    /// Every column's width on screen: as sized by hand when they fit, and otherwise each
+    /// fixed column gives way, down to its minimum, so the rest of the row keeps its own.
+    /// A column left out for want of room is 0 wide, and takes no place in the row. The
+    /// sizes by hand stay, for when there is room again.
+    pub fn shown(&self) -> Vec<Option<f32>> {
+        let widths = self.widths();
+        let Some(room) = self.room else { return widths };
+        let kept = |c: &Column| room >= c.drop_below;
+        let count = self.columns.iter().filter(|c| kept(c)).count();
+        let frame = 2. * (ROW_PAD + 1.) + CELL_GAP * count.saturating_sub(1) as f32;
+        let (mut wanted, mut slack) = (frame, 0.);
+        for c in self.columns.iter().filter(|c| kept(c)) {
+            match c.width {
+                Some(w) => {
+                    wanted += w;
+                    slack += (w - c.min).max(0.);
+                }
+                None => wanted += c.min,
+            }
+        }
+        let over = wanted - room;
+        let give = if slack > 0. { (over / slack).clamp(0., 1.) } else { 0. };
+        self.columns
+            .iter()
+            .map(|c| if kept(c) { c.width.map(|w| (w - (w - c.min).max(0.) * give).round()) } else { Some(0.) })
+            .collect()
     }
 
     /// Set a fixed column's width, kept above its minimum.
@@ -391,6 +467,7 @@ pub fn table_header(
     let p = crate::theme::palette(cx);
     let id: SharedString = id.into();
     let cols = columns.read(cx).columns.clone();
+    let shown = columns.read(cx).shown();
     let count = cols.len();
     let group: SharedString = format!("{id}-head").into();
     let handle_color = mix(p.fg, 0.28, p.panel);
@@ -411,6 +488,9 @@ pub fn table_header(
         .text_color(p.fg_dim)
         .whitespace_nowrap();
     for (i, col) in cols.iter().enumerate() {
+        if shown[i] == Some(0.) {
+            continue;
+        }
         let sorted = sort.filter(|(c, _)| *c == i).map(|(_, up)| up);
         let title = div()
             .flex()
@@ -420,7 +500,7 @@ pub fn table_header(
             .overflow_hidden()
             .when(col.right, |d| d.ml_auto())
             .when(sorted.is_some(), |d| d.text_color(p.fg))
-            .child(col.title.clone())
+            .child(div().min_w_0().truncate().child(col.title.clone()))
             .when_some(sorted, |d, up| {
                 d.child(icon(if up { IconName::ArrowUp } else { IconName::ArrowDown }, 12., p.fg_dim))
             });
@@ -436,7 +516,7 @@ pub fn table_header(
             .flex()
             .items_center()
             .child(title);
-        c = match col.width {
+        c = match shown[i] {
             Some(w) => c.flex_none().w(px(w)),
             None => c.flex_1(),
         };
@@ -449,7 +529,7 @@ pub fn table_header(
         if resizable {
             let drag = ColumnDrag { table: id.clone(), index: i };
             let (table, columns) = (id.clone(), columns.clone());
-            let next_w = cols.get(i + 1).and_then(|c| c.width);
+            let next_w = shown.get(i + 1).copied().flatten();
             let fixed = col.width.is_some();
             c = c.on_drag_move(move |e: &DragMoveEvent<ColumnDrag>, window, cx| {
                 let d = e.drag(cx);
@@ -550,4 +630,48 @@ pub fn section_title(text: impl Into<SharedString>, p: &Palette) -> Div {
         .text_color(p.fg_dim)
         .whitespace_nowrap()
         .child(text.into())
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::*;
+
+    fn journal(room: f32) -> Vec<Option<f32>> {
+        TableColumns {
+            columns: vec![
+                Column::new("", Some(14.)),
+                Column::new("Message", None).min(300.),
+                Column::new("Author", Some(160.)).min(70.).drop_below(500.),
+                Column::new("Date", Some(130.)).min(110.),
+                Column::new("SHA", Some(80.)).min(60.).drop_below(440.),
+            ],
+            room: Some(room),
+        }
+        .shown()
+    }
+
+    #[test]
+    fn a_tight_table_gives_way_and_leaves_columns_out_last() {
+        // Room for all: as sized by hand.
+        assert_eq!(journal(1000.), vec![Some(14.), None, Some(160.), Some(130.), Some(80.)]);
+        // Tight: each down towards its minimum, never under it, the small column kept.
+        let tight = journal(600.);
+        assert_eq!(tight, vec![Some(14.), None, Some(70.), Some(110.), Some(60.)]);
+        // Tighter: the columns that matter least go, and take no place in the row.
+        assert_eq!(journal(480.)[2], Some(0.));
+        assert_eq!(journal(480.)[4], Some(60.));
+        assert_eq!(journal(400.)[4], Some(0.));
+        assert_eq!(journal(400.)[3], Some(110.));
+    }
+
+    #[test]
+    fn what_was_sized_by_hand_comes_back_when_there_is_room() {
+        let mut t = TableColumns { columns: vec![Column::new("Name", Some(260.)).min(80.)], room: None };
+        t.columns.push(Column::new("Rest", None).min(40.));
+        t.fit_room(150.);
+        assert!(t.shown()[0].unwrap() < 260.);
+        assert_eq!(t.widths()[0], Some(260.));
+        t.fit_room(1000.);
+        assert_eq!(t.shown()[0], Some(260.));
+    }
 }

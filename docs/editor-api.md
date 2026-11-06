@@ -20,14 +20,14 @@ An MCP server's tools are listed to the model with their full descriptions and J
 so they take room in the context of every request of the session, whether the agent uses them
 or not. A skill shows the model one line, and the rest is read only when the agent needs it.
 
-For the editor's eight tools, measured on what SnoutCode sends:
+For the API's ten tools, measured on what SnoutCode sends:
 
 | | Size | When it is in the context |
 |---|---|---|
-| The eight tools as MCP definitions | about 3,100 characters, roughly 800 tokens | every request of the session |
+| The ten tools as MCP definitions | about 3,700 characters, roughly 930 tokens | every request of the session |
 | The skill's description | about 320 characters, roughly 80 tokens | every request of the session |
 | The skill's instructions, with the `openFile` call | about 1,400 characters, roughly 350 tokens | once, when the agent first uses the editor |
-| The UTCP manual, all eight tools | about 6,800 characters, roughly 1,700 tokens | only when the agent needs a tool other than `openFile` |
+| The UTCP manual, all ten tools | about 8,300 characters, roughly 2,100 tokens | only when the agent needs a tool other than `openFile` |
 
 So a session that never touches the editor pays about a tenth of what the MCP definitions
 would cost, on every request. Opening a file, the common case, needs the skill alone; the
@@ -89,6 +89,8 @@ The tools:
 | `getDiagnostics` | The errors and warnings of a file, or of every open file | `uri` (optional) |
 | `checkDocumentDirty` | Whether a file has unsaved changes | `filePath` |
 | `saveDocument` | Saves a file | `filePath` |
+| `getCommitChange` | While a [draft](git.md#draft-the-message-with-your-agent) waits: the change the commit would record, and how to write its message | none |
+| `setCommitMessage` | While a draft waits: puts the message in the commit box. An error once it was stopped | `message` |
 
 With curl, from the console:
 

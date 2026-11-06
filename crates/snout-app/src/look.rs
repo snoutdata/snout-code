@@ -200,6 +200,29 @@ pub fn toggle(
         .child(text.into())
 }
 
+/// A [`toggle`] by its icon alone, where its word has no room: give it a tooltip.
+pub fn icon_toggle(
+    id: impl Into<ElementId>,
+    ico: impl Into<crate::components::Ico>,
+    on: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let hover_bg = p.button_hover;
+    let ink = if on { p.fg } else { mix(p.fg, 0.7, p.fg_dim) };
+    div()
+        .id(id)
+        .flex_none()
+        .h(px(INTERACT + 2.))
+        .px(px(6.))
+        .flex()
+        .items_center()
+        .rounded(px(6.))
+        .cursor_pointer()
+        .when(on, |d| d.bg(p.selection()))
+        .when(!on, |d| d.hover(move |s| s.bg(hover_bg)))
+        .child(crate::components::icon(ico, 13., ink))
+}
+
 /// A small framed button with its icon, for bars and rows: the shared button's look,
 /// compact.
 pub fn small_button(

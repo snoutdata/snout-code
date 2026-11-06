@@ -1,6 +1,6 @@
 //! The look, in one place: the colour themes (Studio, the default, warm and modelled on
-//! Snout Studio; Vivid; Deep; and Classic, the earlier neutral greys), each in dark and light,
-//! the type, and the editor's syntax colours, laid onto GPUI Kit's theme. Every view takes
+//! Snout Studio; Snout Studio's Gold, Mono, Abyss and Matrix; Vivid; Deep; and Classic, the
+//! earlier neutral greys), in dark and light, or dark alone, the type, and the editor's syntax colours, laid onto GPUI Kit's theme. Every view takes
 //! its colours from [`palette`]; nothing else names a colour.
 
 mod palettes;
@@ -95,8 +95,9 @@ pub fn contrast(a: Hsla, b: Hsla) -> f32 {
 }
 
 impl Palette {
-    /// `theme` in dark or light.
+    /// `theme` in dark or light (dark, for a theme that has no light).
     pub fn new(theme: ColorTheme, dark: bool) -> Self {
+        let dark = dark || theme.dark_only();
         let b = palettes::base(theme, dark);
         let (fg, card, ok, warn, error) = (hex(b.fg), hex(b.card), hex(b.ok), hex(b.warn), hex(b.error));
         let panel = hex(b.panel);
@@ -128,7 +129,8 @@ impl Palette {
             status_bg: hex(b.status),
             hues,
             tinted: b.hues.is_some(),
-            glow: theme == ColorTheme::Deep,
+            // Deep's aqua, and Matrix's phosphor.
+            glow: matches!(theme, ColorTheme::Deep | ColorTheme::Matrix),
             sel_mix: b.sel_mix,
             on_badge: hex(0xffffff),
             scrim: if dark { hex(0x000000).opacity(0.5) } else { fg.opacity(0.26) },
@@ -145,7 +147,11 @@ impl Palette {
             ill_tint: mix(fg, 0.20, card),
             // The drawings' one hue: sage, as in Snout Studio's; the accent in Vivid and Deep.
             ill_accent: mix(
-                if matches!(theme, ColorTheme::Vivid | ColorTheme::Deep) { hex(b.accent) } else { ok },
+                if matches!(theme, ColorTheme::Vivid | ColorTheme::Deep | ColorTheme::Abyss) {
+                    hex(b.accent)
+                } else {
+                    ok
+                },
                 0.70,
                 card,
             ),
@@ -502,32 +508,40 @@ pub fn system_changed(appearance: WindowAppearance, window: Option<&mut Window>,
 /// Kit's theme. A forced Light or Dark also sets the windows' own frames to match; System
 /// lets them follow the Mac again.
 pub fn apply(theme: ColorTheme, choice: ThemeChoice, window: Option<&mut Window>, cx: &mut App) {
-    force_appearance(choice, cx);
-    let dark = is_dark(choice, window.as_deref(), cx);
+    force_appearance(theme, choice, cx);
+    let dark = theme.dark_only() || is_dark(choice, window.as_deref(), cx);
     lay(theme, choice, dark, window, cx);
 }
 
 /// The palette alone, before the Kit is ready: what the splash paints with. [`apply`] lays
 /// the rest on once the Kit is there.
 pub fn preset(theme: ColorTheme, choice: ThemeChoice, cx: &mut App) {
-    force_appearance(choice, cx);
+    force_appearance(theme, choice, cx);
     let dark = is_dark(choice, None, cx);
     cx.set_global(Current { palette: Palette::new(theme, dark), theme, choice });
 }
 
-/// Light or dark as `choice` says, unless it said so already.
-fn force_appearance(choice: ThemeChoice, cx: &mut App) {
-    let forced = match choice {
+/// The appearance `theme` and `choice` force on the windows' own frames: a theme with no
+/// light side keeps them dark.
+fn forced_appearance(theme: ColorTheme, choice: ThemeChoice) -> Option<WindowAppearance> {
+    match choice {
+        _ if theme.dark_only() => Some(WindowAppearance::Dark),
         ThemeChoice::System => None,
         ThemeChoice::Dark => Some(WindowAppearance::Dark),
         ThemeChoice::Light => Some(WindowAppearance::Light),
-    };
-    if cx.try_global::<Current>().map(|c| c.choice) != Some(choice) {
+    }
+}
+
+/// Light or dark as `theme` and `choice` say, unless they said so already.
+fn force_appearance(theme: ColorTheme, choice: ThemeChoice, cx: &mut App) {
+    let forced = forced_appearance(theme, choice);
+    if cx.try_global::<Current>().map(|c| forced_appearance(c.theme, c.choice)) != Some(forced) {
         cx.set_window_appearance(forced);
     }
 }
 
 fn lay(theme: ColorTheme, choice: ThemeChoice, dark: bool, window: Option<&mut Window>, cx: &mut App) {
+    let dark = dark || theme.dark_only();
     let p = Palette::new(theme, dark);
     cx.set_global(Current { palette: p, theme, choice });
     Theme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, window, cx);
@@ -878,6 +892,11 @@ mod tests {
             apply(ColorTheme::Deep, ThemeChoice::Dark, None, cx);
             system_changed(WindowAppearance::Light, None, cx);
             assert_eq!(palette(cx), Palette::new(ColorTheme::Deep, true), "Dark in the settings stays dark");
+            apply(ColorTheme::Gold, ThemeChoice::Light, None, cx);
+            assert!(palette(cx).dark, "a theme with no light side stays dark, whatever the setting says");
+            apply(ColorTheme::Matrix, ThemeChoice::System, None, cx);
+            system_changed(WindowAppearance::Light, None, cx);
+            assert_eq!(palette(cx), Palette::new(ColorTheme::Matrix, true), "and whatever the Mac does");
         });
     }
 

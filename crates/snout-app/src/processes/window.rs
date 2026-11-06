@@ -18,12 +18,60 @@ use crate::theme::{mix, palette};
 pub struct ProcessesWindow {
     pub processes: Entity<Processes>,
     focus: FocusHandle,
+    /// The width last laid out at: a narrow window keeps fewer columns.
+    width: f32,
 }
 
 impl ProcessesWindow {
     pub fn new(processes: Entity<Processes>, cx: &mut Context<Self>) -> Self {
         cx.observe(&processes, |_, _, cx| cx.notify()).detach();
-        Self { processes, focus: cx.focus_handle() }
+        Self { processes, focus: cx.focus_handle(), width: f32::MAX }
+    }
+
+    /// Note the window's width, and redraw when it crosses a width that changes the columns.
+    fn measure(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let view = cx.entity();
+        gpui::canvas(
+            move |bounds, _, cx| {
+                let w = f32::from(bounds.size.width);
+                view.update(cx, |this, cx| {
+                    let was = Columns::at(this.width);
+                    this.width = w;
+                    if was != Columns::at(w) {
+                        cx.notify();
+                    }
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .into_any_element()
+    }
+}
+
+/// The columns a window of some width keeps, beside the process's description, which needs
+/// the room most. The tooltip of a row says the rest.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Columns {
+    pid: bool,
+    cpu: bool,
+    uptime: bool,
+    memory: bool,
+    state_w: u16,
+}
+
+impl Columns {
+    fn at(width: f32) -> Self {
+        Self {
+            pid: width >= 760.,
+            uptime: width >= 660.,
+            cpu: width >= 560.,
+            memory: width >= 460.,
+            state_w: if width >= 860. { STATE_W as u16 } else { 96 },
+        }
     }
 }
 
@@ -57,10 +105,13 @@ const ACTIONS_W: f32 = 52.;
 impl Render for ProcessesWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        let measure = self.measure(cx);
         let procs = self.processes.read(cx);
         let base = div()
             .id("processes")
             .debug_selector(|| "processes".into())
+            .relative()
+            .child(measure)
             .size_full()
             .flex()
             .flex_col()
@@ -79,6 +130,8 @@ impl Render for ProcessesWindow {
         let idle = rows.iter().filter(|r| r.idle && r.pid.is_some()).count();
         let notice = procs.notice.clone();
         let hover = p.button_hover;
+        let columns = Columns::at(self.width);
+        let state_w = f32::from(columns.state_w);
         let cell = |w: f32| div().w(px(w)).flex_none().overflow_hidden().whitespace_nowrap();
         let header = div()
             .flex_none()
@@ -94,11 +147,11 @@ impl Render for ProcessesWindow {
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.fg_dim)
             .child(div().flex_1().min_w_0().child("Process"))
-            .child(cell(PID_W).text_right().child("PID"))
-            .child(cell(MEMORY_W).text_right().child("Memory"))
-            .child(cell(CPU_W).text_right().child("CPU"))
-            .child(cell(UPTIME_W).text_right().child("Uptime"))
-            .child(cell(STATE_W).pl(px(12.)).child("State"))
+            .when(columns.pid, |d| d.child(cell(PID_W).text_right().child("PID")))
+            .when(columns.memory, |d| d.child(cell(MEMORY_W).text_right().child("Memory")))
+            .when(columns.cpu, |d| d.child(cell(CPU_W).text_right().child("CPU")))
+            .when(columns.uptime, |d| d.child(cell(UPTIME_W).text_right().child("Uptime")))
+            .child(cell(state_w).pl(px(12.)).child("State"))
             .child(div().w(px(ACTIONS_W)).flex_none());
         let entity = self.processes.clone();
         let n = rows.len();
@@ -181,12 +234,20 @@ impl Render for ProcessesWindow {
                                 .child(div().flex_none().child(icon(glyph(&r.kind), 14., ink)))
                                 .child(div().min_w_0().overflow_hidden().text_ellipsis().child(text)),
                         )
-                        .child(num(r.pid.map(|p| p.to_string()).unwrap_or_default()).w(px(PID_W)))
-                        .child(num(if live { bytes(r.memory) } else { String::new() }).w(px(MEMORY_W)))
-                        .child(num(if live { format!("{:.1}%", r.cpu) } else { String::new() }).w(px(CPU_W)))
-                        .child(num(if live { duration(r.uptime) } else { String::new() }).w(px(UPTIME_W)))
+                        .when(columns.pid, |d| {
+                            d.child(num(r.pid.map(|p| p.to_string()).unwrap_or_default()).w(px(PID_W)))
+                        })
+                        .when(columns.memory, |d| {
+                            d.child(num(if live { bytes(r.memory) } else { String::new() }).w(px(MEMORY_W)))
+                        })
+                        .when(columns.cpu, |d| {
+                            d.child(num(if live { format!("{:.1}%", r.cpu) } else { String::new() }).w(px(CPU_W)))
+                        })
+                        .when(columns.uptime, |d| {
+                            d.child(num(if live { duration(r.uptime) } else { String::new() }).w(px(UPTIME_W)))
+                        })
                         .child(
-                            cell(STATE_W)
+                            cell(state_w)
                                 .id(("process-state", i))
                                 .tooltip(move |w, cx| Tooltip::new(state_tip).build(w, cx))
                                 .pl(px(12.))

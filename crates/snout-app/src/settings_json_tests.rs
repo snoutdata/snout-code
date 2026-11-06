@@ -125,6 +125,18 @@ fn the_users_settings_open_as_json_and_a_saved_edit_is_taken_or_kept_out(cx: &mu
     save_text(&editor, &edited, cx);
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.check_user_settings(w, cx)));
     assert_eq!(tab_size(&model, cx), 6);
+    // The view the window shows is not the file's to change: a copy of the settings that
+    // names another one takes effect but for that, and the view showing is what is saved.
+    let shown = cx.update(|_, cx| ws.read(cx).side.read(cx).activity);
+    let other = match shown {
+        crate::panels::Activity::Project => crate::panels::Activity::Git,
+        crate::panels::Activity::Git => crate::panels::Activity::Project,
+    };
+    let stale = Settings { activity: Some(other), ..Store::at(file.clone()).load() };
+    Store::at(file.clone()).save(&stale).unwrap();
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.check_user_settings(w, cx)));
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.save_layout(cx)));
+    assert_eq!(Store::at(file.clone()).load().activity, Some(shown));
     // Broken: the settings in use stay, the error shows, and the file is not written over.
     let broken = edited.replace("\"tab_size\": 6,", "\"tab_size\": 7");
     save_text(&editor, &broken, cx);

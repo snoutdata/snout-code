@@ -1,12 +1,9 @@
-//! Claude Code beside the repository: finding `claude`, and commit messages drafted by it
-//! in print mode (`claude -p`) from the patch the commit would record. A draft runs beside
-//! any console session and leaves that alone.
+//! Coding agents beside the repository: finding `claude`, and what an agent is told when it
+//! drafts a commit message from the patch the commit would record.
 
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::path::PathBuf;
 
-use snout_host::{Cmd, Host, Process, Stdio};
+use snout_host::Host;
 
 /// Inherited variables that would make Claude Code think it runs nested inside another
 /// session (the app started from a Claude Code terminal), or misreport the terminal.
@@ -37,89 +34,13 @@ pub fn find_claude(host: &dyn Host) -> Option<PathBuf> {
     snout_host::which(host, &["claude"], &extra)
 }
 
-/// A running draft. Dropping it stops the process.
-pub struct Draft {
-    child: Arc<Mutex<Box<dyn Process>>>,
-    rx: mpsc::Receiver<Result<String, String>>,
-}
-
-impl Draft {
-    /// Start `program -p prompt` on `host` in `root` with `patch` on stdin; `wake` runs on a
-    /// worker thread when the result is ready for [`Draft::poll`].
-    pub fn start(
-        host: &dyn Host,
-        program: &Path,
-        root: &Path,
-        prompt: &str,
-        patch: &str,
-        wake: impl FnOnce() + Send + 'static,
-    ) -> Result<Self, String> {
-        let mut cmd = Cmd::new(program)
-            .args(["-p", prompt, "--output-format", "text", "--no-session-persistence", "--strict-mcp-config"])
-            // Text in, text out: nothing to read or run.
-            .args(["--tools", ""])
-            .cwd(root)
-            .stdin(Stdio::Piped)
-            .stdout(Stdio::Piped)
-            .stderr(Stdio::Piped);
-        for var in ENV_REMOVE {
-            cmd = cmd.env_remove(var);
-        }
-        let mut child = host.spawn(&cmd).map_err(|e| format!("Could not start {}: {e}", program.display()))?;
-        let (mut stdin, mut stdout, mut stderr) = (
-            child.take_stdin().expect("piped"),
-            child.take_stdout().expect("piped"),
-            child.take_stderr().expect("piped"),
-        );
-        let child = Arc::new(Mutex::new(child));
-        let patch = cut(patch, MAX_PATCH).to_owned();
-        let (tx, rx) = mpsc::channel();
-        let waiter = child.clone();
-        std::thread::spawn(move || {
-            let errors = std::thread::spawn(move || {
-                let mut s = String::new();
-                let _ = stderr.read_to_string(&mut s);
-                s
-            });
-            // A closed pipe here means it already quit; its exit status says why.
-            let _ = stdin.write_all(patch.as_bytes());
-            drop(stdin);
-            let mut out = String::new();
-            let _ = stdout.read_to_string(&mut out);
-            let status = waiter.lock().unwrap().wait();
-            let errors = errors.join().unwrap_or_default();
-            let result = match status {
-                Ok(s) if s.success() => match clean(&out) {
-                    msg if msg.is_empty() => Err("Claude Code returned an empty message".to_owned()),
-                    msg => Ok(msg),
-                },
-                Ok(s) => Err(format!("Claude Code {s}\n{}", first_nonempty(&errors, &out))),
-                Err(e) => Err(e.to_string()),
-            };
-            let _ = tx.send(result);
-            wake();
-        });
-        Ok(Self { child, rx })
-    }
-
-    pub fn poll(&self) -> Option<Result<String, String>> {
-        self.rx.try_recv().ok()
-    }
-}
-
-impl Drop for Draft {
-    fn drop(&mut self) {
-        // Fails harmlessly when it has already exited.
-        let _ = self.child.lock().map(|mut c| c.kill());
-    }
-}
-
-/// The instruction; the patch follows on stdin. `notes` is whatever is in the message box,
-/// taken as the author's own words to build on.
-pub fn draft_prompt(recent: &[&str], notes: &str, amend: bool) -> String {
+/// How to write the message for the change `patch` (cut to fit), and the change: what an agent
+/// gets when it asks. `notes` is whatever is in the message box, taken as the author's own
+/// words to build on.
+pub fn draft_brief(recent: &[&str], notes: &str, amend: bool, patch: &str) -> String {
     let mut s = String::from(
-        "Write the git commit message for the change on stdin (a stat summary, then the patch). \
-         Reply with the message only: no preamble, no code fences, no trailers. \
+        "Write the git commit message for the change below (a stat summary, then the patch). \
+         No code fences, no trailers. \
          The first line is a summary under 72 characters in the imperative mood. If the change \
          needs more, add a blank line and a short body that says what changed and why, wrapped \
          at 72 columns.",
@@ -136,7 +57,14 @@ pub fn draft_prompt(recent: &[&str], notes: &str, amend: bool) -> String {
     if !notes.trim().is_empty() {
         s += &format!("\n\nThe author's notes, to build on and keep the intent of:\n{}\n", notes.trim());
     }
+    s += "\n\nThe change:\n";
+    s += cut(patch, MAX_PATCH);
     s
+}
+
+/// A message as the agent gave it, ready for the message box.
+pub fn clean_message(reply: &str) -> String {
+    clean(reply)
 }
 
 /// The reply without code fences or surrounding blank lines.
@@ -160,10 +88,6 @@ fn cut(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
-fn first_nonempty<'a>(a: &'a str, b: &'a str) -> &'a str {
-    if a.trim().is_empty() { b.trim() } else { a.trim() }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,8 +101,10 @@ mod tests {
 
     #[test]
     fn prompt_carries_style_and_notes() {
-        let p = draft_prompt(&["Fix the thing"], "  group repos  ", true);
+        let p = draft_brief(&["Fix the thing"], "  group repos  ", true, "diff --git a b");
         assert!(p.contains("- Fix the thing") && p.contains("group repos") && p.contains("amended"));
-        assert!(!draft_prompt(&[], "", false).contains("notes"));
+        assert!(p.ends_with("The change:\ndiff --git a b"));
+        assert!(!draft_brief(&[], "", false, "").contains("notes"));
+        assert!(draft_brief(&[], "", false, &"x".repeat(MAX_PATCH + 10)).len() < MAX_PATCH + 1_000, "cut to fit");
     }
 }

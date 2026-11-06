@@ -34,7 +34,8 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
         theme: ThemeChoice::Light,
         repos: vec![project.clone()],
         current: Some(project.clone()),
-        console_open: true,
+        // Draft opens the console itself.
+        console_open: std::env::var_os("SNOUT_E2E_DRAFT").is_none(),
         follow_claude: true,
         claude_path: Some(claude.clone()),
         ..Settings::default()
@@ -96,6 +97,51 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
                 std::thread::sleep(Duration::from_millis(15));
             }
         };
+
+    // Draft, with the real agent: `SNOUT_E2E_DRAFT=1`, a project with something to commit, and
+    // a folder Claude has not been told to trust, so its question comes first. Draft must wait
+    // for the answer, then get the message through the editor's API. The console starts closed.
+    if std::env::var_os("SNOUT_E2E_DRAFT").is_some() {
+        use snout_app::model::Action;
+        pump(&mut cx, 1_500);
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::Refresh, cx)));
+        wait(&mut cx, "the change", 20, &mut |cx| cx.update(|cx| model.read(cx).can_draft()));
+        cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::DraftMessage, cx)));
+        wait(&mut cx, "the agent to print", 60, &mut |cx| !session(cx).trim().is_empty());
+        pump(&mut cx, 4_000);
+        shoot(&mut cx, "e2e-draft-1-waiting");
+        let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
+        if snout_app::console::asks_the_user(&session(&mut cx)) {
+            println!("e2e: it asks first, and the prompt has not gone");
+            assert!(!cx.update(|cx| model.read(cx).draft.as_ref().is_some_and(|d| d.sent)));
+            // Answer as the user would: down to "Yes, I trust this folder", Return.
+            cx.update(|cx| console.read(cx).send_keys(&project, b"\x1b[B"));
+            pump(&mut cx, 500);
+            cx.update(|cx| console.read(cx).send_keys(&project, b"\r"));
+            pump(&mut cx, 3_000);
+        }
+        let start = Instant::now();
+        while cx.update(|cx| model.read(cx).draft.is_some()) {
+            if start.elapsed() > Duration::from_secs(180) {
+                shoot(&mut cx, "e2e-draft-timeout");
+                println!("{}", session(&mut cx));
+                panic!("e2e: no message after 180 s");
+            }
+            pump(&mut cx, 500);
+            // A permission question would be the user's to answer: say so, it is what we test.
+            if snout_app::console::asks_the_user(&session(&mut cx)) {
+                println!("e2e: the agent asks:\n{}", session(&mut cx));
+                shoot(&mut cx, "e2e-draft-asks");
+                panic!("e2e: the agent asked for leave");
+            }
+        }
+        pump(&mut cx, 800);
+        shoot(&mut cx, "e2e-draft-2-done");
+        let (message, status) = cx.update(|cx| (model.read(cx).commit_msg.clone(), model.read(cx).message.clone()));
+        println!("e2e: status: {status}\ne2e: message:\n{message}\n---\n{}", session(&mut cx));
+        assert!(!message.trim().is_empty(), "the message is in the box");
+        return;
+    }
 
     // Claude starts in the console and connects.
     wait(&mut cx, "Claude to connect", 120, &mut |cx| {

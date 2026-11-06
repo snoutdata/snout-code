@@ -431,6 +431,20 @@ fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Conte
             })
             .detach();
         }
+        "getCommitChange" => match ws.model.read(cx).draft.as_ref() {
+            Some(ask) => reply.ok(tools::text(ask.brief.clone())),
+            None => reply.error(TOOL_ERROR, "SnoutCode is not waiting for a commit message", None),
+        },
+        "setCommitMessage" => {
+            let Some(message) = a.get("message").and_then(Value::as_str) else {
+                return reply.error(INVALID_PARAMS, "Invalid params", Some("Missing message parameter".into()));
+            };
+            let name = agents::console_agent(cx).short;
+            match ws.model.update(cx, |m, cx| m.take_draft(message, &name, cx)) {
+                Ok(()) => reply.ok(tools::text("The message is in the commit box")),
+                Err(e) => reply.error(TOOL_ERROR, &e, None),
+            }
+        }
         "close_tab" => {
             let Some(tab) = a.get("tab_name").and_then(Value::as_str) else {
                 return reply.error(
@@ -928,6 +942,64 @@ pub fn ask_to_fix(
     }
 }
 
+/// The prompt that asks an agent for the commit message, naming the script `api` that reaches
+/// this window. One line: it goes in as a paste, then Return.
+pub fn draft_prompt(api: &Path) -> String {
+    let api = shell_word(&api.to_string_lossy());
+    format!(
+        "Draft a commit message for my change. Run `{api} getCommitChange`: it prints the change and how to \
+         write the message. Then put the message in my commit box with `{api} setCommitMessage \
+         '{{\"message\":\"...\"}}'` (JSON in single quotes: newlines as \\n, apostrophes as \\u0027). Run only those \
+         two commands. Do not edit files or commit."
+    )
+}
+
+/// `word` as one word of a shell command: as it is when it can be.
+fn shell_word(word: &str) -> String {
+    if word.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@%".contains(c)) {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
+}
+
+/// How long after the agent's turn ends its message may still arrive.
+const DRAFT_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// The draft in [`crate::model::Model::draft`]: bring up the console as its toolbar button does,
+/// and the agent if it is not running, and ask it. The keyboard stays where it is, and the
+/// message comes back through the editor's API.
+pub fn ask_for_draft(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    let Some(root) = ws.model.read(cx).draft.as_ref().map(|d| d.root.clone()) else { return };
+    // The message lands in the Git view's commit box.
+    ws.show_activity(crate::panels::Activity::Git, window, cx);
+    let api = ws.claude.as_ref().and_then(|b| b.settings_dir.as_deref()).map(super::api::script);
+    let console = crate::console::console_of(ws, cx);
+    let (Some(api), Some(console)) = (api, console) else {
+        let why = "SnoutCode cannot reach the agent in this window. Close the project and open it again.";
+        ws.model.update(cx, |m, cx| m.draft_stuck(why.to_owned(), cx));
+        return;
+    };
+    if !ws.model.read(cx).settings.console_open {
+        ws.model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx));
+    }
+    console.update(cx, |c, cx| {
+        c.ensure_session(&root, window, cx);
+        c.send_when_ready(&root, &draft_prompt(&api), cx);
+        let name = c.session_agent(&root, cx).short;
+        c.show_note(format!("Asked {name} for the commit message"), cx);
+    });
+}
+
+/// The draft for `root` was stopped: the prompt does not go, or the turn it began stops.
+pub fn stop_draft(ws: &mut Workspace, root: &Path, cx: &mut Context<Workspace>) {
+    if let Some(console) = crate::console::console_of(ws, cx) {
+        console.update(cx, |c, _| {
+            c.take_back(root);
+        });
+    }
+}
+
 /// Show the Claude Code console and give it the keyboard.
 fn show_console(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     if !ws.model.read(cx).settings.console_open {
@@ -1303,6 +1375,9 @@ pub fn on_hook(ws: &mut Workspace, e: HookEvent, window: &mut Window, cx: &mut C
             b.hooks_heard = Some(Instant::now());
         }
         b.heard.insert(e.agent);
+    }
+    if matches!(e.kind, HookKind::TurnComplete | HookKind::Stop) {
+        ws.model.update(cx, |m, cx| m.draft_turn_ended(DRAFT_GRACE, cx));
     }
     let changes = changes_of(ws, cx);
     match e.kind {

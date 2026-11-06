@@ -51,7 +51,7 @@ Your own agent has nothing to install: until it has a command, the console offer
 
 ## The console
 
-- Press ⌘J, choose View ▸ Agent Console, or click the console on the tool window stripe. In the Git view, the **Claude** button does the same.
+- Press ⌘J, choose View ▸ Agent Console, or click the console on the tool window stripe. In the Git view, the toolbar button named after the agent (**Claude**, **Codex**, and so on) does the same.
 - The console opens in the bottom dock, beside the **Terminal** tab (your login shell in the project, see [Terminal](terminal.md)). To keep it on the left or the right instead, [move it](tool-windows.md#move-a-tool-window): Options (the three dots) in its header, **Move to**.
 - Press ⌘J again, or click **Hide** (the minus) in its header, to hide it. It hides where it is: on the right, the right dock closes and the bottom dock stays as it was; on the left, the Project view comes back. In the Git view, × in the console's row hides it. The session keeps running.
 - With the console open but behind another window of its dock, ⌘J brings it to the front.
@@ -260,9 +260,11 @@ Pick it in the console and press **Install**, or install it yourself with `curl 
 
 ## Draft a commit message
 
-In the Git view's Commit pane, click **Draft** (or choose Git ▸ Draft Commit Message). Claude Code writes the message from what the commit would record, matching the style of the repository's recent commit subjects and building on anything you already typed. Click **Stop** to cancel.
+In the Git view's Commit pane, click **Draft** (or choose Git ▸ Draft Commit Message). The agent in the console writes the message from what the commit would record, matching the style of the repository's recent commit subjects and building on anything you already typed. Click **Stop** to cancel.
 
-Draft runs `claude` on its own in print mode, with its tools turned off, and sends it the patch. It does not touch the console's session. See [Git](git.md).
+Whichever agent you picked does it, in its session, where you can watch: the console opens if it is closed, and the agent starts if it is not running. SnoutCode types the request and presses Return once the agent is free, never over a question it is asking you. The agent gets the change from SnoutCode and hands the message back through the [editor API](editor-api.md), so the keyboard stays where you were typing.
+
+Claude Code may run these calls without asking. Codex's sandbox blocks local network calls by default, so it may ask you to allow them. See [Git](git.md).
 
 ## On a remote machine
 

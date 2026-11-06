@@ -1,7 +1,7 @@
 //! The Git view: when Git is picked in the activity bar, everything right of the bar is the
 //! egui app's window, pane for pane: the toolbar; the repositories and branches on the
 //! left; the changed files, the commit box, the diff and the Journal in the middle (or the
-//! commit picked in the Journal); the Claude Code console on the right; the status bar.
+//! commit picked in the Journal); the agent's console on the right; the status bar.
 //! Same palette, typefaces, sizes, drawings and proportions.
 
 use std::collections::HashSet;
@@ -30,6 +30,7 @@ use snout_core::{
 use crate::art::{drawing, glyph};
 use crate::components::{
     Column, RowState, TableColumns, file_label, path_text, state_pill, state_pills, table, table_header, table_row,
+    tight_state_pills,
 };
 use crate::look::{self, BODY, MONO, MONO_SIZE, Trigger, pane, separator, title, weak};
 use crate::model::{Action, Model, ModelEvent, SortColumn, StartPoint};
@@ -68,6 +69,69 @@ impl Split {
         }
     }
 }
+
+/// The widths of the view's columns in a window of its size, whatever was dragged. A left
+/// of 0 leaves the left column out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fitted {
+    left: f32,
+    console: f32,
+    commit: f32,
+    middle: f32,
+}
+
+/// Fit the left column, the console and the commit box to `width`: the panes in the middle
+/// get about 640 points, from the console first and then from the left column, each down
+/// to what it still needs. Where that leaves the middle too little to work in, the left
+/// column steps aside while the console is open (the project menu still switches projects).
+/// The commit box takes at most 45 % of the middle, and leaves the Files table its room.
+/// What the user dragged stays, for when the window grows.
+fn fit_columns(width: f32, left: f32, console: f32, commit: f32, console_open: bool) -> Fitted {
+    const MIDDLE: f32 = 640.;
+    const MIDDLE_LEAST: f32 = 400.;
+    const LEFT_LEAST: f32 = 210.;
+    const CONSOLE_LEAST: f32 = 320.;
+    const COMMIT_LEAST: f32 = 220.;
+    const FILES_LEAST: f32 = 240.;
+    let console = console.min((width - left - MIDDLE).max(CONSOLE_LEAST));
+    let taken = if console_open { console } else { 0. };
+    let left = left.min((width - taken - MIDDLE).max(LEFT_LEAST));
+    let left = if console_open && width - left - taken < MIDDLE_LEAST { 0. } else { left };
+    let middle = width - left - taken;
+    let commit = commit.min((middle * 0.45).max(COMMIT_LEAST)).min((middle - FILES_LEAST).max(middle * 0.4));
+    Fitted { left, console, commit, middle }
+}
+
+/// The heights of the view's rows in a window of its size, whatever was dragged.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FittedRows {
+    branches: f32,
+    changes: f32,
+    journal: f32,
+    commit_changes: f32,
+}
+
+/// Fit the rows to `body`, the height under the toolbar: the Files table and the commit box
+/// always get their room, from Changes first and then from the Journal, and the repositories
+/// keep half the left column.
+fn fit_rows(body: f32, branches: f32, changes: f32, journal: f32, commit_changes: f32) -> FittedRows {
+    const TOP_LEAST: f32 = 210.;
+    const CHANGES_LEAST: f32 = 100.;
+    const JOURNAL_LEAST: f32 = 70.;
+    const COMMIT_TOP_LEAST: f32 = 200.;
+    let changes = changes.min((body - journal - TOP_LEAST).max(CHANGES_LEAST));
+    let journal = journal.min((body - changes - TOP_LEAST).max(JOURNAL_LEAST));
+    let commit_changes = commit_changes.min((body - journal - COMMIT_TOP_LEAST).max(CHANGES_LEAST));
+    FittedRows { branches: branches.min(body * 0.5), changes, journal, commit_changes }
+}
+
+/// What the title bar, the toolbar, the status bar and the gaps take from the window's height.
+const CHROME_H: f32 = 110.;
+
+/// What a pane's frame and the gaps round it take from the width of a table inside it.
+const PANE_FRAME: f32 = 14.;
+/// Below this, the middle's diff controls drop their words for their icons.
+const DIFF_WORDS_W: f32 = 760.;
 
 /// Pane sizes, as the egui app's panels start out (frames and margins included).
 struct Sizes {
@@ -136,6 +200,11 @@ pub struct GitView {
     narrow_commit: bool,
     /// The width of the middle column, for what fits beside the Journal's tabs.
     middle_w: f32,
+    /// The columns as laid out by the last frame: a drag starts from what shows.
+    fitted: Option<Fitted>,
+    rows: Option<FittedRows>,
+    /// The window's width less the stripes, for the toolbar's words.
+    width: f32,
     /// The tables' columns, as sized by hand.
     file_columns: Entity<TableColumns>,
     commit_columns: Entity<TableColumns>,
@@ -155,9 +224,9 @@ pub struct GitView {
 
 fn file_columns(state_w: f32) -> Vec<Column> {
     vec![
-        Column::new("Name", Some(260.)).min(120.),
-        Column::new("State", Some(state_w)).min(80.),
-        Column::new("Relative Directory", None),
+        Column::new("Name", Some(260.)).min(80.),
+        Column::new("State", Some(state_w)).min(92.),
+        Column::new("Relative Directory", None).min(60.).drop_below(370.),
     ]
 }
 const DIFF_ROW: f32 = 17.;
@@ -219,6 +288,8 @@ impl GitView {
         })
         .detach();
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
+        // The toolbar's button names the console's agent.
+        cx.observe_global::<crate::agents::ConsoleAgentNow>(|_, cx| cx.notify()).detach();
         let text = model.read(cx).commit_msg.clone();
         message.update(cx, |s, cx| s.set_value(text, window, cx));
         Self {
@@ -235,15 +306,18 @@ impl GitView {
             dragging: None,
             narrow_commit: false,
             middle_w: 1000.,
+            fitted: None,
+            rows: None,
+            width: 1400.,
             file_columns: TableColumns::new(file_columns(170.), cx),
             commit_columns: TableColumns::new(file_columns(130.), cx),
             journal_columns: TableColumns::new(
                 vec![
                     Column::new("", Some(14.)),
-                    Column::new("Message", None),
-                    Column::new("Author", Some(160.)).min(60.),
-                    Column::new("Date", Some(130.)).min(60.),
-                    Column::new("SHA", Some(80.)).min(50.),
+                    Column::new("Message", None).min(300.),
+                    Column::new("Author", Some(160.)).min(70.).drop_below(500.),
+                    Column::new("Date", Some(130.)).min(110.),
+                    Column::new("SHA", Some(80.)).min(60.).drop_below(440.),
                 ],
                 cx,
             ),
@@ -259,6 +333,11 @@ impl GitView {
     /// The commit box's width as dragged (before the 45 % cap).
     pub fn commit_width(&self) -> f32 {
         self.sizes.commit
+    }
+
+    /// How wide the commit's details are: never more than half the middle.
+    fn details_width(&self) -> f32 {
+        self.sizes.details.min((self.middle_w * 0.5).max(200.))
     }
 
     /// The Files table's column widths, as sized by hand.
@@ -298,7 +377,17 @@ impl GitView {
                 MouseButton::Left,
                 cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                     let at = if horizontal { e.position.x } else { e.position.y };
-                    let size = *this.sizes.get(split);
+                    let size = match (split, this.fitted, this.rows) {
+                        (Split::Left, Some(f), _) => f.left,
+                        (Split::Console, Some(f), _) => f.console,
+                        (Split::Commit, Some(f), _) => f.commit,
+                        (Split::Details, ..) => this.details_width(),
+                        (Split::Branches, _, Some(r)) => r.branches,
+                        (Split::Changes, _, Some(r)) => r.changes,
+                        (Split::Journal, _, Some(r)) => r.journal,
+                        (Split::CommitChanges, _, Some(r)) => r.commit_changes,
+                        _ => *this.sizes.get(split),
+                    };
                     this.dragging = Some((split, f32::from(at), size));
                     cx.stop_propagation();
                 }),
@@ -334,17 +423,31 @@ impl GitView {
             0 => "Push".to_owned(),
             n => format!("Push ({n})"),
         };
-        let console = if m.settings.console_open { "Hide Claude" } else { "Claude" };
+        let agent = crate::agents::console_agent(cx);
+        let console: SharedString =
+            if m.settings.console_open { format!("Hide {}", agent.short).into() } else { agent.short.clone() };
+        let console_tip = format!("{} console in this repository (⌘J)", agent.name);
+        // Words while they fit; then the first buttons, GitHub and the agent keep theirs;
+        // then icons alone. A word gone moves to the button's tooltip.
+        let words = |s: &str| s.chars().count() as f32 * 7.5;
+        let longer = words(&console) + words(&push) - words("Push");
+        let (all_words, main_words) = (self.width >= 1222. + longer, self.width >= 820. + longer);
         let theme = m.settings.theme;
         let has_github = m.github_url.is_some();
         let github_tip = m.github_url.clone().unwrap_or_else(|| "No GitHub remote".into());
         let model = self.model.clone();
         let tool = |id: &'static str, g: Glyph, label: String, enabled: bool, tip: &'static str, action: Action| {
-            let b = look::glyph_button(id, g, label, enabled, &p);
+            let word = all_words || (main_words && matches!(id, "tb-open" | "tb-pull" | "tb-fetch" | "tb-push"));
+            let tip = match (word, tip.is_empty()) {
+                (true, _) => tip.to_owned(),
+                (false, true) => label.trim_end_matches('…').to_owned(),
+                (false, false) => format!("{}: {tip}", label.trim_end_matches('…')),
+            };
+            let b = look::glyph_button(id, g, if word { label } else { String::new() }, enabled, &p);
             let b = if tip.is_empty() {
                 b
             } else {
-                b.tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(tip)).build(w, cx))
+                b.tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(&tip)).build(w, cx))
             };
             b.when(enabled, |b| b.on_click(self.on_click(action)))
         };
@@ -418,18 +521,15 @@ impl GitView {
                 },
             ))
             .child(
-                look::glyph_button("tb-github", Glyph::Web, "GitHub", has_github, &p)
+                look::glyph_button("tb-github", Glyph::Web, if main_words { "GitHub" } else { "" }, has_github, &p)
                     .tooltip(move |w, cx| Tooltip::new(github_tip.clone()).build(w, cx))
                     .when(has_github, |b| b.on_click(self.on_click(Action::OpenGithub))),
             )
-            .child(tool(
-                "tb-claude",
-                Glyph::Spark,
-                console.into(),
-                true,
-                "Claude Code console in this repository (⌘J)",
-                Action::ToggleConsole,
-            ))
+            .child(
+                look::glyph_button("tb-claude", Glyph::Spark, if main_words { console } else { "".into() }, true, &p)
+                    .tooltip(move |w, cx| Tooltip::new(crate::keymap::shown(&console_tip)).build(w, cx))
+                    .on_click(self.on_click(Action::ToggleConsole)),
+            )
             .into_any_element()
     }
 
@@ -540,6 +640,8 @@ impl GitView {
     }
 
     fn branch_row(&mut self, b: &Branch, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        // In a narrow column the branch's bold name says it is the current one.
+        let room_for_head = self.fitted.is_none_or(|f| f.left >= 240.);
         let label = match b.kind {
             BranchKind::Local => b.name.clone(),
             BranchKind::Remote => b.local_name().to_owned(),
@@ -605,7 +707,9 @@ impl GitView {
                     .when(ahead > 0, |d| d.child(crate::components::dim(format!("↑{ahead}"), p)))
                     .when(behind > 0, |d| d.child(crate::components::dim(format!("↓{behind}"), p)))
                     .when(gone, |d| d.child(crate::components::badge("gone", crate::components::Tone::Warning, p)))
-                    .when(b.is_head, |d| d.child(crate::components::badge("HEAD", crate::components::Tone::Git, p)))
+                    .when(b.is_head && room_for_head, |d| {
+                        d.child(crate::components::badge("HEAD", crate::components::Tone::Git, p))
+                    })
                     .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
                         if e.click_count() == 2 && !b1.is_head {
                             this.send(Action::RequestCheckout((&b1).into()), cx);
@@ -719,6 +823,7 @@ impl GitView {
         let p = palette(cx);
         let m = self.model.read(cx);
         let summary = format!("{} changed, {} staged", m.status.files.len(), m.status.staged_count());
+        let files_w = self.fitted.map_or(f32::MAX, |f| f.middle - f.commit);
         let dir = m.dir_filter.clone();
         let clean = m.status.files.is_empty();
         let clean_text = match &m.status.branch.head {
@@ -737,7 +842,7 @@ impl GitView {
             .items_center()
             .gap(px(8.))
             .child(title("Files"))
-            .child(weak(summary, &p))
+            .when(files_w >= 340., |d| d.child(weak(summary, &p)))
             .when_some(dir, |d, dir| {
                 d.child(
                     look::small_button("dir-chip", crate::components::IconName::FolderX, format!("in {dir}/"), &p)
@@ -762,7 +867,9 @@ impl GitView {
                 })),
                 cx,
             );
-            let widths = self.file_columns.read(cx).widths();
+            let widths = self.file_columns.read(cx).shown();
+            let tight_pills = widths[1].is_some_and(|w| w < 130.);
+            let no_directory = widths[2] == Some(0.);
             let focused = self.focused.0;
             let lead = m.anchor.clone();
             let list = uniform_list("files", rows.len(), move |range, _, cx| {
@@ -776,11 +883,20 @@ impl GitView {
                         let (path, f2) = (f.path.clone(), f.clone());
                         let cells = vec![
                             file_label(f.file_name().to_owned(), &p).into_any_element(),
-                            state_pills(&file_pills(f), &p).into_any_element(),
+                            if tight_pills {
+                                tight_state_pills(&file_pills(f), &p)
+                            } else {
+                                state_pills(&file_pills(f), &p)
+                            }
+                            .into_any_element(),
                             path_text(("file-dir", i), f.directory().to_owned(), p.fg_dim).into_any_element(),
                         ];
                         let state = RowState::new(is_selected, focused).lead(lead.as_deref() == Some(f.path.as_str()));
+                        let full_path = f.path.clone();
                         table_row(("file", i), state, &widths, cells, &p)
+                            .when(no_directory, |r| {
+                                r.tooltip(move |w, cx| Tooltip::new(full_path.clone()).build(w, cx))
+                            })
                             .on_click({
                                 let model = model.clone();
                                 move |e: &ClickEvent, _, cx| {
@@ -908,12 +1024,19 @@ impl GitView {
         let m = self.model.read(cx);
         let scope = m.commit_scope();
         let has_changes = m.repo.is_some() && scope != snout_core::Scope::Nothing;
-        let drafting = m.draft.is_some();
+        let drafting = m.drafting();
+        let agent = crate::agents::console_agent(cx).short;
+        let waiting: SharedString =
+            if m.draft.as_ref().is_some_and(|d| d.asking) { "See console".into() } else { "Writing\u{2026}".into() };
         let can_commit = m.can_commit();
         let amend = m.amend;
         let has_log = !m.log.is_empty();
         let draft_tip: SharedString = if has_changes {
-            format!("Claude Code writes the message from {}, building on anything you typed", scope.what()).into()
+            format!(
+                "{agent} writes the message from {}, building on anything you typed. If it is not running, it starts in the console.",
+                scope.what()
+            )
+            .into()
         } else {
             "Nothing to commit".into()
         };
@@ -927,10 +1050,12 @@ impl GitView {
             .child(title("Commit"))
             .child(div().flex_1())
             .when(drafting, |d| {
-                d.child(Spinner::new().xsmall()).child(
-                    look::chip_button("stop-draft", Glyph::Close, "Stop", true, &p)
-                        .on_click(self.on_click(Action::CancelDraft)),
-                )
+                d.child(div().min_w_0().truncate().text_size(px(11.5)).text_color(p.fg_dim).child(waiting))
+                    .child(Spinner::new().xsmall())
+                    .child(
+                        look::chip_button("stop-draft", Glyph::Close, "Stop", true, &p)
+                            .on_click(self.on_click(Action::CancelDraft)),
+                    )
             })
             .when(!drafting, |d| {
                 d.child(
@@ -939,7 +1064,7 @@ impl GitView {
                         .when(has_changes, |b| b.on_click(self.on_click(Action::DraftMessage))),
                 )
             });
-        let message = div().flex_1().min_h_0().p(px(8.)).child(
+        let message = div().flex_1().min_h_0().overflow_hidden().p(px(8.)).child(
             div()
                 .size_full()
                 .bg(p.input)
@@ -948,11 +1073,20 @@ impl GitView {
                 .rounded(px(6.))
                 .child(Textarea::new(&self.message).appearance(false).small().h_full().text_size(px(BODY))),
         );
-        let amend_box = look::checkbox("amend", "Amend last commit", amend, has_log, &p).when(has_log, |c| {
+        // In a very narrow box the words give way to the buttons.
+        let tiny = self.fitted.is_some_and(|f| f.commit < 200.);
+        let amend_box = look::checkbox("amend", if tiny { "Amend" } else { "Amend last commit" }, amend, has_log, &p);
+        let amend_box = amend_box.when(has_log, |c| {
             c.on_click(cx.listener(move |this, _, _, cx| this.model.update(cx, |m, cx| m.set_amend(!amend, cx))))
         });
-        let commit =
-            div().flex_1().flex().items_center().justify_end().gap(px(8.)).child(weak(scope.label(), &p)).child(
+        let commit = div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(8.))
+            .when(!tiny, |d| d.child(weak(scope.label(), &p)))
+            .child(
                 look::primary_button("commit", crate::components::IconName::Check, "Commit", can_commit, &p)
                     .tooltip(move |w, cx| Tooltip::new(commit_tip.clone()).build(w, cx))
                     .when(can_commit, |b| b.on_click(self.on_click(Action::Commit))),
@@ -1030,7 +1164,7 @@ impl GitView {
             .child(div().flex_1())
             .child(compare)
             .child(look::vseparator(&p))
-            .child(diff_controls(&self.model, cx));
+            .child(diff_controls(&self.model, self.middle_w < DIFF_WORDS_W, cx));
         let body = if base == DiffBase::HeadToIndex && m.status.staged_count() == 0 && m.diff.is_none() {
             look::art_note(
                 snout_core::art::spots::nothing_staged(),
@@ -1087,12 +1221,8 @@ impl GitView {
             )
             .child(div().flex_1())
             .when(tab == BottomTab::Journal, |d| {
-                d.when(hint, |d| d.child(weak("Click a commit to see what it changed", &p))).child(look::field(
-                    &self.journal_filter,
-                    true,
-                    Some(240.),
-                    &p,
-                ))
+                d.when(hint, |d| d.child(weak("Click a commit to see what it changed", &p)))
+                    .child(look::field(&self.journal_filter, true, Some(240.), &p).flex_shrink(1.).min_w(px(80.)))
             })
             .when(tab == BottomTab::Output, |d| {
                 d.child(look::small_button("clear-output", crate::components::IconName::Eraser, "Clear", &p).on_click(
@@ -1138,7 +1268,7 @@ impl GitView {
         let shown = m.commit_view.as_ref().and_then(|v| v.id()).map(str::to_owned);
         let model = self.model.clone();
         self.journal_columns.update(cx, |c, _| c.fit(0, graph_w));
-        let columns = self.journal_columns.read(cx).widths();
+        let columns = self.journal_columns.read(cx).shown();
         let focused = self.focused.2;
         // A commit picked elsewhere (an editor's annotations) scrolls into sight.
         if shown != self.journal_shown {
@@ -1187,9 +1317,10 @@ impl GitView {
                         div()
                             .flex()
                             .items_center()
+                            .min_w_0()
                             .gap(px(8.))
                             .children(c.refs.iter().map(|r| look::ref_badge(r, &p)))
-                            .child(c.summary.clone())
+                            .child(div().min_w_0().truncate().child(c.summary.clone()))
                             .into_any_element(),
                         crate::components::dim(c.author.clone(), &p).into_any_element(),
                         crate::components::dim(c.date.clone(), &p).into_any_element(),
@@ -1290,7 +1421,8 @@ impl GitView {
         let root = m.repo.as_ref().map(|r| r.root().to_owned());
         let selected = view.selected.clone();
         let rows = d.files.clone();
-        let widths = self.commit_columns.read(cx).widths();
+        let widths = self.commit_columns.read(cx).shown();
+        let no_directory = widths[2] == Some(0.);
         let focused = self.focused.1;
         let list = uniform_list("commit-files", rows.len(), {
             let model = model.clone();
@@ -1310,7 +1442,11 @@ impl GitView {
                             state_pill(change_pill(f.change), &p).into_any_element(),
                             path_text(("cfile-dir", i), dir, p.fg_dim).into_any_element(),
                         ];
+                        let full_path = f.path.clone();
                         table_row(("cfile", i), RowState::new(is_sel, focused), &widths, cells, &p)
+                            .when(no_directory, |r| {
+                                r.tooltip(move |w, cx| Tooltip::new(full_path.clone()).build(w, cx))
+                            })
                             .on_click({
                                 let (model, path) = (model.clone(), path.clone());
                                 move |_, _, cx| model.update(cx, |m, cx| m.select_commit_file(path.clone(), cx))
@@ -1493,7 +1629,7 @@ impl GitView {
                     .child(title("Changes"))
                     .child(diff_title(view.diff.as_ref(), &p))
                     .child(div().flex_1())
-                    .child(diff_controls(&self.model, cx)),
+                    .child(diff_controls(&self.model, self.middle_w < DIFF_WORDS_W, cx)),
             )
             .child(separator(&p))
             .child(diff_body(
@@ -1506,7 +1642,8 @@ impl GitView {
             ));
 
         let s = &self.sizes;
-        let (details_w, changes_h) = (s.details, s.commit_changes);
+        let changes_h = self.rows.map_or(s.commit_changes, |r| r.commit_changes);
+        let details_w = self.details_width();
         div()
             .size_full()
             .flex()
@@ -1570,18 +1707,32 @@ impl Render for GitView {
         let has_repo = m.repo.is_some();
         let in_commit = m.commit_view.is_some();
         let console_open = m.settings.console_open;
+        let width = f32::from(window.viewport_size().width) - crate::workspace::ACTIVITY_W;
+        self.width = width;
         let toolbar = self.toolbar(cx);
         let s = &self.sizes;
-        let (left_w, branches_h, commit_w, changes_h, journal_h, console_w) =
-            (s.left, s.branches, s.commit, s.changes, s.journal, s.console);
-        // As in the egui app: the console never so wide that the panes in the middle get
-        // less than about 600 points, the commit box at most 45 % of what is left.
-        let width = f32::from(window.viewport_size().width) - crate::workspace::ACTIVITY_W;
-        let console_w = console_w.min((width - 860.).max(360.));
-        let middle = width - left_w - if console_open { console_w } else { 0. };
-        let commit_w = commit_w.min((middle * 0.45).max(220.));
+        let body = f32::from(window.viewport_size().height) - CHROME_H;
+        let rows = fit_rows(body, s.branches, s.changes, s.journal, s.commit_changes);
+        let FittedRows { branches: branches_h, changes: changes_h, journal: journal_h, .. } = rows;
+        let fitted = fit_columns(width, s.left, s.console, s.commit, console_open);
+        let Fitted { left: left_w, console: console_w, commit: commit_w, middle } = fitted;
         self.narrow_commit = commit_w < 364.;
         self.middle_w = middle;
+        self.fitted = Some(fitted);
+        self.rows = Some(rows);
+        // The tables know their room, so their columns give way rather than run off the pane.
+        // The Files table keeps the words of two pills while it can.
+        let details_w = self.details_width();
+        let files_room = middle - commit_w - PANE_FRAME;
+        self.file_columns.update(cx, |c, _| {
+            c.set_min(1, if files_room < 290. { 92. } else { 132. });
+            c.fit_room(files_room);
+        });
+        self.commit_columns.update(cx, |c, _| {
+            c.set_min(1, 92.);
+            c.fit_room(middle - details_w - PANE_FRAME);
+        });
+        self.journal_columns.update(cx, |c, _| c.fit_room(middle - PANE_FRAME));
 
         let left = div()
             .flex_none()
@@ -1656,8 +1807,7 @@ impl Render for GitView {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .child(left)
-                    .child(self.handle(Split::Left, cx))
+                    .when(left_w > 0., |d| d.child(left).child(self.handle(Split::Left, cx)))
                     .child(div().flex_1().min_w_0().h_full().px(px(5.)).flex().flex_col().child(center))
                     .when_some(console, |d, c| d.child(self.handle(Split::Console, cx)).child(c)),
             )
@@ -1677,16 +1827,16 @@ fn diff_title(diff: Option<&Result<Rc<DiffLayout>, String>>, p: &Palette) -> Any
         .min_w_0()
         .overflow_hidden()
         .whitespace_nowrap()
-        .child(div().font_family(MONO).text_size(px(MONO_SIZE)).child(d.path.clone()))
+        .child(div().min_w_0().truncate().font_family(MONO).text_size(px(MONO_SIZE)).child(d.path.clone()))
         .when(!d.binary && !d.too_large, |e| {
-            e.child(div().text_color(p.added).child(format!("+{}", d.additions)))
-                .child(div().text_color(p.removed).child(format!("−{}", d.deletions)))
+            e.child(div().flex_none().text_color(p.added).child(format!("+{}", d.additions)))
+                .child(div().flex_none().text_color(p.removed).child(format!("−{}", d.deletions)))
         })
         .into_any_element()
 }
 
 /// Layout toggles shared by every diff.
-fn diff_controls(model: &Entity<Model>, cx: &App) -> AnyElement {
+fn diff_controls(model: &Entity<Model>, narrow: bool, cx: &App) -> AnyElement {
     let p = palette(cx);
     let s = &model.read(cx).settings;
     let (sbs, compact) = (s.side_by_side, s.compact);
@@ -1696,24 +1846,32 @@ fn diff_controls(model: &Entity<Model>, cx: &App) -> AnyElement {
             model.update(cx, |m, cx| m.set_diff_options(side, compact, cx))
         }
     };
+    use crate::components::IconName;
+    // Its word when there is room; in a tight pane its icon, the word in its tooltip.
+    let toggle = |id: &'static str, ico: IconName, word: &'static str, on: bool| {
+        if narrow {
+            look::icon_toggle(id, ico, on, &p).tooltip(move |w, cx| Tooltip::new(word).build(w, cx))
+        } else {
+            look::toggle(id, ico, word, on, &p)
+        }
+    };
     div()
+        .flex_none()
         .flex()
         .items_center()
-        .gap(px(8.))
-        .child(
-            look::toggle("uni", crate::components::IconName::Rows2, "Unified", !sbs, &p)
-                .on_click(set(Some(false), None)),
-        )
-        .child(
-            look::toggle("sbs", crate::components::IconName::Columns2, "Side by Side", sbs, &p)
-                .on_click(set(Some(true), None)),
-        )
+        .gap(px(if narrow { 2. } else { 8. }))
+        .child(toggle("uni", IconName::Rows2, "Unified", !sbs).on_click(set(Some(false), None)))
+        .child(toggle("sbs", IconName::Columns2, "Side by Side", sbs).on_click(set(Some(true), None)))
         .child(look::vseparator(&p))
-        .child(
-            look::toggle("compact", crate::components::IconName::FoldVertical, "Compact", compact, &p)
+        .child(if narrow {
+            look::icon_toggle("compact", IconName::FoldVertical, compact, &p)
+                .tooltip(|w, cx| Tooltip::new("Compact: hide unchanged lines away from changes").build(w, cx))
+                .on_click(set(None, Some(!compact)))
+        } else {
+            look::toggle("compact", IconName::FoldVertical, "Compact", compact, &p)
                 .tooltip(|w, cx| Tooltip::new("Hide unchanged lines away from changes").build(w, cx))
-                .on_click(set(None, Some(!compact))),
-        )
+                .on_click(set(None, Some(!compact)))
+        })
         .into_any_element()
 }
 
@@ -1944,4 +2102,45 @@ pub(crate) fn wordmark(p: &Palette) -> impl IntoElement {
             .inset_0(),
         ),
     )
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::{fit_columns, fit_rows};
+
+    #[test]
+    fn with_the_console_open_the_middle_keeps_its_room() {
+        // A large window: everything as dragged.
+        let f = fit_columns(2000., 260., 680., 380., true);
+        assert_eq!((f.left, f.console, f.commit), (260., 680., 380.));
+        // 1400 wide, less the stripes: the console gives way, not the left column.
+        let f = fit_columns(1320., 260., 680., 380., true);
+        assert_eq!((f.left, f.middle), (260., 640.));
+        assert!(f.console >= 320.);
+        // Smaller: the left column gives way too, and the Files table keeps its room.
+        let f = fit_columns(1020., 260., 680., 380., true);
+        assert_eq!((f.left, f.console), (210., 320.));
+        assert!(f.middle - f.commit >= 240.);
+        // The smallest window: the left column steps aside while the console is open.
+        let f = fit_columns(720., 260., 680., 380., true);
+        assert_eq!((f.left, f.middle), (0., 400.));
+        let f = fit_columns(720., 260., 680., 380., false);
+        assert!(f.left > 0.);
+        assert_eq!(f.middle, 720. - f.left);
+    }
+
+    #[test]
+    fn files_and_the_commit_box_keep_their_height() {
+        // Tall: as dragged.
+        let r = fit_rows(1200., 360., 340., 190., 380.);
+        assert_eq!((r.branches, r.changes, r.journal, r.commit_changes), (360., 340., 190., 380.));
+        // 750 tall: Changes gives way first.
+        let r = fit_rows(640., 360., 340., 190., 380.);
+        assert_eq!(r.journal, 190.);
+        assert!(640. - r.changes - r.journal >= 210.);
+        // 500 tall, the smallest: the top row still has its room.
+        let r = fit_rows(390., 360., 340., 190., 380.);
+        assert!(390. - r.changes - r.journal >= 210.);
+        assert!(r.branches <= 195.);
+    }
 }

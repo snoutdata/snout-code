@@ -32,7 +32,7 @@ impl ThemeChoice {
     }
 }
 
-/// The colour theme, each in light and dark (see `theme`).
+/// The colour theme, in light and dark, or dark alone (see `theme`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ColorTheme {
     /// Warm, after Snout Studio: cream and walnut grounds, a terracotta or amber accent.
@@ -44,10 +44,24 @@ pub enum ColorTheme {
     Deep,
     /// The earlier neutral greys and blue accent.
     Classic,
+    /// Snout Studio's default: near black, warm, a single gold accent. Dark only.
+    Gold,
+    /// Snout Studio's Dark and Light: greys, or warm neutrals, and a monochrome accent.
+    Mono,
+    /// Snout Studio's Abyss: near-black blue surfaces, a violet accent. Dark only.
+    Abyss,
+    /// Snout Studio's Matrix: green phosphor on black. Dark only.
+    Matrix,
 }
 
 impl ColorTheme {
-    pub const ALL: [Self; 4] = [Self::Studio, Self::Vivid, Self::Deep, Self::Classic];
+    pub const ALL: [Self; 8] =
+        [Self::Studio, Self::Gold, Self::Mono, Self::Abyss, Self::Matrix, Self::Vivid, Self::Deep, Self::Classic];
+
+    /// The theme has no light side: it stays dark whatever Light or Dark says.
+    pub fn dark_only(self) -> bool {
+        matches!(self, Self::Gold | Self::Abyss | Self::Matrix)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -55,6 +69,10 @@ impl ColorTheme {
             Self::Vivid => "Vivid",
             Self::Deep => "Deep",
             Self::Classic => "Classic",
+            Self::Gold => "Gold",
+            Self::Mono => "Mono",
+            Self::Abyss => "Abyss",
+            Self::Matrix => "Matrix",
         }
     }
 }
@@ -84,7 +102,8 @@ pub struct Settings {
     pub dock: Option<serde_json::Value>,
     /// The editors' font size (⌘+ and ⌘-).
     pub editor_font_size: f32,
-    /// The activity the window showed last, to open on it again.
+    /// The activity the window showed last, to open on it again (the Project view when
+    /// none). The window writes it; a hand edit does not move a running window.
     pub activity: Option<crate::panels::Activity>,
     /// The projects opened, most recent first, for File ▸ Open Recent and the Welcome
     /// page. Unset until a project opens or the list is cleared: then the repository list

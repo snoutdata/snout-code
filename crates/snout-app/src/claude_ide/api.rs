@@ -17,7 +17,7 @@ use super::tools;
 
 /// The tools the API offers: the IDE connection's, less those that wait on the user or
 /// only make sense to Claude Code itself (diff tabs).
-pub const TOOLS: [&str; 8] = [
+pub const TOOLS: [&str; 10] = [
     "openFile",
     "getCurrentSelection",
     "getLatestSelection",
@@ -26,6 +26,8 @@ pub const TOOLS: [&str; 8] = [
     "getDiagnostics",
     "checkDocumentDirty",
     "saveDocument",
+    "getCommitChange",
+    "setCommitMessage",
 ];
 
 /// The variable naming the file that holds the token's header line (`x-snout-hook: …`),
@@ -59,7 +61,8 @@ pub fn script(dir: &Path) -> PathBuf {
 
 /// The tool `tools/list` describes by `name`.
 fn described(name: &str) -> Option<Value> {
-    tools::list()["tools"].as_array()?.iter().find(|t| t["name"] == name).cloned()
+    let listed = tools::list()["tools"].as_array()?.iter().find(|t| t["name"] == name).cloned();
+    listed.or_else(|| tools::api_only().into_iter().find(|t| t["name"] == name))
 }
 
 /// The UTCP manual: each tool with its inputs and the HTTP call that runs it. The port

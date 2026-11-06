@@ -37,6 +37,9 @@ pub struct Launch<'a> {
     pub env_remove: &'a [&'a str],
     /// How many lines of history the terminal keeps ([`crate::term::SCROLLBACK`] by default).
     pub scrollback: usize,
+    /// The rows and columns to start at, when known; a program that draws at once then does
+    /// not draw for another size first.
+    pub size: Option<(u16, u16)>,
 }
 
 /// State written by the reader and terminal threads.
@@ -94,7 +97,7 @@ impl Pty {
         bg: Rgb,
         wake: impl Fn() + Send + 'static,
     ) -> anyhow::Result<Self> {
-        let size = (24, 80);
+        let size = launch.size.unwrap_or((24, 80));
         let scrollback = launch.scrollback;
         let mut cmd = Cmd::new(launch.program).args(launch.args).cwd(launch.cwd);
         for name in launch.env_remove {
@@ -176,6 +179,11 @@ impl Pty {
     }
 
     /// `None` while running; a description of how it ended afterwards.
+    /// The program has not ended.
+    pub fn is_running(&self) -> bool {
+        !self.shared.exited.load(Ordering::Relaxed)
+    }
+
     pub fn exit_status(&mut self) -> Option<&str> {
         if self.exit.is_none() && self.shared.exited.load(Ordering::Relaxed) {
             let status = self.child.try_wait().ok().flatten().or_else(|| self.child.wait().ok());
@@ -659,6 +667,7 @@ mod tests {
         let line = "echo hello & echo \x1b[31mred\x1b[0m & set /p line= & call echo got:%line%";
         let args = ["/d".to_owned(), "/c".to_owned(), line.to_owned()];
         let launch = Launch {
+            size: None,
             program: Path::new("cmd.exe"),
             args: &args,
             cwd: &dir,
@@ -689,6 +698,7 @@ mod tests {
         let script = r#"printf 'hello \033[31mred\033[0m\n'; stty raw -echo; printf '\033[6n'; r=$(dd bs=1 count=6 2>/dev/null); stty sane; printf 'reply:%s\n' "$(printf %s "$r" | tr -d '\033')"; read line; echo "got:$line""#;
         let args = ["-c".to_owned(), script.to_owned()];
         let launch = Launch {
+            size: None,
             program: Path::new("/bin/sh"),
             args: &args,
             cwd: &dir,

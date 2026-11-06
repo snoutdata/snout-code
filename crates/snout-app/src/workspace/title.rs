@@ -128,7 +128,9 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn title_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn title_bar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        // The project's name gives way in a small window, leaving its menu's arrow in sight.
+        let name_w = (f32::from(window.viewport_size().width) * 0.28 - 60.).max(60.);
         let p = palette(cx);
         let m = self.model.read(cx);
         // The project's own: its name and its repository's branch, whichever repository
@@ -157,7 +159,14 @@ impl Workspace {
             Trigger(
                 bar_button("title-project", &p)
                     .child(badge)
-                    .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(label))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .max_w(px(name_w))
+                            .truncate()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(label),
+                    )
                     .child(icon(Icon::ChevronDown, 12., p.fg_dim)),
             )
             .dropdown_menu(move |mut menu, _, _| {
@@ -340,15 +349,21 @@ impl Workspace {
         });
 
         let right = div()
-            .flex_none()
+            .min_w_0()
             .flex()
             .items_center()
             .gap(px(2.))
             .when(playwright, |d| {
-                d.child(crate::playwright::window::TestsWindow::environment_switch("title-environment", cx))
-                    .child(div().w(px(4.)))
+                // A long environment gives way first: Run and Search always show.
+                d.child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(crate::playwright::window::TestsWindow::environment_switch("title-environment", cx)),
+                )
+                .child(div().flex_none().w(px(4.)))
             })
-            .child(run_config)
+            .child(div().flex_none().child(run_config))
             .child(run_button)
             .child(debug_button)
             .children(stop_button)
@@ -388,6 +403,7 @@ impl Workspace {
                 div()
                     .id("title-bar")
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .pr(px(8.))
                     .flex()
@@ -395,7 +411,16 @@ impl Workspace {
                     .gap(px(2.))
                     .children(self.menu_bar.clone().map(|bar| div().flex_none().mr(px(6.)).child(bar)))
                     .children(remote_widget)
-                    .child(project)
+                    // The project's name gives way in a small window, never Run or Search.
+                    .child(
+                        div()
+                            .min_w_0()
+                            .max_w(gpui::relative(0.28))
+                            .overflow_hidden()
+                            .flex()
+                            .items_center()
+                            .child(project),
+                    )
                     .children(branch_widget)
                     .child(div().flex_1())
                     .child(right),

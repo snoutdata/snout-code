@@ -1186,6 +1186,7 @@ impl SettingsView {
                 let view = cx.entity();
                 let view2 = cx.entity();
                 let dark = p.dark;
+                let dark_only = d.colors.dark_only().then(|| d.colors.label());
                 let swatches = div().flex().flex_wrap().gap(px(6.)).children(ColorTheme::ALL.map(|t| {
                     swatch(t, dark, d.colors == t, &p)
                         .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.colors = t)))
@@ -1202,6 +1203,16 @@ impl SettingsView {
                             .child(theme(ThemeChoice::Dark, "Dark", "settings-theme-dark", cx)),
                         &p,
                     ))
+                    .when_some(dark_only, |d, name| {
+                        d.child(row(
+                            "",
+                            div()
+                                .text_size(px(11.5))
+                                .text_color(p.fg_dim)
+                                .child(format!("{name} has no light side: it stays dark, whatever this says.")),
+                            &p,
+                        ))
+                    })
                     .child(section("Interface", &p))
                     .child(row(
                         "Font",

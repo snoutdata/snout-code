@@ -12,14 +12,14 @@ The project you open is a Git repository, or a folder inside one. The Git view s
 
 *The shop's changes, the diff of one file, the branches, and the history with its graph.*
 
-- **Toolbar** across the top: Open, Pull, Fetch, Push, Stage, Unstage, Discard, Delete, Refresh, Check Out…, New Branch, then the theme menu, GitHub and Claude.
+- **Toolbar** across the top: Open, Pull, Fetch, Push, Stage, Unstage, Discard, Delete, Refresh, Check Out…, New Branch, then the theme menu, GitHub and your agent's button, named after the agent in the console (**Claude**, **Codex**, and so on).
 - **Left column:** the Repositories list, and below it the branches and tags.
 - **Middle:** Files and Commit side by side, Changes under them, and the Journal at the bottom.
-- **Right:** the Claude Code console, when it is open (⌘J). See [Coding agents](agents.md).
+- **Right:** your agent's console, when it is open (⌘J). See [Coding agents](agents.md).
 
-Drag the edges between panes to resize them. In the Git view, the status bar shows the branch, its upstream and how far ahead (↑) and behind (↓) it is, for example `main → origin/main  ↑1`.
+Drag the edges between panes to resize them. In a small window the panes keep their places and give way to fit: the console narrows first, table columns tighten, and toolbar buttons shrink to icons with their names in the tooltip. In the smallest windows, the left column steps aside while the console is open. Your sizes come back when the window grows. In the Git view, the status bar shows the branch, its upstream and how far ahead (↑) and behind (↓) it is, for example `main → origin/main  ↑1`.
 
-SnoutCode reads the repository again when the window comes forward, when you press F5 (**View ▸ Refresh**), and while the Claude Code console's agent is working.
+SnoutCode reads the repository again when the window comes forward, when you press F5 (**View ▸ Refresh**), and while the console's agent is working.
 
 ## Repositories
 
@@ -116,11 +116,11 @@ You do not have to stage first. The label beside the Commit button says what the
 
 **Amend last commit** replaces the last commit with this one. With nothing new to add, only its message changes.
 
-### Draft the message with Claude Code
+### Draft the message with your agent
 
-Click **Draft** (or **Git ▸ Draft Commit Message**) to have Claude Code write the message. It reads exactly what the commit would record, follows the style of your recent commit subjects, and builds on anything you already typed. Click **Stop** to cancel.
+Click **Draft** (or **Git ▸ Draft Commit Message**) to have the agent in the console write the message: Claude Code, Codex, opencode, Amp or a command of your own. It reads exactly what the commit would record, follows the style of your recent commit subjects, and builds on anything you already typed. The message lands in the box for you to read and change. Click **Stop** to cancel.
 
-Draft runs `claude` on its own, with its tools turned off, and does not touch the console's session. It needs Claude Code installed; see [Coding agents](agents.md).
+You do not need the console open first. If it is closed, it opens as the agent's toolbar button opens it, and if the agent is not running, it starts. An agent busy on something else finishes that first, and one asking you a question gets your answer first. If the agent is not installed, the console offers to install it; click **Draft** again once it has. See [Coding agents](agents.md).
 
 ## Check Out
 
@@ -217,7 +217,7 @@ In an editor, **Git ▸ Annotate with Git Blame** (or a right click in the gutte
 | F5 | Refresh |
 | ↑ ↓ | Previous or next commit, in the commit view |
 | Esc | Leave the commit view |
-| ⌘J | Show or hide the Claude Code console |
+| ⌘J | Show or hide the agent's console |
 | ⌥⇧⌘B | Annotate with Git Blame, in an editor |
 
 See [Keyboard shortcuts](keyboard-shortcuts.md) for the full list.

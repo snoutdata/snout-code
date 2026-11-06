@@ -44,6 +44,54 @@ fn front(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> Option<String> {
     })
 }
 
+/// The app opens on the Project view the first time, and on the view it closed on after
+/// that, even when the settings say otherwise by then.
+#[test]
+fn side_docks_give_way_in_a_small_window() {
+    use crate::workspace::docks_fitted;
+    assert_eq!(docks_fitted(320., 300., 2000.), (320., 300.), "room to spare");
+    assert_eq!(docks_fitted(320., 0., 2000.), (320., 0.), "a closed dock stays closed");
+    // 720 of room: the wider gives way first, the editor keeps its 300.
+    let (l, r) = docks_fitted(320., 300., 720.);
+    assert!(l + r + 300. <= 720.5, "{l} {r}");
+    assert!(l >= 180. && r >= 180., "{l} {r}");
+    // Alone, a dock narrows as far as it must.
+    let (l, r) = docks_fitted(600., 0., 720.);
+    assert_eq!((l, r), (420., 0.));
+    // Never below the least, even with no room left.
+    let (l, r) = docks_fitted(320., 300., 400.);
+    assert_eq!((l, r), (180., 180.));
+}
+
+#[gpui::test]
+fn the_app_opens_on_the_view_it_closed_on(cx: &mut TestAppContext) {
+    let repo = demo_repo("session-activity");
+    let (model, ws, vcx) = open(cx, with_repo(&repo));
+    let shown =
+        |ws: &Entity<Workspace>, vcx: &mut VisualTestContext| vcx.update(|_, cx| ws.read(cx).side.read(cx).activity);
+    assert_eq!(shown(&ws, vcx), Activity::Project, "the Project view by default");
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
+    // Git in the settings, as a stale copy would put it, with the Project view showing.
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.set_activity(Activity::Project, w, cx)));
+    vcx.update(|_, cx| model.update(cx, |m, _| m.settings.activity = Some(Activity::Git)));
+    let saved = vcx.update(|_, cx| {
+        ws.update(cx, |ws, cx| ws.save_layout(cx));
+        model.read(cx).settings.clone()
+    });
+    assert_eq!(saved.activity, Some(Activity::Project), "what shows is what is saved");
+    let (_, ws2, vcx2) = reopen(cx, saved);
+    assert_eq!(shown(&ws2, vcx2), Activity::Project);
+    // And the other way round: closed on Git, it opens on Git.
+    vcx2.update(|w, cx| ws2.update(cx, |ws, cx| ws.set_activity(Activity::Git, w, cx)));
+    let saved = vcx2.update(|_, cx| {
+        ws2.update(cx, |ws, cx| ws.save_layout(cx));
+        ws2.read(cx).model.read(cx).settings.clone()
+    });
+    let (_, ws3, vcx3) = reopen(cx, saved);
+    assert_eq!(shown(&ws3, vcx3), Activity::Git);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 #[gpui::test]
 fn tabs_caret_activity_and_layout_come_back_with_the_app(cx: &mut TestAppContext) {
     use gpui_component::dock::DockPlacement;

@@ -97,6 +97,23 @@ pub fn list() -> Value {
     ] })
 }
 
+/// The tools of the editor's API alone, which the IDE connection does not offer: Claude Code's
+/// connection stays as its other integrations have it.
+pub fn api_only() -> Vec<Value> {
+    vec![
+        tool(
+            "getCommitChange",
+            "While SnoutCode waits for a drafted commit message: the change the commit would record, and how to write its message",
+            schema(json!({}), &[]),
+        ),
+        tool(
+            "setCommitMessage",
+            "Put the drafted commit message in SnoutCode's commit box, for the user to read and commit",
+            schema(json!({ "message": { "type": "string", "description": "The commit message" } }), &["message"]),
+        ),
+    ]
+}
+
 /// A tool result of one text item.
 pub fn text(text: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": text.into() }] })

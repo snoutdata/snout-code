@@ -829,25 +829,39 @@ impl EditorPanel {
                 .font_family(look::ui_font(cx))
                 .text_size(px(look::BODY))
                 .child(crate::art::glyph(snout_core::art::Glyph::Spark, 16., p.accent))
-                .child(div().whitespace_nowrap().child(what))
+                // The words give way in a narrow tab: Reject and Accept always show.
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
                         .flex()
-                        .gap(px(6.))
-                        .font_family(look::mono_font(cx))
-                        .text_size(px(12.))
-                        .child(div().text_color(p.added).child(format!("+{plus}")))
-                        .child(div().text_color(p.removed).child(format!("−{minus}"))),
+                        .items_center()
+                        .gap(px(10.))
+                        .child(div().min_w_0().truncate().child(what))
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .gap(px(6.))
+                                .font_family(look::mono_font(cx))
+                                .text_size(px(12.))
+                                .child(div().text_color(p.added).child(format!("+{plus}")))
+                                .child(div().text_color(p.removed).child(format!("−{minus}"))),
+                        )
+                        .when(waiting > 0, |d| {
+                            let text = if waiting == 1 {
+                                "1 more waiting".to_owned()
+                            } else {
+                                format!("{waiting} more waiting")
+                            };
+                            d.child(div().flex_none().child(look::chip(text, p.accent, &p)))
+                        }),
                 )
-                .when(waiting > 0, |d| {
-                    let text =
-                        if waiting == 1 { "1 more waiting".to_owned() } else { format!("{waiting} more waiting") };
-                    d.child(look::chip(text, p.accent, &p))
-                })
-                .child(div().flex_1())
                 .child(
                     look::small_button("review-reject", crate::components::IconName::Ban, "Reject", &p)
                         .debug_selector(|| "review-reject".into())
+                        .flex_none()
                         .px(px(8.))
                         .h(px(24.))
                         .gap(px(6.))
@@ -1324,21 +1338,33 @@ impl EditorPanel {
                 .font_family(look::ui_font(cx))
                 .text_size(px(look::BODY))
                 .child(crate::art::glyph(snout_core::art::Glyph::Spark, 16., c.mark))
-                .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().min_w_0().child(what))
+                // The words give way in a narrow tab: Revert File and Accept File always show.
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
                         .flex()
-                        .gap(px(6.))
-                        .font_family(look::mono_font(cx))
-                        .text_size(px(12.))
-                        .child(div().text_color(c.added).child(format!("+{plus}")))
-                        .child(div().text_color(c.removed).child(format!("−{minus}"))),
+                        .items_center()
+                        .gap(px(10.))
+                        .child(div().min_w_0().truncate().child(what))
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .gap(px(6.))
+                                .font_family(look::mono_font(cx))
+                                .text_size(px(12.))
+                                .child(div().text_color(c.added).child(format!("+{plus}")))
+                                .child(div().text_color(c.removed).child(format!("−{minus}"))),
+                        )
+                        .child(div().flex_1())
+                        .child(div().flex_none().child(hint("⌃⌥⇧↓ next"))),
                 )
-                .child(div().flex_1())
-                .child(hint("⌃⌥⇧↓ next"))
                 .child(
                     look::small_button("claude-revert-file", crate::components::IconName::Undo2, "Revert File", &p)
                         .debug_selector(|| "claude-revert-file".into())
+                        .flex_none()
                         .h(px(24.))
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::RevertFile)))),
                 )

@@ -68,7 +68,8 @@ where they were. A project without saved tabs shows the Welcome page. SnoutCode 
 of your recent projects only.
 
 When you start SnoutCode, it opens the project you had open last, with its tabs, the tool
-windows and their sizes, and the view (Project or Git) you were on.
+windows and their sizes, and the view (Project or Git) you closed it on. The first time, it opens
+on the Project view.
 
 ## Create a new project
 

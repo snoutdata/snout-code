@@ -333,15 +333,36 @@ pub fn locate(host: &dyn snout_host::Host, id: &str, configured: Option<PathBuf>
     found.or_else(|| from_shell(host, name))
 }
 
-/// The program `name` as the user's shell finds it (not on Windows).
+/// How long the user's shell gets to name a program: a profile that hangs, or waits for
+/// something, must not leave the console starting for ever.
+const SHELL_LOOKUP: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// The program `name` as the user's shell finds it (not on Windows), if the shell says
+/// within [`SHELL_LOOKUP`].
 fn from_shell(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
     if host.info().is_windows() {
         return None;
     }
     let shell = crate::console::default_shell(host);
-    let cmd = snout_host::Cmd::new(&shell).arg("-ilc").arg(format!("command -v {name}"));
-    let out = host.run(&cmd, None).ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
+    let cmd = snout_host::Cmd::new(&shell)
+        .arg("-ilc")
+        .arg(format!("command -v {name}"))
+        .stdout(snout_host::Stdio::Piped)
+        .group();
+    let mut child = host.spawn(&cmd).ok()?;
+    let mut stdout = child.take_stdout()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    // On a thread of its own: what the profile left running can hold the pipe open.
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
+        let _ = tx.send(out);
+    });
+    let out = rx.recv_timeout(SHELL_LOOKUP);
+    let _ = child.kill();
+    let _ = child.wait();
+    let out = out.ok()?;
+    let text = String::from_utf8_lossy(&out);
     text.lines().rev().map(str::trim).filter(|l| l.starts_with('/')).map(PathBuf::from).find(|p| host.is_file(p))
 }
 

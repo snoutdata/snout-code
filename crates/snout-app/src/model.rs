@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui::{Context, EventEmitter, PathPromptOptions, Task};
-use snout_core::claude::{Draft, draft_prompt, find_claude};
+use snout_core::claude::{clean_message, draft_brief};
 use snout_core::diff_layout::DiffLayout;
 use snout_core::graph::{GraphRow, journal_matches};
 use snout_core::groups::{RepoGroup, dir_name, move_to_group, save_group};
@@ -242,6 +242,23 @@ pub enum Action {
     Quit(QuitChoice),
 }
 
+/// A draft of the commit message, asked of the console's agent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DraftAsk {
+    /// The folder whose console's agent was asked.
+    pub root: PathBuf,
+    /// What the agent gets when it asks: how to write the message, and the change.
+    pub brief: String,
+    /// The prompt has gone to the agent.
+    pub sent: bool,
+    /// The agent asks the user something in the console first (to trust the folder, to allow
+    /// a command): the keyboard is elsewhere, so the commit pane says so.
+    pub asking: bool,
+}
+
+/// How long a draft waits for the agent's message at most.
+const DRAFT_WAIT: Duration = Duration::from_secs(300);
+
 /// What the workspace should do in response to the model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModelEvent {
@@ -255,6 +272,10 @@ pub enum ModelEvent {
     Theme,
     /// The commit message changed from outside its text field.
     Message,
+    /// A draft of the commit message waits in [`Model::draft`]: ask the console's agent.
+    DraftAsked,
+    /// The draft for the folder was stopped.
+    DraftStopped(PathBuf),
     /// Open a file in an editor tab (the preview tab when the flag says so).
     OpenFile(PathBuf, Option<(u32, u32)>, bool),
     /// The project was closed.
@@ -392,7 +413,7 @@ struct GitSide {
     diff_key: Option<(String, snout_core::DiffBase, bool)>,
     commit_msg: String,
     amend: bool,
-    draft: Option<Draft>,
+    draft: Option<DraftAsk>,
     journal_filter: String,
     commit_view: Option<CommitView>,
     refresh_queued: bool,
@@ -465,8 +486,8 @@ pub struct Model {
     diff_key: Option<(String, snout_core::DiffBase, bool)>,
     pub commit_msg: String,
     pub amend: bool,
-    pub draft: Option<Draft>,
-    _draft_poll: Option<Task<()>>,
+    pub draft: Option<DraftAsk>,
+    _draft_watch: Option<Task<()>>,
     pub journal_filter: String,
     pub commit_view: Option<CommitView>,
     pub output: Vec<OutputLine>,
@@ -589,7 +610,7 @@ impl Model {
             commit_msg: String::new(),
             amend: false,
             draft: None,
-            _draft_poll: None,
+            _draft_watch: None,
             journal_filter: String::new(),
             commit_view: None,
             output: Vec::new(),
@@ -699,6 +720,11 @@ impl Model {
             && self.draft.is_none()
             && !self.commit_msg.trim().is_empty()
             && self.commit_scope() != Scope::Nothing
+    }
+
+    /// A draft of the commit message is under way.
+    pub fn drafting(&self) -> bool {
+        self.draft.is_some() || self.starting_draft
     }
 
     pub fn can_draft(&self) -> bool {
@@ -1493,8 +1519,10 @@ impl Model {
         s
     }
 
-    /// Put the user's settings `user` in place, the project's values over them.
-    pub fn set_user_settings(&mut self, user: Settings) {
+    /// Put the user's settings `user` in place, the project's values over them. The activity
+    /// stays: it says what the window shows, which a file read again does not change.
+    pub fn set_user_settings(&mut self, mut user: Settings) {
+        user.activity = self.settings.activity;
         self.settings = user;
         self.project_under = crate::project_settings::put_over(&self.project_settings, &mut self.settings);
     }
@@ -1647,42 +1675,36 @@ impl Model {
         self.done(format!("Found {} repositories in {} ({added} new)", repos.len(), root.display()));
     }
 
-    /// Have Claude draft the commit message: the patch is read, `claude` found and started
-    /// off the UI thread.
+    /// Ask the console's agent for the commit message: the change is read off the UI thread,
+    /// then the workspace brings the agent up and sends it the prompt. The agent asks for the
+    /// change and hands the message back through the editor's API.
     fn start_draft(&mut self, cx: &mut Context<Self>) {
         let Some(repo) = self.repo.clone() else { return };
-        let known = self.claude.clone().or_else(|| self.settings.claude_path.clone());
+        let Some(root) = self.project_root() else { return };
         let (amend, paths) = (self.amend, self.commit_scope().paths());
         // When amending, the last subject is the one being rewritten.
-        let recent: Vec<&str> =
-            self.log.iter().skip(usize::from(self.amend)).take(12).map(|c| c.summary.as_str()).collect();
-        let prompt = draft_prompt(&recent, &self.commit_msg, self.amend);
+        let recent: Vec<String> =
+            self.log.iter().skip(usize::from(self.amend)).take(12).map(|c| c.summary.clone()).collect();
+        let notes = self.commit_msg.clone();
         self.starting_draft = true;
-        let start = cx.background_executor().spawn(async move {
-            let Some(program) = known.or_else(|| find_claude(&**repo.host())) else {
-                return Err("Claude Code was not found. Install it from https://docs.claude.com/en/docs/claude-code."
-                    .to_owned());
-            };
+        let read = cx.background_executor().spawn(async move {
             let patch = repo.commit_patch(amend, &paths).map_err(|e| e.to_string())?;
-            Draft::start(&**repo.host(), &program, repo.root(), &prompt, &patch, || {})
+            let recent: Vec<&str> = recent.iter().map(String::as_str).collect();
+            Ok::<_, String>(draft_brief(&recent, &notes, amend, &patch))
         });
         cx.spawn(async move |this, cx| {
-            let started = start.await;
+            let brief = read.await;
             let _ = this.update(cx, |m, cx| {
-                m.starting_draft = false;
-                match started {
-                    Ok(draft) => {
-                        m.draft = Some(draft);
-                        m.message = "Claude is drafting the commit message…".into();
-                        m._draft_poll = Some(cx.spawn(async move |this, cx| {
-                            loop {
-                                cx.background_executor().timer(Duration::from_millis(100)).await;
-                                let Ok(done) = this.update(cx, |m, cx| m.poll_draft(cx)) else { return };
-                                if done {
-                                    return;
-                                }
-                            }
-                        }));
+                // Stopped while the change was being read.
+                if !std::mem::take(&mut m.starting_draft) {
+                    return;
+                }
+                match brief {
+                    Ok(brief) => {
+                        m.draft = Some(DraftAsk { root, brief, sent: false, asking: false });
+                        m.message = "Asking the agent to draft the commit message\u{2026}".into();
+                        m.watch_draft(cx);
+                        cx.emit(ModelEvent::DraftAsked);
                     }
                     Err(e) => m.fail(e, cx),
                 }
@@ -1692,21 +1714,87 @@ impl Model {
         .detach();
     }
 
-    /// Take in the draft's result if there is one; whether the draft is over.
-    fn poll_draft(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(draft) = &self.draft else { return true };
-        let Some(result) = draft.poll() else { return false };
-        self.draft = None;
-        match result {
-            Ok(message) => {
-                self.commit_msg = message;
-                self.done("Claude drafted the commit message");
-                cx.emit(ModelEvent::Message);
-            }
-            Err(e) => self.fail(format!("Claude could not draft the message:\n{e}"), cx),
+    /// Give up on the draft after [`DRAFT_WAIT`]: the Draft button comes back.
+    fn watch_draft(&mut self, cx: &mut Context<Self>) {
+        self._draft_watch = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(DRAFT_WAIT).await;
+            let _ = this.update(cx, |m, cx| {
+                m.draft_stuck("The agent has not sent a commit message yet. Its answer is in the console.".into(), cx)
+            });
+        }));
+    }
+
+    /// The prompt went to the agent.
+    pub fn draft_sent(&mut self, cx: &mut Context<Self>) {
+        if let Some(ask) = self.draft.as_mut() {
+            ask.sent = true;
+            cx.notify();
         }
+    }
+
+    /// The agent asks the user something on its screen, or no longer does.
+    pub fn draft_asking(&mut self, asking: bool, name: &str, cx: &mut Context<Self>) {
+        let Some(ask) = self.draft.as_mut().filter(|a| a.asking != asking) else { return };
+        ask.asking = asking;
+        self.message = if asking {
+            format!("{name} asks you something in the console. Answer it there, and the draft goes on.")
+        } else {
+            format!("{name} is writing the commit message\u{2026}")
+        };
         cx.notify();
-        true
+    }
+
+    /// The agent's turn ended: if it has not sent a message by `grace` from now, it will not.
+    pub fn draft_turn_ended(&mut self, grace: Duration, cx: &mut Context<Self>) {
+        if !self.draft.as_ref().is_some_and(|d| d.sent) {
+            return;
+        }
+        self._draft_watch = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(grace).await;
+            let _ = this.update(cx, |m, cx| {
+                m.draft_stuck(
+                    "The agent finished without writing a commit message. Its answer is in the console.".into(),
+                    cx,
+                )
+            });
+        }));
+    }
+
+    /// The draft cannot go on, for the reason `why`.
+    pub fn draft_stuck(&mut self, why: String, cx: &mut Context<Self>) {
+        if self.draft.take().is_some() {
+            self._draft_watch = None;
+            self.message = why.clone();
+            self.ask(Dialog::Error(why), cx);
+            cx.notify();
+        }
+    }
+
+    /// The agent cannot be asked, for the reason `why` the console shows too: no dialog over it.
+    pub fn draft_gone(&mut self, why: String, cx: &mut Context<Self>) {
+        if self.draft.take().is_some() {
+            self._draft_watch = None;
+            self.message = why;
+            cx.notify();
+        }
+    }
+
+    /// The message the agent `name` wrote, for the message box. An error when no draft waits:
+    /// it was stopped, or nobody asked.
+    pub fn take_draft(&mut self, message: &str, name: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let message = clean_message(message);
+        if message.is_empty() {
+            return Err("The message is empty".to_owned());
+        }
+        if self.draft.take().is_none() {
+            return Err("SnoutCode is not waiting for a commit message: it was stopped, or never asked for".to_owned());
+        }
+        self._draft_watch = None;
+        self.commit_msg = message;
+        self.done(format!("{name} drafted the commit message"));
+        cx.emit(ModelEvent::Message);
+        cx.notify();
+        Ok(())
     }
 
     /// Keep the ahead and behind counts of the listed repositories current: fetch when
@@ -1963,9 +2051,12 @@ impl Model {
                 }
             }
             Action::CancelDraft => {
-                self.draft = None;
-                self._draft_poll = None;
-                self.message = "Stopped drafting".into();
+                self.starting_draft = false;
+                if let Some(ask) = self.draft.take() {
+                    self._draft_watch = None;
+                    self.message = "Stopped drafting".into();
+                    cx.emit(ModelEvent::DraftStopped(ask.root));
+                }
             }
             Action::ShowCheckout => self.ask(Dialog::Checkout, cx),
             Action::RequestCheckout(target) => {

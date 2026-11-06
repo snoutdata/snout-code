@@ -99,7 +99,7 @@ the project's folder there, and SnoutCode reads and writes it there.
 
 ![The Appearance page](images/settings-and-keymap-appearance.png)
 
-*The four colour themes, and light or dark.*
+*The colour themes, and light or dark.*
 
 ![The Appearance page in dark mode](images/settings-and-keymap-appearance-dark.png)
 
@@ -107,17 +107,21 @@ the project's folder there, and SnoutCode reads and writes it there.
 
 **Theme**
 
-- **Colors**: the colour theme. Each comes in light and dark, and the swatches show the one
-  in use.
+- **Colors**: the colour theme. The swatches show the one in use, in light or dark.
   - **Studio** (the default): warm cream and walnut, with a terracotta accent in light and
     an amber one in dark, after Snout Studio.
+  - **Gold**: near black and slightly warm, with a single gold accent. Dark only.
+  - **Mono**: plain greys in dark and warm neutrals in light, with a monochrome accent.
+  - **Abyss**: near-black blue, with a violet accent. Dark only.
+  - **Matrix**: green phosphor on black. Errors stay red, and lines added and removed stay
+    blue and amber. Dark only.
   - **Vivid**: neutral greys, a violet accent, and colour wherever it carries meaning.
   - **Deep**: midnight indigo, with an aqua accent that glows.
   - **Classic**: the earlier neutral greys and blue accent.
 - **Light or dark**: **System** (the default) follows your Mac, and switches the moment you
   change it in System Settings ▸ Appearance, or when the Mac changes on its own at sunset.
   **Light** and **Dark** keep SnoutCode in one, whatever the Mac does. View ▸ Appearance
-  switches it too.
+  switches it too. Gold, Abyss and Matrix have no light side, and stay dark whatever this says.
 
 In every theme, text is at least as legible as WCAG AA asks. Lines added and removed show
 in blue and orange, which stay apart with the common forms of colour blindness, and errors

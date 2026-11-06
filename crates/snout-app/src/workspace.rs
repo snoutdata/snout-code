@@ -171,6 +171,31 @@ pub struct Workspace {
 /// The width the stripes take from the window, both edges together.
 pub const ACTIVITY_W: f32 = 2. * STRIPE_W;
 
+/// What a small window keeps for the editor, and the least a side dock narrows to.
+const MIN_CENTER_W: f32 = 300.;
+const MIN_DOCK_W: f32 = 180.;
+
+/// The widths of the left and right docks (0 when closed) so that the editor keeps
+/// [`MIN_CENTER_W`] of `room`: the wider one gives way first, then both. Never below
+/// [`MIN_DOCK_W`].
+pub fn docks_fitted(left: f32, right: f32, room: f32) -> (f32, f32) {
+    let mut over = left + right + MIN_CENTER_W - room;
+    if over <= 0. {
+        return (left, right);
+    }
+    let spare = |w: f32| (w - MIN_DOCK_W).max(0.);
+    let (mut wide, mut narrow) = (left.max(right), left.min(right));
+    // The wider gives way until the two are level...
+    let first = over.min(wide - narrow).min(spare(wide));
+    wide -= first;
+    over -= first;
+    // ...then each gives its share.
+    let share = over / if narrow > 0. { 2. } else { 1. };
+    wide -= share.min(spare(wide));
+    narrow -= share.min(spare(narrow));
+    if left >= right { (wide, narrow) } else { (narrow, wide) }
+}
+
 /// The layout format this build writes; a saved layout of another version is ignored.
 const LAYOUT_VERSION: usize = 2;
 
@@ -1053,6 +1078,8 @@ impl Workspace {
             // The commit and the diff show in the Git view.
             ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
             ModelEvent::Message => {}
+            ModelEvent::DraftAsked => crate::claude_ide::bridge::ask_for_draft(self, window, cx),
+            ModelEvent::DraftStopped(root) => crate::claude_ide::bridge::stop_draft(self, root, cx),
             ModelEvent::Closed => self.after_close(window, cx),
             ModelEvent::Switch(path) => self.switch_project(path.clone(), window, cx),
             ModelEvent::NewProject => self.open_new_project(window, cx),
@@ -1118,7 +1145,12 @@ impl Workspace {
 
     /// ↑ ↓ in the commit view; elsewhere, and in a terminal, the keys go on as usual.
     fn step_commit(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if in_terminal(window) || self.model.read(cx).commit_view.is_none() {
+        // Only in the Git view: the commit view stays open behind the Project view, and a key
+        // there must not bring the Git view forward.
+        if in_terminal(window)
+            || self.model.read(cx).commit_view.is_none()
+            || self.side.read(cx).activity != Activity::Git
+        {
             cx.propagate();
             return;
         }
@@ -1898,11 +1930,15 @@ impl Workspace {
         }));
     }
 
+    /// Save the layout and the activity showing: the next start opens as the window is now,
+    /// whatever the settings file said meanwhile.
     pub fn save_layout(&mut self, cx: &mut Context<Self>) {
         let state = self.dock.read(cx).dump(cx);
+        let activity = self.side.read(cx).activity;
         let Ok(value) = serde_json::to_value(state) else { return };
         self.model.update(cx, |m, _| {
             m.settings.dock = Some(value);
+            m.settings.activity = Some(activity);
             m.persist();
         });
     }
@@ -1911,7 +1947,33 @@ impl Workspace {
         self.model.update(cx, |m, cx| m.handle(action, cx));
     }
 
+    /// Keep the open side docks inside a small window: wider than it has room for, their
+    /// right edges and the buttons there would be cut off under the stripe.
+    fn fit_docks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let room = f32::from(window.viewport_size().width) - 2. * STRIPE_W;
+        let (dock, left, right) = {
+            let d = self.dock.read(cx);
+            let width =
+                |place| d.is_dock_open(place).then(|| d.dock_size(place).map(f32::from)).flatten().unwrap_or(0.);
+            (self.dock.clone(), width(DockPlacement::Left), width(DockPlacement::Right))
+        };
+        let (l, r) = docks_fitted(left, right, room);
+        if (l, r) != (left, right) {
+            cx.defer_in(window, move |_, window, cx| {
+                dock.update(cx, |d, cx| {
+                    if l != left {
+                        d.set_dock_size(DockPlacement::Left, px(l), window, cx);
+                    }
+                    if r != right {
+                        d.set_dock_size(DockPlacement::Right, px(r), window, cx);
+                    }
+                });
+            });
+        }
+    }
+
     fn sync_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.fit_docks(window, cx);
         let m = self.model.read(cx);
         // The window's title names the remote machine the project is on.
         let title = match crate::remote::connection(cx) {
@@ -2354,7 +2416,7 @@ impl Render for Workspace {
                 .child(self.dock_area(cx))
                 .into_any_element()
         };
-        let title = self.title_bar(cx);
+        let title = self.title_bar(window, cx);
         root.child(title)
             .child(
                 div()

@@ -70,7 +70,8 @@ fn pump(cx: &mut VisualTestContext, ms: u64) {
 fn pump_until(cx: &mut VisualTestContext, what: &str, mut done: impl FnMut(&mut VisualTestContext) -> bool) {
     let start = Instant::now();
     while !done(cx) {
-        assert!(start.elapsed() < Duration::from_secs(15), "timed out waiting for {what}");
+        // Generous: a loaded run can stretch a second of the window's clock to several real ones.
+        assert!(start.elapsed() < Duration::from_secs(60), "timed out waiting for {what}");
         pump(cx, 16);
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -634,8 +635,12 @@ fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut Test
         assert!(super::bridge::indicator(c.read(cx), cx).is_some(), "Claude is editing Hello.java");
     });
     std::fs::write(&hello, HELLO_V2).unwrap();
-    // The disk check does not take the file meanwhile: the report shows it.
-    pump(cx, 900);
+    // The disk check does not take the file meanwhile: the report shows it. The hold lasts
+    // 10 s of real time, which these pumps can take in a loaded run, so it is kept fresh.
+    for _ in 0..9 {
+        cx.update(|_, cx| editor.update(cx, |e, _| e.claude_hold = Some(Instant::now())));
+        pump(cx, 100);
+    }
     assert_eq!(text_of(&editor, cx), HELLO);
     run_hook(port, &cmd, tool_hook("PostToolUse", "Edit", &hello));
     pump_until(cx, "the live edit", |cx| cx.update(|_, cx| editor.read(cx).live.is_some()));
@@ -1276,6 +1281,169 @@ fn picking_an_agent_switches_the_console_to_it(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("console-agent-settings").is_some(), "and opens Settings, Agents");
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// A start that was overtaken does not count: a slow lookup of the agent picked first (Amp,
+/// not installed) must not put its "not installed" over the agent picked after it, nor its
+/// session in that one's place.
+#[gpui::test]
+fn a_start_overtaken_by_another_agent_does_not_count(cx: &mut TestAppContext) {
+    use crate::agents::ConsoleAgent;
+    let (repo, lock_dir, model, ws, _client, cx) = connected("console-overtaken", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    hook_command(&ws, cx);
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(crate::tests::unix_tool("/usr/bin/tail"))));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
+    pump_until(cx, "the first session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
+    // Back and forth, faster than the sessions can start: the last pick stands, every time.
+    for _ in 0..3 {
+        for which in [ConsoleAgent::Amp, ConsoleAgent::Codex, ConsoleAgent::Opencode] {
+            cx.update(|w, cx| console.update(cx, |c, cx| c.switch_agent(which, w, cx)));
+        }
+    }
+    pump_until(cx, "the last pick's session", |cx| {
+        cx.update(|_, cx| {
+            console.read(cx).session_agent(&repo, cx).id == crate::agents::OPENCODE
+                && console.read(cx).session_text(&repo).is_some()
+        })
+    });
+    pump(cx, 500);
+    cx.update(|_, cx| {
+        assert_eq!(console.read(cx).session_agent(&repo, cx).id, crate::agents::OPENCODE);
+        assert_eq!(crate::agents::console_agent(cx).id, crate::agents::OPENCODE, "Ask to Fix reaches the one showing");
+        assert_eq!(console.read(cx).error(), None);
+        assert_eq!(model.read(cx).settings.console_agent, ConsoleAgent::Opencode);
+    });
+    for dir in [repo, lock_dir] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// The console's agents get the arguments they should: opencode and Amp once got `-c ""`.
+#[gpui::test]
+fn opencode_and_amp_get_their_own_arguments(cx: &mut TestAppContext) {
+    use crate::agents::ConsoleAgent;
+    let (repo, lock_dir, model, ws, _client, cx) = connected("console-args", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    // A stand-in that prints the arguments it got, then runs on.
+    let bin = crate::tests::scratch_dir("console-args-bin");
+    let fake = bin.join("agent");
+    std::fs::write(&fake, "#!/bin/sh\necho \"args=[$*]\"\nexec cat\n").unwrap();
+    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx)));
+    pump_until(cx, "the first session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
+    for (which, id) in [(ConsoleAgent::Opencode, crate::agents::OPENCODE), (ConsoleAgent::Amp, crate::agents::AMP)] {
+        cx.update(|w, cx| console.update(cx, |c, cx| c.switch_agent(which, w, cx)));
+        pump_until(cx, "its session", |cx| {
+            cx.update(|_, cx| {
+                console.read(cx).session_agent(&repo, cx).id == id
+                    && console.read(cx).session_text(&repo).is_some_and(|t| t.contains("args=["))
+            })
+        });
+        let text = cx.update(|_, cx| console.read(cx).session_text(&repo)).unwrap();
+        assert!(text.contains("args=[]"), "{id} starts with no arguments of ours: {text}");
+        // And Continue's arguments reach it.
+        let resume = crate::console::continue_args(&crate::agents::Agent::of(id, &Default::default()));
+        cx.update(|w, cx| console.update(cx, |c, cx| c.start(&repo, &resume, w, cx)));
+        pump_until(cx, "the resumed session", |cx| {
+            cx.update(|_, cx| console.read(cx).session_text(&repo).is_some_and(|t| t.contains("args=[")))
+        });
+        let text = cx.update(|_, cx| console.read(cx).session_text(&repo)).unwrap();
+        assert!(text.contains(&format!("args=[{}]", resume.join(" "))), "{id}: {text}");
+    }
+    for dir in [repo, lock_dir, bin] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Draft asks the agent in the console: the console opens, the agent starts, the prompt goes,
+/// and what the agent hands back through the editor's API lands in the commit box.
+#[gpui::test]
+fn draft_asks_the_agent_in_the_console_and_takes_its_message(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("draft", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    hook_command(&ws, cx);
+    // A stand-in for an agent: it reads the prompt, runs the script it names for the change,
+    // and hands back a message that shows it saw the change.
+    let bin = crate::tests::scratch_dir("draft-bin");
+    let fake = bin.join("agent");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage '{\"message\":\"Change Hello\\n\\nIt didn\\u0027t change before.\"}'\n  fi\ndone\n",
+    )
+    .unwrap();
+    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
+    pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
+    assert!(!cx.update(|_, cx| model.read(cx).settings.console_open), "the console starts closed");
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::DraftMessage, cx)));
+    pump_until(cx, "the draft under way", |cx| cx.update(|_, cx| model.read(cx).draft.is_some()));
+    pump_until(cx, "the agent's message", |cx| cx.update(|_, cx| model.read(cx).draft.is_none()));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(m.settings.console_open, "it opens as the toolbar's button opens it");
+        assert_eq!(m.commit_msg, "Change Hello\n\nIt didn't change before.");
+        assert_eq!(m.message, "Claude drafted the commit message");
+    });
+    // Nobody is waiting now, so a late message goes nowhere.
+    let late = cx.update(|_, cx| model.update(cx, |m, cx| m.take_draft("Too late", "Claude", cx)));
+    assert!(late.is_err());
+    cx.update(|_, cx| assert_ne!(model.read(cx).commit_msg, "Too late"));
+    for dir in [repo, lock_dir, bin] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Stop takes the prompt back while it waits, and the Draft button returns.
+#[gpui::test]
+fn stop_takes_back_a_draft_that_is_waiting(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("draft-stop", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    hook_command(&ws, cx);
+    // `tail` prints nothing, so the prompt stays waiting.
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(crate::tests::unix_tool("/usr/bin/tail"))));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
+    pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::DraftMessage, cx)));
+    pump_until(cx, "the draft", |cx| cx.update(|_, cx| model.read(cx).draft.is_some()));
+    pump_until(cx, "the session", |cx| cx.update(|_, cx| console.read(cx).session_text(&repo).is_some()));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::CancelDraft, cx)));
+    pump(cx, 100);
+    cx.update(|_, cx| {
+        assert!(model.read(cx).can_draft(), "the button is back");
+        assert_eq!(model.read(cx).message, "Stopped drafting");
+    });
+    for dir in [repo, lock_dir] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// When the agent is not installed, Draft does not hang: the console says how to install it,
+/// and the button comes back.
+#[gpui::test]
+fn draft_with_no_agent_installed_points_to_the_console(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("draft-missing", cx);
+    hook_command(&ws, cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = None));
+    cx.update(|_, cx| {
+        model.update(cx, |m, cx| {
+            // A path that is not there, so the agent counts as not installed.
+            m.settings.claude_path = Some(std::path::PathBuf::from("/nonexistent/claude"));
+            m.handle(crate::model::Action::Refresh, cx)
+        })
+    });
+    pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::DraftMessage, cx)));
+    pump_until(cx, "the draft to end", |cx| {
+        cx.update(|_, cx| model.read(cx).message.contains("is not installed yet") && model.read(cx).can_draft())
+    });
+    assert!(cx.debug_bounds("console-install").is_some(), "the console offers to install it");
+    for dir in [repo, lock_dir] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// The last editor tab closes like any other, and the empty editor shows in its place:
