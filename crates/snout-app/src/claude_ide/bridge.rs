@@ -74,6 +74,8 @@ pub struct Bridge {
     /// The port of the host that leads to the hooks' endpoint.
     hooks_forward: Option<snout_host::Forward>,
     settings_dir: Option<PathBuf>,
+    /// The draft under way: asks the agent, then watches for a sandboxed agent's message.
+    _draft: Option<Task<()>>,
     /// The files the hooks reported, and when; the files the app wrote itself (a revert).
     hooked: HashMap<PathBuf, Instant>,
     own_writes: HashMap<PathBuf, Instant>,
@@ -286,6 +288,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         hooks,
         hooks_forward: None,
         settings_dir,
+        _draft: None,
         hooked: HashMap::new(),
         own_writes: HashMap::new(),
         hooks_heard: None,
@@ -948,9 +951,9 @@ pub fn draft_prompt(api: &Path) -> String {
     let api = shell_word(&api.to_string_lossy());
     format!(
         "Draft a commit message for my change. Run `{api} getCommitChange`: it prints the change and how to \
-         write the message. Then put the message in my commit box with `{api} setCommitMessage \
-         '{{\"message\":\"...\"}}'` (JSON in single quotes: newlines as \\n, apostrophes as \\u0027). Run only those \
-         two commands. Do not edit files or commit."
+         write the message. Then put the message in my commit box with a here-document: `{api} setCommitMessage \
+         <<'MESSAGE'`, then the message as plain text, then a line with only MESSAGE. Run only those two commands. \
+         Do not edit files or commit."
     )
 }
 
@@ -973,9 +976,9 @@ pub fn ask_for_draft(ws: &mut Workspace, window: &mut Window, cx: &mut Context<W
     let Some(root) = ws.model.read(cx).draft.as_ref().map(|d| d.root.clone()) else { return };
     // The message lands in the Git view's commit box.
     ws.show_activity(crate::panels::Activity::Git, window, cx);
-    let api = ws.claude.as_ref().and_then(|b| b.settings_dir.as_deref()).map(super::api::script);
+    let dir = ws.claude.as_ref().and_then(|b| b.settings_dir.clone());
     let console = crate::console::console_of(ws, cx);
-    let (Some(api), Some(console)) = (api, console) else {
+    let (Some(dir), Some(console)) = (dir, console) else {
         let why = "SnoutCode cannot reach the agent in this window. Close the project and open it again.";
         ws.model.update(cx, |m, cx| m.draft_stuck(why.to_owned(), cx));
         return;
@@ -983,12 +986,72 @@ pub fn ask_for_draft(ws: &mut Workspace, window: &mut Window, cx: &mut Context<W
     if !ws.model.read(cx).settings.console_open {
         ws.model.update(cx, |m, cx| m.handle(crate::model::Action::ToggleConsole, cx));
     }
-    console.update(cx, |c, cx| {
-        c.ensure_session(&root, window, cx);
-        c.send_when_ready(&root, &draft_prompt(&api), cx);
-        let name = c.session_agent(&root, cx).short;
-        c.show_note(format!("Asked {name} for the commit message"), cx);
+    // What a sandboxed agent reads is there before it is asked.
+    let Some(host) = ws.claude.as_ref().map(|b| b.server.host()) else { return };
+    let brief = ws.model.read(cx).draft.as_ref().map(|d| d.brief.clone()).unwrap_or_default();
+    let laid_out = cx.background_spawn({
+        let (host, dir) = (host.clone(), dir.clone());
+        async move {
+            let _ = host.remove_file(&dir.join(super::api::COMMIT_MESSAGE));
+            host.write_mode(&dir.join(super::api::COMMIT_CHANGE), brief.as_bytes(), Some(0o600))
+        }
     });
+    let asking = cx.spawn_in(window, async move |ws, cx| {
+        if let Err(e) = laid_out.await {
+            eprintln!("Draft: could not write the change for a sandboxed agent: {e}");
+        }
+        let _ = ws.update_in(cx, |ws, window, cx| {
+            // Stopped in the meantime.
+            if ws.model.read(cx).draft.is_none() {
+                return;
+            }
+            let api = super::api::script(&dir);
+            console.update(cx, |c, cx| {
+                c.ensure_session(&root, window, cx);
+                c.send_when_ready(&root, &draft_prompt(&api), cx);
+                let name = c.session_agent(&root, cx).short;
+                c.show_note(format!("Asked {name} for the commit message"), cx);
+            });
+        });
+        await_sandboxed_message(ws, host, dir, cx).await;
+    });
+    if let Some(b) = ws.claude.as_mut() {
+        b._draft = Some(asking);
+    }
+}
+
+/// While a draft waits, take a message a sandboxed agent left in the session's folder `dir`, and
+/// clear the draft's files out when it is over.
+async fn await_sandboxed_message(
+    ws: gpui::WeakEntity<Workspace>,
+    host: std::sync::Arc<dyn snout_host::Host>,
+    dir: PathBuf,
+    cx: &mut gpui::AsyncWindowContext,
+) {
+    let message = dir.join(super::api::COMMIT_MESSAGE);
+    loop {
+        cx.background_executor().timer(Duration::from_millis(300)).await;
+        let waiting = ws.update(cx, |ws, cx| ws.model.read(cx).draft.is_some()).unwrap_or(false);
+        if !waiting {
+            break;
+        }
+        let read = cx.background_spawn({
+            let (host, message) = (host.clone(), message.clone());
+            async move { host.read(&message).ok().inspect(|_| drop(host.remove_file(&message))) }
+        });
+        if let Some(text) = read.await {
+            let text = String::from_utf8_lossy(&text).into_owned();
+            let _ = ws.update(cx, |ws, cx| {
+                let name = agents::console_agent(cx).short;
+                ws.model.update(cx, |m, cx| m.take_draft(&text, &name, cx))
+            });
+        }
+    }
+    cx.background_spawn(async move {
+        let _ = host.remove_file(&message);
+        let _ = host.remove_file(&dir.join(super::api::COMMIT_CHANGE));
+    })
+    .detach();
 }
 
 /// The draft for `root` was stopped: the prompt does not go, or the turn it began stops.

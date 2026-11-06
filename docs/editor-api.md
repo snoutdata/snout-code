@@ -90,7 +90,7 @@ The tools:
 | `checkDocumentDirty` | Whether a file has unsaved changes | `filePath` |
 | `saveDocument` | Saves a file | `filePath` |
 | `getCommitChange` | While a [draft](git.md#draft-the-message-with-your-agent) waits: the change the commit would record, and how to write its message | none |
-| `setCommitMessage` | While a draft waits: puts the message in the commit box. An error once it was stopped | `message` |
+| `setCommitMessage` | While a draft waits: puts the message in the commit box. An error once it was stopped. With `snout-api`, the message may also come as plain text on standard input | `message` |
 
 With curl, from the console:
 

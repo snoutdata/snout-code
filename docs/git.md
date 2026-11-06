@@ -124,6 +124,8 @@ You do not need the console open first. If it is closed, it opens as the agent's
 
 Picking another agent or starting a new session while a Draft is writing ends that Draft, and the Commit pane says so. Click **Draft** again to ask the new agent.
 
+Draft needs no extra permission from the agent. An agent whose sandbox cuts it off from SnoutCode, such as Codex, reads the change and leaves the message in SnoutCode's private folder for this window, so it does not stop to ask for approval.
+
 ## Check Out
 
 Press ⇧⌘O (outside an editor), click **Check Out…** on the toolbar, or use **Git ▸ Check Out…**.

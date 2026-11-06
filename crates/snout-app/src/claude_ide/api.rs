@@ -59,6 +59,11 @@ pub fn script(dir: &Path) -> PathBuf {
     plugin_dir(dir).join("bin").join("snout-api")
 }
 
+/// What a draft's two calls use in the session's folder when an agent's sandbox cuts it off from
+/// the port: the change the window lays out, and the message the script leaves.
+pub const COMMIT_CHANGE: &str = "commit-change";
+pub const COMMIT_MESSAGE: &str = "commit-message";
+
 /// The tool `tools/list` describes by `name`.
 fn described(name: &str) -> Option<Value> {
     let listed = tools::list()["tools"].as_array()?.iter().find(|t| t["name"] == name).cloned();

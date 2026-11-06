@@ -1357,6 +1357,39 @@ fn opencode_and_amp_get_their_own_arguments(cx: &mut TestAppContext) {
     }
 }
 
+/// Port 1 stands for a sandbox: the script cannot reach the window, but can reach its folder.
+#[gpui::test]
+fn an_agent_in_a_sandbox_drafts_through_the_session_folder(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("draft-sandbox", cx);
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).unwrap();
+    hook_command(&ws, cx);
+    let bin = crate::tests::scratch_dir("draft-sandbox-bin");
+    let fake = bin.join("agent");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  export SNOUT_HOOK_PORT=1\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
+    )
+    .unwrap();
+    std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
+    pump_until(cx, "the change", |cx| cx.update(|_, cx| model.read(cx).can_draft()));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::DraftMessage, cx)));
+    pump_until(cx, "the draft under way", |cx| cx.update(|_, cx| model.read(cx).draft.is_some()));
+    let env = cx.update(|_, cx| cx.global::<IdeEnv>().0.clone());
+    let header = env.iter().find(|(k, _)| *k == super::api::HEADER_ENV).map(|(_, v)| PathBuf::from(v)).unwrap();
+    let dir = header.parent().unwrap().to_owned();
+    pump_until(cx, "the change laid out", |_| dir.join(super::api::COMMIT_CHANGE).exists());
+    pump_until(cx, "the agent's message", |cx| cx.update(|_, cx| model.read(cx).draft.is_none()));
+    cx.update(|_, cx| assert_eq!(model.read(cx).commit_msg, "Change Hello\n\nIt didn't change before."));
+    pump_until(cx, "the draft's files cleared", |_| {
+        !dir.join(super::api::COMMIT_CHANGE).exists() && !dir.join(super::api::COMMIT_MESSAGE).exists()
+    });
+    for dir in [repo, lock_dir, bin] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 /// Draft asks the agent in the console: the console opens, the agent starts, the prompt goes,
 /// and what the agent hands back through the editor's API lands in the commit box.
 #[gpui::test]
@@ -1370,7 +1403,7 @@ fn draft_asks_the_agent_in_the_console_and_takes_its_message(cx: &mut TestAppCon
     let fake = bin.join("agent");
     std::fs::write(
         &fake,
-        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage '{\"message\":\"Change Hello\\n\\nIt didn\\u0027t change before.\"}'\n  fi\ndone\n",
+        "#!/bin/sh\necho ready\nwhile read -r line; do\n  api=$(printf '%s' \"$line\" | sed -n 's/.*Run `\\([^ ]*\\) getCommitChange.*/\\1/p')\n  if \"$api\" getCommitChange | grep -q 'NOTES.md'; then\n    \"$api\" setCommitMessage <<'MESSAGE'\nChange Hello\n\nIt didn't change before.\nMESSAGE\n  fi\ndone\n",
     )
     .unwrap();
     std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
