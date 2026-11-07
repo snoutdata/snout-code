@@ -226,6 +226,10 @@ jobs:
           #!/bin/sh
           case "$1" in --version) echo amp; exit 0 ;; esac
           { echo "args: $*"; "$SNOUT_API" getAppState; "$SNOUT_API" manual; } > /tmp/harness-answer 2>&1
+          # Codex's route, through the same port.
+          curl -sS -X POST -H @"$SNOUT_API_HEADER" -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"snoutcode","arguments":{"tool":"getAppState"}}}' \
+            "http://127.0.0.1:$SNOUT_HOOK_PORT/mcp" > /tmp/harness-mcp 2>&1
           exec sleep 600
           AMP
           sed -i 's/^ *//' ~/.amp/bin/amp

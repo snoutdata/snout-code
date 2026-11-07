@@ -35,6 +35,7 @@ fn each_tool_window_has_one_header_and_an_illustrated_empty_state(cx: &mut TestA
         (Tool::Structure, true),
         (Tool::Hierarchy, true),
         (Tool::Processes, false),
+        (Tool::AgentLog, false),
         (Tool::Tests, true),
     ];
     for (tool, empty) in tools {
@@ -93,6 +94,7 @@ fn panel_name(tool: Tool) -> &'static str {
         Tool::Structure => "Structure",
         Tool::Hierarchy => "Hierarchy",
         Tool::Processes => "Processes",
+        Tool::AgentLog => "Agent Log",
         Tool::Tests => "Tests",
     }
 }

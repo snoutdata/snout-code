@@ -62,6 +62,7 @@ pub struct Tabs {
     pub build: PanelId,
     pub processes: PanelId,
     pub tests: PanelId,
+    pub agent_log: PanelId,
 }
 
 pub struct Workspace {
@@ -115,6 +116,9 @@ pub struct Workspace {
     /// The project's Spring model, for the Spring window and the editors' gutters.
     pub spring: Entity<crate::spring::Spring>,
     pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
+    /// What agents asked of the app, and what waits for the user's answer.
+    pub agent_log: Entity<crate::claude_ide::agent_log::AgentLog>,
+    pub harness: crate::claude_ide::capabilities::Harness,
     /// The processes SnoutCode runs, and their tool window.
     pub processes: Entity<crate::processes::Processes>,
     pub processes_window: Entity<crate::processes::window::ProcessesWindow>,
@@ -372,6 +376,8 @@ impl Workspace {
         let tests_window = cx.new(|cx| crate::playwright::window::TestsWindow::new(pw_tests.clone(), window, cx));
         let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
         let claude_changes = cx.new(|cx| crate::claude_ide::panel::ChangesPanel::new(cx_ws.clone(), cx));
+        let agent_log = cx.new(|_| crate::claude_ide::agent_log::AgentLog::default());
+        let agent_log_panel = cx.new(|cx| crate::claude_ide::agent_log::AgentLogPanel::new(agent_log.clone(), cx));
         let processes_window = cx.new(|cx| crate::processes::window::ProcessesWindow::new(processes.clone(), cx));
         let spring_window = cx.new(|cx| crate::spring::window::SpringWindow::new(spring.clone(), window, cx));
         let structure = cx.new(|cx| crate::lang::structure::StructureWindow::new(window, cx));
@@ -393,6 +399,7 @@ impl Workspace {
             debug: PanelId::from(debug_window.entity_id()),
             build: PanelId::from(build_window.entity_id()),
             processes: PanelId::from(processes_window.entity_id()),
+            agent_log: PanelId::from(agent_log_panel.entity_id()),
             tests: PanelId::from(tests_window.entity_id()),
         };
         if let Some(console) = console {
@@ -407,6 +414,7 @@ impl Workspace {
         panels.push((panel_handle(debug_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(processes_window.clone()), DockPlacement::Bottom));
+        panels.push((panel_handle(agent_log_panel), DockPlacement::Bottom));
         panels.push((panel_handle(tests_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(structure.clone()), DockPlacement::Right));
         panels.push((panel_handle(hierarchy.clone()), DockPlacement::Right));
@@ -470,6 +478,14 @@ impl Workspace {
                 }
                 this.ensure_project_server(cx);
                 cx.notify()
+            }),
+            // A card closed with no answer turns the agent's call down; the next waits its turn.
+            cx.observe(&model, |this, _, cx| {
+                if !this.harness.is_idle() {
+                    // After the events of this change: closing the card comes before the answer.
+                    let ws = cx.entity();
+                    cx.defer(move |cx| ws.update(cx, crate::claude_ide::capabilities::next_ask));
+                }
             }),
             cx.subscribe_in(&dock, window, |this, _, e: &DockEvent, window, cx| {
                 if matches!(e, DockEvent::LayoutChanged) {
@@ -554,6 +570,8 @@ impl Workspace {
             notifications,
             processes,
             processes_window,
+            agent_log,
+            harness: Default::default(),
             runs,
             pw_setup,
             pw_tests,
@@ -1087,6 +1105,7 @@ impl Workspace {
             ModelEvent::Closed => self.after_close(window, cx),
             ModelEvent::Switch(path) => self.switch_project(path.clone(), window, cx),
             ModelEvent::NewProject => self.open_new_project(window, cx),
+            ModelEvent::AgentAnswer(how) => crate::claude_ide::capabilities::asked(self, *how, window, cx),
             ModelEvent::Quit(choice) => self.on_quit_choice(*choice, window, cx),
             ModelEvent::PickRemoteFolder(then) => self.pick_remote(remote_ui::Purpose::Then(then.0), window, cx),
             ModelEvent::OpenFile(path, at, preview) => {
@@ -1947,7 +1966,7 @@ impl Workspace {
         });
     }
 
-    fn send(&mut self, action: Action, cx: &mut Context<Self>) {
+    pub(crate) fn send(&mut self, action: Action, cx: &mut Context<Self>) {
         self.model.update(cx, |m, cx| m.handle(action, cx));
     }
 
@@ -2240,6 +2259,7 @@ impl Render for Workspace {
                 }
                 this.processes.update(cx, |p, cx| p.look(cx));
             }))
+            .on_action(cx.listener(|this, _: &ShowAgentLog, w, cx| this.show_tool(Tool::AgentLog, w, cx)))
             .on_action(cx.listener(|this, _: &StopIdleProcesses, _, cx| {
                 this.processes.update(cx, |p, cx| {
                     p.stop_idle(cx);

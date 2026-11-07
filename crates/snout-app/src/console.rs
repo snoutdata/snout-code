@@ -949,11 +949,6 @@ impl ConsolePanel {
                     args.splice(0..0, extra.0.iter().cloned());
                 }
             }
-            Some(a) if a.id == crate::agents::AMP => {
-                if let Some(extra) = cx.try_global::<crate::claude_ide::AmpArgs>() {
-                    args.splice(0..0, extra.0.iter().cloned());
-                }
-            }
             // A command of the user's own runs through the shell; the other agents take
             // their arguments as they are (Continue's among them).
             Some(a) if a.id == crate::agents::CUSTOM => {

@@ -48,7 +48,7 @@ $settings = Join-Path $env:APPDATA "SnoutCode\settings.json"
 $kept = if (Test-Path $settings) { Get-Content $settings -Raw } else { $null }
 New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
 Set-Content -Path $settings -Value '{"console_open":true,"console_agent":"amp"}'
-InDistro "rm -f /tmp/harness-answer" | Out-Null
+InDistro "rm -f /tmp/harness-answer /tmp/harness-mcp" | Out-Null
 InDistro "rm -rf ~/.snout-code; mkdir -p /tmp/wsl-demo; echo hello > /tmp/wsl-demo/notes.txt" | Out-Null
 
 Write-Host "== Opening \\wsl.localhost\$Distro\tmp\wsl-demo"
@@ -72,6 +72,11 @@ if (-not (WaitFor 120 { InDistro "grep -q wsl-demo /tmp/harness-answer && grep -
     Fail "the agent in the distro did not reach the window"
 }
 Write-Host "the agent in $Distro reached the window"
+if (-not (WaitFor 60 { InDistro "grep -q wsl-demo /tmp/harness-mcp && grep -q 'isError.:false' /tmp/harness-mcp && echo yes" })) {
+    InDistro "cat /tmp/harness-mcp 2>&1" | ForEach-Object { Write-Host $_ }
+    Fail "the MCP tool in the distro did not reach the window"
+}
+Write-Host "the MCP tool in $Distro reached the window"
 InDistro "cut -c1-300 /tmp/harness-answer" | ForEach-Object { Write-Host $_ }
 Show
 StopAll

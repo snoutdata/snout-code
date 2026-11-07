@@ -393,20 +393,14 @@ pub fn codex_hook_args(windows: bool) -> Vec<String> {
 
 /// The variable that makes an `opencode` started in the console load SnoutCode's plugin
 /// `plugin` for the session, beside the user's own (opencode merges its plugin lists).
-pub fn opencode_env(plugin: &Path, port: u16, token: &str) -> (&'static str, String) {
+pub fn opencode_env(plugin: &Path, instructions: &Path) -> (&'static str, String) {
     let url = if matches!(plugin.components().next(), Some(std::path::Component::Prefix(_))) {
         format!("file:///{}", plugin.to_string_lossy().replace('\\', "/"))
     } else {
         format!("file://{}", plugin.to_string_lossy())
     };
-    let mcp = json!({
-        "type": "remote",
-        "url": mcp_url(port),
-        "enabled": true,
-        "oauth": false,
-        "headers": { TOKEN_HEADER: token },
-    });
-    ("OPENCODE_CONFIG_CONTENT", json!({ "plugin": [url], "mcp": { super::api::MCP_TOOL: mcp } }).to_string())
+    let config = json!({ "plugin": [url], "instructions": [instructions.to_string_lossy()] });
+    ("OPENCODE_CONFIG_CONTENT", config.to_string())
 }
 
 /// The API's MCP endpoint.
@@ -433,17 +427,16 @@ pub fn codex_mcp_args(port: u16) -> Vec<String> {
         // something is asked in its window (`capabilities::Effect::Change`).
         "-c".into(),
         format!("mcp_servers.{name}.default_tools_approval_mode={}", quoted("approve")),
+        // The user may take a while to answer the card.
+        "-c".into(),
+        format!("mcp_servers.{name}.tool_timeout_sec={}", ASK_WAIT.as_secs()),
     ]
 }
 
-/// The arguments that give an `amp` the API's MCP tool, for the session only: a file, as its
-/// argument would show the token on a command line. Written into the folder `dir` of
-/// [`write_settings`].
-pub fn amp_mcp_args(host: &dyn snout_host::Host, dir: &Path, port: u16, token: &str) -> std::io::Result<Vec<String>> {
-    let file = dir.join("amp-mcp.json");
-    let config = json!({ super::api::MCP_TOOL: { "url": mcp_url(port), "headers": { TOKEN_HEADER: token } } });
-    host.write_mode(&file, config.to_string().as_bytes(), Some(0o600))?;
-    Ok(vec!["--mcp-config".into(), file.to_string_lossy().into_owned()])
+/// What opencode is told, in every request, in the folder `dir` of [`write_settings`]: one line that
+/// sends it to the skill, as a skill's description would.
+pub fn opencode_instructions(dir: &Path) -> PathBuf {
+    dir.join("snoutcode-instructions.md")
 }
 
 /// Where Amp looks for the plugins of this user on `host`:
@@ -532,6 +525,13 @@ pub fn write_settings(host: &dyn snout_host::Host, dir: &Path, token: &str) -> s
     host.write_mode(&header, format!("{TOKEN_HEADER}: {token}\n").as_bytes(), Some(0o600))?;
     super::api::write_plugin(host, dir)?;
     host.write_mode(&opencode_plugin(dir), OPENCODE_PLUGIN.as_bytes(), Some(0o600))?;
+    let skill = super::api::plugin_dir(dir).join("skills").join("snoutcode").join("SKILL.md");
+    let told = format!(
+        "This session runs in SnoutCode's console. To open files in its editor (instead of `code`, `open`, `idea` or \
+         any other editor), see what is open or on screen, or use its windows, first read {} and follow it.\n",
+        skill.display()
+    );
+    host.write_mode(&opencode_instructions(dir), told.as_bytes(), Some(0o600))?;
     let file = dir.join("claude-settings.json");
     let text =
         serde_json::to_string_pretty(&settings(&header, &super::api::script(dir))).map_err(std::io::Error::other)?;
@@ -549,6 +549,9 @@ type Ask = Arc<dyn Fn(super::server::Call) + Send + Sync>;
 
 /// How long an API call waits for the editor's answer.
 const API_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a call that changes something waits at most: the user is asked first.
+const ASK_WAIT: Duration = Duration::from_secs(600);
 
 /// The endpoint. Dropping it stops it.
 pub struct HookServer {
@@ -723,7 +726,9 @@ fn call_api(name: &str, arguments: Value, ask: &Ask) -> super::api::Answer {
     use super::api::{self, Answer};
     let (reply, answer) = super::server::Reply::channel();
     ask(super::server::Call { client: super::server::API_CLIENT, name: name.to_owned(), arguments, reply });
-    match answer.recv_timeout(API_WAIT) {
+    // A change may wait for the user's answer.
+    let change = super::capabilities::find(name).is_some_and(|c| c.effect == super::capabilities::Effect::Change);
+    match answer.recv_timeout(if change { ASK_WAIT } else { API_WAIT }) {
         Ok(message) => api::answer(&message),
         Err(_) => Answer::error("504 Gateway Timeout", "the editor did not answer"),
     }
@@ -1111,6 +1116,7 @@ pub mod tests {
         let env = [
             (PORT_ENV, server.port().to_string()),
             (super::super::api::HEADER_ENV, dir.join("conf/hook-header").to_string_lossy().into_owned()),
+            (SCRIPT_ENV, super::super::api::script(&dir.join("conf")).to_string_lossy().into_owned()),
         ];
         let out = node(&dir, plugin, &driver, &env)?;
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -1165,6 +1171,8 @@ pub mod tests {
             const on = {}
             const amp = {
                 on: (name, f) => { on[name] = f },
+                system: { cacheDirectory: DIR },
+                registerSkill: async (s) => { writeFileSync(DIR + "/registered", s.path) },
                 helpers: {
                     filesModifiedByToolCall: (e) => e.tool === "edit_file" ? [{ fsPath: e.input.path }] : null,
                     filePathFromURI: (uri) => uri.fsPath,
@@ -1184,6 +1192,11 @@ pub mod tests {
         let kinds: Vec<_> = events.iter().map(|e| e.kind.clone()).collect();
         assert_eq!(kinds, [HookKind::PreTool, HookKind::PostTool, HookKind::TurnComplete]);
         assert!(events.iter().all(|e| e.agent == crate::agents::AMP && e.session == "T-1"));
+        // The skill, for this session: from the session's folder into the plugin's cache.
+        let dir = file.parent().unwrap();
+        let skill = dir.join("skills/snoutcode");
+        assert_eq!(std::fs::read_to_string(dir.join("registered")).unwrap(), skill.to_string_lossy());
+        assert!(std::fs::read_to_string(skill.join("SKILL.md")).unwrap().contains("snout-api"));
         assert_eq!(events[0].file, Some(Snapshot::Text(Arc::new("class A {}\n".into()))));
         assert_eq!(events[1].path.as_deref(), Some(file.as_path()));
         assert_eq!(events[1].file, Some(Snapshot::Text(Arc::new("class A { int x; }\n".into()))));
@@ -1193,12 +1206,10 @@ pub mod tests {
 
     #[test]
     fn opencode_loads_the_plugin_from_a_file_url() {
-        let (k, v) = opencode_env(Path::new("/tmp/snout x/snoutcode-opencode.js"), 4100, "tok");
+        let (k, v) = opencode_env(Path::new("/tmp/snout x/snoutcode-opencode.js"), Path::new("/tmp/snout x/told.md"));
         assert_eq!(k, "OPENCODE_CONFIG_CONTENT");
         let v: Value = serde_json::from_str(&v).unwrap();
         assert_eq!(v["plugin"], json!(["file:///tmp/snout x/snoutcode-opencode.js"]));
-        let mcp = &v["mcp"]["snoutcode"];
-        assert_eq!((&mcp["type"], &mcp["url"]), (&json!("remote"), &json!("http://127.0.0.1:4100/mcp")));
-        assert_eq!(mcp["headers"][TOKEN_HEADER], "tok");
+        assert_eq!(v["instructions"], json!(["/tmp/snout x/told.md"]));
     }
 }

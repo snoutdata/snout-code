@@ -21,6 +21,7 @@ use snout_core::art::{Drawing, spots};
 use snout_core::groups::{dir_name, group_name_problem};
 use snout_core::{BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, branch_name_problem, repo_dir_name};
 
+use crate::claude_ide::capabilities::AskAnswer;
 use crate::components::{
     Button, CANCEL_ICON, FileChip, IconButton, IconName, OK_ICON, Tone, badge, callout, choice_card, dialog_body,
     dialog_footer, dialog_header, field_label,
@@ -61,7 +62,10 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
                 false
             })
             .on_close(move |_, _, cx| {
-                m.update(cx, |m, _| m.dialog = None);
+                m.update(cx, |m, cx| {
+                    m.dialog = None;
+                    cx.notify();
+                });
             })
     });
     // After the dialog layer has taken the keyboard for itself.
@@ -136,6 +140,11 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
             Some(spots::clone_repo()),
             Some("Copy a remote repository to this computer and open it.".into()),
         ),
+        Dialog::AgentAsks { agent, .. } => (
+            Tone::Warning,
+            Some(spots::agent_console()),
+            Some(format!("{agent} is waiting in the console for your answer.").into()),
+        ),
         Dialog::Quit(info) if info.is_empty() => {
             (Tone::Neutral, Some(spots::info()), Some("The window closes, and the Java engine stops with it.".into()))
         }
@@ -177,6 +186,7 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
             "Clone repository".into()
         }
         Dialog::Quit(_) => "Quit SnoutCode?".into(),
+        Dialog::AgentAsks { agent, what, .. } => format!("Allow {agent} to {what}?").into(),
     }
 }
 
@@ -275,7 +285,10 @@ impl DialogBody {
 
     fn close(&self, window: &mut Window, cx: &mut Context<Self>) {
         window.close_dialog(cx);
-        self.model.update(cx, |m, _| m.dialog = None);
+        self.model.update(cx, |m, cx| {
+            m.dialog = None;
+            cx.notify();
+        });
     }
 
     fn value(input: &Entity<InputState>, cx: &gpui::App) -> String {
@@ -322,6 +335,7 @@ impl DialogBody {
                 let dont_ask = self.dont_ask && info.is_empty();
                 self.act(Action::Quit(crate::model::QuitChoice { save, dont_ask }), window, cx)
             }
+            Dialog::AgentAsks { .. } => self.confirm(window, cx),
             Dialog::NewBranch(_) | Dialog::GroupName { .. } | Dialog::Clone { .. } | Dialog::Checkout => {
                 self.confirm(window, cx)
             }
@@ -340,6 +354,7 @@ impl DialogBody {
                 upstream: upstream.filter(|_| self.with_upstream),
             }),
             Dialog::DeleteRemoteBranch(r) => Some(Action::DeleteRemoteBranch(r)),
+            Dialog::AgentAsks { .. } => Some(Action::AgentAnswer(AskAnswer::Once)),
             Dialog::Quit(info) if !info.unsaved.is_empty() => {
                 Some(Action::Quit(crate::model::QuitChoice { save: Some(false), dont_ask: false }))
             }
@@ -970,6 +985,25 @@ impl Render for DialogBody {
             }
             // Below, in its own function.
             Dialog::Quit(_) => {}
+            Dialog::AgentAsks { ref tool, .. } => {
+                body.push(dim(format!("Through SnoutCode's {tool}.")).into_any_element());
+                buttons.push(
+                    Button::new("agent-refuse", CANCEL_ICON)
+                        .debug_selector("agent-refuse")
+                        .focusable()
+                        .label("Don't Allow")
+                        .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
+                        .into_any_element(),
+                );
+                buttons.push(on!(
+                    Button::new("agent-session", OK_ICON)
+                        .debug_selector("agent-session")
+                        .focusable()
+                        .label("Allow for This Session"),
+                    Action::AgentAnswer(AskAnswer::Session)
+                ));
+                buttons.push(on!(ok("Allow").debug_selector("agent-once"), Action::AgentAnswer(AskAnswer::Once)));
+            }
         }
         if let Dialog::Quit(info) = self.dialog.clone() {
             self.quit_body(&info, &mut body, &mut buttons, cancel_button(cx), cx);

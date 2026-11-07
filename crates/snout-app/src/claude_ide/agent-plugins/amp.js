@@ -2,7 +2,8 @@
 // about each file edit, before and after, and the end of each turn with its prompt, so the
 // editor shows the agent writing. SnoutCode puts it here when its console starts Amp. In
 // an Amp started anywhere else (no SNOUT_HOOK_PORT) it does nothing at all.
-import { readFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 export const description = "SnoutCode: shows Amp's edits live in SnoutCode's editor when Amp runs in its console"
 
@@ -10,6 +11,19 @@ export default function (amp) {
   const port = process.env.SNOUT_HOOK_PORT
   const headerFile = process.env.SNOUT_API_HEADER
   if (!port || !headerFile) return
+  // The skill that tells Amp how to work the window, from the session's folder: it names this
+  // session's script. An Amp started anywhere else never hears of it.
+  const script = process.env.SNOUT_API
+  if (script) {
+    try {
+      const dir = join(amp.system.cacheDirectory, "skills", "snoutcode")
+      mkdirSync(dir, { recursive: true })
+      copyFileSync(join(dirname(dirname(script)), "skills", "snoutcode", "SKILL.md"), join(dir, "SKILL.md"))
+      amp.registerSkill({ path: dir }).catch(() => {})
+    } catch {
+      // No skill: Amp goes on as it would without SnoutCode.
+    }
+  }
   let header
   const post = async (body) => {
     try {

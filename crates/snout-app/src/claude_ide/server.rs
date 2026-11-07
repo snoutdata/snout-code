@@ -42,6 +42,11 @@ pub enum Event {
     Disconnected(u64),
     /// A tool call to answer.
     Call(Call),
+    /// The API's call `id` (in the Agent Log) was answered: `error` if it failed.
+    Answered {
+        id: u64,
+        error: Option<String>,
+    },
 }
 
 /// The client of a call that came over the API, not over a connection (whose ids start at 1).
@@ -55,12 +60,16 @@ pub struct Call {
     pub reply: Reply,
 }
 
+type Observer = Box<dyn FnOnce(&Value) + Send>;
+
 /// The way back to the client that made a request. Dropping it unanswered answers with
 /// an error, so a client never waits forever.
 pub struct Reply {
     id: Value,
     out: mpsc::Sender<String>,
     sent: bool,
+    /// Told what the answer was, as it goes.
+    observer: Option<Observer>,
 }
 
 impl Reply {
@@ -68,11 +77,20 @@ impl Reply {
     /// for callers of the tools that are not on the socket (the HTTP API).
     pub fn channel() -> (Self, mpsc::Receiver<String>) {
         let (out, rx) = mpsc::channel();
-        (Self { id: json!(0), out, sent: false }, rx)
+        (Self { id: json!(0), out, sent: false, observer: None }, rx)
+    }
+
+    /// This reply, with `observer` told what the answer was.
+    pub fn observed(mut self, observer: impl FnOnce(&Value) + Send + 'static) -> Self {
+        self.observer = Some(Box::new(observer));
+        self
     }
 
     fn send(&mut self, body: Value) {
         self.sent = true;
+        if let Some(observer) = self.observer.take() {
+            observer(&body);
+        }
         let mut msg = json!({ "jsonrpc": "2.0", "id": self.id });
         if let (Some(m), Some(b)) = (msg.as_object_mut(), body.as_object()) {
             m.extend(b.clone());
@@ -405,7 +423,7 @@ fn handle_one(msg: Value, client: u64, out: &mpsc::Sender<String>, emit: &Emit) 
     // Notifications (no id) need no answer; none asks anything of the IDE yet.
     let Some(id) = msg.get("id").cloned() else { return };
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
-    let reply = Reply { id, out: out.clone(), sent: false };
+    let reply = Reply { id, out: out.clone(), sent: false, observer: None };
     match method {
         "initialize" => {
             let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or_default();
@@ -492,6 +510,7 @@ pub mod tests {
                     call.reply.ok(tools::text(format!("called {name}")));
                     format!("call {name}")
                 }
+                Event::Answered { id, .. } => format!("answered {id}"),
             };
             let _ = tx.lock().unwrap().send(e);
         })

@@ -17,7 +17,7 @@ use crate::tests::{act, git, open, scratch_dir, with_repo};
 use crate::workspace::Workspace;
 
 /// The shop fixture, copied and committed: the build is the repository.
-fn shop(name: &str) -> PathBuf {
+pub(crate) fn shop(name: &str) -> PathBuf {
     let dir = scratch_dir(name);
     let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shop");
     crate::tests::copy_tree(&from, &dir);

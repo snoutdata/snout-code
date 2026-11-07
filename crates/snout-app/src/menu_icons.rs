@@ -164,6 +164,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "ToggleParamHints" => sf("tag", L::Tag),
         "SplitRight" => sf("square.split.2x1", L::SquareSplitHorizontal),
         "ShowProcesses" => sf("cpu", L::Cpu),
+        "ShowAgentLog" => sf("list.bullet.rectangle", L::ScrollText),
         "ThemeSystem" => sf("circle.lefthalf.filled", L::SunMoon),
         "ThemeLight" => sf("sun.max", L::Sun),
         "ThemeDark" => sf("moon", L::Moon),

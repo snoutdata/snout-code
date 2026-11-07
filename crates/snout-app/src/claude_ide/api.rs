@@ -9,10 +9,10 @@
 //! against the same token. [`super::capabilities`] says which calls there are; those the IDE
 //! connection also has are answered by its code, so the two never differ.
 //!
-//! An agent's sandbox can cut it off from that port (Codex's does, by default) but not its MCP
-//! client. So Codex, opencode and Amp get one MCP tool, for their session only, that makes the same
-//! calls ([`mcp_message`]): one definition costs about what a skill's line does, and the manual stays
-//! out of the context until it is asked for.
+//! The one exception is Codex: its sandbox cuts its commands off from that port by default, but not
+//! its MCP client. So it gets one MCP tool, for its session only, that makes the same calls
+//! ([`mcp_message`]): one definition costs about what a skill's line does, and the manual stays out of
+//! the context until it is asked for.
 
 use std::path::{Path, PathBuf};
 
@@ -58,8 +58,7 @@ pub const COMMIT_MESSAGE: &str = "commit-message";
 /// The UTCP manual: each tool with its inputs and the HTTP call that runs it. The port
 /// and the token are variables, from the console's environment.
 pub fn manual() -> Value {
-    let tools: Vec<Value> = capabilities::ALL
-        .iter()
+    let tools: Vec<Value> = capabilities::all()
         .map(|c| {
             let name = c.name;
             json!({
@@ -223,8 +222,7 @@ fn first_sentence(text: &str) -> &str {
 /// a domain with [`domain_manual`]). It is in the context only once asked for, but it grows with each
 /// tool: the full UTCP manual repeats each tool's call, for clients that make the calls themselves.
 pub fn index() -> Value {
-    let tools: Vec<Value> = capabilities::ALL
-        .iter()
+    let tools: Vec<Value> = capabilities::all()
         .map(|c| {
             json!({
                 "name": c.name,
@@ -243,8 +241,7 @@ pub fn index() -> Value {
 
 /// The tools of `domain` with their arguments. An unknown one says which there are.
 pub fn domain_manual(domain: &str) -> Result<Value, String> {
-    let tools: Vec<Value> = capabilities::ALL
-        .iter()
+    let tools: Vec<Value> = capabilities::all()
         .filter(|c| c.domain.tag().eq_ignore_ascii_case(domain.trim()))
         .map(|c| {
             json!({
@@ -256,7 +253,7 @@ pub fn domain_manual(domain: &str) -> Result<Value, String> {
         })
         .collect();
     if tools.is_empty() {
-        let mut known: Vec<&str> = capabilities::ALL.iter().map(|c| c.domain.tag()).collect();
+        let mut known: Vec<&str> = capabilities::all().map(|c| c.domain.tag()).collect();
         known.dedup();
         return Err(format!("No domain called {domain}. The domains: {}", known.join(", ")));
     }
@@ -370,7 +367,7 @@ mod tests {
         let m = manual();
         assert_eq!(m["utcp_version"], UTCP_VERSION);
         let names: Vec<&str> = m["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, capabilities::ALL.iter().map(|c| c.name).collect::<Vec<_>>(), "every tool described");
+        assert_eq!(names, capabilities::all().map(|c| c.name).collect::<Vec<_>>(), "every tool described");
         let open = m["tools"].as_array().unwrap().iter().find(|t| t["name"] == "openFile").unwrap();
         assert_eq!(open["inputs"]["required"], json!(["filePath"]));
         assert_eq!(open["tags"], json!(["editor", "show"]));
@@ -462,7 +459,7 @@ mod tests {
     #[test]
     fn the_short_manual_lists_every_tool_without_its_arguments() {
         let i = index();
-        assert_eq!(i["tools"].as_array().unwrap().len(), capabilities::ALL.len());
+        assert_eq!(i["tools"].as_array().unwrap().len(), capabilities::all().count());
         assert!(!i.to_string().contains("startLine"));
         assert!(i.to_string().len() < manual().to_string().len() / 3, "well under the whole manual");
     }

@@ -125,6 +125,12 @@ pub enum Dialog {
     },
     /// Quit SnoutCode? What would be lost or stopped.
     Quit(QuitInfo),
+    /// An agent asks to change something.
+    AgentAsks {
+        agent: String,
+        what: String,
+        tool: String,
+    },
 }
 
 /// What quitting now would lose or stop, for the Quit dialog.
@@ -237,6 +243,8 @@ pub enum Action {
     ClearRecent,
     /// Put up the New Project dialog.
     ShowNewProject,
+    /// The user's answer to an agent's asking.
+    AgentAnswer(crate::claude_ide::capabilities::AskAnswer),
     /// Quit, as the Quit dialog was answered.
     Quit(QuitChoice),
 }
@@ -281,6 +289,8 @@ pub enum ModelEvent {
     Closed,
     /// Put up the New Project dialog.
     NewProject,
+    /// The user answered an agent's asking.
+    AgentAnswer(crate::claude_ide::capabilities::AskAnswer),
     /// Another project is to open in place of the one open: the workspace settles the
     /// open tabs first, then calls [`Model::switch_project`].
     Switch(PathBuf),
@@ -2006,6 +2016,7 @@ impl Model {
             Action::CloseRepo => self.close_repo(cx),
             Action::ClearRecent => self.settings.recent = Some(Vec::new()),
             Action::ShowNewProject => cx.emit(ModelEvent::NewProject),
+            Action::AgentAnswer(how) => cx.emit(ModelEvent::AgentAnswer(how)),
             Action::PickFolder => self.pick_folder("Open project", Action::OpenPath, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
             Action::InitRepo(path) => {

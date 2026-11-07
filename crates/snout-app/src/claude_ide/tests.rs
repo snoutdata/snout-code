@@ -975,7 +975,7 @@ fn codex_in_the_console_gets_its_turns_and_its_edits(cx: &mut TestAppContext) {
     settings.console_agent = crate::agents::ConsoleAgent::Codex;
     let (model, ws, cx) = open_with_ide(cx, settings, &lock_dir);
     pump_until(cx, "Codex's notify", |cx| {
-        cx.update(|_, cx| cx.try_global::<super::CodexArgs>().is_some_and(|a| a.0.len() == 16))
+        cx.update(|_, cx| cx.try_global::<super::CodexArgs>().is_some_and(|a| a.0.len() == 18))
     });
     let notify = cx.update(|_, cx| cx.global::<super::CodexArgs>().0.clone());
     assert_eq!(notify[0], "-c");
@@ -1370,9 +1370,7 @@ fn opencode_and_amp_get_their_own_arguments(cx: &mut TestAppContext) {
             })
         });
         let text = cx.update(|_, cx| console.read(cx).session_text(&repo)).unwrap();
-        // opencode's come in a variable; Amp's name the MCP tool's file.
-        let ours = if id == crate::agents::AMP { "args=[--mcp-config " } else { "args=[]" };
-        assert!(text.contains(ours), "{id} starts with the arguments it should: {text}");
+        assert!(text.contains("args=[]"), "{id} starts with no arguments of ours: {text}");
         // And Continue's arguments reach it.
         let resume = crate::console::continue_args(&crate::agents::Agent::of(id, &Default::default()));
         cx.update(|w, cx| console.update(cx, |c, cx| c.start(&repo, &resume, w, cx)));
@@ -1380,7 +1378,7 @@ fn opencode_and_amp_get_their_own_arguments(cx: &mut TestAppContext) {
             cx.update(|_, cx| console.read(cx).session_text(&repo).is_some_and(|t| t.contains("args=[")))
         });
         let text = cx.update(|_, cx| console.read(cx).session_text(&repo)).unwrap();
-        assert!(text.replace('\n', "").contains(&format!("{}]", resume.join(" "))), "{id}: {text}");
+        assert!(text.contains(&format!("args=[{}]", resume.join(" "))), "{id}: {text}");
     }
     for dir in [repo, lock_dir, bin] {
         let _ = std::fs::remove_dir_all(dir);
@@ -1572,6 +1570,17 @@ fn shell_while_pumping(cx: &mut VisualTestContext, script: &str, env: &[(&'stati
 /// A call of the API as an agent makes it: real HTTP, with the token from the file the console
 /// names. The window keeps running while it waits. The answer's status code and body.
 fn agent_calls(cx: &mut VisualTestContext, tool: &str, arguments: Value, with_token: bool) -> (u16, String) {
+    let call = agent_starts_call(cx, tool, arguments, with_token);
+    agent_gets_answer(cx, call)
+}
+
+/// The agent's call on its way, which may wait for the user.
+fn agent_starts_call(
+    cx: &mut VisualTestContext,
+    tool: &str,
+    arguments: Value,
+    with_token: bool,
+) -> std::thread::JoinHandle<String> {
     use std::io::{Read as _, Write as _};
     let env = cx.update(|_, cx| cx.global::<IdeEnv>().0.clone());
     let var = |name: &str| env.iter().find(|(k, _)| *k == name).map(|(_, v)| v.clone()).expect(name);
@@ -1584,13 +1593,17 @@ fn agent_calls(cx: &mut VisualTestContext, tool: &str, arguments: Value, with_to
          content-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
     );
-    let call = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream.write_all(request.as_bytes()).unwrap();
         let mut out = String::new();
         stream.read_to_string(&mut out).unwrap();
         out
-    });
+    })
+}
+
+/// The status and body of the answer to a call on its way.
+fn agent_gets_answer(cx: &mut VisualTestContext, call: std::thread::JoinHandle<String>) -> (u16, String) {
     pump_until(cx, "the app's answer", |_| call.is_finished());
     let out = call.join().unwrap();
     let status = out.split_whitespace().nth(1).and_then(|s| s.parse().ok()).expect("a status");
@@ -1605,7 +1618,8 @@ fn an_agent_finds_out_where_it_stands_and_shows_the_user_a_window(cx: &mut TestA
     hook_command(&ws, cx);
 
     // Everything the manual offers is really answered.
-    for c in super::capabilities::ALL {
+    use super::capabilities::Effect;
+    for c in super::capabilities::all().filter(|c| c.effect != Effect::Change) {
         let (status, body) = agent_calls(cx, c.name, json!({}), true);
         assert!(!matches!(status, 404 | 504), "{}: {status} {body}", c.name);
     }
@@ -1657,6 +1671,282 @@ fn an_agent_finds_out_where_it_stands_and_shows_the_user_a_window(cx: &mut TestA
     let _ = std::fs::remove_dir_all(lock_dir);
 }
 
+/// A change waits for the user: nothing happens until they answer, Don't Allow tells the agent so,
+/// Allow is for this one call, and Allow for This Session stops the asking for that tool. Every call
+/// is in the Agent Log, with how it ended.
+#[gpui::test]
+fn a_change_waits_for_the_user_and_the_log_says_how_it_ended(cx: &mut TestAppContext) {
+    use super::agent_log::Outcome;
+    use crate::model::Dialog;
+    let (repo, lock_dir, model, ws, _client, cx) = connected("harness-ask", cx);
+    hook_command(&ws, cx);
+    let hello = repo.join("src/demo/Hello.java");
+    let hello_text = hello.to_string_lossy().into_owned();
+    agent_calls(cx, "openFile", json!({ "filePath": hello_text }), true);
+    let editor = editor_of(&ws, &hello, cx).expect("the tab");
+    let on_disk = || std::fs::read_to_string(&hello).unwrap();
+    let before = on_disk();
+    let edit = |cx: &mut VisualTestContext, text: &str| {
+        cx.update(|w, cx| {
+            editor.update(cx, |e, cx| {
+                e.state.update(cx, |s, cx| s.set_value(text.to_owned(), w, cx));
+                e.dirty = true;
+            });
+        });
+        pump(cx, 50);
+    };
+    let asking = |cx: &mut VisualTestContext| {
+        pump_until(cx, "the card", |cx| {
+            cx.update(|_, cx| matches!(model.read(cx).dialog, Some(Dialog::AgentAsks { .. })))
+        });
+        cx.run_until_parked();
+    };
+    let save = json!({ "filePath": hello_text });
+
+    // Don't Allow: the file stays, and the agent is told.
+    edit(cx, "class Refused {}\n");
+    let call = agent_starts_call(cx, "saveDocument", save.clone(), true);
+    asking(cx);
+    cx.update(|_, cx| match model.read(cx).dialog.as_ref() {
+        Some(Dialog::AgentAsks { what, tool, .. }) => {
+            assert_eq!((what.as_str(), tool.as_str()), (format!("save {hello_text}").as_str(), "saveDocument"));
+        }
+        other => panic!("{other:?}"),
+    });
+    assert_eq!(on_disk(), before, "nothing yet");
+    assert!(!call.is_finished(), "the agent waits");
+    crate::quit_tests::click(cx, "agent-refuse");
+    let (status, body) = agent_gets_answer(cx, call);
+    assert_eq!(status, 422);
+    assert!(body.contains("did not allow"), "{body}");
+    assert_eq!(on_disk(), before);
+
+    // Allow: this call, and the next asks again.
+    let call = agent_starts_call(cx, "saveDocument", save.clone(), true);
+    asking(cx);
+    crate::quit_tests::click(cx, "agent-once");
+    assert_eq!(agent_gets_answer(cx, call).0, 200);
+    assert_eq!(on_disk(), "class Refused {}\n");
+
+    // Allow for This Session: this call and the ones after.
+    edit(cx, "class Session {}\n");
+    let call = agent_starts_call(cx, "saveDocument", save.clone(), true);
+    asking(cx);
+    crate::quit_tests::click(cx, "agent-session");
+    assert_eq!(agent_gets_answer(cx, call).0, 200);
+    assert_eq!(on_disk(), "class Session {}\n");
+    edit(cx, "class Asked {}\n");
+    assert_eq!(agent_calls(cx, "saveDocument", save.clone(), true).0, 200, "no card this time");
+    assert_eq!(on_disk(), "class Asked {}\n");
+
+    // Showing a window never asks.
+    agent_calls(cx, "showToolWindow", json!({ "name": "Agent Log" }), true);
+    pump(cx, 100);
+    assert!(cx.debug_bounds("agent-log").is_some(), "the log shows");
+
+    let log = cx.update(|_, cx| ws.read(cx).agent_log.read(cx).entries.iter().cloned().collect::<Vec<_>>());
+    let saves: Vec<_> = log.iter().filter(|e| e.tool == "saveDocument").collect();
+    assert_eq!(saves.len(), 4);
+    assert!(matches!(&saves[0].outcome, Outcome::Failed(why) if why.contains("did not allow")), "{:?}", saves[0]);
+    assert!(saves[1..].iter().all(|e| e.outcome == Outcome::Done), "{saves:?}");
+    assert!(saves[0].arguments.contains("Hello.java"));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// An agent in the home folder opens the project it made, and runs what is in it: the whole of the
+/// flow with no project open. Needs Node for the script; without it, it stops at the project.
+#[gpui::test]
+fn an_agent_opens_the_project_it_made_and_runs_it(cx: &mut TestAppContext) {
+    use crate::model::Dialog;
+    let lock_dir = scratch_dir("harness-make-ide");
+    let (model, ws, cx) = open_with_ide(cx, Settings::default(), &lock_dir);
+    hook_command(&ws, cx);
+    let made = scratch_dir("harness-made");
+    std::fs::write(
+        made.join("package.json"),
+        r#"{ "name": "made", "scripts": { "hello": "node -e \"console.log('hello from the agent')\"" } }"#,
+    )
+    .unwrap();
+    let path = made.to_string_lossy().into_owned();
+
+    let (_, body) = agent_calls(cx, "listProjects", json!({}), true);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["open"], Value::Null, "{body}");
+    let card = |cx: &mut VisualTestContext| {
+        pump_until(cx, "the card", |cx| {
+            cx.update(|_, cx| matches!(model.read(cx).dialog, Some(Dialog::AgentAsks { .. })))
+        });
+        cx.run_until_parked();
+    };
+    // A folder that is not there: the agent is told, after the user said yes.
+    let call = agent_starts_call(cx, "switchProject", json!({ "path": format!("{path}/nope") }), true);
+    card(cx);
+    crate::quit_tests::click(cx, "agent-once");
+    let (status, body) = agent_gets_answer(cx, call);
+    assert!(status == 422 && body.contains("no folder"), "{status} {body}");
+
+    let call = agent_starts_call(cx, "switchProject", json!({ "path": path }), true);
+    card(cx);
+    crate::quit_tests::click(cx, "agent-session");
+    assert_eq!(agent_gets_answer(cx, call).0, 200);
+    pump_until(cx, "the project", |cx| cx.update(|_, cx| model.read(cx).project_open()));
+    let (_, body) = agent_calls(cx, "getAppState", json!({}), true);
+    let opened =
+        PathBuf::from(serde_json::from_str::<Value>(&body).unwrap()["project"]["path"].as_str().unwrap().to_owned());
+    assert_eq!(opened.canonicalize().unwrap(), made.canonicalize().unwrap());
+
+    if crate::node_tests::has_node().is_none() {
+        let _ = std::fs::remove_dir_all(made);
+        return;
+    }
+    let configs = |cx: &mut VisualTestContext| {
+        let (_, body) = agent_calls(cx, "listRunConfigurations", json!({}), true);
+        serde_json::from_str::<Value>(&body).unwrap()
+    };
+    let mut id = String::new();
+    pump_until(cx, "the scripts", |cx| {
+        id = configs(cx)["configurations"][0]["id"].as_str().unwrap_or_default().to_owned();
+        !id.is_empty()
+    });
+    let call = agent_starts_call(cx, "startRun", json!({ "configuration": id }), true);
+    card(cx);
+    crate::quit_tests::click(cx, "agent-session");
+    let (status, body) = agent_gets_answer(cx, call);
+    assert_eq!(status, 200, "{body}");
+    let run = serde_json::from_str::<Value>(&body).unwrap()["id"].as_u64().unwrap();
+    pump_until(cx, "the run's output", |cx| {
+        let (_, body) = agent_calls(cx, "getRunOutput", json!({ "id": run }), true);
+        body.contains("hello from the agent")
+    });
+    pump_until(cx, "the run's end", |cx| {
+        let (_, body) = agent_calls(cx, "listRuns", json!({}), true);
+        let list = serde_json::from_str::<Value>(&body).unwrap();
+        list["runs"].as_array().unwrap().iter().any(|r| r["id"] == run && r["running"] == false)
+    });
+    let (_, body) = agent_calls(cx, "getTestResults", json!({ "id": run }), true);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["tests"], Value::Null, "no tests in this run: {body}");
+    // No more cards for that tool; a name it does not know gets the list.
+    let (status, body) = agent_calls(cx, "startRun", json!({ "configuration": "nope" }), true);
+    assert!(status == 400 && body.contains("The configurations"), "{status} {body}");
+    let _ = std::fs::remove_dir_all(made);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// The language engine's answers, through the harness, on the real Java engine: what no shell gives
+/// an agent. Needs the engine distribution and a JDK 17; without them it says so and passes.
+#[gpui::test]
+fn an_agent_asks_the_java_engine_what_the_code_is(cx: &mut TestAppContext) {
+    use crate::lang::java;
+    let _engine = crate::tests::engine_lock();
+    let (Some(_), Some(jdk)) = (java::engine_dist(&*snout_host::local()), crate::lang_tests::jdk17()) else {
+        println!("harness, Java: skipped; needs engine/build/dist and a JDK 17 (SNOUT_TEST_JDK17)");
+        return;
+    };
+    let repo = crate::java_tools_tests::shop("harness-java");
+    let lock_dir = scratch_dir("harness-java-ide");
+    let mut settings = with_repo(&repo);
+    settings.project_jdks.insert(repo.clone(), jdk);
+    cx.update(|cx| cx.set_global(crate::lang::hub::LangEnabled(true)));
+    let (model, ws, cx) = open_with_ide(cx, settings, &lock_dir);
+    cx.update(|_, cx| cx.set_global(crate::lang_tests::TestWorkspace(ws.clone())));
+    hook_command(&ws, cx);
+    let dir = repo.join("src/main/java/demo/shop");
+    let shop = dir.join("Shop.java");
+    let shape = dir.join("Shape.java");
+    let line_of = |path: &Path, text: &str| -> u64 {
+        let body = std::fs::read_to_string(path).unwrap();
+        body.lines().position(|l| l.contains(text)).unwrap_or_else(|| panic!("{text} in {}", path.display())) as u64 + 1
+    };
+    agent_calls(cx, "openFile", json!({ "filePath": shop.to_string_lossy() }), true);
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    let root = repo.clone();
+    let start = Instant::now();
+    while !cx.update(|_, cx| hub.read(cx).servers.get(&root).is_some_and(|s| s.first_diagnostics.is_some())) {
+        assert!(start.elapsed() < Duration::from_secs(240), "the engine answers within four minutes");
+        pump(cx, 200);
+    }
+    let call = |cx: &mut VisualTestContext, tool: &str, a: Value| -> Value {
+        let (status, body) = agent_calls(cx, tool, a, true);
+        assert_eq!(status, 200, "{tool}: {body}");
+        serde_json::from_str(&body).unwrap_or(Value::String(body))
+    };
+
+    // By name, across the project. The engine may still be indexing: ask again.
+    let start = Instant::now();
+    let found = loop {
+        let v = call(cx, "findSymbol", json!({ "query": "Circle" }));
+        if v["count"].as_u64().unwrap_or(0) > 0 || start.elapsed() > Duration::from_secs(60) {
+            break v;
+        }
+        pump(cx, 500);
+    };
+    assert!(found["symbols"].to_string().contains("Circle.java"), "{found}");
+
+    let at_call = line_of(&shop, ".area()");
+    let there = json!({ "filePath": shop.to_string_lossy(), "line": at_call, "text": "area" });
+    let definition = call(cx, "getDefinition", there.clone());
+    assert!(definition["places"].to_string().contains("Shape.java"), "{definition}");
+    let at_decl = line_of(&shape, "double area");
+    let decl = json!({ "filePath": shape.to_string_lossy(), "line": at_decl, "text": "area" });
+    let references = call(cx, "findReferences", decl.clone());
+    assert!(references["places"].to_string().contains("Shop.java"), "{references}");
+    let hover = call(cx, "getHover", there);
+    assert!(hover.to_string().contains("area"), "{hover}");
+
+    // The engine knows a type's hierarchy once the file is open; the answer says so until it is.
+    let at_type = line_of(&shape, "interface Shape");
+    let ty = json!({ "filePath": shape.to_string_lossy(), "line": at_type, "text": "Shape", "direction": "subtypes" });
+    let (status, body) = agent_calls(cx, "getHierarchy", ty.clone(), true);
+    if status != 200 {
+        assert!(body.contains("makeFrontmost"), "{status} {body}");
+        call(cx, "openFile", json!({ "filePath": shape.to_string_lossy(), "makeFrontmost": false }));
+    }
+    let start = Instant::now();
+    let subtypes = loop {
+        let (status, body) = agent_calls(cx, "getHierarchy", ty.clone(), true);
+        if status == 200 && body.contains("Circle") || start.elapsed() > Duration::from_secs(30) {
+            break serde_json::from_str::<Value>(&body).unwrap_or(Value::String(body));
+        }
+        pump(cx, 500);
+    };
+    assert!(subtypes["items"].to_string().contains("Circle"), "{subtypes}");
+    let mut callers = decl.clone();
+    callers["direction"] = json!("callers");
+    let callers = call(cx, "getHierarchy", callers);
+    assert!(callers["items"].to_string().contains("Shop.java"), "{callers}");
+    let problems = call(cx, "getProjectProblems", json!({}));
+    assert!(problems["total"].is_u64(), "{problems}");
+
+    // What it names wrongly is put right by the answer.
+    let (status, body) = agent_calls(
+        cx,
+        "getDefinition",
+        json!({ "filePath": shop.to_string_lossy(), "line": 1, "text": "nope" }),
+        true,
+    );
+    assert!(status == 400 && body.contains("not on line 1"), "{status} {body}");
+
+    // A rename changes files, so it asks; the tabs have it, unsaved.
+    let at_sum = line_of(&shop, "double sum");
+    let rename = json!({ "filePath": shop.to_string_lossy(), "line": at_sum, "text": "sum", "newName": "runningSum" });
+    let asked = agent_starts_call(cx, "renameSymbol", rename, true);
+    pump_until(cx, "the card", |cx| {
+        cx.update(|_, cx| matches!(model.read(cx).dialog, Some(crate::model::Dialog::AgentAsks { .. })))
+    });
+    cx.run_until_parked();
+    crate::quit_tests::click(cx, "agent-once");
+    let (status, body) = agent_gets_answer(cx, asked);
+    assert_eq!(status, 200, "{body}");
+    let editor = editor_of(&ws, &shop, cx).expect("the tab");
+    pump_until(cx, "the rename in the tab", |cx| {
+        cx.update(|_, cx| editor.read(cx).state.read(cx).value().to_string().contains("double runningSum"))
+    });
+    let on_disk = std::fs::read_to_string(&shop).unwrap();
+    assert!(on_disk.contains("double sum"), "unsaved, for the user to review");
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
 /// The real agents, signed in, each asked in plain words to do what only the harness can: bring a
 /// window forward. Spends a little of each agent's budget, so it runs only when asked for:
 /// `SNOUT_REAL_AGENTS=codex,amp,claude`, or `opencode` too where it is installed.
@@ -1666,12 +1956,11 @@ fn real_agents_work_the_window_through_the_harness(cx: &mut TestAppContext) {
     use crate::workspace::Tool;
     let (repo, lock_dir, _model, ws, _client, cx) = connected("harness-real", cx);
     hook_command(&ws, cx);
-    let (env, claude, codex, amp, opencode) = cx.update(|_, cx| {
+    let (env, claude, codex, opencode) = cx.update(|_, cx| {
         (
             cx.global::<IdeEnv>().0.clone(),
             cx.global::<super::IdeArgs>().0.clone(),
             cx.global::<super::CodexArgs>().0.clone(),
-            cx.global::<super::AmpArgs>().0.clone(),
             cx.global::<super::OpencodeEnv>().0.clone(),
         )
     });
@@ -1690,7 +1979,7 @@ fn real_agents_work_the_window_through_the_harness(cx: &mut TestAppContext) {
             }
             "amp" => {
                 let mut c = std::process::Command::new("amp");
-                c.args(&amp).args(["-x", prompt.as_str()]);
+                c.args(["-x", prompt.as_str()]).env("PLUGINS", "all");
                 c
             }
             "claude" => {

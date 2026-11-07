@@ -10,7 +10,7 @@ It works without an MCP server, so the editor's tools cost almost nothing in a s
 does not use them. The chain is **Agent Skill → UTCP → API**:
 
 1. **An Agent Skill** tells the agent how to reach the editor. The console's `claude` loads it
-   for its session only. Codex, opencode and Amp get one MCP tool instead (see [Other agents](#other-agents)).
+   for its session only. opencode and Amp get the same skill, and Codex one MCP tool instead (see [Other agents](#other-agents)).
 2. **A UTCP manual** describes each call: its name, what it does, its inputs, and the HTTP
    request that makes it.
 3. **A plain HTTP API** in SnoutCode answers the calls.
@@ -30,7 +30,7 @@ For the API's twelve tools, measured on what SnoutCode sends:
 | The skill's instructions, with the `openFile` call | about 1,500 characters, roughly 370 tokens | once, when the agent first uses the editor |
 | The short manual, all twelve tools | about 2,200 characters, roughly 550 tokens | only when the agent needs a tool other than `openFile` |
 | One domain's manual, the editor's | about 3,400 characters, roughly 840 tokens | only when the agent needs that domain |
-| The MCP tool, for agents without the skill | about 670 characters, roughly 170 tokens | every request of the session |
+| The MCP tool, for Codex in place of the skill | about 670 characters, roughly 170 tokens | every request of the session |
 
 So a session that never touches the editor pays less than a tenth of what the MCP definitions
 would cost, on every request. Opening a file, the common case, needs the skill alone; the
@@ -110,20 +110,23 @@ curl -s -X POST -H @"$SNOUT_API_HEADER" -H 'content-type: application/json' \
 
 ## Other agents
 
-Codex, opencode and Amp get the same tools through one MCP tool, `snoutcode`, for their session
-only. Nothing is written into your project or your settings:
+Every agent gets the same tools, for its session only. Nothing is written into your project or your
+settings:
 
-| Agent | How it gets the tool |
+| Agent | How it hears of them |
 |---|---|
-| Codex | `-c mcp_servers.snoutcode...` arguments. The token comes from the variable `SNOUT_API_TOKEN`. This server's calls do not ask for approval in Codex, because what changes something is asked in SnoutCode's window |
-| opencode | The session's `OPENCODE_CONFIG_CONTENT` variable |
-| Amp | `--mcp-config`, naming a file in the session's folder that only you can read |
+| Claude Code | The skill, through `--plugin-dir` |
+| opencode | One line in its instructions, through the session's `OPENCODE_CONFIG_CONTENT` variable, that sends it to the skill |
+| Amp | The skill, registered by SnoutCode's Amp plugin, which does nothing outside the console |
+| Codex | One MCP tool, `snoutcode`, through `-c mcp_servers.snoutcode...` arguments |
 
-Why one MCP tool, when the reason for the skill is to avoid MCP's cost? A sandbox can cut an agent's
-commands off from the port (Codex's does, by default) but not its MCP client, so the script would
-not work there. And the cost was the definitions: one tool costs about what a skill's description
-does, however many tools the API has. The agent calls `snoutcode` with `tool: "manual"` to list the
-tools, and with `arguments: {"domain": "editor"}` for the arguments of a domain's tools.
+Codex is the exception because its sandbox cuts its commands off from the port by default, so the
+script cannot reach the window there, while its MCP client can. Opening the sandbox's network for
+the script would open it to everything else too. One MCP definition costs about what a skill's
+description does, however many tools the API has. Codex calls `snoutcode` with `tool: "manual"` to
+list the tools, and with `arguments: {"domain": "editor"}` for a domain's arguments. Its token comes
+from the variable `SNOUT_API_TOKEN`. These calls do not ask for approval in Codex, because what
+changes something is asked in SnoutCode's window.
 
 An agent of your own gets `SNOUT_HOOK_PORT`, `SNOUT_API_HEADER` and `SNOUT_API`, the script's path.
 Tell it about them in its instructions: `"$SNOUT_API" manual` lists the tools. A UTCP client reads

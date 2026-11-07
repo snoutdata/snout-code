@@ -454,6 +454,7 @@ mod e2e {
         .await;
 
         let _ = claude_code_on_the_remote(cx, "Greeter.java").await;
+        harness_on_the_remote(cx).await;
 
         // The ssh processes on this Mac die (the remote machine none the wiser): the app
         // reconnects, the engine and the terminal live on.
@@ -561,6 +562,50 @@ mod e2e {
             fail(&format!("in the container, {cmd}: {}", out.status));
         }
         String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// Every agent on the remote machine reaches the window, through that machine's port: the script
+    /// the skill names (Claude Code, opencode and Amp), and the MCP tool (Codex, whose sandbox blocks
+    /// the script), with what each is told written there, not on this Mac.
+    async fn harness_on_the_remote(cx: &mut AsyncApp) {
+        use snout_app::claude_ide::{IdeEnv, OpencodeEnv};
+        let env: Vec<(&'static str, String)> = cx.update(|cx| cx.global::<IdeEnv>().0.clone());
+        let run = |cmd: String, env: Vec<(&'static str, String)>| {
+            cx.background_executor().spawn(async move { in_container(&cmd, &env, "") })
+        };
+        // The script, as the skill names it.
+        let script = env.iter().find(|(k, _)| *k == "SNOUT_API").map(|(_, v)| v.clone());
+        let Some(script) = script else { fail("the console's agents are not told the script") };
+        let skill =
+            std::path::Path::new(&script).parent().and_then(|p| p.parent()).unwrap().join("skills/snoutcode/SKILL.md");
+        let told = run(format!("grep -c '{script} ' {}", skill.display()), env.clone()).await;
+        if told.trim().parse::<u32>().unwrap_or(0) == 0 {
+            fail(&format!("the skill on the remote machine does not name its script: {told}"));
+        }
+        let state = run("\"$SNOUT_API\" getAppState".to_owned(), env.clone()).await;
+        if !state.contains(PROJECT) {
+            fail(&format!("the script on the remote machine did not reach the window: {state}"));
+        }
+        say("an agent's script on the remote machine reaches the window");
+        // opencode's line, there, naming the skill there.
+        let opencode: Vec<(&'static str, String)> = cx.update(|cx| cx.global::<OpencodeEnv>().0.clone());
+        let config: serde_json::Value = serde_json::from_str(&opencode[0].1).unwrap();
+        let line = config["instructions"][0].as_str().unwrap().to_owned();
+        let text = run(format!("cat {line}"), env.clone()).await;
+        if !text.contains(&*skill.to_string_lossy()) {
+            fail(&format!("opencode's instructions on the remote machine: {text}"));
+        }
+        // Codex's route: the MCP tool, with the bearer token, through the same port.
+        let call = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"snoutcode","arguments":{"tool":"getAppState"}}}"#;
+        let cmd = format!(
+            "curl -sS -X POST -H \"authorization: Bearer $SNOUT_API_TOKEN\" -H 'content-type: application/json' \
+             --data '{call}' \"http://127.0.0.1:$SNOUT_HOOK_PORT/mcp\""
+        );
+        let answer = run(cmd, env.clone()).await;
+        if !answer.contains(PROJECT) || !answer.contains("\"isError\":false") {
+            fail(&format!("the MCP tool on the remote machine did not reach the window: {answer}"));
+        }
+        say("the MCP tool on the remote machine reaches the window");
     }
 
     /// Claude Code on the remote machine, faked: it finds the window by the lock file there,

@@ -54,6 +54,8 @@ pub enum Tool {
     Hierarchy,
     /// Not on a stripe: the status bar and View ▸ Processes open it.
     Processes,
+    /// Not on a stripe: View ▸ Agent Log opens it.
+    AgentLog,
     /// A Playwright project's tests.
     Tests,
 }
@@ -178,6 +180,7 @@ impl Tool {
             "Notifications" => Tool::Notifications,
             "Claude Changes" => Tool::ClaudeChanges,
             "Processes" => Tool::Processes,
+            "Agent Log" => Tool::AgentLog,
             "Structure" => Tool::Structure,
             "Hierarchy" => Tool::Hierarchy,
             "Tests" => Tool::Tests,
@@ -202,6 +205,7 @@ impl Tool {
             Tool::Structure => Icon::Structure,
             Tool::Hierarchy => Icon::Hierarchy,
             Tool::Processes => Icon::Gear,
+            Tool::AgentLog => Icon::Gear,
             Tool::Tests => Icon::TestFolder,
         }
     }
@@ -221,6 +225,7 @@ impl Tool {
             Tool::Spring => 1,
             Tool::Notifications => 6,
             Tool::Processes => 0,
+            Tool::AgentLog => 0,
             Tool::ClaudeChanges => 2,
             Tool::Structure => 4,
             Tool::Hierarchy => 0,
@@ -245,6 +250,7 @@ impl Tool {
             Tool::Structure => "Structure (⌘7)",
             Tool::Hierarchy => "Hierarchy (⌃H, ⌃⌥H)",
             Tool::Processes => "Processes",
+            Tool::AgentLog => "Agent Log",
             Tool::Tests => "Tests",
         }
     }
@@ -266,6 +272,7 @@ impl Tool {
             Tool::Structure => "stripe-structure",
             Tool::Hierarchy => "stripe-hierarchy",
             Tool::Processes => "stripe-processes",
+            Tool::AgentLog => "stripe-agent-log",
             Tool::Tests => "stripe-tests",
         }
     }
@@ -374,6 +381,7 @@ impl Workspace {
             Tool::Structure => Some(self.tabs.structure),
             Tool::Hierarchy => Some(self.tabs.hierarchy),
             Tool::Processes => Some(self.tabs.processes),
+            Tool::AgentLog => Some(self.tabs.agent_log),
             Tool::Tests => Some(self.tabs.tests),
         }
     }

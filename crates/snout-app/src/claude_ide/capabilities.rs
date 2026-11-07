@@ -6,11 +6,18 @@
 //! never seen this app, add the row to [`ALL`], and add the call to the test in `tests.rs` that
 //! plays the agent. The rows' checks are below.
 
+pub mod code;
+pub mod projects;
+pub mod run;
+
+use std::collections::{HashSet, VecDeque};
+
 use gpui::{App, Context, Window};
 use serde_json::{Value, json};
 
 use super::server::{Call, Reply};
 use super::tools::{self, INVALID_PARAMS, TOOL_ERROR};
+use crate::model::Dialog;
 use crate::panels::Activity;
 use crate::workspace::{Tool, Workspace};
 
@@ -21,8 +28,11 @@ pub enum Effect {
     Read,
     /// Changes only what shows: a tab, a window. Nothing is written.
     Show,
-    /// Writes something, or starts something.
+    /// Writes something, or starts something. The user is asked, unless they allowed this tool for
+    /// the session.
     Change,
+    /// A change the user has just asked for in the window (Draft's message): it does not ask again.
+    Requested,
 }
 
 impl Effect {
@@ -30,7 +40,7 @@ impl Effect {
         match self {
             Effect::Read => "read",
             Effect::Show => "show",
-            Effect::Change => "change",
+            Effect::Change | Effect::Requested => "change",
         }
     }
 }
@@ -39,6 +49,9 @@ impl Effect {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Domain {
     App,
+    Project,
+    Run,
+    Code,
     Editor,
     Git,
 }
@@ -47,6 +60,9 @@ impl Domain {
     pub fn tag(self) -> &'static str {
         match self {
             Domain::App => "app",
+            Domain::Project => "project",
+            Domain::Run => "run",
+            Domain::Code => "code",
             Domain::Editor => "editor",
             Domain::Git => "git",
         }
@@ -81,6 +97,9 @@ pub struct Capability {
     pub description: &'static str,
     pub input: Input,
     pub run: Run,
+    /// What the card asks, for a person answering in a hurry: "save /p/A.java". Every
+    /// [`Effect::Change`] has one.
+    pub consent: Option<fn(&Value) -> String>,
 }
 
 impl Capability {
@@ -100,7 +119,11 @@ impl Capability {
 }
 
 /// All of them, in the order the manual lists them.
-pub const ALL: &[Capability] = &[
+pub fn all() -> impl Iterator<Item = &'static Capability> {
+    [CORE, projects::ALL, run::ALL, code::ALL].into_iter().flatten()
+}
+
+const CORE: &[Capability] = &[
     Capability {
         name: "getAppState",
         domain: Domain::App,
@@ -110,6 +133,7 @@ pub const ALL: &[Capability] = &[
                       showing and the connection. Call it first when you need to know any of them.",
         input: Input::None,
         run: Run::Own(app_state),
+        consent: None,
     },
     Capability {
         name: "showToolWindow",
@@ -119,6 +143,7 @@ pub const ALL: &[Capability] = &[
                       already shows. It starts nothing and changes nothing.",
         input: Input::Own(show_tool_window_input),
         run: Run::Own(show_tool_window),
+        consent: None,
     },
     Capability {
         name: "openFile",
@@ -127,6 +152,7 @@ pub const ALL: &[Capability] = &[
         description: "Open a file in the editor, and select lines or text in it.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "getCurrentSelection",
@@ -135,6 +161,7 @@ pub const ALL: &[Capability] = &[
         description: "The text selected in the editor in front, and where it is.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "getLatestSelection",
@@ -143,6 +170,7 @@ pub const ALL: &[Capability] = &[
         description: "The last text selected in any tab, even if another tab is in front now.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "getOpenEditors",
@@ -152,6 +180,7 @@ pub const ALL: &[Capability] = &[
                       in front.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "getWorkspaceFolders",
@@ -160,6 +189,7 @@ pub const ALL: &[Capability] = &[
         description: "The project's folders.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "getDiagnostics",
@@ -169,6 +199,7 @@ pub const ALL: &[Capability] = &[
                       looked at.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "checkDocumentDirty",
@@ -177,6 +208,7 @@ pub const ALL: &[Capability] = &[
         description: "Whether a file open in the editor has unsaved changes.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "saveDocument",
@@ -185,6 +217,7 @@ pub const ALL: &[Capability] = &[
         description: "Save a file open in the editor, with the user's unsaved changes in it.",
         input: Input::Connection,
         run: Run::Connection,
+        consent: Some(|a| format!("save {}", text_of(a, "filePath"))),
     },
     Capability {
         name: "getCommitChange",
@@ -194,32 +227,152 @@ pub const ALL: &[Capability] = &[
                       to write its message.",
         input: Input::None,
         run: Run::Connection,
+        consent: None,
     },
     Capability {
         name: "setCommitMessage",
         domain: Domain::Git,
-        effect: Effect::Change,
+        effect: Effect::Requested,
         description: "Put the drafted commit message in SnoutCode's commit box, for the user to read and commit.",
         input: Input::Own(commit_message_input),
         run: Run::Connection,
+        consent: None,
     },
 ];
 
 /// The capability called `name`.
 pub fn find(name: &str) -> Option<&'static Capability> {
-    ALL.iter().find(|c| c.name == name)
+    all().find(|c| c.name == name)
 }
+
+/// The required argument `name` of a call.
+fn need<'a>(a: &'a Value, name: &str) -> Option<&'a str> {
+    a.get(name).and_then(Value::as_str).filter(|v| !v.trim().is_empty())
+}
+
+/// Answer a call that lacks the argument `name`.
+fn missing(reply: Reply, name: &str) {
+    reply.error(INVALID_PARAMS, &format!("Missing {name}"), None);
+}
+
+/// The argument `name` of a call, as text, for a card.
+fn text_of<'a>(a: &'a Value, name: &str) -> &'a str {
+    a.get(name).and_then(Value::as_str).unwrap_or("?")
+}
+
+/// A call waiting for the user's answer.
+struct Ask {
+    capability: &'static Capability,
+    call: Call,
+}
+
+/// What the window remembers of the agents' calls: what the user allowed, and what waits for them.
+#[derive(Default)]
+pub struct Harness {
+    /// The tools the user allowed for the session.
+    allowed: HashSet<&'static str>,
+    /// The calls waiting, the one the card shows first.
+    asks: VecDeque<Ask>,
+    /// The card shows.
+    asking: bool,
+}
+
+impl Harness {
+    /// Nothing waits for the user.
+    pub fn is_idle(&self) -> bool {
+        self.asks.is_empty() && !self.asking
+    }
+}
+
+/// What the user answered on the card.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AskAnswer {
+    Once,
+    Session,
+}
+
+/// The answer to a call the user turned down, or closed the card on.
+const REFUSED: &str = "The user did not allow this. Do not try it again unless they ask you to.";
 
 /// Answer a call of the API. The server let through only names in [`ALL`].
 pub fn run(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Context<Workspace>) {
-    match find(&call.name).map(|c| c.run) {
-        Some(Run::Own(runner)) => runner(ws, &call.arguments, call.reply, window, cx),
-        Some(Run::Connection) => super::bridge::call_tool(ws, call, window, cx),
-        None => {
-            let message = format!("Tool not found: {}", call.name);
-            call.reply.error(tools::METHOD_NOT_FOUND, &message, None);
+    let Some(capability) = find(&call.name) else {
+        let message = format!("Tool not found: {}", call.name);
+        return call.reply.error(tools::METHOD_NOT_FOUND, &message, None);
+    };
+    let agent = crate::agents::console_agent(cx).short.to_string();
+    let id = ws.agent_log.update(cx, |log, cx| log.begin(agent, capability, &call.arguments, cx));
+    let answered = ws.claude.as_ref().map(|b| b.events.clone());
+    let Call { client, name, arguments, reply } = call;
+    let reply = reply.observed(move |message| {
+        let error = message.get("error").map(|e| {
+            let text = [e["message"].as_str(), e["data"].as_str()].into_iter().flatten();
+            text.collect::<Vec<_>>().join(": ")
+        });
+        if let Some(events) = answered {
+            let _ = events.unbounded_send(super::server::Event::Answered { id, error });
+        }
+    });
+    let call = Call { client, name, arguments, reply };
+    if capability.effect == Effect::Change && !ws.harness.allowed.contains(capability.name) {
+        ws.harness.asks.push_back(Ask { capability, call });
+        return next_ask(ws, cx);
+    }
+    answer(capability, ws, call, window, cx);
+}
+
+fn answer(c: &Capability, ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Context<Workspace>) {
+    match c.run {
+        Run::Own(runner) => runner(ws, &call.arguments, call.reply, window, cx),
+        Run::Connection => super::bridge::call_tool(ws, call, window, cx),
+    }
+}
+
+/// Show the card for the next call waiting, if nothing else is in the way. A card closed with no
+/// answer turns the call down.
+pub fn next_ask(ws: &mut Workspace, cx: &mut Context<Workspace>) {
+    let showing = matches!(ws.model.read(cx).dialog, Some(Dialog::AgentAsks { .. }));
+    if ws.harness.asking && !showing {
+        ws.harness.asking = false;
+        if let Some(ask) = ws.harness.asks.pop_front() {
+            ask.call.reply.error(TOOL_ERROR, REFUSED, None);
         }
     }
+    if ws.harness.asking || ws.model.read(cx).dialog.is_some() {
+        return;
+    }
+    let Some(ask) = ws.harness.asks.front() else { return };
+    let what = ask.capability.consent.map_or_else(|| ask.capability.name.to_owned(), |c| c(&ask.call.arguments));
+    let agent = crate::agents::console_agent(cx).name.to_string();
+    let tool = ask.capability.name.to_owned();
+    ws.harness.asking = true;
+    ws.model.update(cx, |m, cx| {
+        m.dialog = Some(Dialog::AgentAsks { agent, what, tool });
+        cx.emit(crate::model::ModelEvent::Dialog);
+        cx.notify();
+    });
+}
+
+/// The user answered the card: the call goes ahead.
+pub fn asked(ws: &mut Workspace, how: AskAnswer, window: &mut Window, cx: &mut Context<Workspace>) {
+    ws.harness.asking = false;
+    if let Some(Ask { capability, call }) = ws.harness.asks.pop_front() {
+        if how == AskAnswer::Session {
+            ws.harness.allowed.insert(capability.name);
+        }
+        answer(capability, ws, call, window, cx);
+    }
+    // Calls of a tool just allowed need no card of their own.
+    let mut ahead = Vec::new();
+    while let Some(at) = ws.harness.asks.iter().position(|a| ws.harness.allowed.contains(a.capability.name)) {
+        if let Some(ask) = ws.harness.asks.remove(at) {
+            ahead.push(ask);
+        }
+    }
+    for Ask { capability, call } in ahead {
+        answer(capability, ws, call, window, cx);
+    }
+    next_ask(ws, cx);
 }
 
 fn commit_message_input() -> Value {
@@ -342,6 +495,7 @@ const WINDOWS: &[(&str, Target)] = &[
     ("Hierarchy", Target::Tool(Tool::Hierarchy)),
     ("Notifications", Target::Tool(Tool::Notifications)),
     ("Processes", Target::Tool(Tool::Processes)),
+    ("Agent Log", Target::Tool(Tool::AgentLog)),
 ];
 
 fn window_names() -> Vec<&'static str> {
@@ -378,11 +532,12 @@ mod tests {
 
     #[test]
     fn every_capability_is_fully_described_and_named_once() {
-        let mut names: Vec<&str> = ALL.iter().map(|c| c.name).collect();
+        let mut names: Vec<&str> = all().map(|c| c.name).collect();
+        let count = names.len();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), ALL.len(), "a name twice");
-        for c in ALL {
+        assert_eq!(names.len(), count, "a name twice");
+        for c in all() {
             assert!(c.description.ends_with('.'), "{}: a whole sentence", c.name);
             assert!(!c.description.contains('\u{2014}'), "{}: no dashes in what the model reads", c.name);
             let s = c.schema();
@@ -398,12 +553,12 @@ mod tests {
     /// also write, and a change can never pass for a look.
     #[test]
     fn a_tools_name_says_what_it_does() {
-        for c in ALL {
+        for c in all() {
             let starts = |words: &[&str]| words.iter().any(|w| c.name.starts_with(w));
             match c.effect {
                 Effect::Read => assert!(starts(&["get", "list", "find", "check"]), "{} reads", c.name),
                 Effect::Show => assert!(starts(&["show", "open"]), "{} shows", c.name),
-                Effect::Change => {
+                Effect::Change | Effect::Requested => {
                     assert!(!starts(&["get", "list", "find", "check", "show", "open"]), "{} changes", c.name);
                 }
             }
@@ -411,8 +566,17 @@ mod tests {
     }
 
     #[test]
+    fn what_changes_something_says_so_on_the_card() {
+        for c in all() {
+            assert_eq!(c.effect == Effect::Change, c.consent.is_some(), "{}", c.name);
+        }
+        let save = find("saveDocument").unwrap().consent.unwrap();
+        assert_eq!(save(&json!({ "filePath": "/p/A.java" })), "save /p/A.java");
+    }
+
+    #[test]
     fn a_tool_of_the_connection_is_described_by_it() {
-        for c in ALL.iter().filter(|c| matches!(c.input, Input::Connection)) {
+        for c in all().filter(|c| matches!(c.input, Input::Connection)) {
             assert!(tools::input_of(c.name).is_some(), "{} is not among the connection's tools", c.name);
         }
     }

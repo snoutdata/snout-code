@@ -18,7 +18,7 @@ fn write(dir: &Path, name: &str, text: &str) {
 }
 
 /// Whether this machine has a Node with npm beside it, as the run tests need.
-fn has_node() -> Option<node::Node> {
+pub(crate) fn has_node() -> Option<node::Node> {
     let host = snout_host::local();
     let all = node::discover(&*host);
     let n = all.into_iter().next()?;
