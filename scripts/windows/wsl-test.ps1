@@ -17,13 +17,14 @@ $recents = Join-Path $env:APPDATA "SnoutCode\remote.json"
 function InDistro([string]$line) { wsl.exe -d $Distro -e sh -c $line }
 function StopAll {
     Get-Process | Where-Object { $_.ProcessName -like "snout-code*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    InDistro "pkill -f snout-server || true" | Out-Null
+    # The bracket keeps the pattern from matching this shell's own command line.
+    InDistro "pkill -f '[s]nout-server' || true" | Out-Null
 }
 function Show {
     Write-Host "--- remote.json"
     if (Test-Path $recents) { Get-Content $recents | ForEach-Object { Write-Host $_ } }
     Write-Host "--- server in the distro"
-    InDistro "ls -la ~/.snout-code/server/*/ 2>&1; pgrep -af snout-server" | ForEach-Object { Write-Host $_ }
+    InDistro "ls -la ~/.snout-code/server/*/ 2>&1; pgrep -af '[s]nout-server'" | ForEach-Object { Write-Host $_ }
     Write-Host "--- processes"
     Get-Process | Where-Object { $_.ProcessName -like "snout*" } |
         ForEach-Object { Write-Host "$($_.ProcessName) $($_.Id) $([int]($_.WorkingSet64 / 1MB)) MB" }
@@ -49,7 +50,7 @@ $env:SNOUT_NO_UPDATE = "1"
 $env:SNOUT_NO_FETCH = "1"
 Start-Process -FilePath $exe -ArgumentList "\\wsl.localhost\$Distro\tmp\wsl-demo" | Out-Null
 
-if (-not (WaitFor 180 { (InDistro "pgrep -f snout-server") })) { Fail "the server never started in the distro" }
+if (-not (WaitFor 180 { (InDistro "pgrep -f '[s]nout-server --daemon'") })) { Fail "the server never started in the distro" }
 Write-Host "the server runs in $Distro"
 if (-not (WaitFor 60 { (Test-Path $recents) -and ((Get-Content $recents -Raw) -match "/tmp/wsl-demo") })) {
     Fail "the project was not opened on the Linux side"
@@ -65,3 +66,5 @@ $env:SNOUT_NO_UPDATE = $null
 $env:SNOUT_NO_FETCH = $null
 Start-Process -FilePath (Join-Path $dir "unins000.exe") -Wait -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") | Out-Null
 Write-Host "PASS"
+# What ran last may have ended the server's shell, which is no failure of this test.
+exit 0
