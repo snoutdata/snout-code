@@ -8,7 +8,7 @@ run on the remote machine; the terminal itself is drawn on your Mac.
 
 ## The Terminal tab
 
-Click **Terminal** in the bottom dock, choose **Tools ▸ Terminal**, or press ⌥F12. The shell starts in the project's folder, as a login
+Click **Terminal** in the bottom dock, choose **Tools ▸ Terminal**, or press ⌥F12. The shell starts in the project's folder (with no project open, in your home folder), as a login
 shell (`$SHELL -l`). There is one shell per project, kept running while you switch projects.
 Another program, other arguments and variables of your own are settings (see
 [Settings](#settings) below); a project can set its own.

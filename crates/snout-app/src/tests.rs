@@ -615,6 +615,46 @@ fn claude_console_on(engine: EngineKind, cx: &mut TestAppContext) {
     }
 }
 
+/// With no project open, the agent waits for Start, then runs in the home folder: it can make
+/// the project. Opening the console or picking an agent does not start it there.
+#[gpui::test]
+fn the_agent_starts_in_the_home_folder_with_no_project_when_asked(cx: &mut TestAppContext) {
+    let bin = scratch_dir("console-no-project-bin");
+    let fake = fake_program(
+        &bin,
+        "claude",
+        "#!/bin/sh\necho \"ready in $(pwd)\"\nsleep 30\n",
+        "@echo off\necho ready in %CD%\nping -n 30 127.0.0.1 >nul\n",
+    );
+    let (model, ws, cx) = open(cx, Settings::default());
+    let console = cx.update(|_, cx| crate::console::console_of(ws.read(cx), cx)).expect("the console is docked");
+    cx.update(|_, cx| console.update(cx, |c, _| c.program = Some(fake.clone())));
+    let home = cx.update(|_, cx| crate::host::host(cx).info().home.clone());
+    act(&model, cx, Action::ToggleConsole);
+    // Longer than the wait for the IDE server, after which a project's agent starts by itself.
+    cx.executor().advance_clock(std::time::Duration::from_secs(60));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(console.read(cx).session_text(&home), None, "not started by opening the console"));
+    cx.update(|w, cx| {
+        console.update(cx, |c, cx| c.switch_agent(crate::agents::ConsoleAgent::Claude, w, cx));
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(console.read(cx).session_text(&home), None, "not started by picking an agent"));
+
+    crate::quit_tests::click(cx, "console-start");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut text = String::new();
+    while std::time::Instant::now() < deadline && !text.contains("ready in") {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        cx.executor().advance_clock(std::time::Duration::from_millis(50));
+        cx.run_until_parked();
+        text = cx.update(|_, cx| console.read(cx).session_text(&home)).unwrap_or_default();
+    }
+    let text = text.replace('\n', "");
+    assert!(text.contains(home.file_name().unwrap().to_str().unwrap()), "{text}");
+    let _ = std::fs::remove_dir_all(bin);
+}
+
 #[gpui::test]
 fn keyboard_shortcuts_reach_the_workspace(cx: &mut TestAppContext) {
     let repo = demo_repo("keys");

@@ -77,6 +77,8 @@ One row says which agent runs, how it is, and what you can do:
 
 When no session runs, the console says so, with **Start** and **Continue last session**. Ending a session keeps it ended until you start it again.
 
+With no project open, the console waits for **Start**, then runs the agent in your home folder, so you can have it make a project. Open that project when it is there: SnoutCode follows an agent's edits in the open project, and the agent starts afresh in it. The session in the home folder keeps running, and shows again when no project is open.
+
 ![The console with no session](images/agents-console-start.png)
 
 ### Keys in the console

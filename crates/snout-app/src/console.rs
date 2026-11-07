@@ -533,6 +533,13 @@ impl ConsolePanel {
             cx.notify();
         });
         let Some(root) = root else { return };
+        // With no project, picking an agent is not asking it to start in the home folder.
+        if self.model.read(cx).project_root().is_none()
+            && !self.sessions.contains_key(&root)
+            && !self.starting.contains_key(&root)
+        {
+            return;
+        }
         let agent = self.agent(cx);
         // It is on its way already: a second click must not start it twice.
         if !self.sessions.contains_key(&root) && self.starting.get(&root).is_some_and(|(_, a)| *a == Some(agent.id)) {
@@ -749,7 +756,17 @@ impl ConsolePanel {
     fn root(&self, cx: &App) -> Option<PathBuf> {
         let m = self.model.read(cx);
         let on = self.kind == Kind::Shell || m.settings.console_open;
-        on.then(|| m.project_root()).flatten()
+        on.then(|| self.folder(cx)).flatten()
+    }
+
+    /// The folder the console works in: the project, else the home folder, so that an agent can
+    /// make the project in the first place.
+    fn folder(&self, cx: &App) -> Option<PathBuf> {
+        self.model.read(cx).project_root().or_else(|| {
+            let host = crate::host::host(cx);
+            let home = &host.info().home;
+            (!home.as_os_str().is_empty()).then(|| home.clone())
+        })
     }
 
     /// Redraw on new output; re-read the repository once the agent goes quiet.
@@ -1453,22 +1470,24 @@ impl ConsolePanel {
 impl Render for ConsolePanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        let root = self.root(cx).or_else(|| self.model.read(cx).project_root());
+        let root = self.root(cx).or_else(|| self.folder(cx));
         let kind = self.kind;
         let Some(root) = root else {
             let hint = match kind {
-                Kind::Claude => format!("Open a repository to run {} in it.", self.agent(cx).name),
-                Kind::Shell => "Open a repository to run a shell in it.".to_owned(),
+                Kind::Claude => format!("Open a project to run {} in it.", self.agent(cx).name),
+                Kind::Shell => "Open a project to run a shell in it.".to_owned(),
             };
             return div().size_full().bg(p.panel).flex().flex_col().child(self.header(None, &p, cx)).child(
-                crate::components::EmptyState::new(snout_core::art::spots::no_project(), "No repository open")
+                crate::components::EmptyState::new(snout_core::art::spots::no_project(), "No project open")
                     .hint(hint)
                     .on(p.panel)
                     .compact(),
             );
         };
         self.probe(cx);
-        let wanted = kind == Kind::Shell || self.model.read(cx).settings.console_open;
+        // An agent acts on the folder it is in: in the home folder, only when asked to start.
+        let wanted = kind == Kind::Shell
+            || (self.model.read(cx).settings.console_open && self.model.read(cx).project_root().is_some());
         if wanted
             && self.ide_ready(cx)
             && !self.sessions.contains_key(&root)
@@ -1532,7 +1551,7 @@ impl Status {
 
     fn tip(self, agent: &str) -> String {
         match self {
-            Status::NotRunning => format!("{agent} is not running in this project"),
+            Status::NotRunning => format!("{agent} is not running"),
             Status::Starting => format!("{agent} is starting"),
             Status::Connected => format!(
                 "{agent} sees the editor: its selection, open files and problems; it proposes changes there for \
@@ -1928,6 +1947,15 @@ impl ConsolePanel {
                 };
                 (format!("{} is not running", agent.name), hint, start)
             }
+        };
+        let hint = if self.kind == Kind::Claude && self.model.read(cx).project_root().is_none() {
+            format!(
+                "No project is open: {} starts in your home folder, where it can make one. Open the project when it \
+                 is there, to follow its edits.",
+                agent.name
+            )
+        } else {
+            hint
         };
         let hint = self.error_of(root).map_or(hint, str::to_owned);
         let (r1, r2) = (root.to_owned(), root.to_owned());
