@@ -339,6 +339,23 @@ impl RemoteHost {
         }
     }
 
+    /// Whether paths need their `\\` made `/`: the app on Windows, the machine not.
+    fn slashes(&self) -> bool {
+        cfg!(windows) && !self.info.is_windows()
+    }
+
+    /// `path` as the machine takes it. On Windows `PathBuf::join` puts `\\` between the parts of
+    /// a Linux path (`/root\\.amp/bin\\amp`), which Linux reads as part of a name.
+    fn at(&self, path: &Path) -> PathBuf {
+        if self.slashes() { PathBuf::from(unix_path(&path.to_string_lossy())) } else { path.to_owned() }
+    }
+
+    /// A program, argument or variable as the machine takes it: an absolute path made the same
+    /// way, anything else as it is.
+    fn text(&self, text: &str) -> String {
+        if self.slashes() { unix_text(text) } else { text.to_owned() }
+    }
+
     /// Run `f` on the connection; when the connection dropped under it and `again`, once
     /// more on the next one.
     fn call<T>(&self, again: bool, f: impl Fn(&Client) -> io::Result<T>) -> io::Result<T> {
@@ -374,6 +391,21 @@ fn status(s: proto::ExitStatus) -> ExitStatus {
     ExitStatus { code: s.code, signal: s.signal }
 }
 
+/// A Linux path joined on Windows, with `/` for its `\\`.
+fn unix_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// [`unix_path`] for a program, argument or variable that is an absolute Linux path, or a list
+/// of them (`PATH`): one word starting with `/`. Anything else may hold a `\\` that means one.
+fn unix_text(text: &str) -> String {
+    if text.starts_with('/') && text.contains('\\') && !text.contains(char::is_whitespace) {
+        unix_path(text)
+    } else {
+        text.to_owned()
+    }
+}
+
 fn lossy(s: &std::ffi::OsStr) -> String {
     s.to_string_lossy().into_owned()
 }
@@ -394,64 +426,64 @@ impl Host for RemoteHost {
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        self.call(true, |c| c.read(path))
+        self.call(true, |c| c.read(self.at(path)))
     }
 
     fn read_range(&self, path: &Path, offset: u64, len: u64) -> io::Result<Vec<u8>> {
-        self.call(true, |c| c.read_range(path, offset, len))
+        self.call(true, |c| c.read_range(self.at(path), offset, len))
     }
 
     fn write_mode(&self, path: &Path, data: &[u8], mode: Option<u32>) -> io::Result<()> {
-        self.call(true, |c| c.write_mode(path, data.to_vec(), mode))
+        self.call(true, |c| c.write_mode(self.at(path), data.to_vec(), mode))
     }
 
     fn append(&self, path: &Path, data: &[u8]) -> io::Result<()> {
-        self.call(false, |c| c.append(path, data.to_vec()))
+        self.call(false, |c| c.append(self.at(path), data.to_vec()))
     }
 
     fn create_dir_all_mode(&self, path: &Path, mode: Option<u32>) -> io::Result<()> {
-        self.call(true, |c| c.create_dir_all_mode(path, mode))
+        self.call(true, |c| c.create_dir_all_mode(self.at(path), mode))
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         if self.symlink_metadata(path)?.is_dir() {
             return Err(io::Error::new(io::ErrorKind::IsADirectory, format!("{}: is a folder", path.display())));
         }
-        self.call(false, |c| c.remove(path, false))
+        self.call(false, |c| c.remove(self.at(path), false))
     }
 
     fn remove_dir(&self, path: &Path) -> io::Result<()> {
         if !self.symlink_metadata(path)?.is_dir() {
             return Err(io::Error::new(io::ErrorKind::NotADirectory, format!("{}: not a folder", path.display())));
         }
-        self.call(false, |c| c.remove(path, false))
+        self.call(false, |c| c.remove(self.at(path), false))
     }
 
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
-        self.call(false, |c| c.remove(path, true))
+        self.call(false, |c| c.remove(self.at(path), true))
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        self.call(false, |c| c.rename(from, to))
+        self.call(false, |c| c.rename(self.at(from), self.at(to)))
     }
 
     fn copy(&self, from: &Path, to: &Path) -> io::Result<u64> {
         self.call(true, |c| {
-            c.copy(from, to, false)?;
-            Ok(c.metadata(to, true)?.len)
+            c.copy(self.at(from), self.at(to), false)?;
+            Ok(c.metadata(self.at(to), true)?.len)
         })
     }
 
     fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-        self.call(true, |c| c.metadata(path, true)).map(metadata)
+        self.call(true, |c| c.metadata(self.at(path), true)).map(metadata)
     }
 
     fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
-        self.call(true, |c| c.metadata(path, false)).map(metadata)
+        self.call(true, |c| c.metadata(self.at(path), false)).map(metadata)
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
-        let entries = self.call(true, |c| c.read_dir(path))?;
+        let entries = self.call(true, |c| c.read_dir(self.at(path)))?;
         Ok(entries
             .into_iter()
             .map(|e| {
@@ -464,12 +496,12 @@ impl Host for RemoteHost {
     }
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        self.call(true, |c| c.canonicalize(path))
+        self.call(true, |c| c.canonicalize(self.at(path)))
     }
 
     fn trash(&self, paths: &[PathBuf]) -> io::Result<()> {
         for p in paths {
-            self.call(false, |c| c.trash(p))?;
+            self.call(false, |c| c.trash(self.at(p)))?;
         }
         Ok(())
     }
@@ -482,17 +514,17 @@ impl Host for RemoteHost {
             skip: options.skip.clone(),
             files_only: options.files_only,
         };
-        let entries = self.call(true, |c| c.walk(root, options.clone()))?;
+        let entries = self.call(true, |c| c.walk(self.at(root), options.clone()))?;
         Ok(entries.into_iter().map(|e| WalkEntry { path: e.path, depth: e.depth, is_dir: e.is_dir }).collect())
     }
 
     fn find_text(&self, root: &Path, files: &[String], needle: &str, limit: usize) -> io::Result<Vec<TextHit>> {
-        let hits = self.call(true, |c| c.find_text(root, files.to_vec(), needle, limit))?;
+        let hits = self.call(true, |c| c.find_text(self.at(root), files.to_vec(), needle, limit))?;
         Ok(hits.into_iter().map(|h| TextHit { path: h.path, line: h.line, column: h.column, text: h.text }).collect())
     }
 
     fn watch(&self, root: &Path) -> io::Result<Watcher> {
-        let watch = self.call(true, |c| c.watch(root, true))?;
+        let watch = self.call(true, |c| c.watch(self.at(root), true))?;
         let (tx, rx) = std::sync::mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let (link, root, stopped) = (self.link.clone(), root.to_owned(), stop.clone());
@@ -504,19 +536,19 @@ impl Host for RemoteHost {
 
     fn spawn(&self, cmd: &Cmd) -> io::Result<Box<dyn Process>> {
         let mut req = proto::SpawnRequest {
-            program: lossy(&cmd.program),
-            args: cmd.args.iter().map(|a| lossy(a)).collect(),
-            cwd: cmd.cwd.clone(),
+            program: self.text(&lossy(&cmd.program)),
+            args: cmd.args.iter().map(|a| self.text(&lossy(a))).collect(),
+            cwd: cmd.cwd.as_deref().map(|p| self.at(p)),
             ..Default::default()
         };
         for (k, v) in &cmd.env {
             match v {
-                Some(v) => req.env.push((lossy(k), lossy(v))),
+                Some(v) => req.env.push((lossy(k), self.text(&lossy(v)))),
                 None => req.env_remove.push(lossy(k)),
             }
         }
         let file = |s: &Stdio| match s {
-            Stdio::File(p) => Some(p.clone()),
+            Stdio::File(p) => Some(self.at(p)),
             _ => None,
         };
         req.stdout_file = file(&cmd.stdout);
@@ -533,15 +565,15 @@ impl Host for RemoteHost {
 
     fn spawn_pty(&self, cmd: &Cmd, rows: u16, cols: u16) -> io::Result<Box<dyn PtyProcess>> {
         let mut req = proto::PtyRequest {
-            program: lossy(&cmd.program),
-            args: cmd.args.iter().map(|a| lossy(a)).collect(),
-            cwd: cmd.cwd.clone(),
+            program: self.text(&lossy(&cmd.program)),
+            args: cmd.args.iter().map(|a| self.text(&lossy(a))).collect(),
+            cwd: cmd.cwd.as_deref().map(|p| self.at(p)),
             size: proto::PtySize { rows, cols },
             ..Default::default()
         };
         for (k, v) in &cmd.env {
             match v {
-                Some(v) => req.env.push((lossy(k), lossy(v))),
+                Some(v) => req.env.push((lossy(k), self.text(&lossy(v)))),
                 None => req.env_remove.push(lossy(k)),
             }
         }
@@ -1058,5 +1090,23 @@ impl PtyProcess for RemoteProc {
 
     fn wait(&mut self) -> io::Result<ExitStatus> {
         self.p.wait()
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::{unix_path, unix_text};
+
+    #[test]
+    fn a_linux_path_joined_on_windows_gets_its_slashes() {
+        assert_eq!(unix_path(r"/root\.amp/bin\amp"), "/root/.amp/bin/amp");
+        assert_eq!(
+            unix_text(r"/root\.snout-code/jdks\.temurin-21.tar.gz.part"),
+            "/root/.snout-code/jdks/.temurin-21.tar.gz.part"
+        );
+        assert_eq!(unix_text(r"/root\.local/bin:/usr/bin"), "/root/.local/bin:/usr/bin", "a PATH");
+        assert_eq!(unix_text(r"printf 'a\n'"), r"printf 'a\n'", "a command keeps its escapes");
+        assert_eq!(unix_text(r"-Dx=\y"), r"-Dx=\y", "only an absolute path");
+        assert_eq!(unix_text(r"/tmp/a b\c"), r"/tmp/a b\c", "one word only");
     }
 }
