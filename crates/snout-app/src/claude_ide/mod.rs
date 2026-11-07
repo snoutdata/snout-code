@@ -9,11 +9,12 @@
 //! Claude Code's hooks report every edit it makes, asked first or not ([`hooks`]); what
 //! it changed waits for review in the session's change set ([`changes`]) and the Claude
 //! Changes tool window ([`panel`]). What the model itself asks of the editor goes through
-//! a skill, a UTCP manual and plain HTTP instead ([`api`]). [`bridge`] connects them to
-//! the workspace.
+//! a skill, a UTCP manual and plain HTTP instead ([`api`]), from the table of what an agent can
+//! ask of the app ([`capabilities`]). [`bridge`] connects them to the workspace.
 
 pub mod api;
 pub mod bridge;
+pub mod capabilities;
 pub mod changes;
 pub mod hooks;
 pub mod ledger;

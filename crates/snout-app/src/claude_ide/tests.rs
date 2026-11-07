@@ -1566,6 +1566,111 @@ fn shell_while_pumping(cx: &mut VisualTestContext, script: &str, env: &[(&'stati
     (out.status.success(), String::from_utf8(out.stdout).unwrap().trim_end().to_owned())
 }
 
+/// A call of the API as an agent makes it: real HTTP, with the token from the file the console
+/// names. The window keeps running while it waits. The answer's status code and body.
+fn agent_calls(cx: &mut VisualTestContext, tool: &str, arguments: Value, with_token: bool) -> (u16, String) {
+    use std::io::{Read as _, Write as _};
+    let env = cx.update(|_, cx| cx.global::<IdeEnv>().0.clone());
+    let var = |name: &str| env.iter().find(|(k, _)| *k == name).map(|(_, v)| v.clone()).expect(name);
+    let port: u16 = var(super::hooks::PORT_ENV).parse().unwrap();
+    let header = std::fs::read_to_string(var(super::api::HEADER_ENV)).unwrap();
+    let header = if with_token { header.trim().to_owned() } else { "x-none: none".to_owned() };
+    let body = arguments.to_string();
+    let request = format!(
+        "POST /api/{tool} HTTP/1.1\r\nhost: 127.0.0.1\r\n{header}\r\ncontent-type: application/json\r\n\
+         content-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let call = std::thread::spawn(move || {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut out = String::new();
+        stream.read_to_string(&mut out).unwrap();
+        out
+    });
+    pump_until(cx, "the app's answer", |_| call.is_finished());
+    let out = call.join().unwrap();
+    let status = out.split_whitespace().nth(1).and_then(|s| s.parse().ok()).expect("a status");
+    (status, out.split_once("\r\n\r\n").map_or(String::new(), |(_, b)| b.to_owned()))
+}
+
+/// The harness, as an agent meets it: this test is the agent, speaking HTTP to the real window,
+/// and what it asserts is what the window does.
+#[gpui::test]
+fn an_agent_finds_out_where_it_stands_and_shows_the_user_a_window(cx: &mut TestAppContext) {
+    let (repo, lock_dir, _model, ws, _client, cx) = connected("harness", cx);
+    hook_command(&ws, cx);
+
+    // Everything the manual offers is really answered.
+    for c in super::capabilities::ALL {
+        let (status, body) = agent_calls(cx, c.name, json!({}), true);
+        assert!(!matches!(status, 404 | 504), "{}: {status} {body}", c.name);
+    }
+
+    // Where it stands: the project and its branch.
+    let state = |cx: &mut VisualTestContext| {
+        let (status, body) = agent_calls(cx, "getAppState", json!({}), true);
+        assert_eq!(status, 200, "{body}");
+        serde_json::from_str::<Value>(&body).unwrap()
+    };
+    let s = state(cx);
+    assert_eq!(s["project"]["path"], repo.to_string_lossy().as_ref());
+    assert_eq!(s["project"]["opening"], false);
+    assert!(s["project"]["git"]["branch"].as_str().unwrap().contains("main"), "{s}");
+    assert_eq!(s["version"], env!("CARGO_PKG_VERSION"));
+
+    // A file it opens is among the open files, and is the one in front.
+    let hello = repo.join("src/demo/Hello.java");
+    let (status, body) = agent_calls(cx, "openFile", json!({ "filePath": hello.to_string_lossy() }), true);
+    assert_eq!(status, 200, "{body}");
+    let s = state(cx);
+    let files = s["openFiles"].as_array().unwrap();
+    assert!(files.iter().any(|f| f["path"] == hello.to_string_lossy().as_ref() && f["active"] == true), "{s}");
+
+    // The window comes forward, and asking again does not hide it.
+    use crate::workspace::Tool;
+    cx.update(|_, cx| assert!(!ws.read(cx).tool_open(Tool::Problems, cx)));
+    for _ in 0..2 {
+        let (status, body) = agent_calls(cx, "showToolWindow", json!({ "name": "problems" }), true);
+        assert_eq!((status, body.as_str()), (200, "The Problems window shows"));
+        pump(cx, 50);
+        cx.update(|_, cx| assert!(ws.read(cx).tool_open(Tool::Problems, cx)));
+    }
+    let s = state(cx);
+    assert!(s["windowsShowing"].as_array().unwrap().contains(&json!("Problems")), "{s}");
+    let (status, body) = agent_calls(cx, "showToolWindow", json!({ "name": "Git" }), true);
+    assert_eq!((status, body.as_str()), (200, "The Git window shows"));
+    pump(cx, 50);
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, crate::panels::Activity::Git));
+
+    // A window that does not exist: the answer lists those that do, so the agent can try again.
+    let (status, body) = agent_calls(cx, "showToolWindow", json!({ "name": "Nope" }), true);
+    assert_eq!(status, 400);
+    assert!(body.contains("No window called Nope") && body.contains("Agent Changes"), "{body}");
+    // A tool that does not exist, and no token.
+    assert_eq!(agent_calls(cx, "deleteEverything", json!({}), true).0, 404);
+    assert_eq!(agent_calls(cx, "getAppState", json!({}), false).0, 401);
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// With no project open the harness still answers, and says so: the agent in the home folder knows
+/// it has a project to make.
+#[gpui::test]
+fn an_agent_with_no_project_is_told_so(cx: &mut TestAppContext) {
+    let lock_dir = scratch_dir("harness-no-project-ide");
+    let (_model, ws, cx) = open_with_ide(cx, Settings::default(), &lock_dir);
+    hook_command(&ws, cx);
+    let (status, body) = agent_calls(cx, "getAppState", json!({}), true);
+    assert_eq!(status, 200, "{body}");
+    let s: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(s["project"], Value::Null, "{s}");
+    let home = cx.update(|_, cx| crate::host::host(cx).info().home.clone());
+    assert_eq!(s["homeFolder"], home.to_string_lossy().as_ref());
+    assert_eq!(s["openFiles"], json!([]));
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
 /// The model asks the editor through the skill the console's `claude` loads: the skill's
 /// own commands (its script, which the session's settings let run) open a file and select
 /// in it, read the selection back, and fetch the UTCP manual; a UTCP client's call with

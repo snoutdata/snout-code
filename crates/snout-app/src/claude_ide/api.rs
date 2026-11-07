@@ -6,29 +6,15 @@
 //! schemas in every request: a skill (in a plugin the console's `claude` loads for its
 //! session only, `--plugin-dir`) tells it how; a UTCP manual (`GET /utcp`) describes the
 //! calls; the calls are plain HTTP on the hooks' endpoint (`POST /api/<tool>`), checked
-//! against the same token. Each call is answered by the same code as the IDE connection's
-//! tool of that name, so the two never differ.
+//! against the same token. [`super::capabilities`] says which calls there are; those the IDE
+//! connection also has are answered by its code, so the two never differ.
 
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
+use super::capabilities;
 use super::tools;
-
-/// The tools the API offers: the IDE connection's, less those that wait on the user or
-/// only make sense to Claude Code itself (diff tabs).
-pub const TOOLS: [&str; 10] = [
-    "openFile",
-    "getCurrentSelection",
-    "getLatestSelection",
-    "getOpenEditors",
-    "getWorkspaceFolders",
-    "getDiagnostics",
-    "checkDocumentDirty",
-    "saveDocument",
-    "getCommitChange",
-    "setCommitMessage",
-];
 
 /// The variable naming the file that holds the token's header line (`x-snout-hook: …`),
 /// for `curl -H @file`: the token stays off command lines and out of transcripts.
@@ -64,25 +50,19 @@ pub fn script(dir: &Path) -> PathBuf {
 pub const COMMIT_CHANGE: &str = "commit-change";
 pub const COMMIT_MESSAGE: &str = "commit-message";
 
-/// The tool `tools/list` describes by `name`.
-fn described(name: &str) -> Option<Value> {
-    let listed = tools::list()["tools"].as_array()?.iter().find(|t| t["name"] == name).cloned();
-    listed.or_else(|| tools::api_only().into_iter().find(|t| t["name"] == name))
-}
-
 /// The UTCP manual: each tool with its inputs and the HTTP call that runs it. The port
 /// and the token are variables, from the console's environment.
 pub fn manual() -> Value {
-    let tools: Vec<Value> = TOOLS
+    let tools: Vec<Value> = capabilities::ALL
         .iter()
-        .filter_map(|name| {
-            let t = described(name)?;
-            Some(json!({
+        .map(|c| {
+            let name = c.name;
+            json!({
                 "name": name,
-                "description": t["description"],
-                "inputs": t["inputSchema"],
+                "description": c.description,
+                "inputs": c.schema(),
                 "outputs": { "type": "object", "description": "The tool's answer: JSON, or text when it is not JSON." },
-                "tags": ["editor", "snout-code"],
+                "tags": c.tags(),
                 "tool_call_template": {
                     "call_template_type": "http",
                     "name": "snout-code",
@@ -96,16 +76,17 @@ pub fn manual() -> Value {
                         "location": "header",
                     },
                 },
-            }))
+            })
         })
         .collect();
     json!({
         "utcp_version": UTCP_VERSION,
         "manual_version": env!("CARGO_PKG_VERSION"),
         "info": {
-            "title": "SnoutCode editor",
+            "title": "SnoutCode",
             "description": format!(
-                "The editor of the SnoutCode window this agent runs in. Arguments go as query parameters or as a JSON \
+                "The SnoutCode window this agent runs in. Each tool is tagged with what it does: read looks, show changes \
+                 only what is on screen, change writes or starts something. Arguments go as query parameters or as a JSON \
                  body. The token is the value of the header line in the file ${HEADER_ENV}; with curl: -H @\"${HEADER_ENV}\"."
             ),
         },
@@ -151,7 +132,7 @@ fn query_pairs(query: &str) -> Vec<(String, String)> {
 /// The arguments of a call to `tool`: the query's parameters, typed as the tool's schema
 /// says, then the JSON body's fields over them.
 pub fn arguments(tool: &str, query: &str, body: &[u8]) -> Result<Value, String> {
-    let schema = described(tool).map(|t| t["inputSchema"]["properties"].clone()).unwrap_or(Value::Null);
+    let schema = capabilities::find(tool).map(|c| c.schema()["properties"].clone()).unwrap_or(Value::Null);
     let mut args = Map::new();
     for (k, v) in query_pairs(query) {
         let typed = match schema[&k]["type"].as_str() {
@@ -251,9 +232,10 @@ mod tests {
         let m = manual();
         assert_eq!(m["utcp_version"], UTCP_VERSION);
         let names: Vec<&str> = m["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, TOOLS, "every tool described, none waiting on the user");
-        let open = &m["tools"][0];
+        assert_eq!(names, capabilities::ALL.iter().map(|c| c.name).collect::<Vec<_>>(), "every tool described");
+        let open = m["tools"].as_array().unwrap().iter().find(|t| t["name"] == "openFile").unwrap();
         assert_eq!(open["inputs"]["required"], json!(["filePath"]));
+        assert_eq!(open["tags"], json!(["editor", "show"]));
         let call = &open["tool_call_template"];
         assert_eq!(call["url"], "http://127.0.0.1:${SNOUT_HOOK_PORT}/api/openFile");
         assert_eq!(call["auth"]["var_name"], "x-snout-hook");

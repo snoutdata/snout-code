@@ -25,8 +25,9 @@ says what was opened and selected; an error names the problem (a file that is no
 
 ## Everything else
 
-The other tools (the open tabs, the selection, the problems of a file, whether a file has
-unsaved changes, save it) are described by the UTCP manual. Read it when you need one:
+The other tools (where this session stands in the window, the open tabs, the selection, the
+problems of a file, whether a file has unsaved changes, save it, bring a window such as Git or
+Problems to the front) are described by the UTCP manual. Read it when you need one:
 
 ```sh
 {{API}} manual

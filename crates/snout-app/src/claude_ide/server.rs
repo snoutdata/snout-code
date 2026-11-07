@@ -44,6 +44,9 @@ pub enum Event {
     Call(Call),
 }
 
+/// The client of a call that came over the API, not over a connection (whose ids start at 1).
+pub const API_CLIENT: u64 = 0;
+
 /// A `tools/call` request.
 pub struct Call {
     pub client: u64,

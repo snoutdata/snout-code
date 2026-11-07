@@ -25,7 +25,7 @@ pub const INVALID_PARAMS: i64 = -32602;
 pub const METHOD_NOT_FOUND: i64 = -32601;
 pub const TOOL_ERROR: i64 = -32000;
 
-fn schema(properties: Value, required: &[&str]) -> Value {
+pub(super) fn schema(properties: Value, required: &[&str]) -> Value {
     let mut s = json!({
         "type": "object",
         "additionalProperties": false,
@@ -97,21 +97,9 @@ pub fn list() -> Value {
     ] })
 }
 
-/// The tools of the editor's API alone, which the IDE connection does not offer: Claude Code's
-/// connection stays as its other integrations have it.
-pub fn api_only() -> Vec<Value> {
-    vec![
-        tool(
-            "getCommitChange",
-            "While SnoutCode waits for a drafted commit message: the change the commit would record, and how to write its message",
-            schema(json!({}), &[]),
-        ),
-        tool(
-            "setCommitMessage",
-            "Put the drafted commit message in SnoutCode's commit box, for the user to read and commit",
-            schema(json!({ "message": { "type": "string", "description": "The commit message" } }), &["message"]),
-        ),
-    ]
+/// The arguments of the listed tool `name`, as `tools/list` describes them.
+pub fn input_of(name: &str) -> Option<Value> {
+    list()["tools"].as_array()?.iter().find(|t| t["name"] == name).map(|t| t["inputSchema"].clone())
 }
 
 /// A tool result of one text item.

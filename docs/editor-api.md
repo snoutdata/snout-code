@@ -2,8 +2,9 @@
 
 An agent running in SnoutCode's console can work the editor: open a file at a line or with
 text selected, read your selection and your open tabs, read the problems of a file, check
-whether a file has unsaved changes, and save it. Ask Claude Code "open the order service at
-the place method" and the file opens in SnoutCode, the method selected.
+whether a file has unsaved changes, and save it. It can also find out where it stands in the
+window, and bring a window such as Git or Problems to the front for you. Ask Claude Code "open
+the order service at the place method" and the file opens in SnoutCode, the method selected.
 
 It works without an MCP server, so the editor's tools cost almost nothing in a session that
 does not use them. The chain is **Agent Skill → UTCP → API**:
@@ -20,16 +21,16 @@ An MCP server's tools are listed to the model with their full descriptions and J
 so they take room in the context of every request of the session, whether the agent uses them
 or not. A skill shows the model one line, and the rest is read only when the agent needs it.
 
-For the API's ten tools, measured on what SnoutCode sends:
+For the API's twelve tools, measured on what SnoutCode sends:
 
 | | Size | When it is in the context |
 |---|---|---|
-| The ten tools as MCP definitions | about 3,700 characters, roughly 930 tokens | every request of the session |
-| The skill's description | about 320 characters, roughly 80 tokens | every request of the session |
-| The skill's instructions, with the `openFile` call | about 1,400 characters, roughly 350 tokens | once, when the agent first uses the editor |
-| The UTCP manual, all ten tools | about 8,300 characters, roughly 2,100 tokens | only when the agent needs a tool other than `openFile` |
+| The twelve tools as MCP definitions | about 4,900 characters, roughly 1,200 tokens | every request of the session |
+| The skill's description | about 290 characters, roughly 70 tokens | every request of the session |
+| The skill's instructions, with the `openFile` call | about 1,500 characters, roughly 370 tokens | once, when the agent first uses the editor |
+| The UTCP manual, all twelve tools | about 14,800 characters, roughly 3,700 tokens | only when the agent needs a tool other than `openFile` |
 
-So a session that never touches the editor pays about a tenth of what the MCP definitions
+So a session that never touches the editor pays less than a tenth of what the MCP definitions
 would cost, on every request. Opening a file, the common case, needs the skill alone; the
 manual stays out of the context unless the agent wants something else. Each tool added to
 the API later grows the manual, not every request.
@@ -77,10 +78,14 @@ the agent's transcript.
 | The token | the header line in the file `$SNOUT_API_HEADER`; with curl, `-H @"$SNOUT_API_HEADER"` |
 | The answer | the tool's JSON, or its text; an error has a status (400, 404, 422) and `{"error": "…"}` |
 
+The manual tags each tool with what it does: `read` looks, `show` changes only what is on screen, `change` writes or starts something.
+
 The tools:
 
 | Tool | What it does | Arguments |
 |---|---|---|
+| `getAppState` | Where the session stands: the project (none when it runs in the home folder), its branch, the open files, the runs, the problems, the windows showing and the connection | none |
+| `showToolWindow` | Brings a window to the front: Project, Git, Run, Debug, Build, Output, Terminal, Problems, Console, Gradle, Maven, Spring, Tests, Agent Changes, Structure, Hierarchy, Notifications or Processes. It stays if it already shows | `name` |
 | `openFile` | Opens a file, and selects lines or text in it | `filePath`; `startLine`, `endLine` (from 1); or `startText`, `endText`, `selectToEndOfLine`; `makeFrontmost`, `preview` |
 | `getCurrentSelection` | The selection in the editor in front | none |
 | `getLatestSelection` | The last selection made, in any tab | none |

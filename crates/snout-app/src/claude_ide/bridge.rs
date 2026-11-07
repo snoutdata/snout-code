@@ -322,6 +322,9 @@ fn on_event(ws: &mut Workspace, event: Event, window: &mut Window, cx: &mut Cont
             b.clients.remove(&id);
             set_status(ws, cx);
         }
+        Event::Call(call) if call.client == super::server::API_CLIENT => {
+            super::capabilities::run(ws, call, window, cx);
+        }
         Event::Call(call) => call_tool(ws, call, window, cx),
     }
     cx.notify();
@@ -329,7 +332,7 @@ fn on_event(ws: &mut Workspace, event: Event, window: &mut Window, cx: &mut Cont
 
 // ----- The tools ---------------------------------------------------------------------
 
-fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Context<Workspace>) {
+pub(super) fn call_tool(ws: &mut Workspace, call: Call, window: &mut Window, cx: &mut Context<Workspace>) {
     let Call { name, arguments: a, reply, .. } = call;
     match name.as_str() {
         "openFile" => open_file(ws, &a, reply, window, cx),

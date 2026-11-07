@@ -636,7 +636,7 @@ fn serve_api(stream: &mut TcpStream, req: &Request, ask: &Ask) {
         let body = serde_json::to_string_pretty(&api::manual()).unwrap_or_default();
         return respond_with(stream, &Answer { status: "200 OK", content_type: "application/json", body });
     }
-    let Some(name) = path.strip_prefix("/api/").filter(|n| api::TOOLS.contains(n)) else {
+    let Some(name) = path.strip_prefix("/api/").filter(|n| super::capabilities::find(n).is_some()) else {
         return respond_with(stream, &Answer::error("404 Not Found", format!("no such call: {path}")));
     };
     if req.method != "POST" {
@@ -647,7 +647,7 @@ fn serve_api(stream: &mut TcpStream, req: &Request, ask: &Ask) {
         Err(e) => return respond_with(stream, &Answer::error("400 Bad Request", e)),
     };
     let (reply, answer) = super::server::Reply::channel();
-    ask(super::server::Call { client: 0, name: name.to_owned(), arguments, reply });
+    ask(super::server::Call { client: super::server::API_CLIENT, name: name.to_owned(), arguments, reply });
     let a = match answer.recv_timeout(API_WAIT) {
         Ok(message) => api::answer(&message),
         Err(_) => Answer::error("504 Gateway Timeout", "the editor did not answer"),
