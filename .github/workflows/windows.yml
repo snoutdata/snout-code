@@ -202,6 +202,47 @@ jobs:
         run: |
           $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
           scripts\windows\install-test.ps1 -Setup $setup.FullName -Jdk "${{ steps.java.outputs.path }}" -Out target\windows-install-test
+      # TEMPORARY, once: the way 1.0.0 and 1.0.1 ran the update's waiter, to see what it does.
+      - name: An update with the waiter hard linked (what 1.0.1 did)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
+          scripts\windows\update-test.ps1 -Setup $setup.FullName -Out target\windows-install-test\update-hardlink -HardLink
+      # A real update: the running app gone, the waiter, the real installer over the real install,
+      # the app back; then a launch that a lock left behind must not hold.
+      - name: A real update, through the waiter and the installer
+        timeout-minutes: 10
+        run: |
+          $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
+          scripts\windows\update-test.ps1 -Setup $setup.FullName -Out target\windows-install-test\update
+      # A project inside WSL: a real Ubuntu, with Amp only in the user's Linux profile. The connection
+      # itself, then the installed app opening a \\wsl.localhost folder.
+      - uses: Vampire/setup-wsl@v7
+        if: matrix.arch == 'x64'
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 1
+      - name: Amp in the Linux profile
+        if: matrix.arch == 'x64'
+        shell: wsl-bash {0}
+        run: |
+          mkdir -p ~/.amp/bin
+          printf '#!/bin/sh\necho amp\n' > ~/.amp/bin/amp
+          chmod +x ~/.amp/bin/amp
+      - name: WSL connects as a remote machine
+        if: matrix.arch == 'x64'
+        timeout-minutes: 15
+        env:
+          SNOUT_WSL_DISTRO: Ubuntu-24.04
+          SNOUT_SERVER_BINARIES: target/snout-server-dist
+        run: cargo test --locked -p snout-remote --test wsl -- --ignored --nocapture
+      - name: The installed app opens a folder inside WSL
+        if: matrix.arch == 'x64'
+        timeout-minutes: 10
+        run: |
+          $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
+          scripts\windows\wsl-test.ps1 -Setup $setup.FullName -Distro Ubuntu-24.04 -Out target\windows-install-test\wsl
       - name: What the firewall blocked
         if: always()
         run: |

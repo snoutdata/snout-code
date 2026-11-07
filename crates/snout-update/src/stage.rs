@@ -206,6 +206,7 @@ pub fn cleanup(updates: &Path, app: Option<&Path>, current: &str) {
         let name = entry.file_name().to_string_lossy().into_owned();
         // What is ours to keep: the records, and the installer a stage is.
         let keep = name.ends_with(".json")
+            || (name == "waiter" && staged.is_some())
             || staged.as_ref().is_some_and(|s| s.path == entry.path())
             || read_staged(updates).is_some_and(|s| download_of(&name, &s.version));
         if !keep {

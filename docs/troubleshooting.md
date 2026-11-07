@@ -150,8 +150,8 @@ see [Supported versions and performance](versions-and-performance.md#measure-it-
 **Check for Updates…** says why, in a sentence: whether this computer is offline, GitHub is not
 answering, or the download was refused. Hover the sentence for the error behind it. Every step goes
 to `update.log`, in `~/Library/Logs/SnoutCode/` on a Mac, `~/.local/state/SnoutCode/` on Linux and
-`%LOCALAPPDATA%\SnoutCode\logs\` on Windows. See [Updates](updates.md) for what is checked and what
-each system does.
+`%LOCALAPPDATA%\SnoutCode\logs\` on Windows, where the installer's own account is beside it, in
+`update-installer.log`. See [Updates](updates.md) for what is checked and what each system does.
 
 ## Logs
 

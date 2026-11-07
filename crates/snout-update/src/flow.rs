@@ -160,6 +160,12 @@ fn fetch_and_stage(
     };
     stage::write_staged(&cfg.updates, &Staged { version: version.to_owned(), path: path.clone() })
         .map_err(|e| describe(&format!("the new version could not be written: {e}"), None))?;
+    // Now, not as the app quits, which has seconds to do it in. If this fails the quit tries again.
+    if let Route::WindowsInstaller { exe, .. } = &cfg.route
+        && let Err(e) = crate::swap::make_waiter_copy(&cfg.updates, exe)
+    {
+        cfg.log(&format!("the waiter's program could not be copied yet: {e}"));
+    }
     Ok(path)
 }
 

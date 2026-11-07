@@ -1,0 +1,67 @@
+# The installed app opens a folder inside WSL: it must connect to the distro, install its server
+# there, and open the project on the Linux side, with the window on Windows.
+#
+#   wsl-test.ps1 -Setup <SnoutCode-…-setup.exe> -Distro <distro> [-Out <dir>]
+param(
+    [Parameter(Mandatory = $true)][string]$Setup,
+    [Parameter(Mandatory = $true)][string]$Distro,
+    [string]$Out = "target\windows-install-test\wsl"
+)
+$ErrorActionPreference = "Stop"
+New-Item -ItemType Directory -Force -Path $Out | Out-Null
+$Setup = (Resolve-Path $Setup).Path
+$dir = Join-Path $env:LOCALAPPDATA "Programs\SnoutCode"
+$exe = Join-Path $dir "snout-code.exe"
+$recents = Join-Path $env:APPDATA "SnoutCode\remote.json"
+
+function InDistro([string]$line) { wsl.exe -d $Distro -e sh -c $line }
+function StopAll {
+    Get-Process | Where-Object { $_.ProcessName -like "snout-code*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    InDistro "pkill -f snout-server || true" | Out-Null
+}
+function Show {
+    Write-Host "--- remote.json"
+    if (Test-Path $recents) { Get-Content $recents | ForEach-Object { Write-Host $_ } }
+    Write-Host "--- server in the distro"
+    InDistro "ls -la ~/.snout-code/server/*/ 2>&1; pgrep -af snout-server" | ForEach-Object { Write-Host $_ }
+    Write-Host "--- processes"
+    Get-Process | Where-Object { $_.ProcessName -like "snout*" } |
+        ForEach-Object { Write-Host "$($_.ProcessName) $($_.Id) $([int]($_.WorkingSet64 / 1MB)) MB" }
+}
+function Fail([string]$why) { Write-Host "FAIL: $why"; Show; StopAll; exit 1 }
+function WaitFor([int]$seconds, [scriptblock]$done) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while (-not (& $done)) {
+        if ((Get-Date) -gt $deadline) { return $false }
+        Start-Sleep -Seconds 1
+    }
+    return $true
+}
+
+StopAll
+$p = Start-Process -FilePath $Setup -Wait -PassThru -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER")
+if ($p.ExitCode -ne 0) { Fail "the install exited with $($p.ExitCode)" }
+Remove-Item $recents -Force -ErrorAction SilentlyContinue
+InDistro "rm -rf ~/.snout-code; mkdir -p /tmp/wsl-demo; echo hello > /tmp/wsl-demo/notes.txt" | Out-Null
+
+Write-Host "== Opening \\wsl.localhost\$Distro\tmp\wsl-demo"
+$env:SNOUT_NO_UPDATE = "1"
+$env:SNOUT_NO_FETCH = "1"
+Start-Process -FilePath $exe -ArgumentList "\\wsl.localhost\$Distro\tmp\wsl-demo" | Out-Null
+
+if (-not (WaitFor 180 { (InDistro "pgrep -f snout-server") })) { Fail "the server never started in the distro" }
+Write-Host "the server runs in $Distro"
+if (-not (WaitFor 60 { (Test-Path $recents) -and ((Get-Content $recents -Raw) -match "/tmp/wsl-demo") })) {
+    Fail "the project was not opened on the Linux side"
+}
+$opened = Get-Content $recents -Raw | ConvertFrom-Json
+if ($opened.projects[0].host -ne "WSL: $Distro") { Fail "it opened on $($opened.projects[0].host)" }
+if (-not (Get-Process -Name "snout-code" -ErrorAction SilentlyContinue | Where-Object { $_.WorkingSet64 -gt 30MB })) {
+    Fail "the app is not running as the real app"
+}
+Show
+StopAll
+$env:SNOUT_NO_UPDATE = $null
+$env:SNOUT_NO_FETCH = $null
+Start-Process -FilePath (Join-Path $dir "unins000.exe") -Wait -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") | Out-Null
+Write-Host "PASS"

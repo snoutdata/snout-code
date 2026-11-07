@@ -29,6 +29,9 @@ const RESTORE_TRIES: u32 = 600;
 /// A lock older than this was left by a power cut, and is not waited on.
 const STALE_LOCK: Duration = Duration::from_secs(5 * 60);
 const LOCK_WAIT: Duration = Duration::from_secs(60);
+/// Long enough for someone to answer an administrator's prompt; a stuck installer must not hold
+/// the update, and every launch behind it, for ever.
+const INSTALLER_WITHIN: Duration = Duration::from_secs(10 * 60);
 
 /// How the swap was asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +74,8 @@ pub trait Deps {
     fn rename(&self, from: &Path, to: &Path) -> bool;
     fn remove_dir(&self, path: &Path);
     fn write(&self, path: &Path, text: &str);
+    /// This process.
+    fn own_pid(&self) -> u32;
     fn remove_file(&self, path: &Path);
     fn sleep(&self, d: Duration);
     /// Run a program to its end: its exit code, None when it never ran or crashed.
@@ -102,15 +107,17 @@ pub fn run_waiter(cfg: &WaiterConfig, d: &dyn Deps) -> Outcome {
         return Outcome::AppStayed;
     }
     let lock = cfg.updates.join(LOCK);
-    d.write(&lock, "");
+    // Who holds it: a launch ignores the lock of a waiter that is gone.
+    d.write(&lock, &d.own_pid().to_string());
     let outcome = match &cfg.plan {
         Plan::Bundle { install, next, old } => swap_bundle(cfg, install, next, old, d),
         Plan::Installer { installer, folder, exe } => {
-            run_installer(cfg, installer, folder, d);
+            let installed = run_installer(cfg, installer, folder, d);
+            // Installed or not, Restart starts whichever version is there.
             if cfg.mode == Mode::Restart {
                 d.launch(exe, true);
             }
-            Outcome::Swapped
+            if installed { Outcome::Swapped } else { Outcome::Failed }
         }
     };
     d.remove_file(&lock);
@@ -157,13 +164,18 @@ fn swap_bundle(cfg: &WaiterConfig, install: &Path, next: &Path, old: &Path, d: &
     Outcome::Swapped
 }
 
-fn run_installer(cfg: &WaiterConfig, installer: &Path, folder: &Path, d: &dyn Deps) {
+fn run_installer(cfg: &WaiterConfig, installer: &Path, folder: &Path, d: &dyn Deps) -> bool {
     // The reaper and what it is stopping run from the install folder, and hold its files.
     if !wait_until(d, OTHERS_GONE_WITHIN, || d.others_in(folder) == 0) {
         d.log("something still runs from the install folder; the installer closes it");
     }
-    let code = d.run(installer, &installer_args(cfg.mode));
+    // Its own account of what it did, beside the update's.
+    let log = format!("/LOG={}", cfg.log.with_file_name("update-installer.log").display());
+    let mut args = installer_args(cfg.mode);
+    args.push(&log);
+    let code = d.run(installer, &args);
     d.log(&format!("the installer of v{} exited: {code:?}", cfg.version));
+    code == Some(0)
 }
 
 fn wait_until(d: &dyn Deps, within: Duration, mut done: impl FnMut() -> bool) -> bool {
@@ -193,19 +205,54 @@ fn retry(d: &dyn Deps, tries: u32, mut attempt: impl FnMut() -> bool) -> bool {
 /// icon the second they quit) must not start from what is being replaced: it waits for the swap,
 /// then starts what is there now. True when this process should exit, having started that.
 /// One file check when there is no swap, which is every launch but that one.
+///
+/// This wait shows nothing, so it never outlasts the reason for it: a lock whose waiter is gone
+/// (killed, or left by an older version, which did not say who it was) is ignored and removed, and
+/// a waiter that takes too long is left to it while the app starts.
 pub fn wait_out_swap(updates: &Path, exe: &Path) -> bool {
     let lock = updates.join(LOCK);
+    let Ok(holder) = std::fs::read_to_string(&lock) else { return false };
     let fresh = std::fs::metadata(&lock)
         .and_then(|m| m.modified())
         .is_ok_and(|at| at.elapsed().unwrap_or(Duration::MAX) <= STALE_LOCK);
-    if !fresh {
+    let waiter = holder.trim().parse::<u32>().ok().filter(|pid| fresh && pid_alive(*pid));
+    let Some(waiter) = waiter else {
+        let _ = std::fs::remove_file(&lock);
         return false;
-    }
+    };
     let started = Instant::now();
     while lock.exists() && started.elapsed() < LOCK_WAIT {
+        if !pid_alive(waiter) {
+            let _ = std::fs::remove_file(&lock);
+            break;
+        }
         std::thread::sleep(Duration::from_millis(200));
     }
+    if lock.exists() {
+        return false;
+    }
     crate::command(exe).args(std::env::args_os().skip(1)).spawn().is_ok()
+}
+
+fn pid_alive(pid: u32) -> bool {
+    snout_host::local().processes(false).is_ok_and(|all| all.iter().any(|p| p.pid == pid))
+}
+
+/// Where the waiter's program goes for an installer's update.
+pub fn waiter_path(updates: &Path) -> PathBuf {
+    updates.join("waiter").join("snout-code-update.exe")
+}
+
+/// Copy the program `exe` to where the waiter runs from. A real copy, never a hard link: a link is
+/// the very file the installer has to replace, and Windows does not replace a file that is running.
+pub fn make_waiter_copy(updates: &Path, exe: &Path) -> std::io::Result<PathBuf> {
+    let copy = waiter_path(updates);
+    if let Some(dir) = copy.parent() {
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::copy(exe, &copy)?;
+    Ok(copy)
 }
 
 /// The real world, for the waiter process.
@@ -264,6 +311,10 @@ impl Deps for OsDeps {
         let _ = std::fs::write(path, text);
     }
 
+    fn own_pid(&self) -> u32 {
+        self.own_pid
+    }
+
     fn remove_file(&self, path: &Path) {
         let _ = std::fs::remove_file(path);
     }
@@ -273,7 +324,19 @@ impl Deps for OsDeps {
     }
 
     fn run(&self, file: &Path, args: &[&str]) -> Option<i32> {
-        crate::command(file).args(args).status().ok()?.code()
+        let mut child = crate::command(file).args(args).env_remove(WAITER_ENV).spawn().ok()?;
+        let started = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().ok()? {
+                return status.code();
+            }
+            if started.elapsed() > INSTALLER_WITHIN {
+                self.log("the installer is taking too long: stopping it");
+                stop_tree(&mut child);
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
     }
 
     fn launch(&self, app: &Path, direct: bool) {
@@ -295,6 +358,17 @@ impl Deps for OsDeps {
     fn log(&self, message: &str) {
         crate::log_to(&self.log, &format!("waiter: {message}"));
     }
+}
+
+/// End `child` and what it started (an installer unpacks itself and runs on as its child).
+fn stop_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let _ = crate::command("taskkill").args(["/T", "/F", "/PID", &pid]).status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Start `c` so that it outlives this process, with nothing of its console or its group.
@@ -348,6 +422,7 @@ mod tests {
         stuck: Vec<PathBuf>,
         app_never_goes: bool,
         others: usize,
+        installer_says: Option<i32>,
     }
 
     impl Fake {
@@ -355,8 +430,11 @@ mod tests {
             self.folders = RefCell::new(folders.iter().map(|f| f.to_path_buf()).collect());
             self
         }
+        /// What was done to the world, without the lock around it.
         fn calls(&self) -> Vec<String> {
-            self.calls.borrow().clone()
+            let lock = format!("/u{}{LOCK}", std::path::MAIN_SEPARATOR);
+            let calls = self.calls.borrow();
+            calls.iter().filter(|c| !c.contains(&lock)).cloned().collect()
         }
         fn note(&self, s: String) {
             self.calls.borrow_mut().push(s);
@@ -397,12 +475,19 @@ mod tests {
             self.note(format!("remove {}", path.display()));
             self.folders.borrow_mut().remove(path);
         }
-        fn write(&self, _: &Path, _: &str) {}
-        fn remove_file(&self, _: &Path) {}
+        fn write(&self, path: &Path, text: &str) {
+            self.note(format!("write {} {text}", path.display()));
+        }
+        fn own_pid(&self) -> u32 {
+            42
+        }
+        fn remove_file(&self, path: &Path) {
+            self.note(format!("remove-file {}", path.display()));
+        }
         fn sleep(&self, _: Duration) {}
         fn run(&self, file: &Path, args: &[&str]) -> Option<i32> {
             self.note(format!("run {} {}", file.display(), args[0]));
-            Some(0)
+            self.installer_says
         }
         fn launch(&self, app: &Path, _: bool) {
             self.note(format!("launch {}", app.display()));
@@ -492,6 +577,9 @@ mod tests {
                 self.0.remove_dir(p)
             }
             fn write(&self, _: &Path, _: &str) {}
+            fn own_pid(&self) -> u32 {
+                42
+            }
             fn remove_file(&self, _: &Path) {}
             fn sleep(&self, _: Duration) {}
             fn run(&self, f: &Path, a: &[&str]) -> Option<i32> {
@@ -532,10 +620,10 @@ mod tests {
 
     #[test]
     fn the_installer_runs_then_a_restart_starts_the_app() {
-        let d = Fake::default();
+        let d = Fake { installer_says: Some(0), ..Default::default() };
         assert_eq!(run_waiter(&installer_cfg(Mode::Restart), &d), Outcome::Swapped);
         assert_eq!(d.calls(), ["run /u/setup.exe /SILENT", "launch /p/s.exe"]);
-        let d = Fake::default();
+        let d = Fake { installer_says: Some(0), ..Default::default() };
         run_waiter(&installer_cfg(Mode::Quit), &d);
         assert_eq!(d.calls(), ["run /u/setup.exe /VERYSILENT"], "a plain quit is quiet and starts nothing");
     }
@@ -548,9 +636,78 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_during_a_swap_waits_only_for_a_fresh_lock() {
+    fn an_installer_that_fails_or_never_ran_is_a_failure_and_a_restart_still_starts_the_app() {
+        for says in [Some(5), None] {
+            let d = Fake { installer_says: says, ..Default::default() };
+            assert_eq!(run_waiter(&installer_cfg(Mode::Restart), &d), Outcome::Failed);
+            assert_eq!(d.calls().last().unwrap(), "launch /p/s.exe");
+        }
+    }
+
+    #[test]
+    fn the_lock_says_who_holds_it_and_is_lifted_after_the_installer() {
+        let d = Fake { installer_says: Some(0), ..Default::default() };
+        run_waiter(&installer_cfg(Mode::Quit), &d);
+        let all = d.calls.borrow().clone();
+        let lock = Path::new("/u").join(LOCK);
+        assert_eq!(all[0], format!("write {} 42", lock.display()));
+        assert_eq!(all.last().unwrap(), &format!("remove-file {}", lock.display()));
+    }
+
+    #[test]
+    fn a_launch_is_not_held_by_a_lock_nobody_holds() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!wait_out_swap(dir.path(), Path::new("/none")), "no swap: one file check");
+        let none = Path::new("/none");
+        assert!(!wait_out_swap(dir.path(), none), "no swap: one file check");
+        let lock = dir.path().join(LOCK);
+        // Left by an older version, which wrote nothing; a waiter that is gone; nonsense.
+        let mut gone = std::process::Command::new(if cfg!(windows) { "whoami" } else { "true" })
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = gone.id();
+        gone.wait().unwrap();
+        for held_by in [String::new(), pid.to_string(), "not a pid".to_owned()] {
+            std::fs::write(&lock, &held_by).unwrap();
+            let started = Instant::now();
+            assert!(!wait_out_swap(dir.path(), none), "it starts as usual: {held_by:?}");
+            assert!(started.elapsed() < Duration::from_secs(5), "at once: {held_by:?}");
+            assert!(!lock.exists(), "and the lock is gone: {held_by:?}");
+        }
+    }
+
+    #[test]
+    fn a_launch_waits_for_a_waiter_that_is_there_then_starts_what_is_there_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join(LOCK);
+        std::fs::write(&lock, std::process::id().to_string()).unwrap();
+        let lifted = lock.clone();
+        let lifting = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            std::fs::remove_file(lifted).unwrap();
+        });
+        let started = Instant::now();
+        // Something harmless that ends at once. Never this test's own program: it would run this
+        // test again, which would start it again, without end.
+        let exe = Path::new(if cfg!(windows) { "whoami" } else { "true" });
+        assert!(wait_out_swap(dir.path(), exe), "it hands over to a new start");
+        assert!(started.elapsed() >= Duration::from_millis(300), "after the swap");
+        lifting.join().unwrap();
+    }
+
+    #[test]
+    fn the_waiters_program_is_a_real_copy_never_a_link_to_the_file_being_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("app.exe");
+        std::fs::write(&exe, "the program").unwrap();
+        let updates = dir.path().join("updates");
+        let copy = make_waiter_copy(&updates, &exe).unwrap();
+        assert_eq!(copy, waiter_path(&updates));
+        // Writing the original leaves the copy, as it never would a hard link.
+        std::fs::write(&exe, "the new version").unwrap();
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "the program");
+        // A second update starts from what is running now.
+        assert_eq!(std::fs::read_to_string(make_waiter_copy(&updates, &exe).unwrap()).unwrap(), "the new version");
     }
 
     /// The app's background threads block signals, and a child inherits that: the waiter, and so

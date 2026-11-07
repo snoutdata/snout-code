@@ -342,21 +342,14 @@ impl Waiter {
 }
 
 /// The program the waiter runs as. On a Mac this one: a running program's folder can be moved. On
-/// Windows a copy, since the installer replaces this one: a hard link where it can be, which costs
-/// nothing and is as good as a copy.
+/// Windows the copy made when the update became ready, since the installer replaces this one.
 fn waiter_program(cfg: &WaiterConfig) -> std::io::Result<PathBuf> {
     let exe = std::env::current_exe()?;
     if !matches!(cfg.plan, Plan::Installer { .. }) {
         return Ok(exe);
     }
-    let dir = cfg.updates.join("waiter");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir)?;
-    let copy = dir.join("snout-code-update.exe");
-    if std::fs::hard_link(&exe, &copy).is_err() {
-        std::fs::copy(&exe, &copy)?;
-    }
-    Ok(copy)
+    let copy = snout_update::swap::waiter_path(&cfg.updates);
+    if copy.exists() { Ok(copy) } else { snout_update::swap::make_waiter_copy(&cfg.updates, &exe) }
 }
 
 /// What to start as the app quits. The download in flight stops here too.
