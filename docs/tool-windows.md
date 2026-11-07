@@ -60,6 +60,8 @@ A window with nothing to show yet says why, with a drawing, and offers the next 
 | Gradle, Maven | No tasks yet, No goals yet | **Sync the Gradle Project**, **Reload the Maven Project** |
 | Spring | No Spring model yet | **Read the Spring Model** |
 | Notifications | No notifications | **Show Output** |
+| Agent Log | No calls yet | None: what an agent asks of SnoutCode shows here |
+| Agent View | Nothing shown yet | None: what an agent chooses to show you appears here |
 | Agent Changes | No changes from agents yet | **Open the Agent Console** |
 | Tests | No tests found (no Playwright project, no package testing with Vitest or Jest) | Open a Playwright project, or a project whose packages test with Vitest or Jest |
 
@@ -87,6 +89,7 @@ says so, with the same kind of drawing.
 | **Open in External Terminal** | Opens the project's folder in your terminal app. |
 | **Agent Console** (⌘J), **Agent Changes**, **Annotate with Agents** | See [Coding agents](agents.md). |
 | **Processes**, **Stop Idle Processes**, **Restart the Java Engine** | See [Processes](processes.md). |
+| **Agent Log** | Every call an agent made of SnoutCode in this session. See [The API for agents](editor-api.md). |
 | **Tool Settings** | Opens Settings on the Keymap, Terminal, Agents or Gradle page. |
 | **Settings…** (⌘,) | See [Settings and keymap](settings-and-keymap.md). |
 

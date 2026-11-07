@@ -6,9 +6,14 @@
 //! never seen this app, add the row to [`ALL`], and add the call to the test in `tests.rs` that
 //! plays the agent. The rows' checks are below.
 
+pub mod agents;
+pub mod app;
+pub mod build;
 pub mod code;
+pub mod git;
 pub mod projects;
 pub mod run;
+pub mod spring;
 
 use std::collections::{HashSet, VecDeque};
 
@@ -52,8 +57,11 @@ pub enum Domain {
     Project,
     Run,
     Code,
+    Build,
     Editor,
     Git,
+    Agents,
+    Spring,
 }
 
 impl Domain {
@@ -63,6 +71,9 @@ impl Domain {
             Domain::Project => "project",
             Domain::Run => "run",
             Domain::Code => "code",
+            Domain::Build => "build",
+            Domain::Agents => "agents",
+            Domain::Spring => "spring",
             Domain::Editor => "editor",
             Domain::Git => "git",
         }
@@ -120,7 +131,9 @@ impl Capability {
 
 /// All of them, in the order the manual lists them.
 pub fn all() -> impl Iterator<Item = &'static Capability> {
-    [CORE, projects::ALL, run::ALL, code::ALL].into_iter().flatten()
+    [CORE, app::ALL, projects::ALL, run::ALL, code::ALL, build::ALL, git::ALL, agents::ALL, spring::ALL]
+        .into_iter()
+        .flatten()
 }
 
 const CORE: &[Capability] = &[
@@ -496,6 +509,7 @@ const WINDOWS: &[(&str, Target)] = &[
     ("Notifications", Target::Tool(Tool::Notifications)),
     ("Processes", Target::Tool(Tool::Processes)),
     ("Agent Log", Target::Tool(Tool::AgentLog)),
+    ("Agent View", Target::Tool(Tool::AgentView)),
 ];
 
 fn window_names() -> Vec<&'static str> {

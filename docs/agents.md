@@ -96,6 +96,12 @@ The console runs on the terminal engine chosen in Settings ▸ Tools ▸ Termina
 
 While the agent works, the Git view reads the repository again: once the console has gone quiet for a moment, and every 3 seconds while it keeps printing. See [Git](git.md).
 
+## What an agent can do in the window
+
+An agent in the console can work the whole window, not only write files: open or switch projects, start runs and read their output and test results, ask the Java and TypeScript engines what the code is, run build tasks, use the Git view, and show you a report in the **Agent View**. See [The API for agents](editor-api.md) for all of it.
+
+What changes something asks you first, on a card in the window: **Allow**, **Allow for This Session** for that tool, or **Don't Allow**, which tells the agent you said no. Return does not answer the card, because it can come up while you are typing. **View ▸ Agent Log** lists every call an agent made and how it ended.
+
 ## Send the selection to the agent
 
 Select code in an editor and press ⌥⌘K, or choose Code ▸ Send Selection to Claude (also in the editor's right-click menu). SnoutCode mentions the file and lines to the agent and brings the console forward. With nothing selected, it mentions the whole file.
@@ -232,7 +238,7 @@ SnoutCode also passes the console's `claude` extra settings for its hooks (`--se
 
 Ask Claude to open a file, or to show you a line or a method, and it opens it in SnoutCode's editor, with the lines or the text selected. It can also read your open tabs, your selection and the problems of a file, and save a file.
 
-This goes through an Agent Skill and a [UTCP](https://www.utcp.io) manual over a small HTTP API, not an MCP server, so the editor's tools cost almost nothing in a session that does not use them: about 80 tokens per request instead of about 800. Nothing is installed into your own Claude Code setup. See **[The editor API for agents](editor-api.md)** for how it works, what it saves, and how other agents can use it.
+This goes through an Agent Skill and a [UTCP](https://www.utcp.io) manual over a small HTTP API, not an MCP server, so these tools cost almost nothing in a session that does not use them: about 140 tokens per request instead of about 5,500. Nothing is installed into your own Claude Code setup. See **[The editor API for agents](editor-api.md)** for how it works, what it saves, and how other agents can use it.
 
 ## Codex
 

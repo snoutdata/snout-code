@@ -56,6 +56,8 @@ pub enum Tool {
     Processes,
     /// Not on a stripe: View ▸ Agent Log opens it.
     AgentLog,
+    /// Not on a stripe: an agent's first push brings it forward.
+    AgentView,
     /// A Playwright project's tests.
     Tests,
 }
@@ -157,6 +159,7 @@ impl Tool {
             | Tool::Maven
             | Tool::Spring
             | Tool::Notifications
+            | Tool::AgentView
             | Tool::ClaudeChanges
             | Tool::Structure
             | Tool::Hierarchy => DockPlacement::Right,
@@ -181,6 +184,7 @@ impl Tool {
             "Claude Changes" => Tool::ClaudeChanges,
             "Processes" => Tool::Processes,
             "Agent Log" => Tool::AgentLog,
+            "Agent View" => Tool::AgentView,
             "Structure" => Tool::Structure,
             "Hierarchy" => Tool::Hierarchy,
             "Tests" => Tool::Tests,
@@ -206,6 +210,7 @@ impl Tool {
             Tool::Hierarchy => Icon::Hierarchy,
             Tool::Processes => Icon::Gear,
             Tool::AgentLog => Icon::Gear,
+            Tool::AgentView => Icon::Gear,
             Tool::Tests => Icon::TestFolder,
         }
     }
@@ -226,6 +231,7 @@ impl Tool {
             Tool::Notifications => 6,
             Tool::Processes => 0,
             Tool::AgentLog => 0,
+            Tool::AgentView => 0,
             Tool::ClaudeChanges => 2,
             Tool::Structure => 4,
             Tool::Hierarchy => 0,
@@ -251,6 +257,7 @@ impl Tool {
             Tool::Hierarchy => "Hierarchy (⌃H, ⌃⌥H)",
             Tool::Processes => "Processes",
             Tool::AgentLog => "Agent Log",
+            Tool::AgentView => "Agent View",
             Tool::Tests => "Tests",
         }
     }
@@ -273,6 +280,7 @@ impl Tool {
             Tool::Hierarchy => "stripe-hierarchy",
             Tool::Processes => "stripe-processes",
             Tool::AgentLog => "stripe-agent-log",
+            Tool::AgentView => "stripe-agent-view",
             Tool::Tests => "stripe-tests",
         }
     }
@@ -382,6 +390,7 @@ impl Workspace {
             Tool::Hierarchy => Some(self.tabs.hierarchy),
             Tool::Processes => Some(self.tabs.processes),
             Tool::AgentLog => Some(self.tabs.agent_log),
+            Tool::AgentView => Some(self.tabs.agent_view),
             Tool::Tests => Some(self.tabs.tests),
         }
     }

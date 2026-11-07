@@ -1715,6 +1715,11 @@ fn a_change_waits_for_the_user_and_the_log_says_how_it_ended(cx: &mut TestAppCon
     });
     assert_eq!(on_disk(), before, "nothing yet");
     assert!(!call.is_finished(), "the agent waits");
+    // The card comes up while the user may be typing: Return does not answer it.
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(matches!(model.read(cx).dialog, Some(Dialog::AgentAsks { .. })), "still asking"));
+    assert_eq!(on_disk(), before, "Return allowed nothing");
     crate::quit_tests::click(cx, "agent-refuse");
     let (status, body) = agent_gets_answer(cx, call);
     assert_eq!(status, 422);
@@ -1943,8 +1948,208 @@ fn an_agent_asks_the_java_engine_what_the_code_is(cx: &mut TestAppContext) {
     });
     let on_disk = std::fs::read_to_string(&shop).unwrap();
     assert!(on_disk.contains("double sum"), "unsaved, for the user to review");
+
+    // The build's tasks, and running one where the user sees it.
+    let start = Instant::now();
+    loop {
+        let tasks = call(cx, "listBuildTasks", json!({}));
+        if tasks["gradle"].to_string().contains(":classes") {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(240), "the tasks: {tasks}");
+        pump(cx, 500);
+    }
+    let asked = agent_starts_call(cx, "runBuildTask", json!({ "task": ":classes" }), true);
+    pump_until(cx, "the card", |cx| {
+        cx.update(|_, cx| matches!(model.read(cx).dialog, Some(crate::model::Dialog::AgentAsks { .. })))
+    });
+    cx.run_until_parked();
+    crate::quit_tests::click(cx, "agent-once");
+    let (status, body) = agent_gets_answer(cx, asked);
+    assert_eq!(status, 200, "{body}");
+    let run = serde_json::from_str::<Value>(&body).unwrap()["id"].as_u64().unwrap();
+    let start = Instant::now();
+    loop {
+        let runs = call(cx, "listRuns", json!({}));
+        if runs["runs"].as_array().unwrap().iter().any(|r| r["id"] == run && r["running"] == false) {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(240), "the run: {runs}");
+        pump(cx, 500);
+    }
+    let output = call(cx, "getRunOutput", json!({ "id": run }));
+    assert!(output["output"].is_string(), "{output}");
+    // Spring: this project has none, and the answer says so without failing.
+    assert_eq!(call(cx, "listBeans", json!({}))["count"], 0);
+    assert_eq!(call(cx, "listEndpoints", json!({ "filter": "x" }))["count"], 0);
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// The rest of the app, as an agent asks for it: Git through the window, the settings it may change
+/// and those it may not, telling the user something, and its own changes.
+#[gpui::test]
+fn an_agent_works_git_settings_and_its_own_changes(cx: &mut TestAppContext) {
+    use crate::model::Dialog;
+    let (repo, lock_dir, model, ws, _client, cx) = connected("harness-rest", cx);
+    let (port, hook_cmd) = hook_command(&ws, cx);
+    let call = |cx: &mut VisualTestContext, tool: &str, a: Value| -> Value {
+        let (status, body) = agent_calls(cx, tool, a, true);
+        assert_eq!(status, 200, "{tool}: {body}");
+        serde_json::from_str(&body).unwrap_or(Value::String(body))
+    };
+    // Each change is allowed once here: the card's own test is above.
+    let allowed = |cx: &mut VisualTestContext, tool: &str, a: Value| -> (u16, String) {
+        let asked = agent_starts_call(cx, tool, a, true);
+        pump_until(cx, "the card", |cx| {
+            cx.update(|_, cx| matches!(model.read(cx).dialog, Some(Dialog::AgentAsks { .. })))
+        });
+        cx.run_until_parked();
+        crate::quit_tests::click(cx, "agent-once");
+        agent_gets_answer(cx, asked)
+    };
+
+    // A change on disk, shown, staged and committed through the window.
+    std::fs::write(repo.join("note.txt"), "a note\n").unwrap();
+    cx.update(|_, cx| model.update(cx, |m, cx| m.handle(crate::model::Action::Refresh, cx)));
+    pump_until(cx, "the change", |cx| {
+        cx.update(|_, cx| model.read(cx).project_status().files.iter().any(|f| f.path == "note.txt"))
+    });
+    assert_eq!(call(cx, "showChanges", json!({})), "The Git view shows");
+    pump(cx, 50);
+    cx.update(|_, cx| assert_eq!(ws.read(cx).side.read(cx).activity, crate::panels::Activity::Git));
+    assert_eq!(call(cx, "showDiff", json!({ "path": "note.txt" })), "The diff of note.txt shows");
+    let (status, body) = agent_calls(cx, "showDiff", json!({ "path": "nope.txt" }), true);
+    assert!(status == 400 && body.contains("no changes"), "{status} {body}");
+    let (status, body) = allowed(cx, "stageFiles", json!({ "paths": ["note.txt"] }));
+    assert_eq!(status, 200, "{body}");
+    pump_until(cx, "the file staged", |cx| {
+        cx.update(|_, cx| model.read(cx).project_status().files.iter().any(|f| f.path == "note.txt" && f.has_staged()))
+    });
+    let (status, body) = allowed(cx, "commitChanges", json!({ "message": "Add a note" }));
+    assert_eq!(status, 200, "{body}");
+    let log = |repo: &Path| {
+        let out =
+            std::process::Command::new("git").args(["log", "-1", "--format=%s"]).current_dir(repo).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    pump_until(cx, "the commit", |_| log(&repo) == "Add a note");
+
+    // Settings: what it may change takes effect; what would run something is out of reach.
+    let before = call(cx, "getSettings", json!({}));
+    assert!(before.get("tab_size").is_some(), "{before}");
+    assert!(before.get("claude_path").is_none() && before.get("terminal_env").is_none(), "{before}");
+    let (status, body) = allowed(cx, "setSetting", json!({ "key": "tab_size", "value": "7" }));
+    assert_eq!(status, 200, "{body}");
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.tab_size, 7));
+    for key in ["claude_path", "terminal_shell", "custom_agent_command", "terminal_env"] {
+        let (status, body) = allowed(cx, "setSetting", json!({ "key": key, "value": "/tmp/evil" }));
+        assert!(status == 400 && body.contains("not a setting an agent may change"), "{key}: {status} {body}");
+    }
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.custom_agent_command, ""));
+    let (status, body) = allowed(cx, "setSetting", json!({ "key": "tab_size", "value": "many" }));
+    assert!(status == 400 && body.contains("not a value"), "{status} {body}");
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.tab_size, 7));
+
+    // Telling the user something.
+    assert_eq!(call(cx, "showNotification", json!({ "message": "The build is done" })), "The user was told");
+    cx.update(|_, cx| {
+        let text = ws.read(cx).notifications.read(cx).items(cx).join("\n");
+        assert!(text.contains("The build is done"), "{text}");
+    });
+    let commands = call(cx, "getShortcuts", json!({}));
+    assert!(commands["commands"].as_array().unwrap().iter().any(|c| c["command"] == "Show Processes"), "{commands}");
+    assert!(call(cx, "listProcesses", json!({}))["processes"].is_array());
+
+    // Its own changes: reported by its hooks, listed, and put back.
+    let other = repo.join("src/demo/Other.java");
+    let input = |event: &str| {
+        json!({ "hook_event_name": event, "session_id": "s", "cwd": repo, "tool_name": "Edit",
+                "tool_input": { "file_path": other.to_string_lossy() }, "tool_response": {} })
+    };
+    let original = std::fs::read_to_string(&other).unwrap();
+    run_hook(port, &hook_cmd, input("PreToolUse"));
+    std::fs::write(&other, "class Other { int edited; }\n").unwrap();
+    run_hook(port, &hook_cmd, input("PostToolUse"));
+    pump_until(cx, "the change in the list", |cx| {
+        call(cx, "listAgentChanges", json!({}))["files"].to_string().contains("Other.java")
+    });
+    let path = other.to_string_lossy().into_owned();
+    let (status, body) = allowed(cx, "revertAgentChange", json!({ "filePath": path }));
+    assert_eq!(status, 200, "{body}");
+    pump_until(cx, "the file back", |_| std::fs::read_to_string(&other).unwrap() == original);
+    let (status, body) = allowed(cx, "revertAgentChange", json!({ "filePath": path }));
+    assert!(status == 400 && body.contains("No agent's change"), "{status} {body}");
+
+    for dir in [repo, lock_dir] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// What an agent shows the user: the view comes forward once, later pushes leave the user where they
+/// are, its code has buttons, and a shell block runs in the Terminal only when clicked.
+#[gpui::test]
+fn an_agent_shows_the_user_something_and_the_user_acts_on_it(cx: &mut TestAppContext) {
+    use crate::workspace::Tool;
+    let (repo, lock_dir, _model, ws, _client, cx) = connected("harness-view", cx);
+    hook_command(&ws, cx);
+    let hello = repo.join("src/demo/Hello.java");
+    agent_calls(cx, "openFile", json!({ "filePath": hello.to_string_lossy() }), true);
+    pump(cx, 50);
+    assert!(cx.debug_bounds("agent-view-clear").is_none(), "no view until an agent draws");
+
+    let md = "# A plan\n\nFirst this.\n\n```sh\necho hello-from-the-view > ran.txt\n```\n\n```java\nint added;\n```\n";
+    let (status, body) = agent_calls(cx, "showInApp", json!({ "markdown": md, "title": "The plan" }), true);
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains("2 code blocks") && body.contains("1 of them with a Run") && body.contains("not hear"),
+        "{body}"
+    );
+    pump(cx, 50);
+    cx.update(|_, cx| assert!(ws.read(cx).tool_open(Tool::AgentView, cx), "the first push brings it forward"));
+    assert!(cx.debug_bounds("agent-view-run-0-1").is_some(), "the shell block can run");
+    assert!(cx.debug_bounds("agent-view-run-0-2").is_none(), "the Java block cannot");
+    assert!(!repo.join("ran.txt").exists(), "nothing runs without a click");
+
+    // Copy, and Insert at the caret of the editor in front.
+    let (copy, insert) = ("agent-view-copy-0-2", "agent-view-insert-0-2");
+    crate::quit_tests::click(cx, copy);
+    let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    assert_eq!(copied.as_deref(), Some("int added;"));
+    crate::quit_tests::click(cx, insert);
+    cx.run_until_parked();
+    let editor = editor_of(&ws, &hello, cx).expect("the tab");
+    cx.update(|_, cx| assert!(editor.read(cx).state.read(cx).value().contains("int added;")));
+
+    // A later push adds and does not move the user: another window in the same dock stays in front.
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_tool(Tool::Notifications, w, cx)));
+    pump(cx, 50);
+    let (status, body) = agent_calls(cx, "showInApp", json!({ "markdown": "More." }), true);
+    assert_eq!(status, 200, "{body}");
+    assert!(!body.contains("code block"), "{body}");
+    pump(cx, 50);
+    cx.update(|_, cx| {
+        assert!(ws.read(cx).tool_open(Tool::Notifications, cx), "it does not take the user away");
+        assert_eq!(ws.read(cx).agent_view.read(cx).pushes.len(), 2, "it appends");
+    });
+
+    // clear starts afresh, and it survives moving to another dock.
+    let (status, _) = agent_calls(cx, "showInApp", json!({ "markdown": "Only this.", "clear": true }), true);
+    assert_eq!(status, 200);
+    cx.update(|_, cx| assert_eq!(ws.read(cx).agent_view.read(cx).pushes.len(), 1));
+
+    // Run in Terminal: the click runs it, in the project.
+    agent_calls(cx, "showInApp", json!({ "markdown": "```sh\necho ran > ran.txt\n```", "clear": true }), true);
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_tool(Tool::AgentView, w, cx)));
+    pump(cx, 50);
+    if !cfg!(windows) {
+        crate::quit_tests::click(cx, "agent-view-run-0-0");
+        pump_until(cx, "the command to run", |_| repo.join("ran.txt").exists());
+        cx.update(|_, cx| assert!(ws.read(cx).tool_open(Tool::Terminal, cx), "the Terminal shows it"));
+    }
+    for dir in [repo, lock_dir] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// The real agents, signed in, each asked in plain words to do what only the harness can: bring a

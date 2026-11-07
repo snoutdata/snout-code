@@ -13,6 +13,7 @@
 //! ask of the app ([`capabilities`]). [`bridge`] connects them to the workspace.
 
 pub mod agent_log;
+pub mod agent_view;
 pub mod api;
 pub mod bridge;
 pub mod capabilities;

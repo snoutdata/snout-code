@@ -159,6 +159,12 @@ mod shots {
         /// The Processes window: the engine, its language server and Gradle daemons, a run,
         /// a test JVM, a terminal and a leftover.
         Processes,
+        /// What an agent shows the user.
+        AgentView,
+        /// An agent asks to change something.
+        AgentAsks,
+        /// What agents asked of the app.
+        AgentLog,
         /// Remote SSH: 0 Connect to SSH Host with the hosts of an ssh config, 1 the folder
         /// picker of the remote machine, 2 a window on a remote machine whose connection is
         /// coming back (the title bar and the status bar say so).
@@ -1863,6 +1869,62 @@ sleep 30
                 .unwrap();
             }
             Some(Select::NoGit(_)) => {}
+            Some(Select::AgentView) => {
+                let md = "# Why the build fails\n\nThe `place` method now takes a **customer id**, and two callers still pass the order.\n\n- `OrderService.java`, line 42\n- `Checkout.java`, line 17\n\nThis fixes both:\n\n```java\norder.place(customer.id());\n```\n\nThen run the tests again:\n\n```sh\n./gradlew :orders:test\n```\n";
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| {
+                        ws.agent_view.update(cx, |v, cx| {
+                            v.push("Claude".into(), Some("The failing build".into()), md, false, cx);
+                        });
+                        ws.show_tool(snout_app::workspace::Tool::AgentView, window, cx);
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::AgentAsks) => {
+                cx.update_window(handle.into(), |_, _, cx| {
+                    model.update(cx, |m, cx| {
+                        m.dialog = Some(snout_app::model::Dialog::AgentAsks {
+                            agent: "Claude Code".into(),
+                            what: "commit \"Pass the customer id to place\"".into(),
+                            tool: "commitChanges".into(),
+                        });
+                        cx.emit(snout_app::model::ModelEvent::Dialog);
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::AgentLog) => {
+                use serde_json::json;
+                use snout_app::claude_ide::capabilities::find;
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| {
+                        ws.agent_log.update(cx, |l, cx| {
+                            let mut call =
+                                |tool: &str, a: serde_json::Value, error: Option<&str>, cx: &mut gpui::Context<_>| {
+                                    let id = l.begin("Claude".into(), find(tool).unwrap(), &a, cx);
+                                    l.end(id, error.map(str::to_owned), cx);
+                                };
+                            call("getAppState", json!({}), None, cx);
+                            call(
+                                "findReferences",
+                                json!({ "filePath": "/home/me/shop/Shape.java", "line": 5, "text": "area" }),
+                                None,
+                                cx,
+                            );
+                            call("startRun", json!({ "configuration": "Tests in orders" }), None, cx);
+                            call(
+                                "pushCommits",
+                                json!({}),
+                                Some("The user did not allow this. Do not try it again unless they ask you to."),
+                                cx,
+                            );
+                        });
+                        ws.show_tool(snout_app::workspace::Tool::AgentLog, window, cx);
+                    });
+                })
+                .unwrap();
+            }
             Some(Select::Update(status, manual)) => cx.update(|cx| {
                 snout_app::updates::updater(cx).update(cx, |u, cx| {
                     u.manual = manual;
@@ -3249,6 +3311,10 @@ sleep 30
         shot("debug-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Debug));
         shot("debug-light", ThemeChoice::Light, Activity::Project, Some(Select::Debug));
         shot("gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Gradle));
+        shot("agent-view-dark", ThemeChoice::Dark, Activity::Project, Some(Select::AgentView));
+        shot("agent-view-light", ThemeChoice::Light, Activity::Project, Some(Select::AgentView));
+        shot("agent-asks", ThemeChoice::Dark, Activity::Project, Some(Select::AgentAsks));
+        shot("agent-log", ThemeChoice::Dark, Activity::Project, Some(Select::AgentLog));
         shot("processes-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Processes));
         shot("processes-light", ThemeChoice::Light, Activity::Project, Some(Select::Processes));
         shot("settings-gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Gradle)));

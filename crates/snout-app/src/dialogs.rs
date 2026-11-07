@@ -335,7 +335,8 @@ impl DialogBody {
                 let dont_ask = self.dont_ask && info.is_empty();
                 self.act(Action::Quit(crate::model::QuitChoice { save, dont_ask }), window, cx)
             }
-            Dialog::AgentAsks { .. } => self.confirm(window, cx),
+            // It comes up while the user may be typing: Return must not answer it for them.
+            Dialog::AgentAsks { .. } => {}
             Dialog::NewBranch(_) | Dialog::GroupName { .. } | Dialog::Clone { .. } | Dialog::Checkout => {
                 self.confirm(window, cx)
             }
@@ -986,7 +987,9 @@ impl Render for DialogBody {
             // Below, in its own function.
             Dialog::Quit(_) => {}
             Dialog::AgentAsks { ref tool, .. } => {
-                body.push(dim(format!("Through SnoutCode's {tool}.")).into_any_element());
+                body.push(
+                    dim(format!("Allow for This Session lets it use {tool} again without asking.")).into_any_element(),
+                );
                 buttons.push(
                     Button::new("agent-refuse", CANCEL_ICON)
                         .debug_selector("agent-refuse")
@@ -1002,7 +1005,14 @@ impl Render for DialogBody {
                         .label("Allow for This Session"),
                     Action::AgentAnswer(AskAnswer::Session)
                 ));
-                buttons.push(on!(ok("Allow").debug_selector("agent-once"), Action::AgentAnswer(AskAnswer::Once)));
+                buttons.push(on!(
+                    Button::new("agent-once", OK_ICON)
+                        .debug_selector("agent-once")
+                        .primary()
+                        .focusable()
+                        .label("Allow"),
+                    Action::AgentAnswer(AskAnswer::Once)
+                ));
             }
         }
         if let Dialog::Quit(info) = self.dialog.clone() {

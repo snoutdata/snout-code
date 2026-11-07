@@ -761,7 +761,7 @@ impl ConsolePanel {
 
     /// The folder the console works in: the project, else the home folder, so that an agent can
     /// make the project in the first place.
-    fn folder(&self, cx: &App) -> Option<PathBuf> {
+    pub fn folder(&self, cx: &App) -> Option<PathBuf> {
         self.model.read(cx).project_root().or_else(|| {
             let host = crate::host::host(cx);
             let home = &host.info().home;
@@ -1107,6 +1107,26 @@ impl ConsolePanel {
             s.pty.send(b"\x1b");
         }
         !waiting
+    }
+
+    /// Run `commands` in `root`'s shell, once it is up, as if typed: the user's own click asked.
+    pub fn run_when_ready(&mut self, root: &Path, commands: &str, cx: &mut Context<Self>) {
+        let (root, keys) = (root.to_owned(), format!("{}\r", commands.trim_end().replace('\n', "\r")));
+        cx.spawn(async move |this, cx| {
+            for _ in 0..150 {
+                let sent = this.update(cx, |this, cx| {
+                    let Some(s) = this.sessions.get_mut(&root).filter(|s| agent_up(s)) else { return false };
+                    s.pty.send(keys.as_bytes());
+                    cx.notify();
+                    true
+                });
+                if !matches!(sent, Ok(false)) {
+                    return;
+                }
+                cx.background_executor().timer(Duration::from_millis(200)).await;
+            }
+        })
+        .detach();
     }
 
     fn enqueue(&mut self, root: &Path, text: &str, submit: bool, wait: Duration, cx: &mut Context<Self>) {
@@ -2596,6 +2616,12 @@ fn cell_run(
     let background = (bg != bg0).then(|| hsla(bg));
     let run = TextRun { len: glyph.len(), font: f, color: ink, background_color: None, underline, strikethrough };
     (glyph, background, run)
+}
+
+/// The Terminal tab's panel.
+pub fn terminal_of(ws: &crate::workspace::Workspace, cx: &App) -> Option<Entity<ConsolePanel>> {
+    let view = ws.dock.read(cx).panel(ws.tabs.terminal)?.clone();
+    view.view().downcast::<ConsolePanel>().ok()
 }
 
 /// The docked console, if the workspace has one.

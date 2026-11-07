@@ -81,7 +81,72 @@ pub const ALL: &[Capability] = &[
         run: Run::Own(test_results),
         consent: None,
     },
+    Capability {
+        name: "runPlaywrightTests",
+        domain: Domain::Run,
+        effect: Effect::Change,
+        description: "Run a Playwright project's tests in the Tests window: all of them, one browser project, a file, or \
+                      the test at a line of it. Follow it with listRuns and getTestResults.",
+        input: Input::Own(playwright_input),
+        run: Run::Own(run_playwright),
+        consent: Some(|a| match a["file"].as_str() {
+            Some(file) => format!("run the Playwright tests in {file}"),
+            None => "run the Playwright tests".to_owned(),
+        }),
+    },
+    Capability {
+        name: "recordPlaywrightTest",
+        domain: Domain::Run,
+        effect: Effect::Change,
+        description: "Start Playwright's recorder at the caret of the spec in front, opening its browser for the user \
+                      to click through. What they do is written into the spec. Use openFile first to place the caret.",
+        input: Input::None,
+        run: Run::Own(|ws, _, reply, window, cx| {
+            ws.record_at_cursor(window, cx);
+            reply.ok(tools::text("The recorder is starting. The Tests window shows how it goes."));
+        }),
+        consent: Some(|_| "open a browser and record a Playwright test".to_owned()),
+    },
+    Capability {
+        name: "pickPlaywrightLocator",
+        domain: Domain::Run,
+        effect: Effect::Change,
+        description: "Open Playwright's browser for the user to pick an element; its locator goes in at the caret of the \
+                      spec in front.",
+        input: Input::None,
+        run: Run::Own(|ws, _, reply, window, cx| {
+            ws.pick_locator(window, cx);
+            reply.ok(tools::text("The locator picker is starting."));
+        }),
+        consent: Some(|_| "open a browser to pick a Playwright locator".to_owned()),
+    },
 ];
+
+fn playwright_input() -> Value {
+    tools::schema(
+        json!({
+            "file": { "type": "string", "description": "A spec, absolute. All of them by default" },
+            "line": { "type": "integer", "description": "The line of a test or describe in it, from 1" },
+            "project": { "type": "string", "description": "A browser project of the configuration" },
+        }),
+        &[],
+    )
+}
+
+fn run_playwright(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
+    use crate::playwright::run::{Options, Scope};
+    let project = a["project"].as_str().map(str::to_owned);
+    let scope = match a["file"].as_str() {
+        Some(file) => Scope::At {
+            file: tools::path_of(file, &crate::host::host(cx).info().home),
+            line: a["line"].as_u64().map(|l| l as u32),
+            project,
+        },
+        None => project.map_or(Scope::All, Scope::Project),
+    };
+    ws.runs.update(cx, |r, cx| r.start_playwright(scope, Options::default(), cx));
+    reply.ok(tools::text("The tests are starting. listRuns has their id; getTestResults says how they went."));
+}
 
 fn start_input() -> Value {
     tools::schema(
@@ -234,6 +299,21 @@ fn test_results(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx:
     let Some(s) = session_of(ws, a, cx) else {
         return reply.error(TOOL_ERROR, "No such run. listRuns has them.", None);
     };
+    if let Some(run) = s.playwright.as_ref() {
+        let c = run.counts();
+        let errors: Vec<String> = run.errors.iter().map(|e| e.message.clone()).collect();
+        return reply.ok(tools::json_text(&json!({
+            "id": s.id,
+            "running": s.running(),
+            "passed": c.passed,
+            "failed": c.failed,
+            "flaky": c.flaky,
+            "skipped": c.skipped,
+            "stillRunning": c.running,
+            "status": run.status,
+            "errors": errors,
+        })));
+    }
     let Some(tree) = s.tests.as_ref() else {
         return reply.ok(tools::json_text(&json!({ "id": s.id, "running": s.running(), "tests": Value::Null })));
     };

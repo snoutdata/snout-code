@@ -63,6 +63,7 @@ pub struct Tabs {
     pub processes: PanelId,
     pub tests: PanelId,
     pub agent_log: PanelId,
+    pub agent_view: PanelId,
 }
 
 pub struct Workspace {
@@ -118,6 +119,8 @@ pub struct Workspace {
     pub notifications: Entity<crate::tool_windows::NotificationsPanel>,
     /// What agents asked of the app, and what waits for the user's answer.
     pub agent_log: Entity<crate::claude_ide::agent_log::AgentLog>,
+    /// What agents chose to show the user.
+    pub agent_view: Entity<crate::claude_ide::agent_view::AgentView>,
     pub harness: crate::claude_ide::capabilities::Harness,
     /// The processes SnoutCode runs, and their tool window.
     pub processes: Entity<crate::processes::Processes>,
@@ -378,6 +381,10 @@ impl Workspace {
         let claude_changes = cx.new(|cx| crate::claude_ide::panel::ChangesPanel::new(cx_ws.clone(), cx));
         let agent_log = cx.new(|_| crate::claude_ide::agent_log::AgentLog::default());
         let agent_log_panel = cx.new(|cx| crate::claude_ide::agent_log::AgentLogPanel::new(agent_log.clone(), cx));
+        let agent_view = cx.new(|_| crate::claude_ide::agent_view::AgentView::default());
+        let ws_handle = cx.weak_entity();
+        let agent_view_panel =
+            cx.new(|cx| crate::claude_ide::agent_view::AgentViewPanel::new(agent_view.clone(), ws_handle, cx));
         let processes_window = cx.new(|cx| crate::processes::window::ProcessesWindow::new(processes.clone(), cx));
         let spring_window = cx.new(|cx| crate::spring::window::SpringWindow::new(spring.clone(), window, cx));
         let structure = cx.new(|cx| crate::lang::structure::StructureWindow::new(window, cx));
@@ -400,6 +407,7 @@ impl Workspace {
             build: PanelId::from(build_window.entity_id()),
             processes: PanelId::from(processes_window.entity_id()),
             agent_log: PanelId::from(agent_log_panel.entity_id()),
+            agent_view: PanelId::from(agent_view_panel.entity_id()),
             tests: PanelId::from(tests_window.entity_id()),
         };
         if let Some(console) = console {
@@ -415,6 +423,7 @@ impl Workspace {
         panels.push((panel_handle(build_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(processes_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(agent_log_panel), DockPlacement::Bottom));
+        panels.push((panel_handle(agent_view_panel), DockPlacement::Right));
         panels.push((panel_handle(tests_window.clone()), DockPlacement::Bottom));
         panels.push((panel_handle(structure.clone()), DockPlacement::Right));
         panels.push((panel_handle(hierarchy.clone()), DockPlacement::Right));
@@ -571,6 +580,7 @@ impl Workspace {
             processes,
             processes_window,
             agent_log,
+            agent_view,
             harness: Default::default(),
             runs,
             pw_setup,

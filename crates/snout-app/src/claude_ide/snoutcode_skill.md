@@ -1,6 +1,6 @@
 ---
 name: snoutcode
-description: Work the SnoutCode window this session runs in, to open files in its editor (at a line, or with text selected), see the project, its tabs, selection and problems, and bring its windows forward. Use it whenever the user asks to open, show or go to a file or line, instead of `code`, `open`, `idea` or any other editor.
+description: Work the SnoutCode window this session runs in. Open files in its editor at a line or with text selected, see the project and what is on screen, open or switch projects, start runs and read their output and test results, ask the language engines for definitions, references, types and callers, run build tasks, use the Git view, and show the user a report in the app. Use it whenever the user asks to open, show or go to a file or line, instead of `code`, `open`, `idea` or any other editor, and whenever they ask about or for anything in SnoutCode.
 ---
 
 # The SnoutCode window
@@ -31,6 +31,9 @@ Everything else this can do is in the manual. List it when you need something:
 {{API}} manual
 ```
 
-Then read the arguments of one domain's tools, such as the editor's, with `{{API}} manual editor`.
-Call each tool as `{{API}} <name> '<JSON arguments>'`. A tool tagged `change` writes or starts
-something, and the user may be asked first.
+Then read the arguments of one domain's tools with `{{API}} manual <domain>`: app, project, run, code,
+build, editor, git, agents or spring. Call each tool as `{{API}} <name> '<JSON arguments>'`.
+
+A tool tagged `change` writes or starts something: the call waits while the user answers a card in
+the window, and may come back refused. Do not try it again unless they ask. When you need to know
+where you stand (no project may be open, and you may be in the home folder), call `getAppState` first.

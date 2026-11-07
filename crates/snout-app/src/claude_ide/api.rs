@@ -264,11 +264,11 @@ pub fn domain_manual(domain: &str) -> Result<Value, String> {
 fn mcp_tool() -> Value {
     json!({
         "name": MCP_TOOL,
-        "description": "Work the SnoutCode window this session runs in: see the project, what is open and what is on \
-                        screen, open files at a line or with text selected, and bring its windows forward. Use it \
-                        instead of `code`, `open`, `idea` or any other editor. Call it with tool \"manual\" to list what \
-                        it can do, and with tool \"manual\" and arguments {\"domain\": name} for the arguments of a \
-                        domain's tools.",
+        "description": "Work the SnoutCode window this session runs in: see the project and what is on screen, open files \
+                        at a line, start runs and read their results, ask the language engines for definitions, \
+                        references, types and callers, run build tasks, use the Git view, and show the user a report. Use \
+                        it instead of `code`, `open`, `idea` or any other editor. Call it with tool \"manual\" to list what \
+                        it can do, and with tool \"manual\" and arguments {\"domain\": name} for a domain's arguments.",
         "inputSchema": {
             "type": "object",
             "additionalProperties": false,
@@ -421,7 +421,7 @@ mod tests {
         let listed = list["result"]["tools"].as_array().unwrap();
         assert_eq!(listed.len(), 1, "one definition, whatever the number of tools");
         assert_eq!(listed[0]["name"], MCP_TOOL);
-        assert!(listed[0].to_string().len() < 900, "about what a skill's line costs: {}", listed[0].to_string().len());
+        assert!(listed[0].to_string().len() < 1000, "about what a skill's line costs: {}", listed[0].to_string().len());
 
         let called = |tool: &str, arguments: Value, a: Answer| {
             let msg = json!({ "id": 3, "method": "tools/call", "params": { "name": MCP_TOOL, "arguments": { "tool": tool, "arguments": arguments } } });
@@ -468,6 +468,16 @@ mod tests {
     fn a_windows_path_is_written_for_its_bash() {
         assert_eq!(shell_path(Path::new(r"C:\Users\me\snout-api")), "C:/Users/me/snout-api");
         assert_eq!(shell_path(Path::new("/home/me/snout-api")), "/home/me/snout-api");
+    }
+
+    /// Every tool is in the guide, so what an agent can do is what the user can read about.
+    #[test]
+    fn every_tool_is_documented() {
+        let guide = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/editor-api.md");
+        let guide = std::fs::read_to_string(guide).unwrap();
+        for c in capabilities::all() {
+            assert!(guide.contains(&format!("`{}`", c.name)), "{} is not in docs/editor-api.md", c.name);
+        }
     }
 
     #[test]
