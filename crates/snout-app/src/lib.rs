@@ -52,6 +52,7 @@ pub mod ui;
 pub mod updates;
 pub mod welcome;
 pub mod workspace;
+pub mod wsl;
 
 #[cfg(test)]
 mod blame_tests;

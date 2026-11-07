@@ -308,10 +308,30 @@ pub fn find_agent(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
             .filter(|_| !home.as_os_str().is_empty())
             .map(|d| home.join(d))
             .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from))
-            // Windows: npm's global folder.
-            .chain(host.info().var("APPDATA").map(|d| PathBuf::from(d).join("npm")))
+            .chain(windows_program_dirs(host.info()))
             .collect();
     snout_host::which(host, &[name], &extra)
+}
+
+/// Where Windows's package managers put what they install: npm's global folder, pnpm's, Volta's,
+/// Scoop's and winget's. Each is often on the PATH only of programs started after it was installed.
+fn windows_program_dirs(info: &snout_host::HostInfo) -> Vec<PathBuf> {
+    if !info.is_windows() {
+        return Vec::new();
+    }
+    let under = |var: &str, rest: &str| info.var(var).map(|d| PathBuf::from(d).join(rest));
+    [
+        under("APPDATA", "npm"),
+        under("LOCALAPPDATA", "pnpm"),
+        under("LOCALAPPDATA", "Volta\\bin"),
+        under("LOCALAPPDATA", "Microsoft\\WinGet\\Links"),
+        under("USERPROFILE", "scoop\\shims"),
+        under("NVM_SYMLINK", ""),
+        under("ProgramFiles", "nodejs"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Where the agent `id` is: `configured` (its path in the settings; none when it names a
@@ -337,33 +357,55 @@ pub fn locate(host: &dyn snout_host::Host, id: &str, configured: Option<PathBuf>
 /// something, must not leave the console starting for ever.
 const SHELL_LOOKUP: std::time::Duration = std::time::Duration::from_secs(6);
 
-/// The program `name` as the user's shell finds it (not on Windows), if the shell says
-/// within [`SHELL_LOOKUP`].
-fn from_shell(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
-    if host.info().is_windows() {
-        return None;
-    }
-    let shell = crate::console::default_shell(host);
-    let cmd = snout_host::Cmd::new(&shell)
-        .arg("-ilc")
-        .arg(format!("command -v {name}"))
-        .stdout(snout_host::Stdio::Piped)
-        .group();
+/// What PowerShell runs to name the program `name`: on the PATH the user has now, not the one this
+/// app started with, which misses whatever was installed since, and after their profile has run
+/// (fnm and the like add to the PATH there). Programs only: npm's `.ps1` shim cannot be started.
+fn windows_lookup_script(name: &str) -> String {
+    format!(
+        "$env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + \
+         [Environment]::GetEnvironmentVariable('Path','Machine'); \
+         (Get-Command {name} -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source"
+    )
+}
+
+/// The program a shell named: the last line that is a path to a file (a profile can print anything).
+fn program_in_output(text: &str, windows: bool, is_file: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let absolute = |l: &str| {
+        if windows { l.starts_with("\\\\") || l.as_bytes().get(1) == Some(&b':') } else { l.starts_with('/') }
+    };
+    text.lines().rev().map(str::trim).filter(|l| absolute(l)).map(PathBuf::from).find(|p| is_file(p))
+}
+
+/// What `cmd` prints within `limit`, or nothing. On a thread of its own: what a profile left running
+/// can hold the pipe open.
+fn output_within(host: &dyn snout_host::Host, cmd: snout_host::Cmd, limit: std::time::Duration) -> Option<Vec<u8>> {
     let mut child = host.spawn(&cmd).ok()?;
     let mut stdout = child.take_stdout()?;
     let (tx, rx) = std::sync::mpsc::channel();
-    // On a thread of its own: what the profile left running can hold the pipe open.
     std::thread::spawn(move || {
         let mut out = Vec::new();
         let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
         let _ = tx.send(out);
     });
-    let out = rx.recv_timeout(SHELL_LOOKUP);
+    let out = rx.recv_timeout(limit);
     let _ = child.kill();
     let _ = child.wait();
-    let out = out.ok()?;
-    let text = String::from_utf8_lossy(&out);
-    text.lines().rev().map(str::trim).filter(|l| l.starts_with('/')).map(PathBuf::from).find(|p| host.is_file(p))
+    out.ok()
+}
+
+/// The program `name` as the user's shell finds it, if the shell says within [`SHELL_LOOKUP`].
+fn from_shell(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
+    let windows = host.info().is_windows();
+    let cmd = if windows {
+        snout_host::Cmd::new("powershell.exe")
+            .args(["-NoLogo", "-NonInteractive", "-Command"])
+            .arg(windows_lookup_script(name))
+    } else {
+        snout_host::Cmd::new(crate::console::default_shell(host)).arg("-ilc").arg(format!("command -v {name}"))
+    };
+    let cmd = cmd.stdout(snout_host::Stdio::Piped).group();
+    let out = output_within(host, cmd, SHELL_LOOKUP)?;
+    program_in_output(&String::from_utf8_lossy(&out), windows, |p| host.is_file(p))
 }
 
 /// What installs the agent `id` on a host like `info`: a line for its shell (PowerShell on
@@ -384,6 +426,26 @@ pub fn install_command(id: &str, info: &snout_host::HostInfo) -> Option<&'static
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shell_s_answer_is_the_last_line_that_is_a_file() {
+        let is_file = |p: &Path| !p.to_string_lossy().contains("gone");
+        let unix = "Welcome back\n/home/ann/gone/amp\n/home/ann/.nvm/bin/amp\nnot a path\n";
+        assert_eq!(program_in_output(unix, false, is_file), Some(PathBuf::from("/home/ann/.nvm/bin/amp")));
+        let win = "profile says hello\r\nC:\\Users\\ann\\AppData\\Roaming\\npm\\amp.cmd\r\n";
+        let found = program_in_output(win, true, is_file);
+        assert_eq!(found, Some(PathBuf::from(r"C:\Users\ann\AppData\Roaming\npm\amp.cmd")));
+        assert_eq!(program_in_output("just talking\n", true, is_file), None);
+        assert_eq!(program_in_output("/home/ann/gone/amp\n", false, is_file), None);
+    }
+
+    #[test]
+    fn windows_is_asked_for_a_program_on_the_path_the_user_has_now() {
+        let script = windows_lookup_script("amp");
+        assert!(script.contains("GetEnvironmentVariable('Path','User')"), "{script}");
+        assert!(script.contains("Get-Command amp -CommandType Application"), "{script}");
+        assert!(!script.contains('"'), "it goes as one argument: {script}");
+    }
 
     #[test]
     fn each_agent_has_its_own_colour_and_name() {

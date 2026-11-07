@@ -92,8 +92,10 @@ On keyboard layouts with an AltGr key, Windows reads AltGr as Ctrl+Alt: a shortc
 Ctrl+Alt and a key that types a character with AltGr (Ctrl+Alt+L on a Polish layout, say) can
 reach SnoutCode instead of typing. Give that command other keys in Settings ▸ Keymap.
 
-In the Terminal tab and the agent console, the Ctrl keys go to the shell, and the terminal's
-own commands take Shift as well: Ctrl+Shift+C copies, Ctrl+Shift+V pastes, Ctrl+Shift+F finds.
+In the Terminal tab and the agent console, the Ctrl keys go to the shell, but for two: Ctrl+V
+pastes, and Ctrl+C copies when text is selected (with nothing selected it interrupts). The terminal's
+own commands take Shift as well: Ctrl+Shift+C copies, Ctrl+Shift+V pastes, Ctrl+Shift+F finds. A right
+click offers Copy and Paste, and on a web address Open Link and Copy Link.
 
 ## The terminal
 
@@ -140,6 +142,18 @@ Git for Windows's bash, so install Git for Windows (you need it for the Git pane
 SnoutCode downloads a new version in the background and runs its installer when you press Restart,
 or silently when you quit. An install for all users asks for an administrator, so it updates only
 on Restart. See [Updates](updates.md).
+
+## Projects in WSL
+
+Open a folder inside WSL as any other (`\\wsl.localhost\Ubuntu\home\you\app`), or pick the distro
+under File ▸ Connect to SSH Host or WSL…. The window stays on Windows, and everything else runs inside
+the distro: the files, Git, the terminals, your agents, builds and the Java engine. It works as
+[Remote SSH](remote-ssh.md) does, with `wsl.exe` carrying the connection instead of `ssh`, and with no
+ssh or port to set up. The first time, SnoutCode installs its small server in `~/.snout-code` in the distro.
+
+So an agent in your Linux profile, such as Amp in `~/.amp/bin`, is found as in your own Linux terminal, and
+**Install** installs it there. Its edits show live and **Draft** works, as on any machine. The title bar and
+the status bar show `WSL: Ubuntu`, and File ▸ Open Recent lists the project as `app on WSL: Ubuntu`.
 
 ## Where SnoutCode keeps its files
 

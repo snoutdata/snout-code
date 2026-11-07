@@ -61,6 +61,10 @@ program asks.
 On Linux, Ctrl takes ⌘'s place here too, and the Ctrl keys go to the shell: copy, paste and
 find are Ctrl+Shift+C, Ctrl+Shift+V and Ctrl+Shift+F (see [SnoutCode on Linux](linux.md#in-the-terminal)).
 
+On Windows, Ctrl+V pastes, and Ctrl+C copies when text is selected (with nothing selected it
+interrupts). Everywhere, a right click offers Copy and Paste, and on a web address Open Link and
+Copy Link.
+
 ⌘-click (Ctrl+click on Linux) a web address in a terminal (`https://`, `http://` or `file://`) to open it. A
 program can also print a link under other text (an OSC 8 hyperlink); with the Ghostty engine
 such text is underlined in the accent colour, and ⌘-click opens its link.

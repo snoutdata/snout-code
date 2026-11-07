@@ -24,7 +24,7 @@ Open Settings (⌘,) ▸ Tools ▸ Agents. The page lists the agents SnoutCode k
 
 ![Settings, Agents](images/settings-and-keymap-agents.png)
 
-- **Programs**: SnoutCode looks for `claude`, `codex`, `opencode` and `amp` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.amp/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, then wherever your shell finds them (npm's folder under nvm, say). Enter a path to use another program.
+- **Programs**: SnoutCode looks for `claude`, `codex`, `opencode` and `amp` on `PATH`, then in `~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.amp/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, then wherever your shell finds them (npm's folder under nvm, say). On Windows it also looks in npm's, pnpm's, Volta's, Scoop's and winget's folders, and asks PowerShell, so a program installed after SnoutCode started is found too. For a project inside WSL everything runs in that distro, so it looks there (see [SnoutCode on Windows](windows.md#projects-in-wsl)). Settings shows what it found for each; enter a path or use **Browse…** to choose another program.
 - **Your agent**: the command line of any other agent, run in the project with `/bin/sh -c`, and the name its caret and marks show. Leave the name empty to use the program's name.
 
 You can also switch agents in the console's header: click the agent's name and pick another. The console switches at once: the session in front ends (a note says so; **Continue** picks its conversation up again later) and the agent you picked starts in its place. The menu marks the agents that are not installed with **(install)**, and your own agent with **(set up)** until it has a command.

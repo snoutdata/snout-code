@@ -99,7 +99,13 @@ fn linux_extras() -> Vec<Binding> {
         "ctrl-l", "ctrl-m", "ctrl-n", "ctrl-o", "ctrl-p", "ctrl-q", "ctrl-r", "ctrl-s", "ctrl-t", "ctrl-u", "ctrl-v",
         "ctrl-w", "ctrl-x", "ctrl-y", "ctrl-z",
     ];
-    out.extend(CTRL_LETTERS.into_iter().map(|k| (k, Box::new(gpui::NoAction) as Box<dyn Action>, Some("Terminal"))));
+    // Windows: Ctrl+V pastes in a terminal, as Windows Terminal has it. (Ctrl+C copies when text
+    // is selected: the console decides, since with none it still interrupts.)
+    if cfg!(windows) {
+        out.push(("ctrl-v", Box::new(i::Paste), Some("Terminal")));
+    }
+    let letters = CTRL_LETTERS.into_iter().filter(|k| !cfg!(windows) || *k != "ctrl-v");
+    out.extend(letters.map(|k| (k, Box::new(gpui::NoAction) as Box<dyn Action>, Some("Terminal"))));
     out
 }
 

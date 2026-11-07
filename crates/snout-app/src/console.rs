@@ -27,6 +27,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{BasePanelView, panel_handle};
 use gpui_component::input::{Copy, InputEvent, InputState, Paste};
+use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use snout_core::claude::ENV_REMOVE;
 use snout_core::pty::{self, KeyInput, Launch, Pty, Rgb};
 use snout_core::term::{Attrs, CursorShape, EngineKind, Frame, Underline, Width};
@@ -40,6 +41,12 @@ use snout_core::art::Glyph;
 const QUIET: Duration = Duration::from_millis(800);
 /// ...and at most this often while it keeps printing.
 const BUSY_REFRESH: Duration = Duration::from_secs(3);
+/// Whether Ctrl+C on this system copies a selection in a terminal: Windows's. Elsewhere Ctrl+C is
+/// always the interrupt, and copying takes Shift.
+fn ctrl_c_copies(windows: bool, only_ctrl: bool, key: &str) -> bool {
+    windows && only_ctrl && key == "c"
+}
+
 /// How long the cursor shows, and then hides, while it blinks.
 const BLINK: Duration = Duration::from_millis(530);
 
@@ -217,6 +224,8 @@ struct Find {
 }
 
 pub struct ConsolePanel {
+    /// The link under the pointer when the terminal's right-click menu opened.
+    menu_link: Option<String>,
     model: Entity<Model>,
     pub kind: Kind,
     sessions: HashMap<PathBuf, Session>,
@@ -379,6 +388,7 @@ impl ConsolePanel {
             program: None,
             error: None,
             selection: None,
+            menu_link: None,
             selecting: false,
             grid: None,
             shown_gen: 0,
@@ -1191,9 +1201,41 @@ impl ConsolePanel {
         Some((y, x))
     }
 
+    /// What is selected in `root`'s terminal, if anything is.
+    fn selected_text(&self, root: &Path) -> Option<String> {
+        let sel = self.selection.filter(|(a, b)| a != b)?;
+        self.sessions.get(root).and_then(|s| s.pty.frame().selected_text(sel))
+    }
+
+    /// Put what is selected on the clipboard. False when nothing is.
+    fn copy_selection(&mut self, root: &Path, cx: &mut Context<Self>) -> bool {
+        let Some(text) = self.selected_text(root) else { return false };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        true
+    }
+
+    /// Type what is on the clipboard into `root`'s terminal.
+    fn paste_clipboard(&mut self, root: &Path, cx: &mut Context<Self>) {
+        let text = cx.read_from_clipboard().and_then(|c| c.text());
+        if let (Some(text), Some(s)) = (text, self.sessions.get(root)) {
+            s.pty.paste(&text);
+        }
+    }
+
     fn on_key(&mut self, e: &KeyDownEvent, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         let m = k.modifiers;
+        // Windows: Ctrl+C copies what is selected, as Windows Terminal has it. Sent on as an
+        // interrupt instead, it would stop what is showing, such as an agent's login, with nothing
+        // copied. With nothing selected it interrupts.
+        if ctrl_c_copies(cfg!(windows), m.control && !m.shift && !m.alt && !m.platform, &k.key)
+            && self.copy_selection(root, cx)
+        {
+            self.selection = None;
+            cx.notify();
+            cx.stop_propagation();
+            return;
+        }
         // Find: ⌘F on a Mac; Ctrl+Shift+F on Linux and Windows, where Ctrl+F belongs to the shell.
         let find = if cfg!(target_os = "macos") {
             m.platform && !m.control && !m.alt
@@ -1743,7 +1785,7 @@ impl ConsolePanel {
     /// The agent's name with its icon in its colour, a menu of the others under it.
     fn agent_picker(&self, agent: &crate::agents::Agent, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
         use crate::agents::ConsoleAgent;
-        use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+        use gpui_component::menu::DropdownMenu as _;
         let color = agent.color(p);
         let view = cx.entity();
         // The agent showing, which a project's session can keep after the settings moved on.
@@ -2114,19 +2156,20 @@ impl ConsolePanel {
                 )
             })
             .on_key_down(cx.listener(move |this, e: &KeyDownEvent, w, cx| this.on_key(e, &r1, w, cx)))
-            .on_action(cx.listener(move |this, _: &Paste, _, cx| {
-                let text = cx.read_from_clipboard().and_then(|c| c.text());
-                if let (Some(text), Some(s)) = (text, this.sessions.get(&r2)) {
-                    s.pty.paste(&text);
-                }
-            }))
+            .on_action(cx.listener(move |this, _: &Paste, _, cx| this.paste_clipboard(&r2, cx)))
             .on_action(cx.listener(move |this, _: &Copy, _, cx| {
-                let text =
-                    this.selection.zip(this.sessions.get(&r3)).and_then(|(sel, s)| s.pty.frame().selected_text(sel));
-                if let Some(text) = text {
-                    cx.write_to_clipboard(ClipboardItem::new_string(text));
-                }
+                this.copy_selection(&r3, cx);
             }))
+            // What the right-click menu is about: the link under the pointer, if one is.
+            .on_mouse_down(MouseButton::Right, {
+                let root = root.to_owned();
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus, cx);
+                    this.menu_link = this
+                        .cell_at(e.position)
+                        .and_then(|(row, col)| this.sessions.get(&root).and_then(|s| s.pty.frame().link_at(row, col)));
+                })
+            })
             .on_scroll(cx.listener({
                 let root = root.to_owned();
                 move |this, e: &ScrollEvent, _, cx| {
@@ -2196,6 +2239,44 @@ impl ConsolePanel {
                 .flex_1()
                 .size_full(),
             );
+        let panel = cx.entity();
+        let menu_root = root.to_owned();
+        let grid = grid.context_menu(move |menu, _, cx| {
+            use crate::components::{IconName, menu_icon};
+            let this = panel.read(cx);
+            let link = this.menu_link.clone();
+            let has_selection = this.selected_text(&menu_root).is_some();
+            let menu = match link {
+                Some(link) => {
+                    let copy = link.clone();
+                    menu.item(
+                        PopupMenuItem::new("Open Link")
+                            .icon(menu_icon(IconName::Globe))
+                            .on_click(move |_, _, cx| cx.open_url(&link)),
+                    )
+                    .item(
+                        PopupMenuItem::new("Copy Link")
+                            .icon(menu_icon(IconName::Copy))
+                            .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))),
+                    )
+                    .separator()
+                }
+                None => menu,
+            };
+            let (copy_panel, copy_root) = (panel.clone(), menu_root.clone());
+            let (paste_panel, paste_root) = (panel.clone(), menu_root.clone());
+            menu.item(PopupMenuItem::new("Copy").icon(menu_icon(IconName::Copy)).disabled(!has_selection).on_click(
+                move |_, _, cx| {
+                    copy_panel.update(cx, |this, cx| {
+                        this.copy_selection(&copy_root, cx);
+                    })
+                },
+            ))
+            .item(
+                PopupMenuItem::new("Paste")
+                    .on_click(move |_, _, cx| paste_panel.update(cx, |this, cx| this.paste_clipboard(&paste_root, cx))),
+            )
+        });
         div().flex_1().min_h_0().flex().flex_col().children(find_bar).child(grid)
     }
 
@@ -2526,6 +2607,14 @@ fn default_shell_name(info: &snout_host::HostInfo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctrl_c_copies_only_on_windows_and_only_as_ctrl_c() {
+        assert!(ctrl_c_copies(true, true, "c"));
+        assert!(!ctrl_c_copies(false, true, "c"), "elsewhere it is always the interrupt");
+        assert!(!ctrl_c_copies(true, false, "c"), "Ctrl+Shift+C has its own binding");
+        assert!(!ctrl_c_copies(true, true, "v"));
+    }
 
     #[test]
     fn an_agent_that_never_goes_quiet_still_counts_as_started() {

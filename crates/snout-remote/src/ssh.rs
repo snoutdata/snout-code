@@ -1,4 +1,5 @@
-//! ssh: probing, installing and launching the server.
+//! ssh: probing, installing and launching the server. A distro of WSL is reached the same way,
+//! through `wsl.exe` in ssh's place: a program that runs a command there, over its stdin and stdout.
 
 use snout_remote_proto::{Client, VERSION};
 use std::io::{self, Read, Write};
@@ -33,7 +34,12 @@ pub struct SshTarget {
     pub idle_timeout: Duration,
     /// How long the connection and the handshake may take.
     pub connect_timeout: Duration,
+    /// A distro of WSL rather than a host of ssh: `wsl.exe` runs the commands.
+    pub wsl_distro: Option<String>,
 }
+
+/// What a WSL distro's connection is called: `WSL: Ubuntu`.
+pub const WSL_PREFIX: &str = "WSL: ";
 
 impl SshTarget {
     pub fn new(host: impl Into<String>) -> SshTarget {
@@ -48,7 +54,26 @@ impl SshTarget {
             askpass: None,
             idle_timeout: Duration::from_secs(3 * 60 * 60),
             connect_timeout: Duration::from_secs(30),
+            wsl_distro: None,
         }
+    }
+
+    /// The WSL distro `distro` of this Windows machine.
+    pub fn wsl(distro: impl Into<String>) -> SshTarget {
+        let distro = distro.into();
+        SshTarget {
+            control_dir: None,
+            ssh_program: "wsl.exe".into(),
+            // A distro that is not running starts first.
+            connect_timeout: Duration::from_secs(60),
+            wsl_distro: Some(distro.clone()),
+            ..SshTarget::new(format!("{WSL_PREFIX}{distro}"))
+        }
+    }
+
+    /// `wsl.exe -d <distro> -e sh -c <remote>`.
+    fn wsl_args(distro: &str, remote: &str) -> [String; 6] {
+        ["-d", distro, "-e", "sh", "-c", remote].map(str::to_owned)
     }
 
     fn base_command(&self) -> Command {
@@ -106,6 +131,10 @@ impl SshTarget {
     /// connection as the app's, prompts allowed.
     pub fn terminal_command(&self, remote: &str) -> Vec<String> {
         let mut v = vec![self.ssh_program.display().to_string()];
+        if let Some(distro) = &self.wsl_distro {
+            v.extend(Self::wsl_args(distro, remote));
+            return v;
+        }
         if let Some(f) = &self.config_file {
             v.extend(["-F".to_owned(), f.display().to_string()]);
         }
@@ -121,6 +150,12 @@ impl SshTarget {
 
     /// `ssh <host> <remote command>`, no terminal.
     pub fn command(&self, remote: &str) -> Command {
+        if let Some(distro) = &self.wsl_distro {
+            let mut c = Command::new(&self.ssh_program);
+            snout_host::default_signals(&mut c);
+            c.args(Self::wsl_args(distro, remote));
+            return c;
+        }
         let mut c = self.base_command();
         c.arg("-T").arg(&self.host).arg(remote);
         c
@@ -135,7 +170,7 @@ impl SshTarget {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| io::Error::new(e.kind(), format!("cannot run ssh: {e}")))?;
+            .map_err(|e| io::Error::new(e.kind(), format!("cannot run {}: {e}", self.ssh_program.display())))?;
         let mut stdin = child.stdin.take().expect("piped");
         let input = input.to_vec();
         let feeder = std::thread::spawn(move || {
@@ -216,7 +251,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn ssh_failure(what: &str, out: &std::process::Output) -> io::Error {
-    let err = String::from_utf8_lossy(&out.stderr);
+    // wsl.exe writes its own messages in UTF-16.
+    let err = String::from_utf8_lossy(&out.stderr).replace('\0', "");
     let err = err.trim();
     let kind = match out.status.code() {
         Some(255) => io::ErrorKind::ConnectionRefused,
@@ -296,7 +332,7 @@ impl StderrTail {
     }
 
     fn text(&self) -> String {
-        String::from_utf8_lossy(&self.0.lock().unwrap()).trim().to_owned()
+        String::from_utf8_lossy(&self.0.lock().unwrap()).replace('\0', "").trim().to_owned()
     }
 }
 
@@ -308,7 +344,7 @@ fn spawn_server(target: &SshTarget, installed: &Installed) -> io::Result<(Child,
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| io::Error::new(e.kind(), format!("cannot run ssh: {e}")))?;
+        .map_err(|e| io::Error::new(e.kind(), format!("cannot run {}: {e}", target.ssh_program.display())))?;
     let tail = StderrTail::default();
     let done = tail.collect(child.stderr.take().expect("piped"));
     Ok((child, tail, done))
@@ -375,6 +411,18 @@ pub fn connect(target: &SshTarget, installed: &Installed) -> io::Result<Client> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wsl_distro_runs_commands_through_wsl_exe_with_no_ssh_options() {
+        let t = SshTarget::wsl("Ubuntu");
+        assert_eq!(t.host, "WSL: Ubuntu");
+        assert!(t.control_dir.is_none() && t.askpass.is_none());
+        let c = t.command("echo hi");
+        assert_eq!(c.get_program(), "wsl.exe");
+        let argv: Vec<_> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(argv, ["-d", "Ubuntu", "-e", "sh", "-c", "echo hi"]);
+        assert_eq!(t.terminal_command("htop"), ["wsl.exe", "-d", "Ubuntu", "-e", "sh", "-c", "htop"]);
+    }
 
     #[test]
     fn uname_names_pick_the_binary() {

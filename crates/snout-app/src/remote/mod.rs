@@ -59,6 +59,9 @@ pub fn ssh_config() -> Option<PathBuf> {
 /// How the app reaches `name` with ssh: the scratch config when one is set, prompts through
 /// this program (see [`askpass`]), a shared connection.
 pub fn target(name: &str) -> SshTarget {
+    if let Some(distro) = name.strip_prefix(snout_remote::WSL_PREFIX) {
+        return SshTarget::wsl(distro);
+    }
     let mut t = SshTarget::new(name);
     t.config_file = std::env::var_os(SSH_CONFIG_ENV).map(PathBuf::from);
     t.askpass = std::env::current_exe().ok();
@@ -160,6 +163,8 @@ pub struct Remote {
     pub tasks: Vec<BgTask>,
     /// A connection made, waiting for a folder to be picked.
     pub pending: Option<(String, Arc<RemoteHost>)>,
+    /// This machine's WSL distros, to offer beside the hosts of ssh.
+    pub wsl_distros: Vec<String>,
 }
 
 impl Global for Remote {}
@@ -169,6 +174,14 @@ impl Global for Remote {}
 pub fn init(store: Option<Store>, cx: &mut App) {
     let recents = store.as_ref().map(|s| Recents::load(&s.dir())).unwrap_or_default();
     cx.set_global(Remote { local: Some(crate::host::host(cx)), main_store: store, recents, ..Default::default() });
+    if cfg!(windows) {
+        let list = cx.background_executor().spawn(async { crate::wsl::distros() });
+        cx.spawn(async move |cx| {
+            let distros = list.await;
+            cx.update(|cx| cx.global_mut::<Remote>().wsl_distros = distros);
+        })
+        .detach();
+    }
     cx.spawn(async move |cx| {
         loop {
             cx.background_executor().timer(Duration::from_millis(500)).await;
@@ -232,6 +245,13 @@ pub fn recents(cx: &App) -> Recents {
 /// The hosts to offer: the recent ones first, then those of the ssh config.
 pub fn known_hosts(cx: &App) -> Vec<String> {
     let mut out = recents(cx).hosts;
+    let distros = cx.try_global::<Remote>().map(|r| r.wsl_distros.clone()).unwrap_or_default();
+    for d in distros {
+        let name = format!("{}{d}", snout_remote::WSL_PREFIX);
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
     for h in ssh_config().map(|f| snout_remote::ssh_config::hosts(&f)).unwrap_or_default() {
         if !out.contains(&h) {
             out.push(h);

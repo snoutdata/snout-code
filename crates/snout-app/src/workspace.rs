@@ -2039,6 +2039,9 @@ impl Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_window(window, cx);
+        if self.model.read(cx).pending_wsl.is_some() {
+            cx.defer_in(window, |this, window, cx| this.go_to_wsl(window, cx));
+        }
         // The first frame is drawn: the heavy work may start.
         if self.hub.read(cx).paused {
             cx.defer_in(window, |this, _, cx| {

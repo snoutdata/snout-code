@@ -485,6 +485,8 @@ pub struct Model {
     /// The folder opened as the project, as it was opened: the repository's root or any
     /// folder inside it. Git works on the repository found at or above it.
     pub project: Option<PathBuf>,
+    /// A folder inside WSL was asked for: the workspace connects to its distro.
+    pub pending_wsl: Option<crate::wsl::WslProject>,
     /// The project that is open has no repository: the Git view says why, and offers one.
     pub no_git: Option<NoGit>,
     pub status: Status,
@@ -611,6 +613,7 @@ impl Model {
             dialog_on_project: false,
             job_on_project: false,
             project: None,
+            pending_wsl: None,
             no_git: None,
             status: Status::default(),
             branches: Vec::new(),
@@ -942,6 +945,15 @@ impl Model {
     /// the UI thread. When another project is open, the workspace is asked first
     /// ([`ModelEvent::Switch`]), and [`Model::switch_project`] finishes the opening.
     fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) {
+        // A folder inside WSL: the window goes there, as to a machine of Remote SSH.
+        if let Some(wsl) = crate::wsl::of_host(&*self.host, path) {
+            self.project = None;
+            self.settings.current = None;
+            self.pending_file = None;
+            self.pending_wsl = Some(wsl);
+            cx.notify();
+            return;
+        }
         let host = self.host.clone();
         let load = cx.background_executor().spawn({
             let path = path.to_owned();
@@ -1019,6 +1031,15 @@ impl Model {
         self.amend = false;
         self.draft = None;
         self.apply_snapshot(snapshot, cx);
+    }
+
+    /// The window could not go to a folder inside WSL.
+    pub fn wsl_failed(&mut self, connection: &str, why: String, cx: &mut Context<Self>) {
+        let text = format!("SnoutCode could not connect to {connection}. {why}");
+        self.ask(
+            Dialog::Info { title: format!("Could not open the project in {connection}"), text, mood: Mood::Warning },
+            cx,
+        );
     }
 
     /// The Git panel with nothing in it: the project has no repository.

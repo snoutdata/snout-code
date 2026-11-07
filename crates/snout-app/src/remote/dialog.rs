@@ -44,7 +44,13 @@ impl ConnectDialog {
     pub fn new(recent: Vec<String>, configured: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let first = recent.first().cloned().unwrap_or_default();
         let input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("user@host, or a Host of your ssh config").default_value(first)
+            InputState::new(window, cx)
+                .placeholder(if cfg!(windows) {
+                    "user@host, a Host of your ssh config, or WSL: Ubuntu"
+                } else {
+                    "user@host, or a Host of your ssh config"
+                })
+                .default_value(first)
         });
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
             InputEvent::Change => cx.notify(),
@@ -221,7 +227,7 @@ impl Render for ConnectDialog {
             "connect-ssh",
             Tone::Info,
             Some(spots::ssh()),
-            "Connect to SSH Host",
+            if cfg!(windows) { "Connect to SSH Host or WSL" } else { "Connect to SSH Host" },
             Some("SnoutCode installs its server on the host the first time (Linux, x86_64 or aarch64).".into()),
             520.,
             Some(480.),

@@ -22,7 +22,7 @@ pub mod ssh_config;
 pub use host::{Connector, RemoteHost, Status};
 pub use snout_remote_proto as proto;
 pub use snout_remote_proto::Client;
-pub use ssh::{ASKPASS_ENV, Installed, SshTarget, connect, install, install_with, platform_binary};
+pub use ssh::{ASKPASS_ENV, Installed, SshTarget, WSL_PREFIX, connect, install, install_with, platform_binary};
 
 use std::io;
 use std::path::{Path, PathBuf};

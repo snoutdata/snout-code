@@ -213,6 +213,8 @@ pub struct SettingsView {
     /// The external terminal's custom command, and the terminal apps installed.
     external_command: Entity<InputState>,
     installed_terminals: Vec<crate::external_terminal::ExternalTerminal>,
+    /// Where each agent was found: for which path set, and the answer once it is in.
+    agents_found: std::collections::HashMap<&'static str, (Option<PathBuf>, Option<Option<PathBuf>>)>,
     /// The JDKs on this Mac, for the Gradle page.
     jdks: Vec<Jdk>,
     /// The Gradle builds the Gradle page lists.
@@ -399,6 +401,7 @@ impl SettingsView {
             new_var,
             external_command,
             installed_terminals: crate::external_terminal::installed(),
+            agents_found: Default::default(),
             jdks,
             builds,
             key_search,
@@ -1750,6 +1753,122 @@ impl SettingsView {
 
     /// Settings ▸ Tools ▸ Agents: the agents SnoutCode knows (each one's colour, icon and how
     /// SnoutCode follows it), the one the console runs, and the programs.
+    /// The path `d` sets for the agent `id`.
+    fn agent_path(d: &Settings, id: &str) -> Option<PathBuf> {
+        match id {
+            crate::agents::CODEX => d.codex_path.clone(),
+            crate::agents::OPENCODE => d.opencode_path.clone(),
+            crate::agents::AMP => d.amp_path.clone(),
+            _ => d.claude_path.clone(),
+        }
+    }
+
+    /// Look for the agent `id` off the UI thread, unless that was already done for this path.
+    fn look_for_agent(&mut self, id: &'static str, configured: Option<PathBuf>, cx: &mut Context<Self>) {
+        if self.agents_found.get(id).is_some_and(|(looked, _)| *looked == configured) {
+            return;
+        }
+        self.agents_found.insert(id, (configured.clone(), None));
+        let host = crate::host::host(cx);
+        let look = cx.background_executor().spawn({
+            let configured = configured.clone();
+            async move { crate::agents::locate(&*host, id, configured) }
+        });
+        cx.spawn(async move |this, cx| {
+            let found = look.await;
+            let _ = this.update(cx, |this, cx| {
+                // The path may have changed meanwhile: then a newer look answers.
+                if this.agents_found.get(id).is_some_and(|(looked, _)| *looked == configured) {
+                    this.agents_found.insert(id, (configured, Some(found)));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Choose the program of the agent `id` with the system's file dialog.
+    fn browse_agent(&mut self, id: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Choose".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    let field = match id {
+                        crate::agents::CODEX => &this.codex,
+                        crate::agents::OPENCODE => &this.opencode,
+                        crate::agents::AMP => &this.amp,
+                        _ => &this.claude,
+                    };
+                    let text = path.display().to_string();
+                    field.clone().update(cx, |s, cx| s.set_value(text, window, cx));
+                    this.set(cx, |s| match id {
+                        crate::agents::CODEX => s.codex_path = Some(path),
+                        crate::agents::OPENCODE => s.opencode_path = Some(path),
+                        crate::agents::AMP => s.amp_path = Some(path),
+                        _ => s.claude_path = Some(path),
+                    });
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// An agent's program: its path, a way to choose it, and where SnoutCode found it.
+    fn program_row(
+        &mut self,
+        label: &'static str,
+        id: &'static str,
+        browse: &'static str,
+        d: &Settings,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let configured = Self::agent_path(d, id);
+        self.look_for_agent(id, configured.clone(), cx);
+        let status = match self.agents_found.get(id).and_then(|(_, found)| found.as_ref()) {
+            None => "Looking for it…".to_owned(),
+            Some(Some(path)) => format!("Found: {}", path.display()),
+            Some(None) if configured.is_some() => "That file is not there.".to_owned(),
+            Some(None) => "Not found. Install it from the console, or choose the program.".to_owned(),
+        };
+        let field = match id {
+            crate::agents::CODEX => &self.codex,
+            crate::agents::OPENCODE => &self.opencode,
+            crate::agents::AMP => &self.amp,
+            _ => &self.claude,
+        };
+        let control = div()
+            .flex()
+            .flex_col()
+            .gap(px(3.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().w(px(360.)).child(look::field(field, false, None, p)))
+                    // A remote machine's programs are not on this machine's file dialog.
+                    .when(!crate::remote::is_remote(cx), |d| {
+                        d.child(
+                            crate::components::Button::new(browse, IconName::FolderOpen)
+                                .compact()
+                                .label("Browse…")
+                                .debug_selector(browse)
+                                .on_click(cx.listener(move |this, _, window, cx| this.browse_agent(id, window, cx))),
+                        )
+                    }),
+            )
+            .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(status));
+        row(label, control, p).into_any_element()
+    }
+
     fn agents_page(&mut self, d: &Settings, cx: &mut Context<Self>) -> AnyElement {
         use crate::agents::{Channel, ConsoleAgent};
         let p = palette(cx);
@@ -1822,11 +1941,14 @@ impl SettingsView {
                  beside the lines it changed, and a dot on the tabs and files it changed until you review them.",
             ))
             .child(section("Programs", &p))
-            .child(row("Claude Code", div().w(px(360.)).child(look::field(&self.claude, false, None, &p)), &p))
-            .child(row("Codex", div().w(px(360.)).child(look::field(&self.codex, false, None, &p)), &p))
-            .child(row("opencode", div().w(px(360.)).child(look::field(&self.opencode, false, None, &p)), &p))
-            .child(row("Amp", div().w(px(360.)).child(look::field(&self.amp, false, None, &p)), &p))
-            .child(note("Leave them empty to find each program on PATH, in ~/.local/bin and the usual places."))
+            .child(self.program_row("Claude Code", crate::agents::CLAUDE, "settings-browse-claude", d, &p, cx))
+            .child(self.program_row("Codex", crate::agents::CODEX, "settings-browse-codex", d, &p, cx))
+            .child(self.program_row("opencode", crate::agents::OPENCODE, "settings-browse-opencode", d, &p, cx))
+            .child(self.program_row("Amp", crate::agents::AMP, "settings-browse-amp", d, &p, cx))
+            .child(note(
+                "Leave them empty and SnoutCode finds each program, on your PATH and where installers put it. \
+                 Browse to choose one yourself.",
+            ))
             .child(row("Your agent", div().w(px(360.)).child(look::field(&self.agent_command, false, None, &p)), &p))
             .child(row("Its name", div().w(px(200.)).child(look::field(&self.agent_name, false, None, &p)), &p))
             .child(note("Any command line agent: the console runs it in the project with /bin/sh -c."))
