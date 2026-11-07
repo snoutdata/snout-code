@@ -2654,10 +2654,12 @@ fn install_label(id: &str) -> &'static str {
 }
 
 /// The shell the Terminal tab starts when Settings names none: the user's `SHELL`; on Windows
-/// PowerShell (7 where it is installed), else the Command Prompt; else zsh.
+/// PowerShell (7 where it is installed), else the Command Prompt; on a Mac zsh; else bash, or
+/// `sh` where there is no bash. `SHELL` is often unset where nobody logged in: in WSL reached
+/// through `wsl.exe`, in a CI job, in a container.
 pub fn default_shell(host: &dyn snout_host::Host) -> PathBuf {
     let info = host.info();
-    if let Some(shell) = info.var("SHELL") {
+    if let Some(shell) = info.var("SHELL").filter(|s| !s.trim().is_empty()) {
         return PathBuf::from(shell);
     }
     if info.is_windows() {
@@ -2665,7 +2667,14 @@ pub fn default_shell(host: &dyn snout_host::Host) -> PathBuf {
             .or_else(|| info.var("ComSpec").or_else(|| info.var("COMSPEC")).map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from("cmd.exe"));
     }
-    PathBuf::from("/bin/zsh")
+    if info.is_mac() {
+        return PathBuf::from("/bin/zsh");
+    }
+    ["/bin/bash", "/usr/bin/bash"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|p| host.exists(p))
+        .unwrap_or_else(|| PathBuf::from("/bin/sh"))
 }
 
 /// The name of [`default_shell`], without looking for it.
@@ -2673,7 +2682,8 @@ fn default_shell_name(info: &snout_host::HostInfo) -> String {
     match info.var("SHELL") {
         Some(shell) => shell.to_owned(),
         None if info.is_windows() => "powershell".into(),
-        None => "zsh".into(),
+        None if info.is_mac() => "zsh".into(),
+        None => "bash".into(),
     }
 }
 

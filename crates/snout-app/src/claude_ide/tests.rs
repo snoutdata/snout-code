@@ -1652,7 +1652,8 @@ fn an_agent_finds_out_where_it_stands_and_shows_the_user_a_window(cx: &mut TestA
     assert_eq!(s["version"], env!("CARGO_PKG_VERSION"));
 
     // A file it opens is among the open files, and is the one in front.
-    let hello = repo.join("src/demo/Hello.java");
+    // As the system writes it (backslashes on Windows), as the answer gives it.
+    let hello = repo.join("src").join("demo").join("Hello.java");
     let (status, body) = agent_calls(cx, "openFile", json!({ "filePath": hello.to_string_lossy() }), true);
     assert_eq!(status, 200, "{body}");
     let s = state(cx);
@@ -2151,7 +2152,8 @@ fn an_agent_runs_playwright_and_reads_what_failed(cx: &mut TestAppContext) {
     for (tool, again) in [("recordPlaywrightTest", "recording is going"), ("pickPlaywrightLocator", "Picking is on")] {
         let (status, body) = agent_allowed(cx, &model, tool, json!({}));
         assert_eq!(status, 200, "{tool}: {body}");
-        pump_until(cx, "the tab to say so", |cx| cx.debug_bounds("record-bar").is_some());
+        let what = format!("{tool}: the tab to say so");
+        pump_until(cx, &what, |cx| cx.debug_bounds("record-bar").is_some());
         let (status, body) = agent_allowed(cx, &model, tool, json!({}));
         assert!(status == 422 && body.contains(again), "{tool}: {status} {body}");
         cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::StopRecording), cx));

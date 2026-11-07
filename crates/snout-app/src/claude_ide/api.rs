@@ -490,11 +490,13 @@ mod tests {
         assert_eq!(meta["name"], "snout-code");
         let skill = std::fs::read_to_string(root.join("skills/snoutcode/SKILL.md")).unwrap();
         assert!(skill.starts_with("---\nname: snoutcode\n"));
-        let api = script(&dir).to_string_lossy().into_owned();
-        assert!(skill.contains(&format!("{api} openFile")) && !skill.contains("{{API}}"), "the script by its path");
+        // As the skill writes it: for bash on Windows, with forward slashes.
+        let named = shell_path(&script(&dir));
+        assert!(skill.contains(&format!("{named} openFile")) && !skill.contains("{{API}}"), "the script by its path");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
+            let api = script(&dir);
             assert_eq!(std::fs::metadata(&api).unwrap().permissions().mode() & 0o777, 0o700);
         }
         let _ = std::fs::remove_dir_all(dir);

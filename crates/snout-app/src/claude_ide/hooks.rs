@@ -1195,7 +1195,9 @@ pub mod tests {
         // The skill, for this session: from the session's folder into the plugin's cache.
         let dir = file.parent().unwrap();
         let skill = dir.join("skills/snoutcode");
-        assert_eq!(std::fs::read_to_string(dir.join("registered")).unwrap(), skill.to_string_lossy());
+        // Amp takes the folder as the plugin joined it, with forward slashes on Windows too.
+        let registered = std::fs::read_to_string(dir.join("registered")).unwrap().replace('\\', "/");
+        assert_eq!(registered, skill.to_string_lossy().replace('\\', "/"));
         assert!(std::fs::read_to_string(skill.join("SKILL.md")).unwrap().contains("snout-api"));
         assert_eq!(events[0].file, Some(Snapshot::Text(Arc::new("class A {}\n".into()))));
         assert_eq!(events[1].path.as_deref(), Some(file.as_path()));

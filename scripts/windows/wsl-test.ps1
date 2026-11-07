@@ -20,7 +20,20 @@ function StopAll {
     # The bracket keeps the pattern from matching this shell's own command line.
     InDistro "pkill -f '[s]nout-server' || true" | Out-Null
 }
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+# The screen as the user would see it, for a failure no log explains (the console's state, say).
+function Shot([string]$name) {
+    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+    $bmp.Save((Join-Path $Out "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    $g.Dispose(); $bmp.Dispose()
+}
 function Show {
+    Shot "failure"
+    Write-Host "--- the app's log"
+    if (Test-Path $log) { Get-Content $log -Tail 60 | ForEach-Object { Write-Host $_ } }
     Write-Host "--- remote.json"
     if (Test-Path $recents) { Get-Content $recents | ForEach-Object { Write-Host $_ } }
     Write-Host "--- server in the distro"
@@ -54,7 +67,9 @@ InDistro "rm -rf ~/.snout-code; mkdir -p /tmp/wsl-demo; echo hello > /tmp/wsl-de
 Write-Host "== Opening \\wsl.localhost\$Distro\tmp\wsl-demo"
 $env:SNOUT_NO_UPDATE = "1"
 $env:SNOUT_NO_FETCH = "1"
-Start-Process -FilePath $exe -ArgumentList "\\wsl.localhost\$Distro\tmp\wsl-demo" | Out-Null
+$log = Join-Path $Out "app.log"
+Start-Process -FilePath $exe -ArgumentList "\\wsl.localhost\$Distro\tmp\wsl-demo" `
+    -RedirectStandardError $log -RedirectStandardOutput (Join-Path $Out "app-stdout.log") | Out-Null
 
 if (-not (WaitFor 180 { (InDistro "pgrep -f '[s]nout-server --daemon'") })) { Fail "the server never started in the distro" }
 Write-Host "the server runs in $Distro"
@@ -72,6 +87,7 @@ if (-not (WaitFor 120 { InDistro "grep -q wsl-demo /tmp/harness-answer && grep -
     Fail "the agent in the distro did not reach the window"
 }
 Write-Host "the agent in $Distro reached the window"
+Shot "agent"
 if (-not (WaitFor 60 { InDistro "grep -q wsl-demo /tmp/harness-mcp && grep -q 'isError.:false' /tmp/harness-mcp && echo yes" })) {
     InDistro "cat /tmp/harness-mcp 2>&1" | ForEach-Object { Write-Host $_ }
     Fail "the MCP tool in the distro did not reach the window"
