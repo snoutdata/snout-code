@@ -465,7 +465,7 @@ fn typescript_server_uris_are_kept_as_the_documents_are() {
 
 // ----- Running ----------------------------------------------------------------------------
 
-mod running {
+pub(crate) mod running {
     use std::collections::BTreeMap;
     use std::io::Write as _;
     use std::path::{Path, PathBuf};
@@ -711,7 +711,7 @@ mod running {
 
     /// A Playwright project whose test runner is `fake-cli.js`: it drives SnoutCode's own
     /// reporter through a small run (see the file).
-    pub(super) fn fake_project(name: &str) -> PathBuf {
+    pub(crate) fn fake_project(name: &str) -> PathBuf {
         let repo = crate::tests::demo_repo(name);
         let fixtures = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/playwright"));
         write(&repo, "package.json", r#"{ "devDependencies": { "@playwright/test": "1.64.1" } }"#);

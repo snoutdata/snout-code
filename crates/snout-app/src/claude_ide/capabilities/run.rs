@@ -1,14 +1,17 @@
 //! Running: the configurations, starting and stopping them, what a run printed and how its tests
 //! went.
 
-use gpui::{Context, Window};
+use std::path::{Path, PathBuf};
+
+use gpui::{Context, Entity, Window};
 use serde_json::{Value, json};
 
 use super::{Capability, Domain, Effect, Input, Run, missing, need, text_of};
 use crate::claude_ide::server::Reply;
 use crate::claude_ide::tools::{self, INVALID_PARAMS, TOOL_ERROR};
-use crate::run::Launch;
+use crate::playwright::report::{State, Test, TestError};
 use crate::run::test_tree::TestState;
+use crate::run::{Launch, Runs};
 use crate::workspace::Workspace;
 
 /// How many lines of a run's output a call returns, unless it asks for fewer.
@@ -18,6 +21,8 @@ const LINES: usize = 200;
 /// How long a run that finds its program first may take to show.
 const WAIT_TICK: std::time::Duration = std::time::Duration::from_millis(100);
 const WAIT_TICKS: usize = 200;
+/// How many of a trace's actions a call returns: the last ones, nearest the failure.
+const TRACE_ACTIONS: usize = 100;
 
 pub const ALL: &[Capability] = &[
     Capability {
@@ -75,8 +80,9 @@ pub const ALL: &[Capability] = &[
         name: "getTestResults",
         domain: Domain::Run,
         effect: Effect::Read,
-        description: "How a run's tests went: the counts, and each failed test with its message and stack. By id, or \
-                      the run in front of the Run window.",
+        description: "How a run's tests went: the counts, and each failed test with its message and where it is. By id, \
+                      or the run in front of the Run window. A failed Playwright test names its trace: \
+                      getPlaywrightTrace reads it.",
         input: Input::Own(id_optional),
         run: Run::Own(test_results),
         consent: None,
@@ -86,7 +92,8 @@ pub const ALL: &[Capability] = &[
         domain: Domain::Run,
         effect: Effect::Change,
         description: "Run a Playwright project's tests in the Tests window: all of them, one browser project, a file, or \
-                      the test at a line of it. Follow it with listRuns and getTestResults.",
+                      the test at a line of it. Answers with the run's id; it does not wait for the run to end. Follow \
+                      it with listRuns and getTestResults.",
         input: Input::Own(playwright_input),
         run: Run::Own(run_playwright),
         consent: Some(|a| match a["file"].as_str() {
@@ -95,15 +102,30 @@ pub const ALL: &[Capability] = &[
         }),
     },
     Capability {
+        name: "getPlaywrightTrace",
+        domain: Domain::Run,
+        effect: Effect::Read,
+        description: "What a Playwright test's trace saw: the browser's actions with their errors, the requests that \
+                      failed, and the console's errors. By part of the test's name, a failed one first. By the run's \
+                      id, or the run in front.",
+        input: Input::Own(trace_input),
+        run: Run::Own(trace),
+        consent: None,
+    },
+    Capability {
         name: "recordPlaywrightTest",
         domain: Domain::Run,
         effect: Effect::Change,
         description: "Start Playwright's recorder at the caret of the spec in front, opening its browser for the user \
-                      to click through. What they do is written into the spec. Use openFile first to place the caret.",
+                      to click through. What they do is written into the spec. Use openFile first to place the caret. \
+                      Answers once the recorder runs.",
         input: Input::None,
         run: Run::Own(|ws, _, reply, window, cx| {
+            if ws.recording_state().is_some() {
+                return reply.error(TOOL_ERROR, "A recording is going: the user stops it above the editor.", None);
+            }
             ws.record_at_cursor(window, cx);
-            reply.ok(tools::text("The recorder is starting. The Tests window shows how it goes."));
+            answer_when_started(Workspace::recording_state, "The recorder runs.", reply, cx);
         }),
         consent: Some(|_| "open a browser and record a Playwright test".to_owned()),
     },
@@ -112,11 +134,14 @@ pub const ALL: &[Capability] = &[
         domain: Domain::Run,
         effect: Effect::Change,
         description: "Open Playwright's browser for the user to pick an element; its locator goes in at the caret of the \
-                      spec in front.",
+                      spec in front. Answers once the browser runs.",
         input: Input::None,
         run: Run::Own(|ws, _, reply, window, cx| {
+            if ws.picking_state().is_some() {
+                return reply.error(TOOL_ERROR, "Picking is on: the user stops it above the editor.", None);
+            }
             ws.pick_locator(window, cx);
-            reply.ok(tools::text("The locator picker is starting."));
+            answer_when_started(Workspace::picking_state, "The browser runs.", reply, cx);
         }),
         consent: Some(|_| "open a browser to pick a Playwright locator".to_owned()),
     },
@@ -133,8 +158,66 @@ fn playwright_input() -> Value {
     )
 }
 
+fn trace_input() -> Value {
+    tools::schema(
+        json!({
+            "test": { "type": "string", "description": "Part of the test's name, in any case" },
+            "id": { "type": "integer", "description": "The run's id, from listRuns" },
+        }),
+        &["test"],
+    )
+}
+
+/// Answer once what was asked for has started, or with what the window told the user instead.
+fn answer_when_started(
+    state: fn(&Workspace) -> Option<bool>,
+    started: &'static str,
+    reply: Reply,
+    cx: &mut Context<Workspace>,
+) {
+    cx.spawn(async move |this, cx| {
+        for _ in 0..WAIT_TICKS {
+            let Ok(now) = this.read_with(cx, |w, _| state(w)) else {
+                return reply.error(TOOL_ERROR, "The window closed.", None);
+            };
+            match now {
+                Some(true) => return reply.ok(tools::text(started)),
+                Some(false) => {}
+                None => {
+                    let why = this.read_with(cx, |w, cx| w.model.read(cx).message.clone()).unwrap_or_default();
+                    return reply.error(TOOL_ERROR, &why, None);
+                }
+            }
+            cx.background_executor().timer(WAIT_TICK).await;
+        }
+        reply.error(TOOL_ERROR, "It did not start. The Output window may say why.", None);
+    })
+    .detach();
+}
+
+/// Answer with the run started after `before`. Node and Playwright are found first, off the UI
+/// thread, so it shows a moment later.
+fn answer_with_new_run(runs: Entity<Runs>, before: u64, title: String, reply: Reply, cx: &mut Context<Workspace>) {
+    cx.spawn(async move |_, cx| {
+        for _ in 0..WAIT_TICKS {
+            let id = cx.update(|cx| runs.read(cx).sessions.iter().map(|s| s.id).filter(|id| *id > before).max());
+            if let Some(id) = id {
+                return reply.ok(tools::json_text(&json!({ "id": id, "title": title })));
+            }
+            cx.background_executor().timer(WAIT_TICK).await;
+        }
+        reply.error(TOOL_ERROR, &format!("{title} did not start. The Output window may say why."), None);
+    })
+    .detach();
+}
+
 fn run_playwright(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
-    use crate::playwright::run::{Options, Scope};
+    use crate::playwright::run::Scope;
+    let tests = ws.pw_tests.clone();
+    let has_tests = tests.read(cx).playwright || tests.read(cx).unit(cx).is_some();
+    if a["file"].is_null() && !has_tests {
+        return reply.error(TOOL_ERROR, "This project has no Playwright tests.", None);
+    }
     let project = a["project"].as_str().map(str::to_owned);
     let scope = match a["file"].as_str() {
         Some(file) => Scope::At {
@@ -144,8 +227,10 @@ fn run_playwright(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, c
         },
         None => project.map_or(Scope::All, Scope::Project),
     };
-    ws.runs.update(cx, |r, cx| r.start_playwright(scope, Options::default(), cx));
-    reply.ok(tools::text("The tests are starting. listRuns has their id; getTestResults says how they went."));
+    let runs = ws.runs.clone();
+    let before = runs.read(cx).sessions.iter().map(|s| s.id).max().unwrap_or(0);
+    tests.update(cx, |t, cx| t.start(scope, cx));
+    answer_with_new_run(runs, before, "The tests".to_owned(), reply, cx);
 }
 
 fn start_input() -> Value {
@@ -240,18 +325,7 @@ fn start(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut C
     if let Some(id) = runs.update(cx, |r, cx| r.start(Launch::Config { config, debug }, cx)) {
         return reply.ok(tools::json_text(&json!({ "id": id, "title": name })));
     }
-    // Node and Playwright are found first, off the UI thread: the run shows a moment later.
-    cx.spawn(async move |_, cx| {
-        for _ in 0..WAIT_TICKS {
-            let id = cx.update(|cx| runs.read(cx).sessions.iter().map(|s| s.id).filter(|id| *id > before).max());
-            if let Some(id) = id {
-                return reply.ok(tools::json_text(&json!({ "id": id, "title": name })));
-            }
-            cx.background_executor().timer(WAIT_TICK).await;
-        }
-        reply.error(TOOL_ERROR, &format!("{name} did not start. The Output window may say why."), None);
-    })
-    .detach();
+    answer_with_new_run(runs, before, name, reply, cx);
 }
 
 fn stop(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
@@ -301,7 +375,25 @@ fn test_results(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx:
     };
     if let Some(run) = s.playwright.as_ref() {
         let c = run.counts();
-        let errors: Vec<String> = run.errors.iter().map(|e| e.message.clone()).collect();
+        let errors: Vec<String> = run.errors.iter().map(TestError::text).collect();
+        let failures: Vec<Value> = run
+            .order
+            .iter()
+            .filter_map(|id| run.tests.get(id))
+            .filter(|t| t.state(run.over) == State::Failed)
+            .map(|t| {
+                let last = t.last_try();
+                let (file, line) = run.location(&t.id).unwrap_or_else(|| (t.file.clone(), t.line));
+                json!({
+                    "title": t.path.join(" > "),
+                    "project": t.project,
+                    "file": file,
+                    "line": line,
+                    "errors": last.map(|l| l.errors.iter().map(TestError::text).collect::<Vec<_>>()),
+                    "trace": last.and_then(|l| l.trace()),
+                })
+            })
+            .collect();
         return reply.ok(tools::json_text(&json!({
             "id": s.id,
             "running": s.running(),
@@ -312,6 +404,7 @@ fn test_results(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx:
             "stillRunning": c.running,
             "status": run.status,
             "errors": errors,
+            "failures": failures,
         })));
     }
     let Some(tree) = s.tests.as_ref() else {
@@ -340,4 +433,62 @@ fn test_results(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx:
         "stillRunning": running,
         "failures": failures,
     })));
+}
+
+/// The test whose name holds `wanted`, a failed one first, and the path of its trace.
+fn trace_of(run: &crate::playwright::report::Run, wanted: &str) -> Option<(String, Option<PathBuf>)> {
+    let wanted = wanted.to_lowercase();
+    let mut found: Vec<&Test> = run
+        .order
+        .iter()
+        .filter_map(|id| run.tests.get(id))
+        .filter(|t| t.path.join(" > ").to_lowercase().contains(&wanted))
+        .collect();
+    found.sort_by_key(|t| t.state(run.over) != State::Failed);
+    let t = found.first()?;
+    Some((t.path.join(" > "), t.last_try().and_then(|l| l.trace()).map(Path::to_path_buf)))
+}
+
+fn trace(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
+    let Some(wanted) = need(a, "test") else { return missing(reply, "test") };
+    let Some(s) = session_of(ws, a, cx) else {
+        return reply.error(TOOL_ERROR, "No such run. listRuns has them.", None);
+    };
+    let Some(run) = s.playwright.as_ref() else {
+        return reply.error(TOOL_ERROR, "That run is not a Playwright run.", None);
+    };
+    let Some((title, path)) = trace_of(run, wanted) else {
+        return reply.error(TOOL_ERROR, &format!("No test called {wanted} in that run."), None);
+    };
+    let Some(path) = path else {
+        let why = format!("{title} has no trace: the project's configuration turns it on with `trace`.");
+        return reply.error(TOOL_ERROR, &why, None);
+    };
+    // Off the UI thread, from the machine the project is on.
+    let host = crate::host::host(cx);
+    let read = cx.background_executor().spawn(async move {
+        let bytes = host.read(&path)?;
+        crate::playwright::trace::of_bytes(bytes)
+    });
+    cx.spawn(async move |_, _| match read.await {
+        Err(e) => reply.error(TOOL_ERROR, &format!("Its trace could not be read: {e}"), None),
+        Ok(t) => {
+            let from = t.actions.len().saturating_sub(TRACE_ACTIONS);
+            let actions: Vec<Value> =
+                t.actions[from..].iter().map(|a| json!({ "title": a.title, "error": a.error })).collect();
+            let failed: Vec<Value> = t
+                .failed_requests
+                .iter()
+                .map(|r| json!({ "method": r.method, "url": r.url, "status": r.status }))
+                .collect();
+            reply.ok(tools::json_text(&json!({
+                "test": title,
+                "omittedActions": from,
+                "actions": actions,
+                "failedRequests": failed,
+                "consoleErrors": t.console_errors,
+            })));
+        }
+    })
+    .detach();
 }

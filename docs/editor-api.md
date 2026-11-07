@@ -21,15 +21,15 @@ An MCP server's tools are listed to the model with their full descriptions and J
 so they take room in the context of every request of the session, whether the agent uses them
 or not. A skill shows the model one line, and the rest is read only when the agent needs it.
 
-For the API's 56 tools, measured on what SnoutCode sends:
+For the API's 57 tools, measured on what SnoutCode sends:
 
 | | Size | When it is in the context |
 |---|---|---|
-| The 56 tools as MCP definitions | about 22,200 characters, roughly 5,500 tokens | every request of the session |
+| The 57 tools as MCP definitions | about 23,000 characters, roughly 5,800 tokens | every request of the session |
 | The skill's description | about 560 characters, roughly 140 tokens | every request of the session |
 | The one MCP tool, for Codex in place of the skill | about 760 characters, roughly 190 tokens | every request of the session |
 | The skill's instructions, with the `openFile` call | about 2,000 characters, roughly 500 tokens | once, when the agent first uses the window |
-| The short manual, all 56 tools with no arguments | about 9,100 characters, roughly 2,300 tokens | only when the agent needs a tool other than `openFile` |
+| The short manual, all 57 tools with no arguments | about 9,400 characters, roughly 2,300 tokens | only when the agent needs a tool other than `openFile` |
 | One domain's manual, with its arguments | 800 to 4,400 characters, 200 to 1,100 tokens | only when the agent needs that domain |
 
 So a session that never touches the window pays about a fortieth of what the MCP definitions would
@@ -135,6 +135,7 @@ the agent does not hear of what you click. **Clear** empties it, and it lasts un
 | `getRunOutput` | run | What a run printed | `id`, `lastLines` |
 | `getTestResults` | run | How a run's tests went, with each failure | `id` |
 | `runPlaywrightTests` | run | Runs Playwright tests | `file`, `line`, `project` |
+| `getPlaywrightTrace` | run | What a test's trace saw: actions, failed requests, console errors | `test`, `id` |
 | `recordPlaywrightTest` | run | Starts Playwright's recorder at the caret | none |
 | `pickPlaywrightLocator` | run | Lets you pick an element for its locator | none |
 | `findSymbol` | code | Classes, methods and fields by name | `query` |

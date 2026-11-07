@@ -85,6 +85,16 @@ impl Workspace {
         Start::of(&projects, environment.as_ref(), root)
     }
 
+    /// A recording: `None` when there is none, else whether its recorder has started.
+    pub(crate) fn recording_state(&self) -> Option<bool> {
+        self.recording.as_ref().map(|r| r.id.is_some())
+    }
+
+    /// A pick: `None` when there is none, else whether its browser has started.
+    pub(crate) fn picking_state(&self) -> Option<bool> {
+        self.picking.as_ref().map(|p| p.id.is_some())
+    }
+
     /// Record at Cursor: the recorder, its steps written where the caret is.
     pub fn record_at_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.recording.is_some() {

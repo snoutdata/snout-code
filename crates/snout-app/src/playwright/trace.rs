@@ -62,13 +62,21 @@ fn lines(text: &str) -> impl Iterator<Item = Value> + '_ {
 
 /// Read the trace at `path`.
 pub fn read(path: &Path) -> anyhow::Result<Trace> {
-    let file = std::fs::File::open(path)?;
+    of_archive(std::fs::File::open(path)?)
+}
+
+/// Read a trace from its bytes, as the machine the project is on gave them.
+pub fn of_bytes(bytes: Vec<u8>) -> anyhow::Result<Trace> {
+    of_archive(std::io::Cursor::new(bytes))
+}
+
+fn of_archive<R: std::io::Read + std::io::Seek>(file: R) -> anyhow::Result<Trace> {
     let mut zip = zip::ZipArchive::new(file)?;
     let names: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
     let mut trace = Trace::default();
     let mut start: Option<f64> = None;
     let mut open: Vec<(String, usize)> = Vec::new();
-    let text_of = |zip: &mut zip::ZipArchive<std::fs::File>, name: &str| -> String {
+    let text_of = |zip: &mut zip::ZipArchive<R>, name: &str| -> String {
         let mut s = String::new();
         if let Ok(mut f) = zip.by_name(name) {
             let _ = f.read_to_string(&mut s);

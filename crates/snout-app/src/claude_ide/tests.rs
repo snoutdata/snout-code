@@ -242,6 +242,11 @@ fn connected<'a>(name: &str, cx: &'a mut TestAppContext) -> Connected<'a> {
     std::fs::write(repo.join("src/demo/Other.java"), "class Other {}\n").unwrap();
     git(&repo, &["add", "src/demo"]);
     git(&repo, &["commit", "-qm", "Add hello"]);
+    connected_to(repo, name, cx)
+}
+
+/// A window on `repo`, connected, as [`connected`] makes it.
+fn connected_to<'a>(repo: PathBuf, name: &str, cx: &'a mut TestAppContext) -> Connected<'a> {
     let lock_dir = scratch_dir(&format!("{name}-ide"));
     let (model, ws, cx) = open_with_ide(cx, with_repo(&repo), &lock_dir);
     let lock = lock_in(&lock_dir);
@@ -1610,6 +1615,16 @@ fn agent_gets_answer(cx: &mut VisualTestContext, call: std::thread::JoinHandle<S
     (status, out.split_once("\r\n\r\n").map_or(String::new(), |(_, b)| b.to_owned()))
 }
 
+/// A change as an agent asks for it, with the user allowing it once on the card.
+fn agent_allowed(cx: &mut VisualTestContext, model: &Entity<Model>, tool: &str, arguments: Value) -> (u16, String) {
+    use crate::model::Dialog;
+    let asked = agent_starts_call(cx, tool, arguments, true);
+    pump_until(cx, "the card", |cx| cx.update(|_, cx| matches!(model.read(cx).dialog, Some(Dialog::AgentAsks { .. }))));
+    cx.run_until_parked();
+    crate::quit_tests::click(cx, "agent-once");
+    agent_gets_answer(cx, asked)
+}
+
 /// The harness, as an agent meets it: this test is the agent, speaking HTTP to the real window,
 /// and what it asserts is what the window does.
 #[gpui::test]
@@ -1990,7 +2005,6 @@ fn an_agent_asks_the_java_engine_what_the_code_is(cx: &mut TestAppContext) {
 /// and those it may not, telling the user something, and its own changes.
 #[gpui::test]
 fn an_agent_works_git_settings_and_its_own_changes(cx: &mut TestAppContext) {
-    use crate::model::Dialog;
     let (repo, lock_dir, model, ws, _client, cx) = connected("harness-rest", cx);
     let (port, hook_cmd) = hook_command(&ws, cx);
     let call = |cx: &mut VisualTestContext, tool: &str, a: Value| -> Value {
@@ -1999,15 +2013,8 @@ fn an_agent_works_git_settings_and_its_own_changes(cx: &mut TestAppContext) {
         serde_json::from_str(&body).unwrap_or(Value::String(body))
     };
     // Each change is allowed once here: the card's own test is above.
-    let allowed = |cx: &mut VisualTestContext, tool: &str, a: Value| -> (u16, String) {
-        let asked = agent_starts_call(cx, tool, a, true);
-        pump_until(cx, "the card", |cx| {
-            cx.update(|_, cx| matches!(model.read(cx).dialog, Some(Dialog::AgentAsks { .. })))
-        });
-        cx.run_until_parked();
-        crate::quit_tests::click(cx, "agent-once");
-        agent_gets_answer(cx, asked)
-    };
+    let allowed =
+        |cx: &mut VisualTestContext, tool: &str, a: Value| -> (u16, String) { agent_allowed(cx, &model, tool, a) };
 
     // A change on disk, shown, staged and committed through the window.
     std::fs::write(repo.join("note.txt"), "a note\n").unwrap();
@@ -2084,6 +2091,93 @@ fn an_agent_works_git_settings_and_its_own_changes(cx: &mut TestAppContext) {
     for dir in [repo, lock_dir] {
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// Playwright, as an agent asks for it: its tests run in the Tests window, it learns which failed and
+/// what the trace saw, and the browser it asks for opens for the user.
+#[gpui::test]
+fn an_agent_runs_playwright_and_reads_what_failed(cx: &mut TestAppContext) {
+    if crate::lang::node::discover(&*snout_host::local()).is_empty() {
+        println!("an agent runs Playwright: skipped; needs Node");
+        return;
+    }
+    let repo = crate::playwright_tests::running::fake_project("harness-pw");
+    let fixtures = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/playwright"));
+    std::fs::copy(fixtures.join("fake-api.js"), repo.join("node_modules/@playwright/test/index.js")).unwrap();
+    let (repo, lock_dir, model, ws, _client, cx) = connected_to(repo, "harness-pw", cx);
+    hook_command(&ws, cx);
+    let (tests, runs) = cx.update(|_, cx| (ws.read(cx).pw_tests.clone(), ws.read(cx).runs.clone()));
+    pump_until(cx, "the tests listed", |cx| cx.update(|_, cx| tests.read(cx).listing.is_some()));
+
+    // The run: the id, in the Tests window, its failure with where it is and its trace.
+    let (status, body) = agent_allowed(cx, &model, "runPlaywrightTests", json!({}));
+    assert_eq!(status, 200, "{body}");
+    let id = serde_json::from_str::<Value>(&body).unwrap()["id"].as_u64().expect("the run's id");
+    pump_until(cx, "the run's end", |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| !s.running())));
+    cx.update(|_, cx| assert_eq!(tests.read(cx).live, Some(id), "the Tests window follows it"));
+    let (status, body) = agent_calls(cx, "getTestResults", json!({ "id": id }), true);
+    assert_eq!(status, 200, "{body}");
+    let results: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        (&results["passed"], &results["failed"], &results["flaky"]),
+        (&json!(2), &json!(1), &json!(1)),
+        "{body}"
+    );
+    let failure = &results["failures"][0];
+    assert!(failure["title"].as_str().unwrap().contains("pays by card"), "{body}");
+    assert_eq!(failure["project"], "chromium", "{body}");
+    assert!(failure["file"].as_str().unwrap().ends_with("shop.spec.ts"), "{body}");
+    assert!(!failure["errors"].as_array().unwrap().is_empty(), "{body}");
+    assert!(failure["trace"].as_str().unwrap().ends_with("trace.zip"), "{body}");
+
+    // What the trace saw, by part of the name, the failed one first.
+    let (status, body) = agent_calls(cx, "getPlaywrightTrace", json!({ "test": "PAYS BY", "id": id }), true);
+    assert_eq!(status, 200, "{body}");
+    let trace: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(trace["actions"][1]["error"], "Timeout 5000ms exceeded.", "{body}");
+    assert_eq!(trace["failedRequests"][0]["status"], 502, "{body}");
+    assert_eq!(trace["consoleErrors"][0], "Payment widget: order id missing", "{body}");
+    let (status, body) = agent_calls(cx, "getPlaywrightTrace", json!({ "test": "no such", "id": id }), true);
+    assert!(status == 422 && body.contains("no such"), "{status} {body}");
+
+    // The recorder and the picker: nothing without a spec in front, then the browser for the user.
+    let (status, body) = agent_allowed(cx, &model, "recordPlaywrightTest", json!({}));
+    assert!(status == 422 && body.contains("open a spec"), "{status} {body}");
+    let spec = repo.join("tests/shop.spec.ts");
+    agent_calls(cx, "openFile", json!({ "filePath": spec.to_string_lossy() }), true);
+    pump_until(cx, "the spec open", |cx| {
+        cx.update(|_, cx| ws.read(cx).editors(cx).iter().any(|e| e.read(cx).path == spec && !e.read(cx).loading))
+    });
+    for (tool, again) in [("recordPlaywrightTest", "recording is going"), ("pickPlaywrightLocator", "Picking is on")] {
+        let (status, body) = agent_allowed(cx, &model, tool, json!({}));
+        assert_eq!(status, 200, "{tool}: {body}");
+        pump_until(cx, "the tab to say so", |cx| cx.debug_bounds("record-bar").is_some());
+        let (status, body) = agent_allowed(cx, &model, tool, json!({}));
+        assert!(status == 422 && body.contains(again), "{tool}: {status} {body}");
+        cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::StopRecording), cx));
+        pump_until(cx, "the stop", |cx| cx.debug_bounds("record-bar").is_none());
+    }
+    drop(ws);
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
+/// A project with no Playwright: each tool says so, and nothing claims to have started.
+#[gpui::test]
+fn an_agent_asking_for_playwright_where_there_is_none_is_told(cx: &mut TestAppContext) {
+    let (repo, lock_dir, model, ws, _client, cx) = connected("harness-no-pw", cx);
+    hook_command(&ws, cx);
+    let (status, body) = agent_allowed(cx, &model, "runPlaywrightTests", json!({}));
+    assert!(status == 422 && body.contains("no Playwright tests"), "{status} {body}");
+    for tool in ["recordPlaywrightTest", "pickPlaywrightLocator"] {
+        let (status, body) = agent_allowed(cx, &model, tool, json!({}));
+        assert!(status == 422 && body.contains("works in a Playwright project"), "{tool}: {status} {body}");
+    }
+    let (status, body) = agent_calls(cx, "getPlaywrightTrace", json!({ "test": "any" }), true);
+    assert_eq!(status, 422, "{body}");
+    drop(ws);
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
 }
 
 /// What an agent shows the user: the view comes forward once, later pushes leave the user where they
