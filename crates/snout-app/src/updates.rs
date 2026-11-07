@@ -348,8 +348,9 @@ fn waiter_program(cfg: &WaiterConfig) -> std::io::Result<PathBuf> {
     if !matches!(cfg.plan, Plan::Installer { .. }) {
         return Ok(exe);
     }
-    let copy = snout_update::swap::waiter_path(&cfg.updates);
-    if copy.exists() { Ok(copy) } else { snout_update::swap::make_waiter_copy(&cfg.updates, &exe) }
+    let version = current_version();
+    let copy = snout_update::swap::waiter_path(&cfg.updates, &version);
+    if copy.exists() { Ok(copy) } else { snout_update::swap::make_waiter_copy(&cfg.updates, &exe, &version) }
 }
 
 /// What to start as the app quits. The download in flight stops here too.

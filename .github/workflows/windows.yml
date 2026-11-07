@@ -202,13 +202,6 @@ jobs:
         run: |
           $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
           scripts\windows\install-test.ps1 -Setup $setup.FullName -Jdk "${{ steps.java.outputs.path }}" -Out target\windows-install-test
-      # TEMPORARY, once: the way 1.0.0 and 1.0.1 ran the update's waiter, to see what it does.
-      - name: An update with the waiter hard linked (what 1.0.1 did)
-        continue-on-error: true
-        timeout-minutes: 10
-        run: |
-          $setup = Get-ChildItem target\windows-package -Filter 'SnoutCode-*-setup.exe' | Select-Object -First 1
-          scripts\windows\update-test.ps1 -Setup $setup.FullName -Out target\windows-install-test\update-hardlink -HardLink
       # A real update: the running app gone, the waiter, the real installer over the real install,
       # the app back; then a launch that a lock left behind must not hold.
       - name: A real update, through the waiter and the installer
@@ -235,7 +228,8 @@ jobs:
         timeout-minutes: 15
         env:
           SNOUT_WSL_DISTRO: Ubuntu-24.04
-          SNOUT_SERVER_BINARIES: target/snout-server-dist
+          # Absolute: cargo runs a test in its package's folder.
+          SNOUT_SERVER_BINARIES: ${{ github.workspace }}/target/snout-server-dist
         run: cargo test --locked -p snout-remote --test wsl -- --ignored --nocapture
       - name: The installed app opens a folder inside WSL
         if: matrix.arch == 'x64'

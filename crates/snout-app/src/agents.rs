@@ -357,6 +357,34 @@ pub fn locate(host: &dyn snout_host::Host, id: &str, configured: Option<PathBuf>
 /// something, must not leave the console starting for ever.
 const SHELL_LOOKUP: std::time::Duration = std::time::Duration::from_secs(6);
 
+/// The PATH for a program started now on Windows: this app's, then the user's and the machine's as
+/// they are now, for what was installed since this app started. None elsewhere, or if it cannot say.
+pub fn windows_fresh_path(host: &dyn snout_host::Host) -> Option<String> {
+    let info = host.info();
+    if !info.is_windows() {
+        return None;
+    }
+    let script =
+        "[Environment]::GetEnvironmentVariable('Path','User'); [Environment]::GetEnvironmentVariable('Path','Machine')";
+    let cmd = snout_host::Cmd::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+        .stdout(snout_host::Stdio::Piped)
+        .group();
+    let out = output_within(host, cmd, SHELL_LOOKUP)?;
+    let mut dirs: Vec<String> = info.path_dirs().iter().map(|d| d.display().to_string()).collect();
+    merge_path(&mut dirs, &String::from_utf8_lossy(&out));
+    Some(dirs.join(";"))
+}
+
+/// `found` (lines of `;`-separated folders) after `dirs`, each folder once, whatever its case.
+fn merge_path(dirs: &mut Vec<String>, found: &str) {
+    for dir in found.lines().flat_map(|l| l.split(';')).map(str::trim).filter(|d| !d.is_empty()) {
+        if !dirs.iter().any(|d| d.eq_ignore_ascii_case(dir)) {
+            dirs.push(dir.to_owned());
+        }
+    }
+}
+
 /// What PowerShell runs to name the program `name`: on the PATH the user has now, not the one this
 /// app started with, which misses whatever was installed since, and after their profile has run
 /// (fnm and the like add to the PATH there). Programs only: npm's `.ps1` shim cannot be started.
@@ -437,6 +465,13 @@ mod tests {
         assert_eq!(found, Some(PathBuf::from(r"C:\Users\ann\AppData\Roaming\npm\amp.cmd")));
         assert_eq!(program_in_output("just talking\n", true, is_file), None);
         assert_eq!(program_in_output("/home/ann/gone/amp\n", false, is_file), None);
+    }
+
+    #[test]
+    fn a_fresh_path_keeps_this_apps_folders_first_and_adds_each_new_one_once() {
+        let mut dirs = vec![r"C:\Windows".to_owned()];
+        merge_path(&mut dirs, "C:\\Users\\a\\AppData\\Roaming\\npm;c:\\windows;\r\nC:\\Program Files\\nodejs\r\n");
+        assert_eq!(dirs, [r"C:\Windows", r"C:\Users\a\AppData\Roaming\npm", r"C:\Program Files\nodejs"]);
     }
 
     #[test]

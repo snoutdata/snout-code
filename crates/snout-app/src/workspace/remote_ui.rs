@@ -69,24 +69,27 @@ impl Workspace {
         cx.notify();
     }
 
-    /// A folder inside WSL was opened: connect to its distro, and open it there.
+    /// A folder inside WSL was opened: settle the unsaved tabs, connect to its distro, and open it
+    /// there. Answering Cancel leaves everything as it was, with nothing connected.
     pub(super) fn go_to_wsl(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(wsl) = self.model.update(cx, |m, _| m.pending_wsl.take()) else { return };
-        let name = wsl.connection();
-        let (ws, handle) = (cx.weak_entity(), window.window_handle());
-        let folder = PathBuf::from(wsl.path);
-        remote::connect(
-            name.clone(),
-            move |result, cx| {
-                let _ = handle.update(cx, |_, window, cx| {
-                    let _ = ws.update(cx, |this, cx| match result {
-                        Ok(host) => this.open_remote(name, host, folder, window, cx),
-                        Err(why) => this.model.update(cx, |m, cx| m.wsl_failed(&name, why, cx)),
+        self.settle_unsaved(window, cx, move |_, window, cx| {
+            let name = wsl.connection();
+            let (ws, handle) = (cx.weak_entity(), window.window_handle());
+            let folder = PathBuf::from(wsl.path);
+            remote::connect(
+                name.clone(),
+                move |result, cx| {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        let _ = ws.update(cx, |this, cx| match result {
+                            Ok(host) => this.open_remote(name, host, folder, window, cx),
+                            Err(why) => this.model.update(cx, |m, cx| m.wsl_failed(&name, why, cx)),
+                        });
                     });
-                });
-            },
-            cx,
-        );
+                },
+                cx,
+            );
+        });
     }
 
     /// Put up the folder picker of the remote machine, for `purpose`.

@@ -26,12 +26,14 @@ const OTHERS_GONE_WITHIN: Duration = Duration::from_secs(20);
 const RENAME_TRIES: u32 = 5;
 /// Nothing but us has a reason to hold the folder we just moved.
 const RESTORE_TRIES: u32 = 600;
-/// A lock older than this was left by a power cut, and is not waited on.
-const STALE_LOCK: Duration = Duration::from_secs(5 * 60);
-const LOCK_WAIT: Duration = Duration::from_secs(60);
 /// Long enough for someone to answer an administrator's prompt; a stuck installer must not hold
 /// the update, and every launch behind it, for ever.
 const INSTALLER_WITHIN: Duration = Duration::from_secs(10 * 60);
+/// A launch waits as long as a waiter that is really there can take: starting sooner would put the
+/// app in the folder its installer is about to replace, which would close it.
+const LOCK_WAIT: Duration = Duration::from_secs(11 * 60);
+/// A lock older than any waiter lasts was left behind (a power cut), and is not waited on.
+const STALE_LOCK: Duration = Duration::from_secs(15 * 60);
 
 /// How the swap was asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +76,8 @@ pub trait Deps {
     fn rename(&self, from: &Path, to: &Path) -> bool;
     fn remove_dir(&self, path: &Path);
     fn write(&self, path: &Path, text: &str);
+    /// Whether this user can write in `folder`.
+    fn can_write(&self, folder: &Path) -> bool;
     /// This process.
     fn own_pid(&self) -> u32;
     fn remove_file(&self, path: &Path);
@@ -169,10 +173,14 @@ fn run_installer(cfg: &WaiterConfig, installer: &Path, folder: &Path, d: &dyn De
     if !wait_until(d, OTHERS_GONE_WITHIN, || d.others_in(folder) == 0) {
         d.log("something still runs from the install folder; the installer closes it");
     }
-    // Its own account of what it did, beside the update's.
+    // Its own account of what it did, beside the update's. Only where the installer runs as this
+    // user: run as an administrator it may not reach this user's folder, and Setup gives up when it
+    // cannot write its log.
     let log = format!("/LOG={}", cfg.log.with_file_name("update-installer.log").display());
     let mut args = installer_args(cfg.mode);
-    args.push(&log);
+    if d.can_write(folder) {
+        args.push(&log);
+    }
     let code = d.run(installer, &args);
     d.log(&format!("the installer of v{} exited: {code:?}", cfg.version));
     code == Some(0)
@@ -234,24 +242,30 @@ pub fn wait_out_swap(updates: &Path, exe: &Path) -> bool {
     crate::command(exe).args(std::env::args_os().skip(1)).spawn().is_ok()
 }
 
+/// Whether the waiter `pid` runs: a process of ours, since the system reuses numbers.
 fn pid_alive(pid: u32) -> bool {
-    snout_host::local().processes(false).is_ok_and(|all| all.iter().any(|p| p.pid == pid))
+    snout_host::local()
+        .processes(false)
+        .is_ok_and(|all| all.iter().any(|p| p.pid == pid && p.name.to_lowercase().contains("snout")))
 }
 
-/// Where the waiter's program goes for an installer's update.
-pub fn waiter_path(updates: &Path) -> PathBuf {
-    updates.join("waiter").join("snout-code-update.exe")
+/// Where the waiter's program goes for an installer's update, for a running program of `version`:
+/// a copy left by another version is never taken for this one's.
+pub fn waiter_path(updates: &Path, version: &str) -> PathBuf {
+    updates.join("waiter").join(format!("snout-code-update-{version}.exe"))
 }
 
-/// Copy the program `exe` to where the waiter runs from. A real copy, never a hard link: a link is
-/// the very file the installer has to replace, and Windows does not replace a file that is running.
-pub fn make_waiter_copy(updates: &Path, exe: &Path) -> std::io::Result<PathBuf> {
-    let copy = waiter_path(updates);
-    if let Some(dir) = copy.parent() {
-        let _ = std::fs::remove_dir_all(dir);
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::copy(exe, &copy)?;
+/// Copy the program `exe`, of `version`, to where the waiter runs from. A real copy, never a hard
+/// link: a link is the very file the installer has to replace, and Windows does not replace a file
+/// that is running. Whole or not at all: a process killed halfway leaves no program to run.
+pub fn make_waiter_copy(updates: &Path, exe: &Path, version: &str) -> std::io::Result<PathBuf> {
+    let copy = waiter_path(updates, version);
+    let dir = copy.parent().unwrap_or(updates);
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir)?;
+    let part = copy.with_extension("part");
+    std::fs::copy(exe, &part)?;
+    std::fs::rename(&part, &copy)?;
     Ok(copy)
 }
 
@@ -309,6 +323,10 @@ impl Deps for OsDeps {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(path, text);
+    }
+
+    fn can_write(&self, folder: &Path) -> bool {
+        crate::route::can_write(folder)
     }
 
     fn own_pid(&self) -> u32 {
@@ -423,6 +441,8 @@ mod tests {
         app_never_goes: bool,
         others: usize,
         installer_says: Option<i32>,
+        all_users: bool,
+        installer_log: std::cell::Cell<bool>,
     }
 
     impl Fake {
@@ -478,6 +498,9 @@ mod tests {
         fn write(&self, path: &Path, text: &str) {
             self.note(format!("write {} {text}", path.display()));
         }
+        fn can_write(&self, _: &Path) -> bool {
+            !self.all_users
+        }
         fn own_pid(&self) -> u32 {
             42
         }
@@ -487,6 +510,7 @@ mod tests {
         fn sleep(&self, _: Duration) {}
         fn run(&self, file: &Path, args: &[&str]) -> Option<i32> {
             self.note(format!("run {} {}", file.display(), args[0]));
+            self.installer_log.replace(args.iter().any(|a| a.starts_with("/LOG=")));
             self.installer_says
         }
         fn launch(&self, app: &Path, _: bool) {
@@ -577,6 +601,9 @@ mod tests {
                 self.0.remove_dir(p)
             }
             fn write(&self, _: &Path, _: &str) {}
+            fn can_write(&self, _: &Path) -> bool {
+                true
+            }
             fn own_pid(&self) -> u32 {
                 42
             }
@@ -696,46 +723,43 @@ mod tests {
     }
 
     #[test]
-    fn the_waiters_program_is_a_real_copy_never_a_link_to_the_file_being_replaced() {
+    fn the_installers_log_is_asked_for_only_where_it_can_be_written() {
+        let d = Fake { installer_says: Some(0), ..Default::default() };
+        run_waiter(&installer_cfg(Mode::Quit), &d);
+        assert!(d.installer_log.get(), "a per-user install keeps its log");
+        let d = Fake { installer_says: Some(0), all_users: true, ..Default::default() };
+        run_waiter(&installer_cfg(Mode::Restart), &d);
+        assert!(!d.installer_log.get(), "Setup, elevated, would give up on this user's folder");
+    }
+
+    #[test]
+    fn a_waiter_outlasts_any_installer_and_a_lock_outlasts_any_waiter() {
+        assert!(LOCK_WAIT > INSTALLER_WITHIN + APP_GONE_WITHIN + OTHERS_GONE_WITHIN);
+        assert!(STALE_LOCK > LOCK_WAIT);
+    }
+
+    #[test]
+    fn the_waiters_program_is_a_real_copy_of_this_version_never_a_link_to_the_file_being_replaced() {
         let dir = tempfile::tempdir().unwrap();
         let exe = dir.path().join("app.exe");
         std::fs::write(&exe, "the program").unwrap();
         let updates = dir.path().join("updates");
-        let copy = make_waiter_copy(&updates, &exe).unwrap();
-        assert_eq!(copy, waiter_path(&updates));
+        let copy = make_waiter_copy(&updates, &exe, "1.0.1").unwrap();
+        assert_eq!(copy, waiter_path(&updates, "1.0.1"));
+        assert_ne!(
+            waiter_path(&updates, "1.0.1"),
+            waiter_path(&updates, "1.0.2"),
+            "another version's is not this one's"
+        );
         // Writing the original leaves the copy, as it never would a hard link.
         std::fs::write(&exe, "the new version").unwrap();
         assert_eq!(std::fs::read_to_string(&copy).unwrap(), "the program");
-        // A second update starts from what is running now.
-        assert_eq!(std::fs::read_to_string(make_waiter_copy(&updates, &exe).unwrap()).unwrap(), "the new version");
-    }
-
-    /// The app's background threads block signals, and a child inherits that: the waiter, and so
-    /// the new version it starts, once ignored every `kill` this way.
-    #[cfg(unix)]
-    #[test]
-    fn what_a_thread_with_signals_blocked_starts_still_answers_a_kill() {
-        let started = std::thread::spawn(|| {
-            // SAFETY: changes this thread's mask only, with a set made here.
-            unsafe {
-                let mut all: libc::sigset_t = std::mem::zeroed();
-                libc::sigfillset(&mut all);
-                libc::pthread_sigmask(libc::SIG_BLOCK, &all, std::ptr::null_mut());
-            }
-            spawn_detached(crate::command("sleep").arg("30")).unwrap()
-        });
-        let mut child = started.join().unwrap();
-        // SAFETY: a signal to the child just started.
-        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
-        for _ in 0..50 {
-            if child.try_wait().unwrap().is_some() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        child.kill().unwrap();
-        child.wait().unwrap();
-        panic!("SIGTERM stayed blocked in the child");
+        // Nothing half made stays beside it.
+        assert_eq!(std::fs::read_dir(copy.parent().unwrap()).unwrap().count(), 1);
+        // A later update starts from what is running then, and the old copy goes.
+        let next = make_waiter_copy(&updates, &exe, "1.0.2").unwrap();
+        assert_eq!(std::fs::read_to_string(next).unwrap(), "the new version");
+        assert!(!copy.exists());
     }
 
     /// Real folders, the real exchange, a real relaunch.

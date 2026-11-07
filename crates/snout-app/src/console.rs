@@ -496,9 +496,15 @@ impl ConsolePanel {
             (crate::agents::OPENCODE, s.opencode_path.clone()),
             (crate::agents::AMP, s.amp_path.clone()),
         ];
-        let looked = cx
-            .background_executor()
-            .spawn(async move { paths.map(|(id, path)| (id, crate::agents::locate(&*host, id, path).is_some())) });
+        let looked = cx.background_executor().spawn(async move {
+            // Side by side: on Windows each one missing can take seconds to be sure of.
+            std::thread::scope(|scope| {
+                let host = &host;
+                paths
+                    .map(|(id, path)| (id, scope.spawn(move || crate::agents::locate(&**host, id, path).is_some())))
+                    .map(|(id, look)| (id, look.join().unwrap_or(false)))
+            })
+        });
         cx.spawn(async move |this, cx| {
             let found = looked.await;
             let _ = this.update(cx, |this, cx| {
@@ -962,7 +968,13 @@ impl ConsolePanel {
                 };
                 let program = program.or(found).ok_or(None)?;
                 let env_remove: &[&str] = if kind == Kind::Claude { ENV_REMOVE } else { &[] };
-                let env: Vec<(&str, String)> = env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+                let mut env: Vec<(&str, String)> = env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+                // Windows: what was installed since this app started is on the user's PATH, not on
+                // the one it started with, and an agent npm installed looks for `node` there.
+                let path = crate::agents::windows_fresh_path(&*host);
+                if let Some(path) = &path {
+                    env.push(("PATH", path.clone()));
+                }
                 let launch =
                     Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove, scrollback, size };
                 Pty::spawn(&*host, &launch, engine, fg, bg, || {})
@@ -1217,8 +1229,13 @@ impl ConsolePanel {
     /// Type what is on the clipboard into `root`'s terminal.
     fn paste_clipboard(&mut self, root: &Path, cx: &mut Context<Self>) {
         let text = cx.read_from_clipboard().and_then(|c| c.text());
-        if let (Some(text), Some(s)) = (text, self.sessions.get(root)) {
-            s.pty.paste(&text);
+        let Some(s) = self.sessions.get(root) else { return };
+        match text {
+            Some(text) => s.pty.paste(&text),
+            // Windows: no text to paste (a screenshot, say), so Ctrl+V goes to the program as it
+            // would have: an agent may attach the image, and vim and the shell have uses for the key.
+            None if cfg!(windows) => s.pty.send(&[0x16]),
+            None => {}
         }
     }
 

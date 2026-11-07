@@ -941,17 +941,27 @@ impl Model {
 
     // ----- State ----------------------------------------------------------------------
 
+    /// `path` is inside WSL: the workspace connects to its distro, as to a machine of Remote SSH,
+    /// and opens it there. The project open now stays until that has worked; only a project
+    /// remembered from last time that was in WSL, which never opened here, is let go of.
+    fn go_to_wsl(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
+        let Some(wsl) = crate::wsl::of_host(&*self.host, path) else { return false };
+        if self.settings.current.as_deref() == Some(path) {
+            self.settings.current = None;
+            if !self.project_open() {
+                self.project = None;
+            }
+        }
+        self.pending_wsl = Some(wsl);
+        cx.notify();
+        true
+    }
+
     /// Open the folder `path` as the project, with the repository found at or above it, off
     /// the UI thread. When another project is open, the workspace is asked first
     /// ([`ModelEvent::Switch`]), and [`Model::switch_project`] finishes the opening.
     fn open_repo(&mut self, path: &Path, cx: &mut Context<Self>) {
-        // A folder inside WSL: the window goes there, as to a machine of Remote SSH.
-        if let Some(wsl) = crate::wsl::of_host(&*self.host, path) {
-            self.project = None;
-            self.settings.current = None;
-            self.pending_file = None;
-            self.pending_wsl = Some(wsl);
-            cx.notify();
+        if self.go_to_wsl(path, cx) {
             return;
         }
         let host = self.host.clone();
@@ -1149,6 +1159,10 @@ impl Model {
     /// Open `path` as the command line names it: `File.java:12` or `File.java:12:5` puts the
     /// caret on that line (and column), from 1.
     pub fn open_arg(&mut self, arg: &Path, cx: &mut Context<Self>) {
+        // A file in WSL, and its line, too: the Linux side reads them, this side's Git never does.
+        if self.go_to_wsl(arg, cx) {
+            return;
+        }
         let host = self.host.clone();
         let arg = arg.to_owned();
         let look = cx.background_executor().spawn(async move {
@@ -1174,6 +1188,9 @@ impl Model {
     /// Open the folder `path` as the project, or the file `path` (at `at`) in its repository,
     /// once the host says which it is.
     fn open_path_at(&mut self, path: &Path, at: Option<(u32, u32)>, cx: &mut Context<Self>) {
+        if self.go_to_wsl(path, cx) {
+            return;
+        }
         let host = self.host.clone();
         let path = path.to_owned();
         let look = cx.background_executor().spawn({

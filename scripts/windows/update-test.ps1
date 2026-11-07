@@ -3,13 +3,13 @@
 # must be back, the waiter must end, its lock must be lifted, and the app must come back as the real
 # app, not as a process that shows nothing. Then a launch must not be held by a lock left behind.
 #
-#   update-test.ps1 -Setup <SnoutCode-…-setup.exe> [-Out <dir>] [-HardLink]
+#   update-test.ps1 -Setup <SnoutCode-…-setup.exe> [-Out <dir>]
 #
-# -HardLink runs the waiter from a hard link to the program, as 1.0.0 and 1.0.1 did.
+# The waiter runs from a real copy of the program. From a hard link to it, as in 1.0.0 and 1.0.1, the
+# installer killed the waiter a few seconds in, and the waiter's lock stayed behind.
 param(
     [Parameter(Mandatory = $true)][string]$Setup,
-    [string]$Out = "target\windows-install-test\update",
-    [switch]$HardLink
+    [string]$Out = "target\windows-install-test\update"
 )
 $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
@@ -87,7 +87,7 @@ if (-not (WaitFor 90 { RealApp })) { Fail "the app did not start" }
 # What a quit does: the waiter's program and its plan, then the app goes.
 $program = Join-Path $updates "waiter\snout-code-update.exe"
 New-Item -ItemType Directory -Force -Path (Split-Path $program) | Out-Null
-if ($HardLink) { New-Item -ItemType HardLink -Path $program -Target $exe | Out-Null } else { Copy-Item $exe $program }
+Copy-Item $exe $program
 $installer = Join-Path $updates (Split-Path $Setup -Leaf)
 Copy-Item $Setup $installer
 $config = Join-Path $updates "waiter.json"
@@ -101,7 +101,7 @@ $config = Join-Path $updates "waiter.json"
     direct_launch = $true
 } | ConvertTo-Json -Depth 5 | Set-Content -Path $config -Encoding utf8NoBOM
 
-Write-Host "== The update ($(if ($HardLink) { 'hard link' } else { 'copy' }))"
+Write-Host "== The update"
 $env:SNOUT_UPDATE_WAITER = $config
 $waiter = Start-Process -FilePath $program -PassThru
 $env:SNOUT_UPDATE_WAITER = $null

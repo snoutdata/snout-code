@@ -162,7 +162,7 @@ fn fetch_and_stage(
         .map_err(|e| describe(&format!("the new version could not be written: {e}"), None))?;
     // Now, not as the app quits, which has seconds to do it in. If this fails the quit tries again.
     if let Route::WindowsInstaller { exe, .. } = &cfg.route
-        && let Err(e) = crate::swap::make_waiter_copy(&cfg.updates, exe)
+        && let Err(e) = crate::swap::make_waiter_copy(&cfg.updates, exe, &cfg.current)
     {
         cfg.log(&format!("the waiter's program could not be copied yet: {e}"));
     }

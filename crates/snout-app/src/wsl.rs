@@ -54,7 +54,9 @@ pub fn distros() -> Vec<String> {
     }
     let mut c = std::process::Command::new("wsl.exe");
     snout_host::default_signals(&mut c);
-    c.args(["-l", "-q"]).output().map(|out| distros_in(&out.stdout)).unwrap_or_default()
+    // Always UTF-16, whatever the user has set. A failure's words (no distro installed) are not names.
+    c.args(["-l", "-q"]).env_remove("WSL_UTF8");
+    c.output().ok().filter(|out| out.status.success()).map(|out| distros_in(&out.stdout)).unwrap_or_default()
 }
 
 #[cfg(test)]
