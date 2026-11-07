@@ -43,6 +43,12 @@ StopAll
 $p = Start-Process -FilePath $Setup -Wait -PassThru -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER")
 if ($p.ExitCode -ne 0) { Fail "the install exited with $($p.ExitCode)" }
 Remove-Item $recents -Force -ErrorAction SilentlyContinue
+# The console runs Amp when the window opens, as a user who left it open would have it. Put back after.
+$settings = Join-Path $env:APPDATA "SnoutCode\settings.json"
+$kept = if (Test-Path $settings) { Get-Content $settings -Raw } else { $null }
+New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
+Set-Content -Path $settings -Value '{"console_open":true,"console_agent":"amp"}'
+InDistro "rm -f /tmp/harness-answer" | Out-Null
 InDistro "rm -rf ~/.snout-code; mkdir -p /tmp/wsl-demo; echo hello > /tmp/wsl-demo/notes.txt" | Out-Null
 
 Write-Host "== Opening \\wsl.localhost\$Distro\tmp\wsl-demo"
@@ -60,8 +66,16 @@ if ($opened.projects[0].host -ne "WSL: $Distro") { Fail "it opened on $($opened.
 if (-not (Get-Process -Name "snout-code" -ErrorAction SilentlyContinue | Where-Object { $_.WorkingSet64 -gt 30MB })) {
     Fail "the app is not running as the real app"
 }
+# An agent in the distro reaches the window: the API's port is forwarded through wsl.exe.
+if (-not (WaitFor 120 { InDistro "grep -q wsl-demo /tmp/harness-answer && grep -q showToolWindow /tmp/harness-answer && echo yes" })) {
+    InDistro "cat /tmp/harness-answer 2>&1" | ForEach-Object { Write-Host $_ }
+    Fail "the agent in the distro did not reach the window"
+}
+Write-Host "the agent in $Distro reached the window"
+InDistro "cut -c1-300 /tmp/harness-answer" | ForEach-Object { Write-Host $_ }
 Show
 StopAll
+if ($null -ne $kept) { Set-Content -Path $settings -Value $kept } else { Remove-Item $settings -Force -ErrorAction SilentlyContinue }
 $env:SNOUT_NO_UPDATE = $null
 $env:SNOUT_NO_FETCH = $null
 Start-Process -FilePath (Join-Path $dir "unins000.exe") -Wait -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") | Out-Null

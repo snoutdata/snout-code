@@ -10,7 +10,7 @@ It works without an MCP server, so the editor's tools cost almost nothing in a s
 does not use them. The chain is **Agent Skill → UTCP → API**:
 
 1. **An Agent Skill** tells the agent how to reach the editor. The console's `claude` loads it
-   for its session only.
+   for its session only. Codex, opencode and Amp get one MCP tool instead (see [Other agents](#other-agents)).
 2. **A UTCP manual** describes each call: its name, what it does, its inputs, and the HTTP
    request that makes it.
 3. **A plain HTTP API** in SnoutCode answers the calls.
@@ -28,7 +28,9 @@ For the API's twelve tools, measured on what SnoutCode sends:
 | The twelve tools as MCP definitions | about 4,900 characters, roughly 1,200 tokens | every request of the session |
 | The skill's description | about 290 characters, roughly 70 tokens | every request of the session |
 | The skill's instructions, with the `openFile` call | about 1,500 characters, roughly 370 tokens | once, when the agent first uses the editor |
-| The UTCP manual, all twelve tools | about 14,800 characters, roughly 3,700 tokens | only when the agent needs a tool other than `openFile` |
+| The short manual, all twelve tools | about 2,200 characters, roughly 550 tokens | only when the agent needs a tool other than `openFile` |
+| One domain's manual, the editor's | about 3,400 characters, roughly 840 tokens | only when the agent needs that domain |
+| The MCP tool, for agents without the skill | about 670 characters, roughly 170 tokens | every request of the session |
 
 So a session that never touches the editor pays less than a tenth of what the MCP definitions
 would cost, on every request. Opening a file, the common case, needs the skill alone; the
@@ -47,7 +49,7 @@ selection in its prompt), not tools for the model, and stays as it is.
 You do nothing: start Claude Code in the console and ask. Behind it, SnoutCode starts `claude`
 with:
 
-- `--plugin-dir`, a plugin of its own holding the **snout-editor** skill and a small script,
+- `--plugin-dir`, a plugin of its own holding the **snoutcode** skill and a small script,
   `snout-api`. Nothing is installed into your Claude Code setup, and the plugin is gone when
   the window closes.
 - `--settings`, the settings it already passes for its hooks, which also let `snout-api` run
@@ -72,7 +74,8 @@ the agent's transcript.
 
 | | |
 |---|---|
-| The manual | `GET http://127.0.0.1:$SNOUT_HOOK_PORT/utcp` |
+| The short manual | `GET http://127.0.0.1:$SNOUT_HOOK_PORT/manual`, every tool without its arguments; `?domain=editor` for a domain's tools with theirs |
+| The UTCP manual | `GET http://127.0.0.1:$SNOUT_HOOK_PORT/utcp` |
 | A call | `POST http://127.0.0.1:$SNOUT_HOOK_PORT/api/<tool>` |
 | Arguments | a JSON body, or query parameters (`?filePath=…&startLine=12`), or both (the body wins) |
 | The token | the header line in the file `$SNOUT_API_HEADER`; with curl, `-H @"$SNOUT_API_HEADER"` |
@@ -107,11 +110,27 @@ curl -s -X POST -H @"$SNOUT_API_HEADER" -H 'content-type: application/json' \
 
 ## Other agents
 
-The API is not Claude's alone. Any agent started in the console can read the manual and make
-the calls: Codex, opencode and Amp get the same two variables, and so does a command of your own. A UTCP client
-reads `GET /utcp` and calls the tools from it directly; the manual names the port
-(`${SNOUT_HOOK_PORT}`) and the token (`${SNOUT_API_TOKEN}`, the value in the header file) as
-variables, so nothing secret is written into it.
+Codex, opencode and Amp get the same tools through one MCP tool, `snoutcode`, for their session
+only. Nothing is written into your project or your settings:
+
+| Agent | How it gets the tool |
+|---|---|
+| Codex | `-c mcp_servers.snoutcode...` arguments. The token comes from the variable `SNOUT_API_TOKEN`. This server's calls do not ask for approval in Codex, because what changes something is asked in SnoutCode's window |
+| opencode | The session's `OPENCODE_CONFIG_CONTENT` variable |
+| Amp | `--mcp-config`, naming a file in the session's folder that only you can read |
+
+Why one MCP tool, when the reason for the skill is to avoid MCP's cost? A sandbox can cut an agent's
+commands off from the port (Codex's does, by default) but not its MCP client, so the script would
+not work there. And the cost was the definitions: one tool costs about what a skill's description
+does, however many tools the API has. The agent calls `snoutcode` with `tool: "manual"` to list the
+tools, and with `arguments: {"domain": "editor"}` for the arguments of a domain's tools.
+
+An agent of your own gets `SNOUT_HOOK_PORT`, `SNOUT_API_HEADER` and `SNOUT_API`, the script's path.
+Tell it about them in its instructions: `"$SNOUT_API" manual` lists the tools. A UTCP client reads
+`GET /utcp` and calls the tools from it directly; the manual names the port (`${SNOUT_HOOK_PORT}`)
+and the token (`${SNOUT_API_TOKEN}`, the value in the header file) as variables, so nothing secret
+is written into it. The script needs `sh` and `curl`; on Windows without Git for Windows, call the
+API with `curl.exe`.
 
 Outside SnoutCode's console there is no port or token, and the script says so: the API is for
 the agent working in the window.

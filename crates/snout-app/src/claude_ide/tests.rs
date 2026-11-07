@@ -975,7 +975,7 @@ fn codex_in_the_console_gets_its_turns_and_its_edits(cx: &mut TestAppContext) {
     settings.console_agent = crate::agents::ConsoleAgent::Codex;
     let (model, ws, cx) = open_with_ide(cx, settings, &lock_dir);
     pump_until(cx, "Codex's notify", |cx| {
-        cx.update(|_, cx| cx.try_global::<super::CodexArgs>().is_some_and(|a| a.0.len() == 10))
+        cx.update(|_, cx| cx.try_global::<super::CodexArgs>().is_some_and(|a| a.0.len() == 16))
     });
     let notify = cx.update(|_, cx| cx.global::<super::CodexArgs>().0.clone());
     assert_eq!(notify[0], "-c");
@@ -1370,7 +1370,9 @@ fn opencode_and_amp_get_their_own_arguments(cx: &mut TestAppContext) {
             })
         });
         let text = cx.update(|_, cx| console.read(cx).session_text(&repo)).unwrap();
-        assert!(text.contains("args=[]"), "{id} starts with no arguments of ours: {text}");
+        // opencode's come in a variable; Amp's name the MCP tool's file.
+        let ours = if id == crate::agents::AMP { "args=[--mcp-config " } else { "args=[]" };
+        assert!(text.contains(ours), "{id} starts with the arguments it should: {text}");
         // And Continue's arguments reach it.
         let resume = crate::console::continue_args(&crate::agents::Agent::of(id, &Default::default()));
         cx.update(|w, cx| console.update(cx, |c, cx| c.start(&repo, &resume, w, cx)));
@@ -1378,7 +1380,7 @@ fn opencode_and_amp_get_their_own_arguments(cx: &mut TestAppContext) {
             cx.update(|_, cx| console.read(cx).session_text(&repo).is_some_and(|t| t.contains("args=[")))
         });
         let text = cx.update(|_, cx| console.read(cx).session_text(&repo)).unwrap();
-        assert!(text.contains(&format!("args=[{}]", resume.join(" "))), "{id}: {text}");
+        assert!(text.replace('\n', "").contains(&format!("{}]", resume.join(" "))), "{id}: {text}");
     }
     for dir in [repo, lock_dir, bin] {
         let _ = std::fs::remove_dir_all(dir);
@@ -1555,7 +1557,8 @@ fn the_last_tab_closes_and_the_empty_editor_shows(cx: &mut TestAppContext) {
 /// Run `script` through the shell on its own thread, with `env`, while the window runs;
 /// whether it succeeded, and its standard output.
 fn shell_while_pumping(cx: &mut VisualTestContext, script: &str, env: &[(&'static str, String)]) -> (bool, String) {
-    let mut c = std::process::Command::new("/bin/sh");
+    // On Windows, the Git for Windows bash that Claude Code runs its commands with.
+    let mut c = std::process::Command::new(crate::tests::unix_tool("/bin/sh"));
     c.arg("-c").arg(script).env_remove(super::hooks::PORT_ENV).env_remove(super::api::HEADER_ENV);
     for (k, v) in env {
         c.env(k, v);
@@ -1654,6 +1657,78 @@ fn an_agent_finds_out_where_it_stands_and_shows_the_user_a_window(cx: &mut TestA
     let _ = std::fs::remove_dir_all(lock_dir);
 }
 
+/// The real agents, signed in, each asked in plain words to do what only the harness can: bring a
+/// window forward. Spends a little of each agent's budget, so it runs only when asked for:
+/// `SNOUT_REAL_AGENTS=codex,amp,claude`, or `opencode` too where it is installed.
+#[gpui::test]
+fn real_agents_work_the_window_through_the_harness(cx: &mut TestAppContext) {
+    let Ok(agents) = std::env::var("SNOUT_REAL_AGENTS") else { return };
+    use crate::workspace::Tool;
+    let (repo, lock_dir, _model, ws, _client, cx) = connected("harness-real", cx);
+    hook_command(&ws, cx);
+    let (env, claude, codex, amp, opencode) = cx.update(|_, cx| {
+        (
+            cx.global::<IdeEnv>().0.clone(),
+            cx.global::<super::IdeArgs>().0.clone(),
+            cx.global::<super::CodexArgs>().0.clone(),
+            cx.global::<super::AmpArgs>().0.clone(),
+            cx.global::<super::OpencodeEnv>().0.clone(),
+        )
+    });
+    let targets =
+        [(Tool::Problems, "Problems"), (Tool::Output, "Output"), (Tool::Terminal, "Terminal"), (Tool::Build, "Build")];
+    for (agent, (tool, name)) in agents.split(',').zip(targets) {
+        let prompt = format!(
+            "You are in SnoutCode's console. Use SnoutCode's tools to bring its {name} window to the front. Do nothing \
+             else, change no files, then say done."
+        );
+        let mut c = match agent {
+            "codex" => {
+                let mut c = std::process::Command::new("codex");
+                c.arg("exec").args(&codex).args(["--skip-git-repo-check", prompt.as_str()]);
+                c
+            }
+            "amp" => {
+                let mut c = std::process::Command::new("amp");
+                c.args(&amp).args(["-x", prompt.as_str()]);
+                c
+            }
+            "claude" => {
+                let mut c = std::process::Command::new("claude");
+                c.args(&claude).args(["-p", prompt.as_str()]);
+                c
+            }
+            "opencode" => {
+                let mut c = std::process::Command::new("opencode");
+                c.args(["run", prompt.as_str()]);
+                c
+            }
+            other => panic!("no agent called {other}"),
+        };
+        c.current_dir(&repo).stdin(std::process::Stdio::null());
+        for (k, v) in env.iter().chain(opencode.iter().filter(|_| agent == "opencode")) {
+            c.env(k, v);
+        }
+        let run = std::thread::spawn(move || c.output().unwrap());
+        let start = Instant::now();
+        while !run.is_finished() && start.elapsed() < Duration::from_secs(280) {
+            pump(cx, 200);
+        }
+        assert!(run.is_finished(), "{agent} did not finish");
+        let out = run.join().unwrap();
+        let said = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        pump(cx, 100);
+        let open = cx.update(|_, cx| ws.read(cx).tool_open(tool, cx));
+        eprintln!(
+            "--- {agent} ({name}: {open})\n{}",
+            said.chars().rev().take(900).collect::<String>().chars().rev().collect::<String>()
+        );
+        assert!(open, "{agent} did not bring {name} forward: {said}");
+    }
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
 /// With no project open the harness still answers, and says so: the agent in the home folder knows
 /// it has a project to make.
 #[gpui::test]
@@ -1677,16 +1752,13 @@ fn an_agent_with_no_project_is_told_so(cx: &mut TestAppContext) {
 /// query parameters works too; without the token nothing happens.
 #[gpui::test]
 fn the_skill_opens_files_in_the_editor_over_the_api(cx: &mut TestAppContext) {
-    if !Path::new("/bin/sh").exists() {
-        return;
-    }
     let (repo, lock_dir, _model, ws, _client, cx) = connected("claude-api", cx);
     let (port, _) = hook_command(&ws, cx);
     let (args, env) = cx.update(|_, cx| (cx.global::<super::IdeArgs>().0.clone(), cx.global::<IdeEnv>().0.clone()));
     let plugin = PathBuf::from(&args[args.iter().position(|a| a == "--plugin-dir").expect("the plugin") + 1]);
-    let skill = std::fs::read_to_string(plugin.join("skills/snout-editor/SKILL.md")).unwrap();
+    let skill = std::fs::read_to_string(plugin.join("skills/snoutcode/SKILL.md")).unwrap();
     assert!(env.iter().any(|(k, _)| *k == super::api::HEADER_ENV), "the console gets the token's header file");
-    let api = plugin.join("bin/snout-api").to_string_lossy().into_owned();
+    let api = super::api::shell_path(&plugin.join("bin/snout-api"));
     let settings: Value = serde_json::from_str(&std::fs::read_to_string(&args[1]).unwrap()).unwrap();
     assert_eq!(settings["permissions"]["allow"], json!([format!("Bash({api}:*)")]), "it runs without asking");
     let blocks: Vec<&str> = skill.split("```sh\n").skip(1).map(|b| b.split("```").next().unwrap().trim_end()).collect();
@@ -1694,7 +1766,7 @@ fn the_skill_opens_files_in_the_editor_over_the_api(cx: &mut TestAppContext) {
     // The skill's own command, with the path and line it shows swapped for ours.
     let hello = repo.join("src/demo/Hello.java");
     let open = blocks[0]
-        .replace("/abs/path/File.java", &hello.to_string_lossy())
+        .replace("/abs/path/File.java", &super::api::shell_path(&hello))
         .replace("\"startLine\":42", "\"startText\":\"class Hello\"");
     assert!(open.starts_with(&format!("{api} openFile '")), "{open}");
     assert_eq!(shell_while_pumping(cx, &open, &env), (true, "Opened file and selected text \"class Hello\"".into()));
@@ -1707,19 +1779,21 @@ fn the_skill_opens_files_in_the_editor_over_the_api(cx: &mut TestAppContext) {
     let other = repo.join("src/demo/Other.java");
     let q = format!(
         "curl -s -X POST -H @\"$SNOUT_API_HEADER\" \"http://127.0.0.1:$SNOUT_HOOK_PORT/api/openFile?filePath={}&startLine=1\"",
-        other.to_string_lossy()
+        super::api::shell_path(&other)
     );
     assert_eq!(shell_while_pumping(cx, &q, &env), (true, "Opened file and selected lines 1 to 1".into()));
 
     // A file that is not there fails the script; the manual; outside the console, and
     // without the token, nothing happens.
-    let missing = open.replace(&*hello.to_string_lossy(), &repo.join("nope.txt").to_string_lossy());
+    let missing = open.replace(&super::api::shell_path(&hello), &super::api::shell_path(&repo.join("nope.txt")));
     let (ok, out) = shell_while_pumping(cx, &missing, &env);
     assert!(!ok && out.contains("File not found"), "{out}");
     let (ok, manual) = shell_while_pumping(cx, blocks[1], &env);
     assert!(ok);
     let manual: Value = serde_json::from_str(&manual).unwrap();
     assert!(manual["tools"].as_array().unwrap().iter().any(|t| t["name"] == "openFile"));
+    let (ok, editor) = shell_while_pumping(cx, &format!("{api} manual editor"), &env);
+    assert!(ok && editor.contains("startLine"), "a domain's arguments: {editor}");
     assert!(!shell_while_pumping(cx, &open, &[]).0, "no editor outside the console");
     let anon = format!("curl -s -o /dev/null -w '%{{http_code}}' -X POST http://127.0.0.1:{port}/api/getOpenEditors");
     assert_eq!(shell_while_pumping(cx, &anon, &[]), (true, "401".into()));

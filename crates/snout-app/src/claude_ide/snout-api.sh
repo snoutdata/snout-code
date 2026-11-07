@@ -1,8 +1,8 @@
 #!/bin/sh
-# SnoutCode's editor API, for the agent in its console (the snout-editor skill).
+# SnoutCode's API, for the agent in its console (the snoutcode skill).
 #   snout-api <tool> [JSON arguments]   call a tool: POST /api/<tool>
 #   snout-api setCommitMessage          the message as plain text on standard input
-#   snout-api manual                    the UTCP manual that describes the tools
+#   snout-api manual [domain]           the tools, and the arguments of a domain's
 # The port and the file holding the token's header come from the console's environment.
 # An agent's sandbox may cut it off from the port but not from the session's folder, which holds
 # the header. A draft's two calls need nothing else, so there they go through that folder.
@@ -14,11 +14,11 @@ if [ -z "$port" ] || [ -z "$header" ]; then
 fi
 case ${1-} in
     "" | -h | --help)
-        echo "usage: snout-api <tool> [JSON arguments] | snout-api manual" >&2
+        echo "usage: snout-api <tool> [JSON arguments] | snout-api manual [domain]" >&2
         exit 2
         ;;
     manual)
-        exec curl -sS --fail-with-body -H @"$header" "http://127.0.0.1:$port/utcp"
+        exec curl -sS --fail-with-body -G -H @"$header" ${2:+--data-urlencode "domain=$2"} "http://127.0.0.1:$port/manual"
         ;;
 esac
 # Reached, or turned away (22, with --fail-with-body)? Anything else: the port is out of reach.

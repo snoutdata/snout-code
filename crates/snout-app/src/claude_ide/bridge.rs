@@ -24,7 +24,7 @@ use super::hooks::{self, HookEvent, HookKind, HookServer, Snapshot};
 use super::panel::{Activity, ClaudeChanges, PendingDiff, Updated};
 use super::server::{Call, Event, Reply, Server};
 use super::tools::{self, INVALID_PARAMS, TOOL_ERROR};
-use super::{CodexArgs, IdeArgs, IdeConfig, IdeEnv, IdeStatus, OpencodeEnv, review};
+use super::{AmpArgs, CodexArgs, IdeArgs, IdeConfig, IdeEnv, IdeStatus, OpencodeEnv, review};
 use crate::agents::{self, ConsoleTurn};
 use crate::editor::{Answer, ClaudeRequest, EditorPanel, Outcome};
 use crate::lang::text::to_lsp;
@@ -187,7 +187,8 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             Some(cx.background_spawn(async move {
                 let forward = host.forward_to_app(app_port)?;
                 let file = hooks::write_settings(&*host, &dir, &token)?;
-                std::io::Result::Ok((forward, file, super::api::plugin_dir(&dir)))
+                let amp = hooks::amp_mcp_args(&*host, &dir, forward.port, &token)?;
+                std::io::Result::Ok((forward, file, super::api::plugin_dir(&dir), amp, token))
             }))
         }
         _ => None,
@@ -198,9 +199,12 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
         let mut args = Vec::new();
         let mut codex = Vec::new();
         let mut opencode = Vec::new();
+        let mut amp_args = Vec::new();
         if let Some(task) = hooks_ready {
             match task.await {
-                Ok((forward, file, plugin)) => {
+                Ok((forward, file, plugin, amp, token)) => {
+                    amp_args = amp;
+                    env.push((hooks::TOKEN_ENV, token.clone()));
                     env.push((hooks::PORT_ENV, forward.port.to_string()));
                     args = vec![
                         "--settings".into(),
@@ -211,8 +215,10 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
                     if let Some(dir) = file.parent() {
                         let header = dir.join("hook-header");
                         env.push((super::api::HEADER_ENV, header.to_string_lossy().into_owned()));
+                        env.push((hooks::SCRIPT_ENV, super::api::shell_path(&super::api::script(dir))));
                         codex = hooks::codex_args(&header, forward.port);
-                        opencode = vec![hooks::opencode_env(&hooks::opencode_plugin(dir))];
+                        codex.extend(hooks::codex_mcp_args(forward.port));
+                        opencode = vec![hooks::opencode_env(&hooks::opencode_plugin(dir), forward.port, &token)];
                     }
                     let _ = ws.update(cx, |ws, _| {
                         if let Some(b) = ws.claude.as_mut() {
@@ -227,6 +233,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
             cx.set_global(IdeEnv(env));
             cx.set_global(IdeArgs(args));
             cx.set_global(CodexArgs(codex));
+            cx.set_global(AmpArgs(amp_args));
             cx.set_global(OpencodeEnv(opencode));
         });
     })
@@ -236,6 +243,7 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
     cx.set_global(IdeEnv::default());
     cx.set_global(IdeArgs::default());
     cx.set_global(CodexArgs::default());
+    cx.set_global(AmpArgs::default());
     cx.set_global(OpencodeEnv::default());
     cx.set_global(IdeStatus::default());
     let hook_events = cx.spawn_in(window, async move |this, cx| {

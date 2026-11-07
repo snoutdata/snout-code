@@ -127,6 +127,12 @@ pub struct CodexArgs(pub Vec<String>);
 
 impl Global for CodexArgs {}
 
+/// The arguments an `amp` started in the console gets: the API's MCP tool.
+#[derive(Clone, Debug, Default)]
+pub struct AmpArgs(pub Vec<String>);
+
+impl Global for AmpArgs {}
+
 /// The variables an `opencode` started in the console gets besides the hooks' port: the one
 /// that loads SnoutCode's plugin for the session.
 #[derive(Clone, Debug, Default)]

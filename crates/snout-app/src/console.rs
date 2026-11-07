@@ -907,15 +907,17 @@ impl ConsolePanel {
         let agent_id = agent.as_ref().map(|a| a.id);
         let mut hooked = false;
         if let Some(ide) = cx.try_global::<crate::claude_ide::IdeEnv>() {
+            let is_api = |k: &str| {
+                k == crate::claude_ide::hooks::PORT_ENV
+                    || k == crate::claude_ide::api::HEADER_ENV
+                    || k == crate::claude_ide::hooks::SCRIPT_ENV
+            };
             let take = |k: &str| match agent_id {
-                Some(crate::agents::CLAUDE) => true,
-                Some(crate::agents::CODEX | crate::agents::OPENCODE | crate::agents::AMP) => {
-                    k == crate::claude_ide::hooks::PORT_ENV || k == crate::claude_ide::api::HEADER_ENV
-                }
-                // A command of the user's own can call the editor's API too.
-                Some(crate::agents::CUSTOM) => {
-                    k == crate::claude_ide::hooks::PORT_ENV || k == crate::claude_ide::api::HEADER_ENV
-                }
+                Some(crate::agents::CLAUDE) => k != crate::claude_ide::hooks::TOKEN_ENV,
+                // Its MCP client reads the token from a variable.
+                Some(crate::agents::CODEX) => is_api(k) || k == crate::claude_ide::hooks::TOKEN_ENV,
+                // A command of the user's own can call the API too.
+                Some(crate::agents::OPENCODE | crate::agents::AMP | crate::agents::CUSTOM) => is_api(k),
                 _ => false,
             };
             hooked = ide.0.iter().any(|(k, _)| *k == crate::claude_ide::hooks::PORT_ENV);
@@ -944,6 +946,11 @@ impl ConsolePanel {
             }
             Some(a) if a.id == crate::agents::CODEX => {
                 if let Some(extra) = cx.try_global::<crate::claude_ide::CodexArgs>() {
+                    args.splice(0..0, extra.0.iter().cloned());
+                }
+            }
+            Some(a) if a.id == crate::agents::AMP => {
+                if let Some(extra) = cx.try_global::<crate::claude_ide::AmpArgs>() {
                     args.splice(0..0, extra.0.iter().cloned());
                 }
             }

@@ -393,13 +393,57 @@ pub fn codex_hook_args(windows: bool) -> Vec<String> {
 
 /// The variable that makes an `opencode` started in the console load SnoutCode's plugin
 /// `plugin` for the session, beside the user's own (opencode merges its plugin lists).
-pub fn opencode_env(plugin: &Path) -> (&'static str, String) {
+pub fn opencode_env(plugin: &Path, port: u16, token: &str) -> (&'static str, String) {
     let url = if matches!(plugin.components().next(), Some(std::path::Component::Prefix(_))) {
         format!("file:///{}", plugin.to_string_lossy().replace('\\', "/"))
     } else {
         format!("file://{}", plugin.to_string_lossy())
     };
-    ("OPENCODE_CONFIG_CONTENT", json!({ "plugin": [url] }).to_string())
+    let mcp = json!({
+        "type": "remote",
+        "url": mcp_url(port),
+        "enabled": true,
+        "oauth": false,
+        "headers": { TOKEN_HEADER: token },
+    });
+    ("OPENCODE_CONFIG_CONTENT", json!({ "plugin": [url], "mcp": { super::api::MCP_TOOL: mcp } }).to_string())
+}
+
+/// The API's MCP endpoint.
+fn mcp_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/mcp")
+}
+
+/// The variable that holds the token, for Codex's MCP client, which reads a bearer token from one.
+pub const TOKEN_ENV: &str = "SNOUT_API_TOKEN";
+
+/// The variable naming the API's script, for an agent of the user's own.
+pub const SCRIPT_ENV: &str = "SNOUT_API";
+
+/// The arguments that give a `codex` the API's MCP tool, for the session only.
+pub fn codex_mcp_args(port: u16) -> Vec<String> {
+    let name = super::api::MCP_TOOL;
+    let quoted = |v: &str| serde_json::to_string(v).unwrap_or_default();
+    vec![
+        "-c".into(),
+        format!("mcp_servers.{name}.url={}", quoted(&mcp_url(port))),
+        "-c".into(),
+        format!("mcp_servers.{name}.bearer_token_env_var={}", quoted(TOKEN_ENV)),
+        // Codex would ask before every call, even to look. This server is SnoutCode's: what changes
+        // something is asked in its window (`capabilities::Effect::Change`).
+        "-c".into(),
+        format!("mcp_servers.{name}.default_tools_approval_mode={}", quoted("approve")),
+    ]
+}
+
+/// The arguments that give an `amp` the API's MCP tool, for the session only: a file, as its
+/// argument would show the token on a command line. Written into the folder `dir` of
+/// [`write_settings`].
+pub fn amp_mcp_args(host: &dyn snout_host::Host, dir: &Path, port: u16, token: &str) -> std::io::Result<Vec<String>> {
+    let file = dir.join("amp-mcp.json");
+    let config = json!({ super::api::MCP_TOOL: { "url": mcp_url(port), "headers": { TOKEN_HEADER: token } } });
+    host.write_mode(&file, config.to_string().as_bytes(), Some(0o600))?;
+    Ok(vec!["--mcp-config".into(), file.to_string_lossy().into_owned()])
 }
 
 /// Where Amp looks for the plugins of this user on `host`:
@@ -476,7 +520,7 @@ pub fn settings(header: &Path, api: &Path) -> Value {
             "UserPromptSubmit": always,
             "Stop": always,
         },
-        "permissions": { "allow": [format!("Bash({}:*)", api.to_string_lossy())] },
+        "permissions": { "allow": [format!("Bash({}:*)", super::api::shell_path(api))] },
     })
 }
 
@@ -632,9 +676,34 @@ fn respond_with(stream: &mut TcpStream, a: &super::api::Answer) {
 fn serve_api(stream: &mut TcpStream, req: &Request, ask: &Ask) {
     use super::api::{self, Answer};
     let (path, query) = req.path.split_once('?').unwrap_or((req.path.as_str(), ""));
+    let json_of = |v: &Value| Answer { status: "200 OK", content_type: "application/json", body: v.to_string() };
     if path == "/utcp" {
         let body = serde_json::to_string_pretty(&api::manual()).unwrap_or_default();
         return respond_with(stream, &Answer { status: "200 OK", content_type: "application/json", body });
+    }
+    if path == "/manual" {
+        let a = match api::arguments("", query, b"") {
+            Ok(a) => match a["domain"].as_str() {
+                Some(domain) => {
+                    api::domain_manual(domain).map_or_else(|e| Answer::error("404 Not Found", e), |m| json_of(&m))
+                }
+                None => json_of(&api::index()),
+            },
+            Err(e) => Answer::error("400 Bad Request", e),
+        };
+        return respond_with(stream, &a);
+    }
+    if path == "/mcp" {
+        if req.method != "POST" {
+            return respond_with(stream, &Answer::error("405 Method Not Allowed", "use POST"));
+        }
+        let Ok(msg) = serde_json::from_slice::<Value>(&req.body) else {
+            return respond_with(stream, &Answer::error("400 Bad Request", "the body must be JSON"));
+        };
+        return match api::mcp_message(&msg, |name, arguments| call_api(name, arguments, ask)) {
+            Some(answer) => respond_with(stream, &json_of(&answer)),
+            None => respond(stream, "202 Accepted"),
+        };
     }
     let Some(name) = path.strip_prefix("/api/").filter(|n| super::capabilities::find(n).is_some()) else {
         return respond_with(stream, &Answer::error("404 Not Found", format!("no such call: {path}")));
@@ -646,13 +715,18 @@ fn serve_api(stream: &mut TcpStream, req: &Request, ask: &Ask) {
         Ok(a) => a,
         Err(e) => return respond_with(stream, &Answer::error("400 Bad Request", e)),
     };
+    respond_with(stream, &call_api(name, arguments, ask));
+}
+
+/// Make a call of the API, and wait for the window's answer.
+fn call_api(name: &str, arguments: Value, ask: &Ask) -> super::api::Answer {
+    use super::api::{self, Answer};
     let (reply, answer) = super::server::Reply::channel();
     ask(super::server::Call { client: super::server::API_CLIENT, name: name.to_owned(), arguments, reply });
-    let a = match answer.recv_timeout(API_WAIT) {
+    match answer.recv_timeout(API_WAIT) {
         Ok(message) => api::answer(&message),
         Err(_) => Answer::error("504 Gateway Timeout", "the editor did not answer"),
-    };
-    respond_with(stream, &a);
+    }
 }
 
 fn serve(mut stream: TcpStream, host: &dyn snout_host::Host, token: &str, emit: &Emit, ask: &Ask) {
@@ -661,10 +735,13 @@ fn serve(mut stream: TcpStream, host: &dyn snout_host::Host, token: &str, emit: 
     let Ok(req) = stream.try_clone().and_then(read_request) else {
         return respond(&mut stream, "400 Bad Request");
     };
-    if !req.header(TOKEN_HEADER).is_some_and(|t| same(t, token)) {
+    // An MCP client presents it as a bearer token, when it can name no other header.
+    let bearer = req.header("authorization").and_then(|a| a.strip_prefix("Bearer "));
+    if !req.header(TOKEN_HEADER).or(bearer).is_some_and(|t| same(t, token)) {
         return respond(&mut stream, "401 Unauthorized");
     }
-    if req.path == "/utcp" || req.path.starts_with("/utcp?") || req.path.starts_with("/api/") {
+    let page = req.path.split('?').next().unwrap_or_default();
+    if matches!(page, "/utcp" | "/manual" | "/mcp") || page.starts_with("/api/") {
         return serve_api(&mut stream, &req, ask);
     }
     if req.method != "POST" || !matches!(req.path.as_str(), "/hook" | "/hook/codex" | "/codex" | "/agent") {
@@ -1116,8 +1193,12 @@ pub mod tests {
 
     #[test]
     fn opencode_loads_the_plugin_from_a_file_url() {
-        let (k, v) = opencode_env(Path::new("/tmp/snout x/snoutcode-opencode.js"));
+        let (k, v) = opencode_env(Path::new("/tmp/snout x/snoutcode-opencode.js"), 4100, "tok");
         assert_eq!(k, "OPENCODE_CONFIG_CONTENT");
-        assert_eq!(v, r#"{"plugin":["file:///tmp/snout x/snoutcode-opencode.js"]}"#);
+        let v: Value = serde_json::from_str(&v).unwrap();
+        assert_eq!(v["plugin"], json!(["file:///tmp/snout x/snoutcode-opencode.js"]));
+        let mcp = &v["mcp"]["snoutcode"];
+        assert_eq!((&mcp["type"], &mcp["url"]), (&json!("remote"), &json!("http://127.0.0.1:4100/mcp")));
+        assert_eq!(mcp["headers"][TOKEN_HEADER], "tok");
     }
 }

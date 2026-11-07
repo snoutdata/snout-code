@@ -221,7 +221,14 @@ jobs:
         shell: wsl-bash {0}
         run: |
           mkdir -p ~/.amp/bin
-          printf '#!/bin/sh\necho amp\n' > ~/.amp/bin/amp
+          # What an agent does in the console: it calls the window, through the forwarded port.
+          cat > ~/.amp/bin/amp <<'AMP'
+          #!/bin/sh
+          case "$1" in --version) echo amp; exit 0 ;; esac
+          { echo "args: $*"; "$SNOUT_API" getAppState; "$SNOUT_API" manual; } > /tmp/harness-answer 2>&1
+          exec sleep 600
+          AMP
+          sed -i 's/^ *//' ~/.amp/bin/amp
           chmod +x ~/.amp/bin/amp
       - name: WSL connects as a remote machine
         if: matrix.arch == 'x64'

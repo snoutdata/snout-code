@@ -26,7 +26,7 @@ pub enum Effect {
 }
 
 impl Effect {
-    fn tag(self) -> &'static str {
+    pub fn tag(self) -> &'static str {
         match self {
             Effect::Read => "read",
             Effect::Show => "show",
@@ -44,7 +44,7 @@ pub enum Domain {
 }
 
 impl Domain {
-    fn tag(self) -> &'static str {
+    pub fn tag(self) -> &'static str {
         match self {
             Domain::App => "app",
             Domain::Editor => "editor",
