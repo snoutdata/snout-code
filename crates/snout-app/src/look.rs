@@ -471,7 +471,14 @@ pub fn chevron(open: bool, color: Hsla) -> impl IntoElement {
 }
 
 /// egui's checkbox: a small framed box, ticked when on, and its label.
-pub fn checkbox(id: impl Into<ElementId>, label: &'static str, on: bool, enabled: bool, p: &Palette) -> Stateful<Div> {
+pub fn checkbox(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    on: bool,
+    enabled: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let label = label.into();
     let ink = if enabled { p.fg } else { p.weak() };
     let tick = p.fg;
     div()

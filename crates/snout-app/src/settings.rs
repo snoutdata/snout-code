@@ -23,11 +23,11 @@ pub enum ThemeChoice {
 impl ThemeChoice {
     pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::System => "System",
-            Self::Dark => "Dark",
-            Self::Light => "Light",
+            Self::System => t!("theme-system"),
+            Self::Dark => t!("theme-dark"),
+            Self::Light => t!("theme-light"),
         }
     }
 }
@@ -98,6 +98,9 @@ pub struct Settings {
     pub theme: ThemeChoice,
     /// The colour theme.
     pub colors: ColorTheme,
+    /// The interface's language: `System` (the system's, else English), `English`, `French`,
+    /// `Spanish` or `Portuguese` (Brazilian).
+    pub language: crate::i18n::Language,
     /// The dock layout as GPUI Kit's dock writes it: panels, sizes, open docks.
     pub dock: Option<serde_json::Value>,
     /// The editors' font size (⌘+ and ⌘-).
@@ -324,6 +327,7 @@ impl Default for Settings {
             console_open: false,
             theme: ThemeChoice::default(),
             colors: ColorTheme::default(),
+            language: Default::default(),
             dock: None,
             editor_font_size: crate::look::MONO_SIZE,
             activity: None,

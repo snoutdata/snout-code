@@ -1,0 +1,6 @@
+# The interface's languages (see src/i18n.rs): Fluent catalogs in i18n/<language>/snout-app.ftl.
+# English is the source and the fallback: every message is in it.
+fallback_language = "en"
+
+[fluent]
+assets_dir = "i18n"

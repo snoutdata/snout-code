@@ -105,6 +105,16 @@ the project's folder there, and SnoutCode reads and writes it there.
 
 *The same page in dark mode, in Studio.*
 
+**Language**
+
+- **Interface language**: English, Français, Español or Português (Brasil). **System**, the
+  default, takes the first of your system's preferred languages that SnoutCode speaks, and
+  English when it speaks none of them. The window and the menus change as soon as you press
+  **Apply** or **OK**, with no restart. It is `language` in your settings.
+
+Your code, Git's and the build tools' output, and what you send to a coding agent are not
+translated.
+
 **Theme**
 
 - **Colors**: the colour theme. The swatches show the one in use, in light or dark.

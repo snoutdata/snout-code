@@ -71,6 +71,12 @@ libc = "0.2"
 sha2 = "0.10"
 # A scratch folder for a JDK fetched on the Mac for a remote machine.
 tempfile.workspace = true
+# The interface's languages: Fluent catalogs (`i18n/<language>/snout-app.ftl`) embedded in the
+# program, the system's languages, and `fl!`, which checks every message id at compile time.
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8"
+unic-langid = "0.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Open in External Terminal: the terminal apps installed, by bundle id (LaunchServices); and

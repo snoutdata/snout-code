@@ -82,13 +82,20 @@ const fn sf(symbol: &'static str, lucide: IconName) -> Option<Icon> {
 /// A submenu's icon, by its title.
 pub fn for_submenu(title: &str) -> Option<Icon> {
     use IconName as L;
-    match title {
-        "Open Recent" => sf("clock.arrow.circlepath", L::Clock),
-        "Tool Window Actions" => sf("sidebar.left", L::PanelLeft),
-        "Tool Settings" => sf("slider.horizontal.3", L::SlidersHorizontal),
-        "Appearance" => sf("circle.lefthalf.filled", L::SunMoon),
-        "Services" => sf("gearshape.2", L::Cog),
-        _ => None,
+    // The titles are in the language in use, as the bar was made.
+    let is = |id: String| title == id;
+    if is(t!("menu-open-recent")) {
+        sf("clock.arrow.circlepath", L::Clock)
+    } else if is(t!("menu-tool-window-actions")) {
+        sf("sidebar.left", L::PanelLeft)
+    } else if is(t!("menu-tool-settings")) {
+        sf("slider.horizontal.3", L::SlidersHorizontal)
+    } else if is(t!("menu-appearance")) {
+        sf("circle.lefthalf.filled", L::SunMoon)
+    } else if is(t!("menu-services")) {
+        sf("gearshape.2", L::Cog)
+    } else {
+        None
     }
 }
 

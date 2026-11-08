@@ -5,6 +5,12 @@
 
 #[cfg(target_os = "macos")]
 fn main() {
+    // `SNOUT_SHOT_LANGUAGE=French` (or Spanish, Portuguese) takes the shots in that language, to
+    // see that its longer words fit.
+    if let Ok(name) = std::env::var("SNOUT_SHOT_LANGUAGE") {
+        use snout_app::i18n::{Language, select};
+        select(Language::ALL.into_iter().find(|l| format!("{l:?}") == name).expect("a language's name"));
+    }
     // The user guide's shots instead, when asked for (see `screenshots/docs.rs`).
     if let Some(projects) = std::env::var_os("SNOUT_DOCS_SHOTS") {
         docs::run(projects.into());
@@ -3320,7 +3326,7 @@ sleep 30
         shot("settings-gradle-dark", ThemeChoice::Dark, Activity::Project, Some(Select::Settings(Page::Gradle)));
         // Every Settings page, light and dark (`SNOUT_SHOT_ONLY=settings-page-` takes these alone).
         for page in Page::ALL {
-            let slug = page.title().to_lowercase().replace(' ', "-");
+            let slug = page.slug();
             for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
                 shot(&format!("settings-page-{slug}-{mode}"), theme, Activity::Project, Some(Select::Settings(page)));
             }

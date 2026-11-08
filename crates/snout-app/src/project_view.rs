@@ -922,7 +922,7 @@ impl ProjectView {
                     menu
                 };
                 menu.item(
-                    PopupMenuItem::new(crate::platform::REVEAL)
+                    PopupMenuItem::new(crate::platform::reveal())
                         .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
                         .on_click(send(Action::Reveal(path.clone()))),
                 )

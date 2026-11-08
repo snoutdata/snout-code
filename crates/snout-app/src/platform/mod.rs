@@ -26,7 +26,7 @@ use windows as imp;
 /// windows under its icon.
 pub const APP_ID: &str = "snout-code";
 
-pub use imp::{IN_WINDOW_MENUS, REVEAL, THIS_MACHINE, process_start, window_decorations};
+pub use imp::{IN_WINDOW_MENUS, THIS_MACHINE, process_start, reveal, window_decorations};
 
 /// A long run ended: where the system has a way to say so while the app is in the
 /// background (the Dock's bounce and badge on a Mac), it does. `badge` is what it wears.

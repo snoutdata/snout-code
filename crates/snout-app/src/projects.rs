@@ -448,7 +448,7 @@ fn dir_tree(m: &Model) -> (BTreeMap<String, Vec<String>>, HashMap<String, usize>
 
 pub fn reveal_items(menu: PopupMenu, model: &Entity<Model>, path: &Path) -> PopupMenu {
     menu.item(
-        PopupMenuItem::new(crate::platform::REVEAL)
+        PopupMenuItem::new(crate::platform::reveal())
             .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
             .on_click(send(model, Action::Reveal(path.to_owned()))),
     )

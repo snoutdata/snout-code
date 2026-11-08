@@ -1,7 +1,10 @@
-//! On Windows: the program's icon and version, as resources of `snout-code.exe` (Explorer, the
+//! The catalogs `t!` checks against, and on Windows: the program's icon and version, as resources of `snout-code.exe` (Explorer, the
 //! taskbar and the window take the icon from it; the manifest is GPUI's).
 
 fn main() {
+    // `t!` checks its messages against the English catalog: a change there compiles again.
+    println!("cargo:rerun-if-changed=i18n");
+    println!("cargo:rerun-if-changed=i18n.toml");
     println!("cargo:rerun-if-changed=windows/snout-code.rc");
     println!("cargo:rerun-if-changed=../../assets/icon/snout.ico");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

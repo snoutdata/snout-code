@@ -104,38 +104,52 @@ impl Page {
     }
 
     /// What the page is for, under its title.
-    pub fn blurb(self) -> &'static str {
+    pub fn blurb(self) -> String {
         match self {
-            Page::Appearance => "Colours, light or dark, and the typefaces of the window and the editor.",
-            Page::Keymap => "The keys of every command. Add keys, take them away, or go back to the defaults.",
-            Page::Editor => "How files indent, wrap and show as you type.",
-            Page::VersionControl => "How SnoutCode keeps your projects' Git up to date.",
-            Page::Gradle => "The JDK each build runs on, and how long SnoutCode's Gradle daemons stay.",
-            Page::Spring => "The profiles the Spring window evaluates the beans under.",
-            Page::Terminal => "How the terminals look and what they run, and the terminal app to open folders in.",
-            Page::ClaudeCode => "The coding agents SnoutCode follows, and the one its console runs.",
+            Page::Appearance => t!("settings-blurb-appearance"),
+            Page::Keymap => t!("settings-blurb-keymap"),
+            Page::Editor => t!("settings-blurb-editor"),
+            Page::VersionControl => t!("settings-blurb-version-control"),
+            Page::Gradle => t!("settings-blurb-gradle"),
+            Page::Spring => t!("settings-blurb-spring"),
+            Page::Terminal => t!("settings-blurb-terminal"),
+            Page::ClaudeCode => t!("settings-blurb-agents"),
         }
     }
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Page::Appearance => "Appearance",
-            Page::Keymap => "Keymap",
-            Page::Editor => "Editor",
-            Page::VersionControl => "Version Control",
-            Page::Gradle => "Gradle",
-            Page::Spring => "Spring",
-            Page::Terminal => "Terminal",
-            Page::ClaudeCode => "Agents",
+            Page::Appearance => t!("settings-page-appearance"),
+            Page::Keymap => t!("settings-page-keymap"),
+            Page::Editor => t!("settings-page-editor"),
+            Page::VersionControl => t!("settings-page-version-control"),
+            Page::Gradle => "Gradle".into(),
+            Page::Spring => "Spring".into(),
+            Page::Terminal => t!("settings-page-terminal"),
+            Page::ClaudeCode => t!("settings-page-agents"),
+        }
+    }
+
+    /// The page's name for ids, the same in every language.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Page::Appearance => "appearance",
+            Page::Keymap => "keymap",
+            Page::Editor => "editor",
+            Page::VersionControl => "version-control",
+            Page::Gradle => "gradle",
+            Page::Spring => "spring",
+            Page::Terminal => "terminal",
+            Page::ClaudeCode => "agents",
         }
     }
 
     /// The group the page sits under in the tree, if any.
-    fn group(self) -> Option<&'static str> {
+    fn group(self) -> Option<String> {
         match self {
-            Page::Gradle => Some("Build Tools"),
-            Page::Spring => Some("Frameworks"),
-            Page::Terminal | Page::ClaudeCode => Some("Tools"),
+            Page::Gradle => Some(t!("settings-group-build-tools")),
+            Page::Spring => Some(t!("settings-group-frameworks")),
+            Page::Terminal | Page::ClaudeCode => Some(t!("settings-group-tools")),
             _ => None,
         }
     }
@@ -754,18 +768,24 @@ fn check_line(check: impl IntoElement, mark: Option<AnyElement>) -> gpui::Div {
 }
 
 /// A labelled row of a page: the label on the left, the control after it.
-pub(crate) fn row(label: &'static str, control: impl IntoElement, p: &Palette) -> gpui::Div {
+pub(crate) fn row(label: impl Into<SharedString>, control: impl IntoElement, p: &Palette) -> gpui::Div {
     div()
         .flex()
         .items_center()
         .gap(px(12.))
         .min_h(px(34.))
-        .child(div().w(px(150.)).flex_none().text_color(p.fg).child(label))
+        .child(div().w(px(150.)).flex_none().text_color(p.fg).child(label.into()))
         .child(control)
 }
 
-pub(crate) fn section(text: &'static str, p: &Palette) -> gpui::Div {
-    div().pt(px(14.)).pb(px(6.)).text_color(p.fg_dim).text_size(px(12.)).font_weight(FontWeight::MEDIUM).child(text)
+pub(crate) fn section(text: impl Into<SharedString>, p: &Palette) -> gpui::Div {
+    div()
+        .pt(px(14.))
+        .pb(px(6.))
+        .text_color(p.fg_dim)
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .child(text.into())
 }
 
 /// A count with thousands apart: `10,000`.
@@ -1173,13 +1193,13 @@ impl SettingsView {
         let body = div().flex().flex_col();
         match self.page {
             Page::Appearance => {
-                let theme = |t: ThemeChoice, label: &'static str, id: &'static str, cx: &mut Context<Self>| {
+                let theme = |t: ThemeChoice, id: &'static str, cx: &mut Context<Self>| {
                     let ico = match t {
                         ThemeChoice::System => IconName::SunMoon,
                         ThemeChoice::Light => IconName::Sun,
                         ThemeChoice::Dark => IconName::Moon,
                     };
-                    look::toggle(id, ico, label, d.theme == t, &p)
+                    look::toggle(id, ico, t.label(), d.theme == t, &p)
                         .debug_selector(move || id.to_owned())
                         .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.theme = t)))
                 };
@@ -1195,31 +1215,49 @@ impl SettingsView {
                     swatch(t, dark, d.colors == t, &p)
                         .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |s| s.colors = t)))
                 }));
-                body.child(section("Theme", &p))
-                    .child(row("Colors", swatches, &p))
+                let languages =
+                    crate::i18n::Language::ALL.iter().map(|l| (format!("{l:?}"), l.native_name())).collect();
+                let pick_language = set.clone();
+                body.child(section(t!("settings-section-language"), &p))
                     .child(row(
-                        "Light or dark",
+                        t!("settings-language"),
+                        choice(
+                            "settings-language",
+                            &format!("{:?}", d.language),
+                            languages,
+                            move |v, cx| {
+                                let language = crate::i18n::Language::ALL
+                                    .into_iter()
+                                    .find(|l| format!("{l:?}") == v)
+                                    .unwrap_or_default();
+                                pick_language(Box::new(move |s: &mut Settings| s.language = language))(cx)
+                            },
+                            &p,
+                        ),
+                        &p,
+                    ))
+                    .child(section(t!("settings-section-theme"), &p))
+                    .child(row(t!("settings-colors"), swatches, &p))
+                    .child(row(
+                        t!("settings-light-or-dark"),
                         div()
                             .flex()
                             .gap(px(4.))
-                            .child(theme(ThemeChoice::System, "System", "settings-theme-system", cx))
-                            .child(theme(ThemeChoice::Light, "Light", "settings-theme-light", cx))
-                            .child(theme(ThemeChoice::Dark, "Dark", "settings-theme-dark", cx)),
+                            .child(theme(ThemeChoice::System, "settings-theme-system", cx))
+                            .child(theme(ThemeChoice::Light, "settings-theme-light", cx))
+                            .child(theme(ThemeChoice::Dark, "settings-theme-dark", cx)),
                         &p,
                     ))
                     .when_some(dark_only, |d, name| {
                         d.child(row(
                             "",
-                            div()
-                                .text_size(px(11.5))
-                                .text_color(p.fg_dim)
-                                .child(format!("{name} has no light side: it stays dark, whatever this says.")),
+                            div().text_size(px(11.5)).text_color(p.fg_dim).child(t!("settings-dark-only", name = name)),
                             &p,
                         ))
                     })
-                    .child(section("Interface", &p))
+                    .child(section(t!("settings-section-interface"), &p))
                     .child(row(
-                        "Font",
+                        t!("settings-font"),
                         choice(
                             "settings-ui-font",
                             &d.ui_font,
@@ -1230,7 +1268,7 @@ impl SettingsView {
                         &p,
                     ))
                     .child(row(
-                        "Size",
+                        t!("settings-size"),
                         stepper(
                             "settings-ui-size",
                             format!("{}", d.ui_font_size),
@@ -1243,9 +1281,9 @@ impl SettingsView {
                         ),
                         &p,
                     ))
-                    .child(section("Editor", &p))
+                    .child(section(t!("settings-section-editor"), &p))
                     .child(row(
-                        "Font",
+                        t!("settings-font"),
                         choice(
                             "settings-editor-font",
                             &d.editor_font,
@@ -1256,7 +1294,7 @@ impl SettingsView {
                         &p,
                     ))
                     .child(row(
-                        "Size",
+                        t!("settings-size"),
                         stepper(
                             "settings-editor-size",
                             format!("{}", d.editor_font_size),
@@ -1272,12 +1310,12 @@ impl SettingsView {
                         ),
                         &p,
                     ))
-                    .child(section("Quitting", &p))
+                    .child(section(t!("settings-section-quitting"), &p))
                     .child(
                         div().py(px(6.)).child(
                             look::checkbox(
                                 "settings-confirm-quit",
-                                "Confirm before quitting",
+                                t!("settings-confirm-quit"),
                                 d.confirm_quit,
                                 true,
                                 &p,
@@ -1286,15 +1324,13 @@ impl SettingsView {
                             .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.confirm_quit = !s.confirm_quit))),
                         ),
                     )
-                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(
-                        "SnoutCode always asks when quitting would lose unsaved changes or stop something running.",
-                    ))
-                    .child(section("Updates", &p))
+                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(t!("settings-confirm-quit-note")))
+                    .child(section(t!("settings-section-updates"), &p))
                     .child(
                         div().py(px(6.)).child(
                             look::checkbox(
                                 "settings-update-check",
-                                "Check for updates automatically",
+                                t!("settings-update-check"),
                                 d.update_check,
                                 true,
                                 &p,
@@ -1303,9 +1339,7 @@ impl SettingsView {
                             .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.update_check = !s.update_check))),
                         ),
                     )
-                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(
-                        "A new version downloads in the background and installs when you restart or quit. Help has Check for Updates at any time.",
-                    ))
+                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(t!("settings-update-check-note")))
                     .into_any_element()
             }
             Page::Keymap => body.child(self.keymap_page(cx)).into_any_element(),
@@ -2622,7 +2656,7 @@ impl SettingsView {
         for page in Page::ALL.into_iter().filter(|pg| pg.matches(&query)) {
             if page.group() != group {
                 group = page.group();
-                if let Some(g) = group {
+                if let Some(g) = group.clone() {
                     rows.push(
                         div()
                             .h(px(26.))
@@ -2638,7 +2672,7 @@ impl SettingsView {
                 }
             }
             let on = page == self.page;
-            let id = format!("settings-page-{}", page.title().to_lowercase().replace(' ', "-"));
+            let id = format!("settings-page-{}", page.slug());
             let sel = id.clone();
             rows.push(
                 crate::components::list_row_h(
@@ -2664,7 +2698,7 @@ impl SettingsView {
             );
         }
         if rows.is_empty() {
-            rows.push(div().px(px(12.)).text_color(p.fg_dim).child("Nothing matches").into_any_element());
+            rows.push(div().px(px(12.)).text_color(p.fg_dim).child(t!("settings-nothing-matches")).into_any_element());
         }
         div()
             .w(px(220.))

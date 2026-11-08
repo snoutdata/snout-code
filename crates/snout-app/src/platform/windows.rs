@@ -9,8 +9,10 @@ use std::time::{Duration, SystemTime};
 /// The window draws the menus in its title bar.
 pub const IN_WINDOW_MENUS: bool = true;
 
-/// What the app calls showing a file in the file manager.
-pub const REVEAL: &str = "Show in Explorer";
+/// The file manager's command that shows a file there.
+pub fn reveal() -> String {
+    t!("reveal-windows")
+}
 
 /// The machine the app runs on, as messages name it.
 pub const THIS_MACHINE: &str = "this PC";

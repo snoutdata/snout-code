@@ -6,8 +6,10 @@ use std::time::{Duration, SystemTime};
 /// The menus are the system's menu bar.
 pub const IN_WINDOW_MENUS: bool = false;
 
-/// What the app calls showing a file in the file manager.
-pub const REVEAL: &str = "Reveal in Finder";
+/// The file manager's command that shows a file there.
+pub fn reveal() -> String {
+    t!("reveal-mac")
+}
 
 /// The machine the app runs on, as messages name it.
 pub const THIS_MACHINE: &str = "this Mac";

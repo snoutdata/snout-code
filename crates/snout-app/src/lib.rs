@@ -1,5 +1,9 @@
 //! SnoutCode on GPUI and GPUI Kit: an activity bar, docks, and the Git Panel.
 
+// First, so that `t!` is there for every module after it.
+#[macro_use]
+pub mod i18n;
+
 pub mod agents;
 pub mod art;
 pub mod background;
@@ -193,6 +197,8 @@ pub fn run() {
         cx.set_global(workspace::quit::RealQuit);
         let store = Store::for_user();
         let settings = store.as_ref().map(Store::load).unwrap_or_default();
+        // The interface's language, before anything is drawn (the tests stay in English).
+        i18n::select(settings.language);
         // The splash first, with no more than it needs to paint: everything else waits until
         // it shows, so nothing holds up the first window.
         init_look(&settings, cx);

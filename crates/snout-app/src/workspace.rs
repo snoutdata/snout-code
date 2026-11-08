@@ -1654,6 +1654,12 @@ impl Workspace {
         ));
         let defaults = crate::editor::EditorDefaults::of(&next);
         cx.set_global(defaults);
+        if before.language != next.language {
+            crate::i18n::select(next.language);
+            // Every window speaks it at once, the menu bar too.
+            self.menu_checks = None;
+            cx.refresh_windows();
+        }
         if before.keymap != next.keymap {
             crate::keymap::apply(&next.keymap, cx);
             // The menus show the shortcuts: they are made again.

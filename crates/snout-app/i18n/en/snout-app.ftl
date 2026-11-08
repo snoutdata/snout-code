@@ -1,0 +1,280 @@
+# SnoutCode's interface in English: the source catalog. Every message is here; the other
+# languages translate these, and a message they leave out shows in English.
+#
+# Ids are grouped by where they show. Product names (Java, Gradle, Maven, Spring, Git, GitHub,
+# Claude, SnoutCode) stay as they are in every language. No em dashes.
+
+## Languages
+
+# The choice that follows the system, with the language that gives.
+language-system = System ({ $language })
+
+## Light or dark
+
+theme-system = System
+theme-light = Light
+theme-dark = Dark
+
+## Settings
+
+settings-nothing-matches = Nothing matches
+settings-group-build-tools = Build Tools
+settings-group-frameworks = Frameworks
+settings-group-tools = Tools
+settings-page-appearance = Appearance
+settings-page-keymap = Keymap
+settings-page-editor = Editor
+settings-page-version-control = Version Control
+settings-page-terminal = Terminal
+settings-page-agents = Agents
+settings-blurb-appearance = The language, colours, light or dark, and the typefaces of the window and the editor.
+settings-blurb-keymap = The keys of every command. Add keys, take them away, or go back to the defaults.
+settings-blurb-editor = How files indent, wrap and show as you type.
+settings-blurb-version-control = How SnoutCode keeps your projects' Git up to date.
+settings-blurb-gradle = The JDK each build runs on, and how long SnoutCode's Gradle daemons stay.
+settings-blurb-spring = The profiles the Spring window evaluates the beans under.
+settings-blurb-terminal = How the terminals look and what they run, and the terminal app to open folders in.
+settings-blurb-agents = The coding agents SnoutCode follows, and the one its console runs.
+
+settings-section-language = Language
+settings-language = Interface language
+settings-section-theme = Theme
+settings-colors = Colors
+settings-light-or-dark = Light or dark
+settings-dark-only = { $name } has no light side: it stays dark, whatever this says.
+settings-section-interface = Interface
+settings-font = Font
+settings-size = Size
+settings-section-editor = Editor
+settings-section-quitting = Quitting
+settings-confirm-quit = Confirm before quitting
+settings-confirm-quit-note = SnoutCode always asks when quitting would lose unsaved changes or stop something running.
+settings-section-updates = Updates
+settings-update-check = Check for updates automatically
+settings-update-check-note = A new version downloads in the background and installs when you restart or quit. Help has Check for Updates at any time.
+
+## The menu bar
+
+menu-run = Run
+menu-snoutcode = SnoutCode
+menu-services = Services
+menu-file = File
+menu-open-recent = Open Recent
+menu-edit = Edit
+menu-view = View
+menu-git = Git
+menu-tool-window-actions = Tool Window Actions
+menu-appearance = Appearance
+menu-code = Code
+menu-navigate = Navigate
+menu-refactor = Refactor
+menu-build = Build
+menu-tools = Tools
+menu-tool-settings = Tool Settings
+menu-window = Window
+menu-help = Help
+
+## Commands: the menu items and the command palette
+
+cmd-new-project = New Project…
+cmd-open-project = Open Project…
+cmd-close-project = Close Project
+cmd-connect-to-ssh-host-or-wsl = Connect to SSH Host or WSL…
+cmd-connect-to-ssh-host = Connect to SSH Host…
+cmd-close-remote-connection = Close Remote Connection
+cmd-clear-recent-projects = Clear Recent Projects
+cmd-search-everywhere = Search Everywhere…
+cmd-settings = Settings…
+cmd-open-settings-json = Open Settings (JSON)
+cmd-open-project-settings-json = Open Project Settings (JSON)
+cmd-go-to-file = Go to File…
+cmd-recent-files = Recent Files…
+cmd-new-file = New File…
+cmd-go-to-class = Go to Class…
+cmd-go-to-line = Go to Line…
+cmd-find-in-files = Find in Files…
+cmd-replace-in-files = Replace in Files…
+cmd-undo-replace-in-files = Undo Replace in Files
+cmd-find-in-file = Find in File
+cmd-replace-in-file = Replace in File
+cmd-save = Save
+cmd-close-tab = Close Tab
+cmd-split-editor-right = Split Editor Right
+cmd-toggle-comment = Toggle Comment
+cmd-duplicate-line = Duplicate Line
+cmd-move-line-up = Move Line Up
+cmd-move-line-down = Move Line Down
+cmd-toggle-soft-wrap = Toggle Soft Wrap
+cmd-toggle-parameter-name-hints = Toggle Parameter Name Hints
+cmd-go-to-definition = Go to Definition
+cmd-go-to-declaration-or-usages = Go to Declaration or Usages
+cmd-go-to-implementations = Go to Implementations
+cmd-find-references = Find References
+cmd-rename-symbol = Rename Symbol…
+cmd-extract-method = Extract Method
+cmd-extract-variable = Extract Variable
+cmd-extract-constant = Extract Constant
+cmd-extract-field = Extract Field
+cmd-inline = Inline
+cmd-show-context-actions = Show Context Actions…
+cmd-apply-top-fix = Apply Top Fix
+cmd-format-document = Format Document
+cmd-format-selection = Format Selection
+cmd-organize-imports = Organize Imports
+cmd-show-parameter-hints = Show Parameter Hints
+cmd-trigger-completion = Trigger Completion
+cmd-go-to-symbol-in-workspace = Go to Symbol in Workspace…
+cmd-go-to-symbol-in-file = Go to Symbol in File…
+cmd-file-structure = File Structure…
+cmd-structure = Structure
+cmd-type-hierarchy = Type Hierarchy
+cmd-call-hierarchy = Call Hierarchy
+cmd-hierarchy = Hierarchy
+cmd-show-problems = Show Problems
+cmd-run = Run
+cmd-debug = Debug
+cmd-run-context-configuration = Run Context Configuration
+cmd-debug-context-configuration = Debug Context Configuration
+cmd-stop = Stop
+cmd-rerun = Rerun
+cmd-rerun-failed-tests = Rerun Failed Tests
+cmd-build-project = Build Project
+cmd-rebuild-project = Rebuild Project
+cmd-run-gradle-task = Run Gradle Task…
+cmd-run-maven-goal = Run Maven Goal…
+cmd-show-the-build-window = Show the Build Window
+cmd-show-the-gradle-window = Show the Gradle Window
+cmd-show-the-maven-window = Show the Maven Window
+cmd-terminal = Terminal
+cmd-output = Output
+cmd-settings-keymap = Settings: Keymap
+cmd-settings-terminal = Settings: Terminal
+cmd-settings-coding-agents = Settings: Coding Agents
+cmd-settings-gradle-and-maven = Settings: Gradle and Maven
+cmd-edit-configurations = Edit Configurations…
+cmd-edit-environments = Edit Environments…
+cmd-show-the-tests-window = Show the Tests Window
+cmd-record-at-cursor = Record at Cursor
+cmd-pick-locator = Pick Locator
+cmd-stop-recording = Stop Recording
+cmd-open-ui-mode = Open UI Mode
+cmd-toggle-breakpoint = Toggle Breakpoint
+cmd-toggle-breakpoint-enabled = Toggle Breakpoint Enabled
+cmd-edit-breakpoint-condition = Edit Breakpoint Condition…
+cmd-view-breakpoints = View Breakpoints…
+cmd-evaluate-expression = Evaluate Expression…
+cmd-run-to-cursor = Run to Cursor
+cmd-step-over = Step Over
+cmd-step-into = Step Into
+cmd-step-out = Step Out
+cmd-pause-program = Pause Program
+cmd-resume-program = Resume Program
+cmd-clear-output = Clear Output
+cmd-sync-gradle-and-maven-projects = Sync Gradle and Maven Projects
+cmd-project-structure = Project Structure…
+cmd-refresh-gradle-tasks = Refresh Gradle Tasks
+cmd-collapse-all-gradle-tasks = Collapse All Gradle Tasks
+cmd-reload-maven-project = Reload Maven Project
+cmd-read-the-maven-goals-again = Read the Maven Goals Again
+cmd-collapse-all-maven-goals = Collapse All Maven Goals
+cmd-spring-beans-and-endpoints = Spring Beans and Endpoints
+cmd-read-the-spring-model-again = Read the Spring Model Again
+cmd-go-to-spring-bean-or-usages = Go to Spring Bean or Usages…
+cmd-spring-active-profiles = Spring Active Profiles…
+cmd-collapse-the-spring-window = Collapse the Spring Window
+cmd-reload-all-from-disk = Reload All from Disk
+cmd-select-opened-file = Select Opened File
+cmd-collapse-the-project-tree = Collapse the Project Tree
+cmd-hide-the-side-panel = Hide the Side Panel
+cmd-sort-structure-by-name = Sort Structure by Name
+cmd-show-processes = Show Processes
+cmd-show-the-agent-log = Show the Agent Log
+cmd-stop-idle-processes = Stop Idle Processes
+cmd-restart-the-java-engine = Restart the Java Engine
+cmd-send-selection-to-claude = Send Selection to Claude
+cmd-accept-claudes-change = Accept Claude's Change
+cmd-reject-claudes-change = Reject Claude's Change
+cmd-next-claude-change = Next Claude Change
+cmd-previous-claude-change = Previous Claude Change
+cmd-accept-claude-change-at-caret = Accept Claude Change at Caret
+cmd-revert-claude-change-at-caret = Revert Claude Change at Caret
+cmd-accept-all-claude-changes = Accept All Claude Changes
+cmd-revert-all-claude-changes = Revert All Claude Changes
+cmd-show-agent-changes = Show Agent Changes
+cmd-annotate-with-agents = Annotate with Agents
+cmd-annotate-with-git-blame = Annotate with Git Blame
+cmd-undo = Undo
+cmd-redo = Redo
+cmd-zoom-in = Zoom In
+cmd-zoom-out = Zoom Out
+cmd-actual-size = Actual Size
+cmd-show-project = Show Project
+cmd-show-git = Show Git
+cmd-toggle-agent-console = Toggle Agent Console
+cmd-find-repositories-in-folder = Find Repositories in Folder…
+cmd-clone-from-github = Clone from GitHub…
+cmd-new-group = New Group…
+cmd-refresh = Refresh
+cmd-pull = Pull
+cmd-fetch = Fetch
+cmd-push = Push
+cmd-commit = Commit
+cmd-draft-commit-message = Draft Commit Message
+cmd-stage = Stage
+cmd-unstage = Unstage
+cmd-discard-changes = Discard Changes…
+cmd-check-out = Check Out…
+cmd-new-branch = New Branch…
+cmd-side-by-side-diff = Side by Side Diff
+cmd-unified-diff = Unified Diff
+cmd-compact-diff = Compact Diff
+cmd-theme-match-the-system = Theme: Match the System
+cmd-theme-dark = Theme: Dark
+cmd-theme-light = Theme: Light
+cmd-open-on-github = Open on GitHub
+cmd-open-in-external-terminal = Open in External Terminal
+cmd-about-snoutcode = About SnoutCode
+cmd-check-for-updates = Check for Updates…
+cmd-release-notes = Release Notes
+cmd-quit-snoutcode = Quit SnoutCode
+cmd-clear-recent = Clear Recent
+cmd-exit = Exit
+cmd-quit = Quit
+cmd-zoom = Zoom
+cmd-maximize = Maximize
+cmd-command-palette = Command Palette…
+cmd-cut = Cut
+cmd-copy = Copy
+cmd-paste = Paste
+cmd-select-all = Select All
+cmd-find = Find
+cmd-replace = Replace
+cmd-project = Project
+cmd-git = Git
+cmd-agent-console = Agent Console
+cmd-soft-wrap = Soft Wrap
+cmd-parameter-name-hints = Parameter Name Hints
+cmd-processes = Processes
+cmd-agent-log = Agent Log
+cmd-build-window = Build Window
+cmd-gradle = Gradle
+cmd-maven = Maven
+cmd-move-to-trash = Move to Trash…
+cmd-agent-changes = Agent Changes
+cmd-keymap = Keymap…
+cmd-terminal-more = Terminal…
+cmd-coding-agents = Coding Agents…
+cmd-gradle-and-maven = Gradle and Maven…
+cmd-minimize = Minimize
+cmd-snoutcode-on-github = SnoutCode on GitHub
+cmd-report-an-issue = Report an Issue
+cmd-snoutdata-website = SnoutData Website
+# The command palette: open a recent project, by its folder name.
+cmd-open-recent-project = Open Recent: { $name }
+
+## The platform's file manager
+
+reveal-mac = Reveal in Finder
+reveal-windows = Show in Explorer
+reveal-linux = Show in Files
+

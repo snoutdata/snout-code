@@ -984,7 +984,7 @@ impl GitView {
                                 if let Some(root) = &root {
                                     menu = menu
                                         .item(
-                                            PopupMenuItem::new(crate::platform::REVEAL)
+                                            PopupMenuItem::new(crate::platform::reveal())
                                                 .icon(crate::components::menu_icon(
                                                     crate::components::IconName::FolderOpen,
                                                 ))
@@ -1501,7 +1501,7 @@ impl GitView {
                                 let menu = match &root {
                                     Some(root) => menu
                                         .item(
-                                            PopupMenuItem::new(crate::platform::REVEAL)
+                                            PopupMenuItem::new(crate::platform::reveal())
                                                 .icon(crate::components::menu_icon(
                                                     crate::components::IconName::FolderOpen,
                                                 ))
