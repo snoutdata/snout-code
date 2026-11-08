@@ -386,6 +386,37 @@ const SECTION_ART = {
 			<Spark x={330} y={100} s={0.65} />
 		</>
 	),
+	// The agent drives the window: the robot's wire runs into the app, where a run plays, the
+	// tests come back two green and one to look at, and a small card waits for your answer
+	// before anything changes.
+	harness: () => (
+		<>
+			<path className="ill-blob" d={WIDE_BLOB} />
+			<Bot x={62} y={126} />
+			<path className="ill-wire" d="M88 110C118 112 120 74 150 74" />
+			<path className="ill-wire-flow" d="M88 110C118 112 120 74 150 74" />
+			<Win x={150} y={22} w={176} h={104} />
+			<rect className="ill-tint" x={158} y={44} width={34} height={74} rx="4" />
+			<path className="ill-code" d="M165 56H184M165 68H180M165 80H186" />
+			<CodeLines x={204} y={48} lines={[[0, 58], [10, 80], [10, 64]]} gap={12} accent={1} />
+			<circle className="ill-accent" cx="214" cy="104" r="9" />
+			<path className="ill-on-accent" d="M211 99V109L219 104Z" />
+			<circle className="ill-accent" cx="244" cy="104" r="7" />
+			<path d="M241 104L243.5 106.5L248 101.5" />
+			<circle className="ill-accent" cx="266" cy="104" r="7" />
+			<path d="M263 104L265.5 106.5L270 101.5" />
+			<circle className="ill-clay" cx="288" cy="104" r="7" />
+			<path d="M285.5 101.5L290.5 106.5M290.5 101.5L285.5 106.5" />
+			<g className="ill-float">
+				<rect className="ill-paper" x={262} y={2} width={86} height={40} rx="7" />
+				<path className="ill-code" d="M272 14H322" />
+				<rect className="ill-accent" x={272} y={24} width={30} height={10} rx="4" />
+				<rect className="ill-tint" x={308} y={24} width={30} height={10} rx="4" />
+			</g>
+			<Spark x={28} y={44} s={0.6} />
+			<Spark x={136} y={12} s={0.55} />
+		</>
+	),
 	// Playwright: a browser being recorded (the red dot), a pointer clicking its button, and the
 	// steps flowing into the spec beside it, the newest line in green.
 	playwright: () => (
@@ -618,6 +649,40 @@ const CARD_ART = {
 			<path className="ill-code" d="M72 36H110" />
 		</>
 	),
+	// The agent on this computer: a laptop, the agent's line typed in, the run going green.
+	here: () => (
+		<>
+			<Laptop x={52} y={14} w={96} h={62} />
+			<CodeLines x={64} y={30} lines={[[0, 40], [8, 52], [8, 34]]} gap={11} warm={1} />
+			<circle className="ill-accent" cx="128" cy="60" r="8" />
+			<path className="ill-on-accent" d="M126 56V64L132 60Z" />
+		</>
+	),
+	// Over SSH: the window on the desk, a wire to the machine where the agent runs.
+	ssh: () => (
+		<>
+			<Laptop x={22} y={34} w={64} h={42} />
+			<CodeLines x={32} y={46} lines={[[0, 28], [6, 36]]} gap={10} accent={1} />
+			<path className="ill-wire" d="M84 48C110 12 136 12 150 38" />
+			<path className="ill-wire-flow" d="M84 48C110 12 136 12 150 38" />
+			<path className="ill-paper" d="M132 46L156 28L180 46V90H132Z" />
+			<rect className="ill-tint" x={142} y={54} width={28} height={30} rx="3" />
+			<path d="M147 63H165M147 73H165" />
+			<circle className="ill-accent ill-blink" cx="162" cy="63" r="2" />
+		</>
+	),
+	// WSL: a Windows monitor with a Linux shell inside it, where the agent works.
+	wsl: () => (
+		<>
+			<rect className="ill-paper" x={46} y={10} width={108} height={70} rx="6" />
+			<path d="M100 80V90M78 92H122" />
+			<rect className="ill-ink-panel" x={60} y={22} width={80} height={46} rx="4" />
+			<path className="ill-on-ink" d="M70 38L77 43L70 48" />
+			<path className="ill-on-ink" d="M82 48H110" />
+			<rect className="ill-accent ill-blink" x={114} y={39} width={7} height={10} rx="1.5" />
+			<path className="ill-on-ink ill-faint" d="M70 58H128" />
+		</>
+	),
 	// Building from source: a terminal, a gear turning beside it.
 	source: () => (
 		<>
@@ -639,6 +704,55 @@ export function CardArt({ art }: { art: CardArtKind }) {
 	const Art = CARD_ART[art]
 	return (
 		<svg className="ill ill-card" viewBox="0 0 200 100" aria-hidden="true" focusable="false">
+			<Art />
+		</svg>
+	)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Flow drawings (0 0 120 80): the steps from what you ask to the window doing it
+// ---------------------------------------------------------------------------------------------
+
+const FLOW_ART = {
+	// The agent in the console.
+	agent: () => <Bot x={60} y={78} />,
+	// The skill: a page the agent keeps a bookmark in, read when it needs it.
+	skill: () => (
+		<>
+			<rect className="ill-paper" x={34} y={6} width={52} height={68} rx="5" />
+			<CodeLines x={44} y={24} lines={[[0, 26], [0, 32], [0, 20], [0, 28]]} gap={11} />
+			<path className="ill-accent" d="M70 6V30L76 25L82 30V6Z" />
+		</>
+	),
+	// The API: a call in braces, sent on.
+	api: () => (
+		<>
+			<Brace x={26} y={14} h={52} />
+			<Brace x={78} y={14} h={52} flip />
+			<CodeLines x={40} y={28} lines={[[0, 30], [4, 26], [0, 20]]} gap={12} accent={1} />
+			<path d="M94 40H112M106 34L112 40L106 46" />
+		</>
+	),
+	// The window doing it: a run started, the tests back.
+	window: () => (
+		<>
+			<Win x={14} y={8} w={92} h={64} />
+			<CodeLines x={26} y={32} lines={[[0, 34], [6, 44]]} gap={11} />
+			<circle className="ill-accent" cx="88" cy="56" r="8" />
+			<path className="ill-on-accent" d="M86 52V60L92 56Z" />
+			<circle className="ill-clay" cx="30" cy="58" r="4" />
+			<circle className="ill-accent" cx="42" cy="58" r="4" />
+			<circle className="ill-accent" cx="54" cy="58" r="4" />
+		</>
+	)
+}
+
+export type FlowArtKind = keyof typeof FLOW_ART
+
+export function FlowArt({ art }: { art: FlowArtKind }) {
+	const Art = FLOW_ART[art]
+	return (
+		<svg className="ill ill-flow" viewBox="0 0 120 80" aria-hidden="true" focusable="false">
 			<Art />
 		</svg>
 	)

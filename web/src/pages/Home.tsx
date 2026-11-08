@@ -2,6 +2,7 @@ import { SiteHeader } from '../components/SiteHeader'
 import { SiteFooter } from '../components/SiteFooter'
 import { GitHubMark, Glyph } from '../components/Glyph'
 import { CardArt, HeroMark, PerchArt, SectionArt, WorkshopScene, type CardArtKind } from '../components/Illustrations'
+import { HarnessSection } from '../components/Harness'
 import { SectionHead, Showcase } from '../components/Sections'
 import { Shot } from '../components/Shot'
 import { useScrollReveal } from '../effects'
@@ -81,7 +82,7 @@ export function Home() {
 						</h1>
 						<p className="lede">
 							Written in Rust, with its own Java engine, and TypeScript for Node projects and Playwright tests. Git is
-							built in, Claude Code, Codex, opencode and Amp edit live in your editor, and the window can stay on your
+							built in, Claude Code, Codex, opencode and Amp edit live in your editor and can drive the whole app, and the window can stay on your
 							desk while the project lives on a Linux machine over SSH.
 						</p>
 						<div className="hero-cta">
@@ -335,11 +336,13 @@ export function Home() {
 							<p>Send the selection, or ask the agent to fix a problem, from the code itself. The file and lines arrive in its prompt.</p>
 						</article>
 						<article className="trio-card" data-reveal>
-							<h3>An editor API, not a token bill</h3>
-							<p>The agent opens files, reads your selection and the problems through an Agent Skill, a UTCP manual and plain HTTP. About 80 tokens a request, where MCP tool definitions take about 800.</p>
+							<h3>It drives the window too</h3>
+							<p>Beyond its edits, the agent can open the project it made, run its tests, read what failed and show you, through SnoutCode's own API. <a className="inline-link" href="#harness">See how</a>.</p>
 						</article>
 					</div>
 				</section>
+
+				<HarnessSection />
 
 				<section className="section" aria-labelledby="git-title">
 					<SectionHead id="git-title" art="git" eyebrow="Built in" title="Git, right where you work">
