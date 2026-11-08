@@ -259,10 +259,11 @@ pub fn small_button(
 pub fn primary_button(
     id: impl Into<ElementId>,
     icon: crate::components::IconName,
-    text: &'static str,
+    text: impl Into<SharedString>,
     enabled: bool,
     p: &Palette,
 ) -> Stateful<Div> {
+    let text: SharedString = text.into();
     let b = p.primary();
     let (fill, ink) = if enabled { (b.fill, b.ink) } else { (p.button, p.fg_dim) };
     let (hover, pressed) = (b.hover, b.pressed);

@@ -342,13 +342,7 @@ pub fn locate(host: &dyn snout_host::Host, id: &str, configured: Option<PathBuf>
     if let Some(path) = configured {
         return (!path.is_absolute() || host.is_file(&path)).then_some(path);
     }
-    let name = match id {
-        CLAUDE => "claude",
-        CODEX => "codex",
-        OPENCODE => "opencode",
-        AMP => "amp",
-        _ => return None,
-    };
+    let name = program_name(id)?;
     let found = if id == CLAUDE { snout_core::claude::find_claude(host) } else { find_agent(host, name) };
     found.or_else(|| from_shell(host, name))
 }
@@ -439,14 +433,37 @@ fn from_shell(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
 /// What installs the agent `id` on a host like `info`: a line for its shell (PowerShell on
 /// Windows). None for the custom agent.
 pub fn install_command(id: &str, info: &snout_host::HostInfo) -> Option<&'static str> {
-    Some(match (id, info.is_windows()) {
+    install_line(id, info.is_windows())
+}
+
+/// What installs the agent `id`: in PowerShell on Windows, else in a Unix shell.
+pub fn install_line(id: &str, windows: bool) -> Option<&'static str> {
+    Some(match (id, windows) {
         (CLAUDE, false) => "curl -fsSL https://claude.ai/install.sh | bash",
         (CLAUDE, true) => "irm https://claude.ai/install.ps1 | iex",
         (CODEX, _) => "npm install -g @openai/codex",
         (OPENCODE, false) => "curl -fsSL https://opencode.ai/install | bash",
         (OPENCODE, true) => "npm install -g opencode-ai",
         (AMP, false) => "curl -fsSL https://ampcode.com/install.sh | bash",
-        (AMP, true) => "npm install -g @sourcegraph/amp",
+        (AMP, true) => "irm https://ampcode.com/install.ps1 | iex",
+        _ => return None,
+    })
+}
+
+/// Whether the agent `id`'s makers would have it run inside WSL on Windows: Amp's say "The CLI
+/// supports macOS, Linux, and Windows through WSL". The console looks for it in the distros
+/// too, and offers WSL before Windows itself.
+pub fn wsl_first(id: &str) -> bool {
+    id == AMP
+}
+
+/// The program the agent `id` runs as, for all but the custom agent.
+pub fn program_name(id: &str) -> Option<&'static str> {
+    Some(match id {
+        CLAUDE => "claude",
+        CODEX => "codex",
+        OPENCODE => "opencode",
+        AMP => "amp",
         _ => return None,
     })
 }
@@ -514,6 +531,14 @@ mod tests {
             }
             assert_eq!(install_command(CUSTOM, &info), None);
         }
+    }
+
+    #[test]
+    fn amp_on_windows_is_installed_by_its_own_installer_and_wsl_comes_first() {
+        assert_eq!(install_line(AMP, true), Some("irm https://ampcode.com/install.ps1 | iex"));
+        assert_eq!(install_line(AMP, false), Some("curl -fsSL https://ampcode.com/install.sh | bash"));
+        assert!(wsl_first(AMP));
+        assert!(!wsl_first(CLAUDE) && !wsl_first(CODEX) && !wsl_first(OPENCODE));
     }
 
     #[test]

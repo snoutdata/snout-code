@@ -180,6 +180,8 @@ struct Session {
     started: Instant,
     /// The agent whose installer this session runs, if it runs one.
     install: Option<&'static str>,
+    /// The WSL distro that installer runs in, when not in this machine's own shell.
+    install_in: Option<String>,
 }
 
 /// Text waiting to go to a folder's session.
@@ -276,7 +278,14 @@ pub struct ConsolePanel {
     installed_here: std::collections::HashSet<&'static str>,
     /// Whether the agents have been looked for.
     probed: bool,
+    /// The distros that have an agent its makers would run in WSL, as last looked for (Windows).
+    in_wsl: HashMap<&'static str, Vec<String>>,
+    /// The agents being looked for in the distros now.
+    wsl_looking: std::collections::HashSet<&'static str>,
 }
+
+/// The install lines the not-installed view shows, each under its label, if it has one.
+type InstallLines = Vec<(Option<&'static str>, String)>;
 
 /// Below this width (points) the console's toolbar shows icons only.
 const COMPACT_W: f32 = 560.;
@@ -409,6 +418,8 @@ impl ConsolePanel {
             found: HashMap::new(),
             installed_here: Default::default(),
             probed: false,
+            in_wsl: HashMap::new(),
+            wsl_looking: Default::default(),
         }
     }
 
@@ -581,11 +592,19 @@ impl ConsolePanel {
         }
     }
 
-    /// Run the installer of the agent `id` in the console, in the user's shell: its output
-    /// shows as it goes, and the agent starts once it is done.
-    pub fn install(&mut self, root: &Path, id: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+    /// Run the installer of the agent `id` in the console, in the user's shell (or in the WSL
+    /// distro `distro`'s): its output shows as it goes, and the agent starts once it is done.
+    pub fn install(
+        &mut self,
+        root: &Path,
+        id: &'static str,
+        distro: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let host = crate::host::host(cx);
-        let Some(line) = crate::agents::install_command(id, host.info()) else { return };
+        let windows = host.info().is_windows() && distro.is_none();
+        let Some(line) = crate::agents::install_line(id, windows) else { return };
         if let Some(mut s) = self.sessions.remove(root) {
             s.pty.kill();
         }
@@ -601,8 +620,13 @@ impl ConsolePanel {
         let size = self.start_size();
         let started = cx.background_executor().spawn({
             let root = root.clone();
+            let distro = distro.clone();
             async move {
-                let (program, args): (PathBuf, Vec<String>) = if host.info().is_windows() {
+                let (program, args): (PathBuf, Vec<String>) = if let Some(d) = distro {
+                    // A login shell of the distro's: its PATH, as its own terminal has it.
+                    let args = ["-d", d.as_str(), "-e", "bash", "-lc", line].map(str::to_owned);
+                    (PathBuf::from("wsl.exe"), args.to_vec())
+                } else if windows {
                     let ps = snout_host::which(&*host, &["pwsh", "powershell"], &[])
                         .unwrap_or_else(|| PathBuf::from("powershell.exe"));
                     (ps, vec!["-NoProfile".into(), "-Command".into(), line.into()])
@@ -632,6 +656,7 @@ impl ConsolePanel {
                             turn: None,
                             started: Instant::now(),
                             install: Some(id),
+                            install_in: distro.clone(),
                         };
                         this.sessions.insert(root.clone(), session);
                         this.note_engine(&root, cx);
@@ -646,18 +671,45 @@ impl ConsolePanel {
         cx.notify();
     }
 
-    /// The installer of `root`'s session finished well: start its agent.
+    /// The installer of `root`'s session finished well: start its agent. One installed in a
+    /// distro is looked for there again, for the console to offer a folder of it.
     fn after_install(&mut self, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.sessions.get_mut(root).and_then(|s| {
+        let Some((id, distro)) = self.sessions.get_mut(root).and_then(|s| {
             let id = s.install?;
-            (s.pty.exit_status() == Some("exited")).then_some(id)
+            (s.pty.exit_status() == Some("exited")).then(|| (id, s.install_in.clone()))
         }) else {
             return;
         };
         self.sessions.remove(root);
-        self.installed_here.insert(id);
-        self.found.insert(id, true);
+        if distro.is_some() {
+            self.in_wsl.remove(id);
+        } else {
+            self.installed_here.insert(id);
+            self.found.insert(id, true);
+        }
         self.start(root, &[], window, cx);
+    }
+
+    /// Look for the agent `id` in this machine's WSL distros, off the UI thread, when its makers
+    /// would have it run there and the console runs on Windows: the console offers its distro.
+    /// Again at each start that does not find it, for one installed there since.
+    fn look_in_wsl(&mut self, id: &'static str, cx: &mut Context<Self>) {
+        let host = crate::host::host(cx);
+        // Not in the unit tests: it starts the distros.
+        if !host.info().is_windows() || !crate::agents::wsl_first(id) || cfg!(test) || !self.wsl_looking.insert(id) {
+            return;
+        }
+        let Some(name) = crate::agents::program_name(id) else { return };
+        let looked = cx.background_executor().spawn(async move { crate::wsl::distros_with(name) });
+        cx.spawn(async move |this, cx| {
+            let found = looked.await;
+            let _ = this.update(cx, |this, cx| {
+                this.wsl_looking.remove(id);
+                this.in_wsl.insert(id, found);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn compact(&self) -> bool {
@@ -1021,6 +1073,7 @@ impl ConsolePanel {
                             turn: None,
                             started: Instant::now(),
                             install: None,
+                            install_in: None,
                         };
                         this.sessions.insert(root.clone(), session);
                         this.note_engine(&root, cx);
@@ -1039,6 +1092,7 @@ impl ConsolePanel {
                             this.error = Some((root.clone(), e));
                         } else {
                             this.missing = Some((root.clone(), Missing::Program(id)));
+                            this.look_in_wsl(id, cx);
                         }
                     }
                     Err(Some(e)) => this.error = Some((root.clone(), e)),
@@ -2058,6 +2112,13 @@ impl ConsolePanel {
     ) -> gpui::AnyElement {
         use crate::components::IconName;
         let host = crate::host::host(cx);
+        if let Missing::Program(id) = missing
+            && host.info().is_windows()
+            && crate::agents::wsl_first(id)
+        {
+            let (title, hint, lines, buttons) = self.wsl_guide(root, agent, id, p, cx);
+            return self.missing_layout(title, hint, lines, buttons, p, cx);
+        }
         let line = match missing {
             Missing::Program(id) => crate::agents::install_command(id, host.info()),
             Missing::Command => None,
@@ -2104,13 +2165,132 @@ impl ConsolePanel {
             buttons.push(
                 look::primary_button("console-install", IconName::Download, install_label(id), true, p)
                     .debug_selector(|| "console-install".into())
-                    .on_click(cx.listener(move |this, _, window, cx| this.install(&r, id, window, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| this.install(&r, id, None, window, cx)))
                     .into_any_element(),
             );
             buttons.push(settings_button(false));
         } else {
             buttons.push(settings_button(true));
         }
+        let lines = line.map(|l| vec![(None, l.to_owned())]).unwrap_or_default();
+        self.missing_layout(title, hint, lines, buttons, p, cx)
+    }
+
+    /// What the console says, on Windows, of an agent whose makers would have it run in WSL and
+    /// that is not installed on Windows: the distro that has it, with a way to a folder there;
+    /// else how to install it in a distro, and after that how to on Windows itself.
+    fn wsl_guide(
+        &self,
+        root: &Path,
+        agent: &crate::agents::Agent,
+        id: &'static str,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> (String, String, InstallLines, Vec<gpui::AnyElement>) {
+        use crate::components::IconName;
+        let name = agent.name.clone();
+        let unix = crate::agents::install_line(id, false).unwrap_or_default().to_owned();
+        let windows = crate::agents::install_line(id, true).unwrap_or_default().to_owned();
+        let makers = format!("{name}'s developers recommend running it in WSL.");
+        let mut buttons: Vec<gpui::AnyElement> = Vec::new();
+        let settings = look::small_button("console-agent-settings", IconName::Settings, "Set Its Path", p)
+            .debug_selector(|| "console-agent-settings".into())
+            .h(px(28.))
+            .px(px(12.))
+            .on_click(
+                cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(crate::menus::SettingsAgents), cx)),
+            )
+            .into_any_element();
+        if self.wsl_looking.contains(id) && !self.in_wsl.contains_key(id) {
+            let title = format!("Looking for {name} in WSL…");
+            return (title, makers, Vec::new(), vec![settings]);
+        }
+        let has = self.in_wsl.get(id).cloned().unwrap_or_default();
+        if !has.is_empty() {
+            for (i, d) in has.iter().take(3).enumerate() {
+                let host = format!("{}{d}", snout_remote::WSL_PREFIX);
+                buttons.push(
+                    look::primary_button(
+                        ("console-open-wsl", i),
+                        IconName::FolderOpen,
+                        format!("Open a Folder in {d}"),
+                        true,
+                        p,
+                    )
+                    .debug_selector(|| "console-open-wsl".into())
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        window.dispatch_action(Box::new(crate::menus::ConnectHost(host.clone())), cx)
+                    }))
+                    .into_any_element(),
+                );
+            }
+            buttons.push(settings);
+            let title = format!("{name} is installed in {}", has.join(" and "));
+            let hint = format!("{makers} Open a folder in {} and the console runs {name} there.", has[0]);
+            return (title, hint, Vec::new(), buttons);
+        }
+        let distros = cx.try_global::<crate::remote::Remote>().map(|r| r.wsl_distros.clone()).unwrap_or_default();
+        let title = format!("{name} is not installed");
+        let Some(first) = distros.first().cloned() else {
+            let hint = format!(
+                "{makers} This PC has no WSL distribution yet: `wsl --install` in PowerShell sets one up. \
+                 To run {name} on Windows itself instead, install it with the line below, or set its path."
+            );
+            return (title, hint, vec![(Some("On Windows itself"), windows)], vec![settings]);
+        };
+        let hint = format!(
+            "{makers} Install runs its installer in {first}; then open a folder there and the console runs \
+             {name} in it. On Windows itself, it installs with the second line."
+        );
+        for (i, d) in distros.iter().take(3).enumerate() {
+            let (r, d) = (root.to_owned(), d.clone());
+            let label = format!("Install in {d}");
+            let button = if i == 0 {
+                look::primary_button(("console-install-wsl", i), IconName::Download, label, true, p)
+            } else {
+                look::small_button(("console-install-wsl", i), IconName::Download, label, p).h(px(28.)).px(px(12.))
+            };
+            buttons.push(
+                button
+                    .debug_selector(|| "console-install-wsl".into())
+                    .on_click(cx.listener(move |this, _, window, cx| this.install(&r, id, Some(d.clone()), window, cx)))
+                    .into_any_element(),
+            );
+        }
+        buttons.push(settings);
+        (title, hint, vec![(Some("In WSL"), unix), (Some("On Windows itself"), windows)], buttons)
+    }
+
+    /// The not-installed view: the agent's drawing beside `title`, `hint`, the install `lines`
+    /// (each under its label, if it has one) and `buttons`.
+    fn missing_layout(
+        &self,
+        title: String,
+        hint: String,
+        lines: InstallLines,
+        buttons: Vec<gpui::AnyElement>,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let mono = look::mono_font(cx);
+        let lines = lines.into_iter().map(|(label, line)| {
+            div()
+                .mt(px(6.))
+                .flex()
+                .flex_col()
+                .gap(px(3.))
+                .when_some(label, |d, l| d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(l)))
+                .child(
+                    div()
+                        .px(px(8.))
+                        .py(px(5.))
+                        .rounded(px(5.))
+                        .bg(p.wash(p.fg_dim))
+                        .font_family(mono.clone())
+                        .text_size(px(11.5))
+                        .child(line),
+                )
+        });
         div()
             .id("console-not-running")
             .debug_selector(|| "console-missing".into())
@@ -2143,19 +2323,7 @@ impl ConsolePanel {
                             .when(self.stacked(), |d| d.w_full())
                             .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
                             .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
-                            .when_some(line, |d, line| {
-                                d.child(
-                                    div()
-                                        .mt(px(6.))
-                                        .px(px(8.))
-                                        .py(px(5.))
-                                        .rounded(px(5.))
-                                        .bg(p.wash(p.fg_dim))
-                                        .font_family(look::mono_font(cx))
-                                        .text_size(px(11.5))
-                                        .child(line),
-                                )
-                            })
+                            .children(lines)
                             .child(div().mt(px(10.)).flex().flex_wrap().gap(px(8.)).children(buttons)),
                     ),
             )
@@ -2186,6 +2354,7 @@ impl ConsolePanel {
         let (r1, r2, r3) = (root.to_owned(), root.to_owned(), root.to_owned());
         let start = root.to_owned();
         let install = self.sessions.get(root).and_then(|s| s.install);
+        let install_in = self.sessions.get(root).and_then(|s| s.install_in.clone());
         let (ended, again) = match (self.kind, install) {
             (_, Some(_)) => ("The installer".to_owned(), "Try again"),
             (Kind::Claude, None) => (self.session_agent(root, cx).name.to_string(), "Start a new session"),
@@ -2216,7 +2385,7 @@ impl ConsolePanel {
                                 .icon(crate::components::menu_icon(crate::components::IconName::Play))
                                 .label(again)
                                 .on_click(cx.listener(move |this, _, window, cx| match install {
-                                    Some(id) => this.install(&start, id, window, cx),
+                                    Some(id) => this.install(&start, id, install_in.clone(), window, cx),
                                     None => this.start(&start, &[], window, cx),
                                 })),
                         ),

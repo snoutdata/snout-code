@@ -59,6 +59,55 @@ pub fn distros() -> Vec<String> {
     c.output().ok().filter(|out| out.status.success()).map(|out| distros_in(&out.stdout)).unwrap_or_default()
 }
 
+/// How long a distro gets to say where a program is: the first call may have to start it.
+const LOOKUP: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// What a distro's login shell runs to name the program `name`: on its PATH, else where the
+/// installers put it (Amp's script, for one, adds its folder to the PATH of `.bashrc` only).
+fn lookup_script(name: &str) -> String {
+    format!(
+        "command -v {name} 2>/dev/null || for d in \"$HOME/.local/bin\" \"$HOME/.amp/bin\" \"$HOME/.npm-global/bin\" \
+         \"$HOME/.bun/bin\"; do [ -x \"$d/{name}\" ] && echo \"$d/{name}\" && break; done; true"
+    )
+}
+
+/// The program a distro's shell named: the last line that is an absolute path (a profile can print anything).
+fn program_in(output: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(output).lines().rev().map(str::trim).find(|l| l.starts_with('/')).map(str::to_owned)
+}
+
+/// Where the program `name` is in the distro `distro`, if it is there.
+pub fn find_program(distro: &str, name: &str) -> Option<String> {
+    let mut c = std::process::Command::new("wsl.exe");
+    snout_host::default_signals(&mut c);
+    c.args(["-d", distro, "-e", "sh", "-lc", &lookup_script(name)])
+        .env_remove("WSL_UTF8")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let mut child = c.spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
+        let _ = tx.send(out);
+    });
+    let out = rx.recv_timeout(LOOKUP);
+    let _ = child.kill();
+    let _ = child.wait();
+    program_in(&out.ok()?)
+}
+
+/// The distros of this machine that have the program `name`, looked in side by side.
+pub fn distros_with(name: &str) -> Vec<String> {
+    let all = distros();
+    std::thread::scope(|scope| {
+        let looks: Vec<_> = all.iter().map(|d| (d, scope.spawn(move || find_program(d, name).is_some()))).collect();
+        looks.into_iter().filter_map(|(d, look)| look.join().unwrap_or(false).then(|| d.clone())).collect()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +137,14 @@ mod tests {
         let bytes: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
         assert_eq!(distros_in(&bytes), ["Ubuntu", "Debian"]);
         assert_eq!(distros_in(b""), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_distro_names_amp_where_its_script_put_it() {
+        let script = lookup_script("amp");
+        assert!(script.starts_with("command -v amp"), "{script}");
+        assert!(script.contains("$HOME/.amp/bin"), "Amp's script puts it here: {script}");
+        assert_eq!(program_in(b"welcome to ubuntu\n/root/.local/bin/amp\n"), Some("/root/.local/bin/amp".into()));
+        assert_eq!(program_in(b"no amp here\n"), None);
     }
 }

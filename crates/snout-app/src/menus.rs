@@ -175,6 +175,12 @@ pub struct RunMavenGoal {
 #[action(namespace = snout, no_json)]
 pub struct OpenRemoteRecent(pub crate::remote::RemoteProject);
 
+/// Connect to this machine (`WSL: Ubuntu`, say) and pick a folder there: the console's way to an
+/// agent installed in a distro.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct ConnectHost(pub String);
+
 /// Hide a tool window's dock: the one that holds the panel of this dock name.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = snout, no_json)]

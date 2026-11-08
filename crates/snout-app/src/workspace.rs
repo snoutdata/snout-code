@@ -2195,6 +2195,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &NewProject, w, cx| this.open_new_project(w, cx)))
             .on_action(cx.listener(|this, _: &ConnectSsh, w, cx| this.open_connect(w, cx)))
             .on_action(cx.listener(|this, a: &OpenRemoteRecent, w, cx| this.open_remote_recent(a.0.clone(), w, cx)))
+            .on_action(cx.listener(|this, a: &crate::menus::ConnectHost, w, cx| this.connect_host(a.0.clone(), w, cx)))
             // Greyed out without a connection.
             .when(crate::remote::is_remote(cx), |d| {
                 d.on_action(cx.listener(|this, _: &CloseRemote, w, cx| this.close_remote(w, cx)))

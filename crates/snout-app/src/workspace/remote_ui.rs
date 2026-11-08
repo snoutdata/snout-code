@@ -189,6 +189,26 @@ impl Workspace {
         );
     }
 
+    /// Connect to `name` and put up its folder picker: the console's way to an agent in a distro.
+    pub fn connect_host(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        let (ws, handle) = (cx.weak_entity(), window.window_handle());
+        remote::connect(
+            name.clone(),
+            move |result, cx| {
+                let _ = handle.update(cx, |_, window, cx| {
+                    let _ = ws.update(cx, |this, cx| match result {
+                        Ok(host) => this.pick_remote(Purpose::Connect(name, host), window, cx),
+                        Err(why) => this.model.update(cx, |m, cx| {
+                            m.message = format!("Could not connect to {name}: {why}");
+                            cx.notify();
+                        }),
+                    });
+                });
+            },
+            cx,
+        );
+    }
+
     /// File ▸ Close Remote Connection: the window opens again on this Mac.
     pub fn close_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !remote::is_remote(cx) {
