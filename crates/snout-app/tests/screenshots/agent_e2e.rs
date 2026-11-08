@@ -127,7 +127,7 @@ pub fn run(claude: PathBuf, project: PathBuf, lock_dir: PathBuf, out: PathBuf) {
         pump(&mut cx, 4_000);
         shoot(&mut cx, &format!("install-{id}-1-offer"));
         cx.update_window(window, |_, window, cx| {
-            console.update(cx, |c, cx| c.install(&project, id, window, cx));
+            console.update(cx, |c, cx| c.install(&project, id, None, window, cx));
         })
         .unwrap();
         wait(&mut cx, "the installer to start", 30, &mut |cx| cx.update(|cx| console.read(cx).installing(&project)));
