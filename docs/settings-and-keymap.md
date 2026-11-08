@@ -115,6 +115,8 @@ the project's folder there, and SnoutCode reads and writes it there.
 Your code, Git's and the build tools' output, and what you send to a coding agent are not
 translated.
 
+To correct a translation or add a language, see [Translating SnoutCode](translating.md).
+
 **Theme**
 
 - **Colors**: the colour theme. The swatches show the one in use, in light or dark.

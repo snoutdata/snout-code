@@ -34,6 +34,7 @@ Each item links to its page in the user guide.
 - **[Terminal](docs/terminal.md):** your shell in the bottom dock, with scrollback, find and links, on the built-in terminal engine or Ghostty's.
 - **[Remote SSH](docs/remote-ssh.md):** the project, Git, the Java engine, builds, runs and terminals on a Linux machine you reach with `ssh`.
 - **[Processes](docs/processes.md):** what SnoutCode runs on your machine, and stopping it.
+- **Languages:** the window and the menus in English, French, Spanish and Brazilian Portuguese, following your system or your choice in Settings. [Help translate it](docs/translating.md).
 - **[Updates](docs/updates.md):** SnoutCode downloads a new version in the background and installs it when you restart or quit, from a feed it checks is signed.
 
 The Java features come from SnoutCode's Java engine (`engine/`, see [engine/README.md](engine/README.md)). The macOS app, the Linux packages and the Windows installer carry the engine with its own Java runtime, so you need no Java installed to start.
@@ -137,6 +138,10 @@ The site at [snoutcode.com](https://snoutcode.com) is in [`web/`](web/README.md)
 ## Contributing
 
 Issues and pull requests are welcome. Please run the three commands under [Tests](#tests) before opening a pull request.
+
+### Translations
+
+You can help without writing code. Each language is one text file, so correcting a translation is a small edit you can make on GitHub, and adding a language starts with copying the English file. The French, Spanish and Portuguese have not been proofread by native speakers yet, so corrections are very welcome. [Translating SnoutCode](docs/translating.md) shows how.
 
 ## License
 

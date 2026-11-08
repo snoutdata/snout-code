@@ -40,6 +40,10 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScrip
 - [Terminal](terminal.md): the Terminal tab and the console as terminals: keys, scrollback, find, links, and the terminal engine (Built-in or Ghostty).
 - [Remote SSH](remote-ssh.md): keep the window on your Mac and work on a Linux machine over SSH.
 
+## Helping out
+
+- [Translating SnoutCode](translating.md): correct a translation or add a language, with or without writing code.
+
 ## When something goes wrong
 
 - [Troubleshooting](troubleshooting.md): logs, the Java engine's status, and common problems, such as Ghostty unavailable.
