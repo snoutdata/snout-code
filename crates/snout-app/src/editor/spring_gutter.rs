@@ -237,7 +237,8 @@ impl EditorPanel {
         // A bean injected in many places: a field narrows the list, and has the keyboard.
         let filter = (gos.len() > FILTER_FROM).then(|| {
             let input = cx.new(|cx| {
-                gpui_component::input::InputState::new(window, cx).placeholder("Filter by class, member or file")
+                gpui_component::input::InputState::new(window, cx)
+                    .placeholder(ts!("editor-filter-by-class-member-or-file"))
             });
             cx.subscribe(&input, |this, _, e: &gpui_component::input::InputEvent, cx| match e {
                 gpui_component::input::InputEvent::Change => cx.notify(),
@@ -382,31 +383,32 @@ impl EditorPanel {
                             cx.notify();
                         })),
                 ),
-                SpringItem::CopyPath(path) => {
-                    col.child(row("spring-copy").child(icon(Icon::Copy, 13., p.fg_dim)).child("Copy Path").on_click(
+                SpringItem::CopyPath(path) => col.child(
+                    row("spring-copy").child(icon(Icon::Copy, 13., p.fg_dim)).child(ts!("tabs-copy-path")).on_click(
                         cx.listener(move |this, _, _, cx| {
                             this.gutter_menu = None;
                             cx.write_to_clipboard(gpui::ClipboardItem::new_string(path.clone()));
                             cx.notify();
                         }),
-                    ))
-                }
+                    ),
+                ),
                 SpringItem::ShowEndpoint(path) => col.child(
-                    row("spring-show").child(icon(Icon::Endpoint, 13., green)).child("Show in Endpoints").on_click(
-                        cx.listener(move |this, _, _, cx| {
+                    row("spring-show")
+                        .child(icon(Icon::Endpoint, 13., green))
+                        .child(ts!("editor-show-in-endpoints"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
                             this.gutter_menu = None;
                             if let Some(model) = spring::spring(cx) {
                                 let path = path.clone();
                                 model.update(cx, |s, cx| s.show_endpoint(path, cx));
                             }
                             cx.notify();
-                        }),
-                    ),
+                        })),
                 ),
             };
         }
         if matching == 0 && total > 0 {
-            col = col.child(div().px(px(10.)).py(px(4.)).text_color(p.fg_dim).child("Nothing matches."));
+            col = col.child(div().px(px(10.)).py(px(4.)).text_color(p.fg_dim).child(ts!("editor-nothing-matches")));
         }
         let list = div()
             .id("spring-menu-list")
@@ -422,14 +424,11 @@ impl EditorPanel {
                     .items_center()
                     .gap(px(8.))
                     .child(div().flex_1().child(crate::look::field(filter, true, None, &p)))
-                    .child(
-                        div()
-                            .flex_none()
-                            .pr(px(4.))
-                            .text_size(px(11.5))
-                            .text_color(p.fg_dim)
-                            .child(format!("{matching} of {total}")),
-                    ),
+                    .child(div().flex_none().pr(px(4.)).text_size(px(11.5)).text_color(p.fg_dim).child(t!(
+                        "editor-of",
+                        matching = matching.to_string(),
+                        total = total.to_string()
+                    ))),
             );
         }
         body.child(list).into_any_element()
@@ -464,11 +463,11 @@ pub fn spring_items(line: &SpringLine) -> Vec<SpringItem> {
     for b in &line.beans {
         let sites = b.sites();
         if sites.is_empty() {
-            out.push(SpringItem::Heading(format!("Bean '{}'", b.name)));
-            out.push(SpringItem::Note("Not injected anywhere".into()));
+            out.push(SpringItem::Heading(t!("editor-bean", b = (b.name).to_string())));
+            out.push(SpringItem::Note(ts!("spring-not-injected-anywhere-2").into()));
             continue;
         }
-        out.push(SpringItem::Heading(format!("Bean '{}' is injected into", b.name)));
+        out.push(SpringItem::Heading(t!("editor-bean-is-injected-into", b = (b.name).to_string())));
         for s in sites {
             let target = s.target();
             out.push(SpringItem::Go { label: s.label(), detail: place(&target), target });
@@ -478,19 +477,26 @@ pub fn spring_items(line: &SpringLine) -> Vec<SpringItem> {
         let name = i.name.clone().or(i.member.clone()).unwrap_or_default();
         match (i.status.as_str(), i.beans.as_slice()) {
             ("value", _) => {
-                out.push(SpringItem::Note(format!("'{name}' takes {}", i.value.clone().unwrap_or_default())));
+                out.push(SpringItem::Note(t!(
+                    "editor-takes",
+                    name = name.to_string(),
+                    value = (i.value.clone().unwrap_or_default()).to_string()
+                )));
             }
             (_, []) => {
-                let why = i.message.clone().unwrap_or_else(|| format!("No bean for '{name}'"));
-                out.push(SpringItem::Note(crate::keymap::shown(&format!("{why}. Press ⌘. for quick fixes."))));
+                let why = i.message.clone().unwrap_or_else(|| t!("editor-no-bean-for", name = name.to_string()));
+                out.push(SpringItem::Note(crate::keymap::shown(&t!(
+                    "editor-press-for-quick-fixes",
+                    why = why.to_string()
+                ))));
             }
             (status, beans) => {
                 let heading = if status == "ambiguous" {
-                    format!("'{name}' could take any of")
+                    t!("editor-could-take-any-of", name = name.to_string())
                 } else if beans.len() > 1 {
-                    format!("'{name}' takes")
+                    t!("editor-takes-2", name = name.to_string())
                 } else {
-                    format!("'{name}' takes the bean")
+                    t!("editor-takes-the-bean", name = name.to_string())
                 };
                 out.push(SpringItem::Heading(heading));
                 for b in beans {

@@ -314,7 +314,7 @@ impl Runs {
                             d.attaching = false;
                         }
                         if let Some(s) = this.session_mut(id) {
-                            s.push(Stream::Err, &format!("Could not connect the debugger: {e}"));
+                            s.push(Stream::Err, &t!("debug-could-not-connect-the-debugger", e = e.to_string()));
                         }
                         cx.notify();
                     });
@@ -327,7 +327,7 @@ impl Runs {
                 d.add_target(&dap);
                 d.events.push(listen);
                 if let Some(s) = this.session_mut(id) {
-                    s.push(Stream::System, "Debugger attached");
+                    s.push(Stream::System, ts!("debug-debugger-attached"));
                 }
                 cx.notify();
                 true
@@ -348,7 +348,7 @@ impl Runs {
             if let Err(e) = dap.request("attach", attach).await {
                 let _ = this.update(cx, |this, cx| {
                     if let Some(s) = this.session_mut(id) {
-                        s.push(Stream::Err, &format!("The debugger could not attach: {e}"));
+                        s.push(Stream::Err, &t!("debug-the-debugger-could-not-attach", e = e.to_string()));
                     }
                     cx.notify();
                 });
@@ -744,12 +744,12 @@ impl Runs {
                             .filter_map(Value::as_str)
                             .collect();
                         match classes.len() {
-                            0 => "Nothing to reload".to_owned(),
-                            1 => format!("Reloaded {}", classes[0]),
-                            n => format!("Reloaded {n} classes"),
+                            0 => ts!("debug-nothing-to-reload").to_owned(),
+                            1 => t!("debug-reloaded", classes = (classes[0]).to_string()),
+                            n => t!("debug-reloaded-classes", n = n.to_string()),
                         }
                     }
-                    Err(e) => format!("Could not reload the changed classes: {e}"),
+                    Err(e) => t!("debug-could-not-reload-the-changed-classes", e = e.to_string()),
                 };
                 if let Some(s) = this.session_mut(id) {
                     s.push(Stream::System, &text);

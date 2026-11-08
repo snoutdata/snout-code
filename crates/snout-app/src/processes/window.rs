@@ -75,6 +75,19 @@ impl Columns {
     }
 }
 
+/// A process's state in the language in use. The rows keep it in English: it decides what a
+/// row offers.
+fn shown_state(state: &str) -> String {
+    match state {
+        "Running" => ts!("console-running").to_owned(),
+        "Debugging" => ts!("quit-debugging").to_owned(),
+        "Building" => ts!("processes-state-building").to_owned(),
+        "Stopping" => ts!("processes-state-stopping").to_owned(),
+        "Left over" => ts!("processes-state-left-over").to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 crate::panels::panel!(ProcessesWindow, "Processes", |_, _| "Processes".into(), true);
 
 fn glyph(kind: &Kind) -> Icon {
@@ -120,9 +133,12 @@ impl Render for ProcessesWindow {
             .text_color(p.fg);
         if procs.rows.is_empty() {
             return base.child(
-                crate::components::EmptyState::new(snout_core::art::spots::no_processes(), "Looking at the processes")
-                    .hint("SnoutCode's own processes show here: the Java engine, Gradle daemons, Maven, runs and terminals.")
-                    .compact(),
+                crate::components::EmptyState::new(
+                    snout_core::art::spots::no_processes(),
+                    ts!("processes-looking-at-the-processes"),
+                )
+                .hint(ts!("processes-snoutcodes-own-processes-show-here-the-java-engine"))
+                .compact(),
             );
         }
         let rows: Rc<Vec<Row>> = Rc::new(procs.rows.clone());
@@ -146,12 +162,12 @@ impl Render for ProcessesWindow {
             .text_size(px(crate::components::HEAD_TEXT))
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.fg_dim)
-            .child(div().flex_1().min_w_0().child("Process"))
+            .child(div().flex_1().min_w_0().child(ts!("processes-process")))
             .when(columns.pid, |d| d.child(cell(PID_W).text_right().child("PID")))
-            .when(columns.memory, |d| d.child(cell(MEMORY_W).text_right().child("Memory")))
+            .when(columns.memory, |d| d.child(cell(MEMORY_W).text_right().child(ts!("processes-memory"))))
             .when(columns.cpu, |d| d.child(cell(CPU_W).text_right().child("CPU")))
-            .when(columns.uptime, |d| d.child(cell(UPTIME_W).text_right().child("Uptime")))
-            .child(cell(state_w).pl(px(12.)).child("State"))
+            .when(columns.uptime, |d| d.child(cell(UPTIME_W).text_right().child(ts!("processes-uptime"))))
+            .child(cell(state_w).pl(px(12.)).child(ts!("git-state")))
             .child(div().w(px(ACTIONS_W)).flex_none());
         let entity = self.processes.clone();
         let n = rows.len();
@@ -166,7 +182,10 @@ impl Render for ProcessesWindow {
                         gpui::HighlightStyle { color: Some(p.fg_dim), ..Default::default() },
                     )]);
                     let tip: SharedString = match &r.project {
-                        Some(project) => format!("{}\nProject: {project}", r.purpose).into(),
+                        Some(project) => {
+                            t!("processes-project", purpose = (r.purpose).to_string(), project = project.to_string())
+                                .into()
+                        }
                         None => r.purpose.clone().into(),
                     };
                     let ink = match &r.kind {
@@ -179,9 +198,9 @@ impl Render for ProcessesWindow {
                         _ => p.fg_dim,
                     };
                     let state_tip: &'static str = if r.busy {
-                        "Busy: at work now (a filled dot)"
+                        ts!("processes-busy-at-work-now-a-filled-dot")
                     } else {
-                        "Waiting: alive, doing nothing now (a hollow dot)"
+                        ts!("processes-waiting-alive-doing-nothing-now-a-hollow-dot")
                     };
                     let state_ink = if r.state.starts_with("Failed") || r.kind == Kind::Leftover {
                         p.warn
@@ -195,8 +214,8 @@ impl Render for ProcessesWindow {
                     let mut actions = div().w(px(ACTIONS_W)).flex_none().flex().justify_end().gap(px(2.));
                     for act in r.actions() {
                         let (g, tip, ink, name) = match act {
-                            Act::Restart => (Icon::Rerun, "Restart", p.fg_dim, "restart"),
-                            Act::Stop => (Icon::Stop, "Stop", p.error, "stop"),
+                            Act::Restart => (Icon::Rerun, ts!("status-restart"), p.fg_dim, "restart"),
+                            Act::Stop => (Icon::Stop, ts!("cmd-stop"), p.error, "stop"),
                         };
                         let entity = entity.clone();
                         let row = r.clone();
@@ -263,7 +282,7 @@ impl Render for ProcessesWindow {
                                         .when(r.busy, |d| d.bg(p.accent))
                                         .when(!r.busy, |d| d.border_1().border_color(p.fg_dim)),
                                 )
-                                .child(div().min_w_0().overflow_hidden().text_ellipsis().child(r.state.clone())),
+                                .child(div().min_w_0().overflow_hidden().text_ellipsis().child(shown_state(&r.state))),
                         )
                         .child(actions)
                 })
@@ -273,12 +292,7 @@ impl Render for ProcessesWindow {
         .min_h_0()
         .px(px(4.))
         .py(px(3.));
-        let summary = format!(
-            "{count} {}, {} of memory, {:.0}% CPU",
-            if count == 1 { "process" } else { "processes" },
-            bytes(memory),
-            cpu
-        );
+        let summary = t!("processes-summary", count = count, memory = bytes(memory), cpu = format!("{cpu:.0}"));
         let foot = div()
             .flex_none()
             .h(px(30.))
@@ -302,7 +316,7 @@ impl Render for ProcessesWindow {
                         .child(n),
                 )
             })
-            .when(idle > 0, |d| d.child(format!("{idle} idle")));
+            .when(idle > 0, |d| d.child(t!("processes-idle", idle = idle.to_string())));
         base.child(header).child(list).child(foot)
     }
 }

@@ -187,7 +187,7 @@ pub fn fix_all_offers(problems: &[Diagnostic], here: &[Diagnostic], fixes: &[Cod
         if alike > 1 {
             continue;
         }
-        let label = format!("Fix all \u{2018}{}\u{2019} in file", fix_all_name(&fix.title));
+        let label = t!("editor-fix-all-in-file", title = (fix_all_name(&fix.title)).to_string());
         if out.iter().any(|o| o.label == label) {
             continue;
         }

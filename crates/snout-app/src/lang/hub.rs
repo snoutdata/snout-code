@@ -43,15 +43,15 @@ pub enum Stage {
 impl Stage {
     pub fn label(&self) -> String {
         match self {
-            Stage::NeedsJdk(v) => format!("Needs JDK {v}"),
-            Stage::Importing => "Importing Gradle model".into(),
-            Stage::CompilingScala => "Compiling Scala".into(),
-            Stage::Starting => "Starting".into(),
-            Stage::Indexing => "Indexing".into(),
-            Stage::Ready => "Ready".into(),
-            Stage::Restarting => "Restarting".into(),
-            Stage::WaitingForEngine => "Waiting for snout-engine".into(),
-            Stage::Stopped => "Stopped".into(),
+            Stage::NeedsJdk(v) => t!("editor-needs-jdk", v = v.to_string()),
+            Stage::Importing => ts!("editor-importing-gradle-model").into(),
+            Stage::CompilingScala => ts!("background-compiling-scala").into(),
+            Stage::Starting => ts!("console-starting").into(),
+            Stage::Indexing => ts!("background-indexing").into(),
+            Stage::Ready => ts!("model-ready").into(),
+            Stage::Restarting => ts!("editor-restarting").into(),
+            Stage::WaitingForEngine => ts!("background-waiting-for-snout-engine").into(),
+            Stage::Stopped => ts!("run-stopped").into(),
             Stage::Failed(why) => why.clone(),
         }
     }
@@ -93,12 +93,12 @@ impl Ready {
 /// The readable name of a readiness stage.
 pub fn readiness_label(stage: &str) -> &'static str {
     match stage {
-        "syncing" => "Syncing the build model",
-        "generatingSources" => "Generating sources",
-        "compilingScala" => "Compiling Scala",
-        "importing" => "Importing",
-        "ready" => "Ready",
-        _ => "Starting",
+        "syncing" => ts!("editor-syncing-the-build-model"),
+        "generatingSources" => ts!("editor-generating-sources"),
+        "compilingScala" => ts!("background-compiling-scala"),
+        "importing" => ts!("editor-importing"),
+        "ready" => ts!("model-ready"),
+        _ => ts!("console-starting"),
     }
 }
 
@@ -164,9 +164,9 @@ impl Readiness {
     /// "7 of 12 modules ready", or the project's stage while the modules are not known.
     pub fn summary(&self) -> String {
         match (&self.project, self.total) {
-            (_, n) if n > 0 => format!("{} of {n} modules ready", self.ready),
+            (_, n) if n > 0 => t!("editor-of-modules-ready", ready = (self.ready).to_string(), n = n.to_string()),
             (Some(p), _) => p.label().to_owned(),
-            (None, _) => "Starting".to_owned(),
+            (None, _) => ts!("console-starting").to_owned(),
         }
     }
 }
@@ -202,13 +202,13 @@ impl Server {
     /// "Java: Indexing (40%)", "Java: 7 of 12 modules ready" and the like.
     pub fn status(&self) -> String {
         if matches!(self.stage, Stage::Indexing | Stage::Ready) && self.readiness.pending() {
-            return format!("Java: {}", self.readiness.summary());
+            return t!("editor-java", summary = (self.readiness.summary()).to_string());
         }
         let what = match (&self.stage, self.progress.current()) {
             (Stage::Ready | Stage::Indexing, Some(work)) => work.label(),
             (stage, _) => stage.label(),
         };
-        format!("Java: {what}")
+        t!("editor-java-2", what = what.to_string())
     }
 
     pub fn busy(&self) -> bool {
@@ -738,10 +738,11 @@ impl LangHub {
                 super::remote_engine::install(&*host, &|_| {}, &progress)
                     .map_err(|e| format!("The Java engine could not be installed: {e:#}"))?;
             }
-            let dist =
-                java::engine_dist(&*host).ok_or_else(|| "The Java engine is not built (run snout.sh)".to_owned())?;
+            let dist = java::engine_dist(&*host)
+                .ok_or_else(|| ts!("editor-the-java-engine-is-not-built-run-snout").to_owned())?;
             let command = java::engine_command(&*host, &dist, &root_buf, &jdk.home, idle_minutes, &maven_profiles);
-            let started = Client::spawn(&*host, &command).map_err(|e| format!("The Java engine did not start: {e}"))?;
+            let started = Client::spawn(&*host, &command)
+                .map_err(|e| t!("editor-the-java-engine-did-not-start", e = e.to_string()))?;
             Ok((started, jdk))
         });
         let root_buf = root.to_owned();
@@ -947,7 +948,7 @@ impl LangHub {
                 eprintln!("[java] message: {text}");
                 if level <= 1 {
                     self.model.update(cx, |m, cx| {
-                        m.message = format!("Java: {text}");
+                        m.message = t!("editor-java-3", text = text.to_string());
                         cx.notify();
                     });
                 }
@@ -1041,7 +1042,7 @@ impl LangHub {
         // (the status bar then offers Restart). The documents open go to the new one.
         if server.crashes > 5 {
             server.recovering = None;
-            server.stage = Stage::Failed("The Java engine keeps stopping".into());
+            server.stage = Stage::Failed(ts!("editor-the-java-engine-keeps-stopping").into());
             eprintln!("[java] the engine for {} keeps stopping; not starting it again", root.display());
         } else {
             server.stage = Stage::Restarting;
@@ -1428,7 +1429,7 @@ impl LangHub {
                     return;
                 }
             };
-            let title = format!("References to {name}");
+            let title = t!("editor-references-to", name = name.to_string());
             let _ = this.update(cx, |_, cx| cx.emit(HubEvent::References { title, locations }));
         })
         .detach();

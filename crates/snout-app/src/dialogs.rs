@@ -534,7 +534,9 @@ impl Render for DialogBody {
         let files = |entries: &[snout_core::FileEntry]| {
             div().id("files").max_h(px(204.)).overflow_y_scrollbar().flex().flex_col().gap(px(6.)).children(
                 entries.iter().enumerate().map(|(i, e)| {
-                    FileChip::new(("file", i), e.path.clone()).status(e.state_label(), state_color(e, &p)).max_chars(46)
+                    FileChip::new(("file", i), e.path.clone())
+                        .status(crate::core_text::file_state(e), state_color(e, &p))
+                        .max_chars(46)
                 }),
             )
         };
@@ -753,7 +755,7 @@ impl Render for DialogBody {
                 body.push(field_label(ts!("dialogs-name"), &p).into_any_element());
                 body.push(Input::new(&self.name).into_any_element());
                 if let Some(problem) = branch_name_problem(&Self::value(&self.name, cx)) {
-                    body.push(callout(Tone::Warning, problem, &p).into_any_element());
+                    body.push(callout(Tone::Warning, crate::core_text::name_problem(problem), &p).into_any_element());
                 }
                 body.push(
                     div()
@@ -794,7 +796,7 @@ impl Render for DialogBody {
                 if let Some(problem) =
                     group_name_problem(&m.settings.groups, &Self::value(&self.name, cx), rename.as_deref())
                 {
-                    body.push(callout(Tone::Warning, problem, &p).into_any_element());
+                    body.push(callout(Tone::Warning, crate::core_text::name_problem(problem), &p).into_any_element());
                 }
                 buttons.push(cancel);
                 let (verb, icon) = if rename.is_some() {

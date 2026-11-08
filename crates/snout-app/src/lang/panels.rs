@@ -105,10 +105,6 @@ fn rows_view(id: &'static str, rows: Vec<Row>, hub: Entity<LangHub>, cx: &mut gp
 
 pub use super::problems::{ProblemsEvent, ProblemsPanel};
 
-fn plural(n: usize, word: &str) -> String {
-    if n == 1 { word.to_owned() } else { format!("{word}s") }
-}
-
 /// The last Find References.
 pub struct ReferencesPanel {
     hub: Entity<LangHub>,
@@ -121,7 +117,7 @@ impl ReferencesPanel {
     pub fn new(hub: Entity<LangHub>, cx: &mut Context<Self>) -> Self {
         Self {
             hub,
-            title: crate::keymap::shown("Find References (⇧F12) lists them here").into(),
+            title: crate::keymap::shown(ts!("editor-find-references-f12-lists-them-here")).into(),
             rows: Vec::new(),
             focus: cx.focus_handle(),
         }
@@ -151,7 +147,8 @@ impl ReferencesPanel {
             })
             .collect();
         let n = self.rows.len();
-        self.title = format!("{title}: {n} {}", plural(n, "result")).into();
+        self.title =
+            t!("editor-title-results", title = title.to_string(), results = t!("editor-results", count = n)).into();
         let host = crate::host::host(cx);
         let lines = cx.background_executor().spawn(async move {
             let mut files: HashMap<PathBuf, Vec<String>> = HashMap::new();
@@ -201,9 +198,9 @@ impl Render for ReferencesPanel {
         if self.rows.is_empty() {
             let searched = self.title.contains(':');
             let (title, hint) = if searched {
-                ("No usages found", self.title.clone())
+                (ts!("editor-no-usages-found"), self.title.clone())
             } else {
-                ("No usages yet", "Find Usages on a symbol lists every place it is used.".into())
+                (ts!("editor-no-usages-yet"), ts!("editor-find-usages-on-a-symbol-lists-every-place").into())
             };
             return base.child(
                 crate::components::EmptyState::new(snout_core::art::spots::no_usages(), title)
@@ -212,7 +209,7 @@ impl Render for ReferencesPanel {
                     .primary_action(
                         "references-empty-find",
                         crate::components::IconName::Link,
-                        "Find Usages at the Caret",
+                        ts!("editor-find-usages-at-the-caret"),
                         crate::editor::FindReferences,
                     ),
             );

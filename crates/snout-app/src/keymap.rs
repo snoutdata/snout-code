@@ -357,9 +357,9 @@ fn plus_style(k: &Keystroke) -> String {
         }
     }
     let key = match k.key.as_str() {
-        "pageup" => "Page Up".to_owned(),
-        "pagedown" => "Page Down".to_owned(),
-        "backspace" => "Backspace".to_owned(),
+        "pageup" => ts!("keys-page-up").to_owned(),
+        "pagedown" => ts!("keys-page-down").to_owned(),
+        "backspace" => ts!("keys-backspace").to_owned(),
         "escape" => "Esc".to_owned(),
         key if key.len() == 1 => key.to_uppercase(),
         key if key.starts_with('f') && key[1..].parse::<u8>().is_ok() => key.to_uppercase(),

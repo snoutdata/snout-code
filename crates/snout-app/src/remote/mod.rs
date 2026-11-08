@@ -97,7 +97,7 @@ pub struct RemoteProject {
 impl RemoteProject {
     /// `demo on devbox`.
     pub fn label(&self) -> String {
-        format!("{} on {}", Model::dir_name(&self.path), self.host)
+        t!("remote-on", path = (Model::dir_name(&self.path)).to_string(), host = (self.host).to_string())
     }
 }
 
@@ -215,11 +215,13 @@ pub fn reconnect(cx: &mut App) {
 /// How the connection is, in words, and its colour.
 pub fn describe_status(name: &str, status: &Status, p: &crate::theme::Palette) -> (String, gpui::Hsla) {
     match status {
-        Status::Connected => (format!("Connected to {name}"), p.ok),
-        Status::Reconnecting { attempt: 0, .. } => (format!("Reconnecting to {name}…"), p.warn),
-        Status::Reconnecting { attempt, .. } => (format!("Reconnecting to {name}… (attempt {})", attempt + 1), p.warn),
-        Status::Lost(_) => (format!("The connection to {name} is lost"), p.error),
-        Status::Closed => (format!("Disconnected from {name}"), p.fg_dim),
+        Status::Connected => (t!("remote-connected-to", name = name.to_string()), p.ok),
+        Status::Reconnecting { attempt: 0, .. } => (t!("remote-reconnecting-to", name = name.to_string()), p.warn),
+        Status::Reconnecting { attempt, .. } => {
+            (t!("remote-reconnecting-to-attempt", name = name.to_string(), attempt = (attempt + 1).to_string()), p.warn)
+        }
+        Status::Lost(_) => (t!("remote-the-connection-to-is-lost", name = name.to_string()), p.error),
+        Status::Closed => (t!("remote-disconnected-from", name = name.to_string()), p.fg_dim),
     }
 }
 
@@ -282,7 +284,7 @@ pub fn describe(e: &std::io::Error) -> String {
     match e.kind() {
         std::io::ErrorKind::Unsupported => text,
         std::io::ErrorKind::NotFound if server_binaries().is_none() => {
-            "The Linux server builds are missing: run scripts/build-server-linux.sh".into()
+            ts!("remote-the-linux-server-builds-are-missing-run-scripts").into()
         }
         _ => text,
     }
@@ -291,15 +293,19 @@ pub fn describe(e: &std::io::Error) -> String {
 /// Connect to `name` off the UI thread, installing the server there when it is not; then put
 /// the Java engine there in the background. `done` hears how it went, on the UI thread.
 pub fn connect(name: String, done: impl FnOnce(Result<Arc<RemoteHost>, String>, &mut App) + 'static, cx: &mut App) {
-    let title = format!("Connecting to {name}");
-    set_task(&title, Some(task(&title, "Connecting", None)), cx);
+    let title = t!("remote-connecting-to-3", name = name.to_string());
+    set_task(&title, Some(task(&title, ts!("remote-connecting"), None)), cx);
     let (tx, rx) = std::sync::mpsc::channel::<&'static str>();
     let target = target(&name);
     let work = cx.background_executor().spawn(async move {
         let binaries = server_binaries()
-            .ok_or_else(|| "The Linux server builds are missing: run scripts/build-server-linux.sh".to_owned())?;
+            .ok_or_else(|| ts!("remote-the-linux-server-builds-are-missing-run-scripts").to_owned())?;
         let say = move |what: &str| {
-            let _ = tx.send(if what == "installing" { "Installing snout-server" } else { "Connecting" });
+            let _ = tx.send(if what == "installing" {
+                ts!("remote-installing-snout-server")
+            } else {
+                ts!("remote-connecting")
+            });
         };
         let session = RemoteSession::open_with(target, &binaries, &say).map_err(|e| describe(&e))?;
         RemoteHost::connect(Arc::new(session)).map(Arc::new).map_err(|e| describe(&e))
@@ -338,10 +344,10 @@ pub fn connect(name: String, done: impl FnOnce(Result<Arc<RemoteHost>, String>, 
 
 /// Put the Java engine on the remote machine, in the background tasks.
 fn install_engine(name: String, host: Arc<RemoteHost>, cx: &mut App) {
-    let title = format!("Java engine on {name}");
-    set_task(&title, Some(task(&title, "Looking for the engine", None)), cx);
+    let title = t!("remote-java-engine-on", name = name.to_string());
+    set_task(&title, Some(task(&title, ts!("remote-looking-for-the-engine"), None)), cx);
     let progress = crate::lang::java::DownloadProgress::default();
-    let stage = Arc::new(std::sync::Mutex::new(String::from("Looking for the engine")));
+    let stage = Arc::new(std::sync::Mutex::new(String::from(ts!("remote-looking-for-the-engine"))));
     let work = cx.background_executor().spawn({
         let (progress, stage) = (progress.clone(), stage.clone());
         async move {
@@ -370,7 +376,7 @@ fn install_engine(name: String, host: Arc<RemoteHost>, cx: &mut App) {
             }
             Err(e) => {
                 eprintln!("[remote] the engine could not be put on {name}: {e}");
-                set_task(&title, Some(task(&title, &format!("Could not install it: {e}"), None)), cx);
+                set_task(&title, Some(task(&title, &t!("remote-could-not-install-it", e = e.to_string()), None)), cx);
             }
         });
     })

@@ -38,7 +38,7 @@ impl Entry {
         match self {
             Entry::Fix(a) | Entry::EngineFixAll(a) | Entry::Other(a) => a.title.clone(),
             Entry::FixAll(f) => f.label.clone(),
-            Entry::Ask(_) => format!("Ask {agent} to fix"),
+            Entry::Ask(_) => t!("editor-ask-to-fix", agent = agent.to_string()),
         }
     }
 }
@@ -208,7 +208,7 @@ pub fn view(
             .pb(px(4.))
             .text_color(p.weak())
             .child(icon(IconName::Lightbulb, 13., p.fg_dim))
-            .child("Context Actions"),
+            .child(ts!("editor-context-actions")),
     };
     let mut rows: Vec<AnyElement> = Vec::new();
     let mut first_fix = true;
@@ -276,7 +276,7 @@ pub fn view(
                 .gap(px(8.))
                 .text_color(p.fg_dim)
                 .child(icon(IconName::LoaderCircle, 14., p.fg_dim))
-                .child("Looking for fixes\u{2026}")
+                .child(ts!("editor-looking-for-fixes"))
                 .into_any_element(),
         );
     }

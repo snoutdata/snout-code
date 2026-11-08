@@ -74,7 +74,7 @@ impl GradleWindow {
             for p in &b.projects {
                 let pkey = format!("p:{}:{}", b.build, p.path);
                 let popen = single || self.open.contains(&pkey);
-                let name = if p.path == ":" { format!("{} (root)", p.name) } else { p.path.clone() };
+                let name = if p.path == ":" { t!("run-root", name = p.name.to_string()) } else { p.path.clone() };
                 out.push(Row::Project { key: pkey, name: name.into(), open: popen });
                 if !popen {
                     continue;
@@ -125,7 +125,7 @@ impl Render for GradleWindow {
                 e.primary_action(
                     "gradle-empty-sync",
                     IconName::RefreshCw,
-                    "Sync the Gradle Project",
+                    ts!("tabs-sync-the-gradle-project"),
                     crate::menus::SyncGradle,
                 )
             })
@@ -135,20 +135,25 @@ impl Render for GradleWindow {
             return base.child(match (&runs.gradle.error, runs.gradle.loading, ready) {
                 (_, true, _) => note(
                     snout_core::art::building(),
-                    "Reading the Gradle tasks",
-                    "The builds are being configured.".into(),
+                    ts!("run-reading-the-gradle-tasks"),
+                    ts!("run-the-builds-are-being-configured").into(),
                     false,
                 ),
-                (Some(e), _, _) => note(spots::gradle_failed(), "The tasks could not be read", e.clone(), true),
+                (Some(e), _, _) => {
+                    note(spots::gradle_failed(), ts!("run-the-tasks-could-not-be-read"), e.clone(), true)
+                }
                 (None, _, false) => note(
                     spots::gradle(),
-                    "No tasks yet",
-                    "The tasks appear once the Java engine has imported the project.".into(),
+                    ts!("run-no-tasks-yet"),
+                    ts!("run-the-tasks-appear-once-the-java-engine-has").into(),
                     true,
                 ),
-                (None, _, true) => {
-                    note(spots::no_project(), "No Gradle tasks", "This project has no Gradle build.".into(), true)
-                }
+                (None, _, true) => note(
+                    spots::no_project(),
+                    ts!("run-no-gradle-tasks"),
+                    ts!("run-this-project-has-no-gradle-build").into(),
+                    true,
+                ),
             });
         }
         let rows: Rc<Vec<Row>> = Rc::new(self.rows(&runs.gradle.builds));

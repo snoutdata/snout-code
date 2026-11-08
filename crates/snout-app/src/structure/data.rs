@@ -126,7 +126,7 @@ impl ModuleInfo {
     pub fn note(&self) -> Option<String> {
         match self.kind {
             BuildKind::BuildSrc if self.gradle_path == ":" => Some("buildSrc".into()),
-            BuildKind::Included if self.gradle_path == ":" => Some("included build".into()),
+            BuildKind::Included if self.gradle_path == ":" => Some(ts!("structure-included-build").into()),
             _ => None,
         }
     }
@@ -157,10 +157,10 @@ impl Scope {
 
     pub fn label(self) -> &'static str {
         match self {
-            Scope::Compile => "Compile",
-            Scope::Runtime => "Runtime",
-            Scope::Test => "Test",
-            Scope::AnnotationProcessor => "Annotation processor",
+            Scope::Compile => ts!("structure-compile"),
+            Scope::Runtime => ts!("structure-runtime"),
+            Scope::Test => ts!("structure-test"),
+            Scope::AnnotationProcessor => ts!("structure-annotation-processor"),
         }
     }
 
@@ -171,9 +171,9 @@ impl Scope {
             return self.detail();
         }
         match self {
-            Scope::Compile => "What the main code compiles against (compile, provided and system scopes).",
-            Scope::Runtime => "What the main code runs with (compile and runtime scopes).",
-            Scope::Test => "What the tests compile and run with (every scope).",
+            Scope::Compile => ts!("structure-what-the-main-code-compiles-against-compile-provided"),
+            Scope::Runtime => ts!("structure-what-the-main-code-runs-with-compile-and"),
+            Scope::Test => ts!("structure-what-the-tests-compile-and-run-with-every"),
             Scope::AnnotationProcessor => self.detail(),
         }
     }
@@ -181,10 +181,10 @@ impl Scope {
     /// What the classpath is, for the line under the scopes.
     pub fn detail(self) -> &'static str {
         match self {
-            Scope::Compile => "What the main code compiles against (compileClasspath).",
-            Scope::Runtime => "What the main code runs with (runtimeClasspath).",
-            Scope::Test => "What the tests compile and run with (the test source set's runtimeClasspath).",
-            Scope::AnnotationProcessor => "The annotation processors javac runs on the main code.",
+            Scope::Compile => ts!("structure-what-the-main-code-compiles-against-compileclasspath"),
+            Scope::Runtime => ts!("structure-what-the-main-code-runs-with-runtimeclasspath"),
+            Scope::Test => ts!("structure-what-the-tests-compile-and-run-with-the"),
+            Scope::AnnotationProcessor => ts!("structure-the-annotation-processors-javac-runs-on-the-main"),
         }
     }
 }
@@ -227,7 +227,7 @@ impl Node {
     pub fn coordinates(&self) -> String {
         match &self.kind {
             NodeKind::Module { group, name, .. } => format!("{group}:{name}"),
-            NodeKind::Project { path, .. } => format!("project {path}"),
+            NodeKind::Project { path, .. } => t!("structure-project", path = path.to_string()),
             NodeKind::Other(id) => id.clone(),
         }
     }
@@ -243,7 +243,7 @@ impl Node {
     pub fn haystack(&self) -> String {
         match &self.kind {
             NodeKind::Module { group, name, version } => format!("{group}:{name}:{version}").to_lowercase(),
-            NodeKind::Project { path, .. } => format!("project {path}").to_lowercase(),
+            NodeKind::Project { path, .. } => t!("structure-project", path = path.to_string()).to_lowercase(),
             NodeKind::Other(id) => id.to_lowercase(),
         }
     }
@@ -636,7 +636,9 @@ impl Structure {
 
 /// Read the model file at `file` on `host` for the window.
 pub fn read(host: &dyn snout_host::Host, file: &Path) -> Result<Structure, String> {
-    let text = host.read_to_string(file).map_err(|e| format!("The Gradle model could not be read: {e}"))?;
-    let json: Value = serde_json::from_str(&text).map_err(|e| format!("The Gradle model is not JSON: {e}"))?;
-    parse(&json).ok_or_else(|| "The Gradle model is of an older format: sync again".to_owned())
+    let text =
+        host.read_to_string(file).map_err(|e| t!("structure-the-gradle-model-could-not-be-read", e = e.to_string()))?;
+    let json: Value =
+        serde_json::from_str(&text).map_err(|e| t!("structure-the-gradle-model-is-not-json", e = e.to_string()))?;
+    parse(&json).ok_or_else(|| ts!("structure-the-gradle-model-is-of-an-older-format").to_owned())
 }

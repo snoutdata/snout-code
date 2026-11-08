@@ -11,6 +11,7 @@ pub mod branch_popup;
 pub mod claude_ide;
 pub mod components;
 pub mod console;
+pub mod core_text;
 pub mod dialogs;
 pub mod editing;
 pub mod editor;

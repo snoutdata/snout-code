@@ -210,7 +210,7 @@ pub fn visibility_name(v: Visibility) -> &'static str {
     match v {
         Visibility::Public => "public",
         Visibility::Protected => "protected",
-        Visibility::Package => "package private",
+        Visibility::Package => ts!("editor-package-private"),
         Visibility::Private => "private",
     }
 }

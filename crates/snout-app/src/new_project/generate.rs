@@ -128,7 +128,7 @@ pub fn occupied(host: &dyn Host, dir: &Path) -> bool {
 
 /// The words for a project folder that [`occupied`] says is taken.
 pub fn occupied_problem(dir: &Path) -> String {
-    format!("{} already exists and is not empty.", dir.display())
+    t!("newproject-already-exists-and-is-not-empty", dir = (dir.display()).to_string())
 }
 
 /// Why `b` cannot make a project in `location`, if it cannot: the first problem, in words.
@@ -136,25 +136,25 @@ pub fn occupied_problem(dir: &Path) -> String {
 pub fn problem(b: &Basics, location: &Path, occupied: Option<bool>) -> Option<String> {
     let name = b.name.trim();
     if name.is_empty() {
-        return Some("Give the project a name.".into());
+        return Some(ts!("newproject-give-the-project-a-name").into());
     }
     if name.starts_with('.') || name.contains(['/', ':', '\\']) {
-        return Some("The name cannot start with a dot or hold / : or \\.".into());
+        return Some(ts!("newproject-the-name-cannot-start-with-a-dot-or").into());
     }
     if location.as_os_str().is_empty() || !location.is_absolute() {
-        return Some("Choose where the project goes.".into());
+        return Some(ts!("newproject-choose-where-the-project-goes").into());
     }
     if occupied == Some(true) {
         return Some(occupied_problem(&location.join(name)));
     }
     if !is_dotted(&b.group, false) {
-        return Some("The group is a dotted name, such as com.example.".into());
+        return Some(ts!("newproject-the-group-is-a-dotted-name-such-as").into());
     }
     if b.artifact.trim().is_empty() || !b.artifact.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
-        return Some("The artifact holds letters, digits, dots, dashes and underscores.".into());
+        return Some(ts!("newproject-the-artifact-holds-letters-digits-dots-dashes-and").into());
     }
     if !is_dotted(&b.package, true) {
-        return Some("The package is a dotted Java name, such as com.example.demo.".into());
+        return Some(ts!("newproject-the-package-is-a-dotted-java-name-such").into());
     }
     None
 }
@@ -694,7 +694,7 @@ pub fn playwright_problem(name: &str, location: &Path, base_url: &str, occupied:
     }
     let url = base_url.trim();
     if !url.is_empty() && !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Some("The application's address starts with http:// or https://.".into());
+        return Some(ts!("newproject-the-applications-address-starts-with-http-or-https").into());
     }
     None
 }

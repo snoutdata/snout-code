@@ -61,12 +61,12 @@ impl Kind {
 
     pub fn label(self) -> &'static str {
         match self {
-            Kind::Main => "Application",
+            Kind::Main => ts!("config-application"),
             Kind::Gradle => "Gradle",
-            Kind::Tests => "Tests",
+            Kind::Tests => ts!("stripes-tests"),
             Kind::Maven => "Maven",
             Kind::Playwright => "Playwright",
-            Kind::Npm => "Package script",
+            Kind::Npm => ts!("config-package-script"),
             Kind::Node => "Node",
         }
     }
@@ -174,12 +174,12 @@ impl RunConfig {
     pub fn group(&self) -> &'static str {
         match self.kind {
             Kind::Main if self.spring_boot => "Spring Boot",
-            Kind::Main => "Application",
+            Kind::Main => ts!("config-application"),
             Kind::Gradle => "Gradle",
             Kind::Maven => "Maven",
-            Kind::Tests => "Tests",
+            Kind::Tests => ts!("stripes-tests"),
             Kind::Playwright => "Playwright",
-            Kind::Npm => "Scripts",
+            Kind::Npm => ts!("config-scripts"),
             Kind::Node => "Node",
         }
     }

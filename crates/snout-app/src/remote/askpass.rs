@@ -25,9 +25,9 @@ pub fn is_confirmation(prompt: &str) -> bool {
 pub fn title_of(prompt: &str) -> &'static str {
     let p = prompt.to_lowercase();
     if is_confirmation(prompt) {
-        "Trust This Host?"
+        ts!("remote-trust-this-host")
     } else if p.contains("passphrase") {
-        "Key Passphrase"
+        ts!("remote-key-passphrase")
     } else if p.contains("password") {
         "Password"
     } else {
@@ -105,7 +105,7 @@ impl Render for Askpass {
                         button(
                             "askpass-cancel",
                             crate::components::CANCEL_ICON,
-                            if confirm { "No" } else { "Cancel" },
+                            if confirm { ts!("remote-no") } else { ts!("settings-cancel") },
                             false,
                             true,
                             cx,
@@ -121,7 +121,7 @@ impl Render for Askpass {
                         button(
                             "askpass-ok",
                             if confirm { crate::components::APPLY_ICON } else { crate::components::OK_ICON },
-                            if confirm { "Yes" } else { "OK" },
+                            if confirm { ts!("remote-yes") } else { "OK" },
                             true,
                             true,
                             cx,
@@ -143,7 +143,7 @@ fn is_confirmation_reply() -> bool {
 
 /// The helper's whole life: one dialog, its answer on stdout.
 pub fn run() {
-    let prompt = std::env::args().nth(1).unwrap_or_else(|| "Password:".into());
+    let prompt = std::env::args().nth(1).unwrap_or_else(|| ts!("remote-password").into());
     gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut App| {
         let settings = crate::settings::Store::for_user().map(|s| s.load()).unwrap_or_default();
         crate::init(&settings, cx);

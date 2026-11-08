@@ -250,13 +250,13 @@ pub fn script_launch(
     let manager = manager_of(host, dir, root);
     let (program, mut all) = match manager {
         PackageManager::Npm => {
-            let npm = crate::lang::typescript::npm_cli(host, node).ok_or("npm is missing beside Node")?;
+            let npm = crate::lang::typescript::npm_cli(host, node).ok_or(ts!("run-npm-is-missing-beside-node"))?;
             (node.bin.clone(), vec![npm.display().to_string(), "run".to_owned(), script.to_owned()])
         }
         other => {
             let name = other.name();
             let program = snout_host::which(host, &[name], &[node.bin_dir().to_owned()])
-                .ok_or_else(|| format!("{name} is not installed (the project's lockfile is {name}'s)"))?;
+                .ok_or_else(|| t!("run-is-not-installed-the-projects-lockfile-is-s", name = name.to_string()))?;
             (program, vec!["run".to_owned(), script.to_owned()])
         }
     };
@@ -418,7 +418,11 @@ pub fn config_launch(
     if let (Kind::Node, Some(port)) = (config.kind, config.port) {
         // Attaching is debugging, whichever button started it.
         return Ok(ProcessLaunch {
-            title: if config.name.trim().is_empty() { format!("Attach to port {port}") } else { config.name.clone() },
+            title: if config.name.trim().is_empty() {
+                t!("run-attach-to-port", port = port.to_string())
+            } else {
+                config.name.clone()
+            },
             program: node.bin.clone(),
             args: vec![format!("--inspect=127.0.0.1:{port}")],
             cwd: root.to_owned(),
@@ -435,7 +439,7 @@ pub fn config_launch(
     let package = config_package(host, root, config);
     let mut launch = match config.kind {
         Kind::Npm => {
-            let script = task.ok_or("The configuration names no script")?;
+            let script = task.ok_or(ts!("run-the-configuration-names-no-script"))?;
             let mut l = script_launch(host, &package, root, node, script, &config.args, env)?;
             if let Some(cwd) = cwd {
                 l.cwd = cwd;
@@ -443,10 +447,10 @@ pub fn config_launch(
             l
         }
         _ => {
-            let file = task.ok_or("The configuration names no file to run")?;
+            let file = task.ok_or(ts!("run-the-configuration-names-no-file-to-run"))?;
             let file = root.join(file);
             if !host.is_file(&file) {
-                return Err(format!("{} is not there", file.display()));
+                return Err(t!("run-is-not-there", file = (file.display()).to_string()));
             }
             file_launch(host, &package, node, &file, &config.jvm_args, &config.args, cwd.as_deref(), env)?
         }
@@ -486,7 +490,7 @@ impl Runs {
     /// UI thread first.
     pub(super) fn start_node_config(&mut self, config: RunConfig, debug: bool, cx: &mut Context<Self>) {
         let Some(project) = self.model.read(cx).project_root() else {
-            self.say("Open a project first", cx);
+            self.say(ts!("run-open-a-project-first"), cx);
             return;
         };
         let host = crate::host::host(cx);
@@ -514,7 +518,7 @@ impl Runs {
     /// Run (or debug) `file` of the open project on its Node.
     pub fn run_node_file(&mut self, file: &Path, debug: bool, cx: &mut Context<Self>) {
         let Some(project) = self.model.read(cx).project_root() else {
-            self.say("Open a project first", cx);
+            self.say(ts!("run-open-a-project-first"), cx);
             return;
         };
         let config = file_config(&project, file);
@@ -561,7 +565,7 @@ impl Runs {
         cx: &mut Context<Self>,
     ) {
         let Some(project) = self.model.read(cx).project_root() else {
-            self.say("Open a project first", cx);
+            self.say(ts!("run-open-a-project-first"), cx);
             return;
         };
         let host = crate::host::host(cx);
@@ -592,9 +596,7 @@ impl Runs {
 pub fn project_node(host: &dyn Host, dir: &Path, root: &Path) -> Result<Node, String> {
     let wanted = node::wanted(host, dir, Some(root));
     let all = node::discover(host);
-    node::choose(&wanted, &all)
-        .cloned()
-        .ok_or_else(|| "No Node fits this project: download it from the bar above the editor first.".to_owned())
+    node::choose(&wanted, &all).cloned().ok_or_else(|| ts!("run-no-node-fits-this-project-download-it-from").to_owned())
 }
 
 #[cfg(test)]

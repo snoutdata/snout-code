@@ -185,7 +185,7 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
         idle: false,
     };
     if let Some(app) = snap.get(known.app) {
-        let mut r = row(app, 0, Kind::App, "SnoutCode: the window, the editors and Git".into(), None);
+        let mut r = row(app, 0, Kind::App, ts!("processes-snoutcode-the-window-the-editors-and-git").into(), None);
         r.state = "Running".into();
         out.push(r);
     }
@@ -212,8 +212,8 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
     let idle_text = |since: Option<u64>| {
         let limit = known.idle_minutes;
         match since.map(|s| snap.now.saturating_sub(s) / 60) {
-            Some(m) if m >= 1 => format!("Idle for {m} min, stops after {limit}"),
-            _ => format!("Idle, stops after {limit} min"),
+            Some(m) if m >= 1 => t!("processes-idle-for-min-stops-after", m = m.to_string(), limit = limit.to_string()),
+            _ => t!("processes-idle-stops-after-min", limit = limit.to_string()),
         }
     };
 
@@ -226,7 +226,7 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 p,
                 1,
                 Kind::Engine { root: engine.root.clone() },
-                format!("Java engine for {project}: reads the Gradle or Maven build, runs and tests the code"),
+                t!("processes-java-engine-for-reads-the-gradle-or-maven", project = project.to_string()),
                 Some(project.clone()),
             ),
             None => Row {
@@ -234,7 +234,7 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 start: 0,
                 depth: 1,
                 kind: Kind::Engine { root: engine.root.clone() },
-                purpose: format!("Java engine for {project}: reads the Gradle or Maven build, runs and tests the code"),
+                purpose: t!("processes-java-engine-for-reads-the-gradle-or-maven", project = project.to_string()),
                 project: Some(project.clone()),
                 memory: 0,
                 cpu: 0.,
@@ -262,7 +262,10 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                     child,
                     2,
                     Kind::LanguageServer { root: engine.root.clone() },
-                    format!("Java language server for {project}: completion, errors, navigation"),
+                    t!(
+                        "processes-java-language-server-for-completion-errors-navigation",
+                        project = project.to_string()
+                    ),
                     Some(project.clone()),
                 );
                 r.state = engine.state.clone();
@@ -273,8 +276,10 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 // application spring-boot:run starts) show under it.
                 let s = gradle_session(false);
                 let purpose = match s {
-                    Some(s) => format!("Maven for {project}: runs {}", s.title),
-                    None => format!("Maven for {project}: runs goals"),
+                    Some(s) => {
+                        t!("processes-maven-for-runs", project = project.to_string(), title = (s.title).to_string())
+                    }
+                    None => t!("processes-maven-for-runs-goals", project = project.to_string()),
                 };
                 let mut r = row(child, 2, Kind::Maven { session: s.map(|s| s.id) }, purpose, Some(project.clone()));
                 r.state = "Running".into();
@@ -294,16 +299,20 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                         (
                             Kind::Tests { session: t.map(|t| t.id) },
                             match t {
-                                Some(t) => format!("Tests of {}: the test JVM Maven started", t.title),
-                                None => format!("Tests for {project}: the test JVM Maven started"),
+                                Some(t) => {
+                                    t!("processes-tests-of-the-test-jvm-maven-started", title = (t.title).to_string())
+                                }
+                                None => {
+                                    t!("processes-tests-for-the-test-jvm-maven-started", project = project.to_string())
+                                }
                             },
                         )
                     } else {
                         (
                             Kind::GradleChild { session: s.map(|s| s.id) },
                             match s {
-                                Some(s) => format!("{}: your program, started by Maven", s.title),
-                                None => format!("Program Maven started for {project}"),
+                                Some(s) => t!("processes-your-program-started-by-maven", title = (s.title).to_string()),
+                                None => t!("processes-program-maven-started-for", project = project.to_string()),
                             },
                         )
                     };
@@ -314,9 +323,9 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
             } else {
                 let session = session_by_pid(child.pid);
                 let purpose = match session {
-                    Some(s) if s.debug => format!("{}: your program, being debugged", s.title),
-                    Some(s) => format!("{}: your program, started with Run", s.title),
-                    None => format!("Program started by the Java engine for {project}"),
+                    Some(s) if s.debug => t!("processes-your-program-being-debugged", title = (s.title).to_string()),
+                    Some(s) => t!("processes-your-program-started-with-run", title = (s.title).to_string()),
+                    None => t!("processes-program-started-by-the-java-engine-for", project = project.to_string()),
                 };
                 let mut r = row(child, 2, Kind::Run { session: session.map(|s| s.id) }, purpose, Some(project.clone()));
                 r.state = if session.is_some_and(|s| s.debug) { "Debugging" } else { "Running" }.into();
@@ -332,7 +341,11 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 dp,
                 2,
                 Kind::Daemon { version: d.version.clone() },
-                format!("Gradle daemon {} for {project}: syncs the build, runs tasks and tests", d.version),
+                t!(
+                    "processes-gradle-daemon-for-syncs-the-build-runs-tasks",
+                    version = (d.version).to_string(),
+                    project = project.to_string()
+                ),
                 Some(project.clone()),
             );
             r.busy = d.busy;
@@ -345,20 +358,20 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 let (kind, purpose) = if line.contains("Gradle Test Executor") {
                     let s = gradle_session(true);
                     let purpose = match s {
-                        Some(s) => format!("Tests of {}: the test JVM Gradle started", s.title),
-                        None => format!("Tests for {project}: the test JVM Gradle started"),
+                        Some(s) => t!("processes-tests-of-the-test-jvm-gradle-started", title = (s.title).to_string()),
+                        None => t!("processes-tests-for-the-test-jvm-gradle-started", project = project.to_string()),
                     };
                     (Kind::Tests { session: s.map(|s| s.id) }, purpose)
                 } else if line.contains("GradleWorkerMain") || line.contains("worker.org.gradle.process") {
                     (
                         Kind::GradleChild { session: None },
-                        format!("Gradle worker for {project}: compiles or processes in a JVM of its own"),
+                        t!("processes-gradle-worker-for-compiles-or-processes-in-a", project = project.to_string()),
                     )
                 } else {
                     let s = gradle_session(false);
                     let purpose = match s {
-                        Some(s) => format!("{}: your program, started by Gradle", s.title),
-                        None => format!("Program Gradle started for {project}"),
+                        Some(s) => t!("processes-your-program-started-by-gradle", title = (s.title).to_string()),
+                        None => t!("processes-program-gradle-started-for", project = project.to_string()),
                     };
                     (Kind::GradleChild { session: s.map(|s| s.id) }, purpose)
                 };
@@ -378,23 +391,27 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
         // Without its folder, its leading `-` (a login shell) and Windows's `.exe`.
         let base = child.name.rsplit(['/', '\\']).next().unwrap_or(&child.name).trim_start_matches('-');
         let name = base.strip_suffix(".exe").unwrap_or(base).to_owned();
-        let within = project.as_deref().map(|p| format!(" in {p}")).unwrap_or_default();
+        let within = project.as_deref().map(|p| t!("processes-in", p = p.to_string())).unwrap_or_default();
         let (kind, purpose, state) = if child.is_engine() {
             let folder = child.engine_folder().map(|f| dir_name(Path::new(f))).unwrap_or_default();
             (
                 Kind::Other,
-                format!("Java engine for {folder}: stopping, with its language server and Gradle daemons"),
+                t!("processes-java-engine-for-stopping-with-its-language-server", folder = folder.to_string()),
                 "Stopping",
             )
         } else if SHELLS.contains(&name.as_str()) {
-            (Kind::Terminal, format!("Terminal: your {name} shell{within}"), "Running")
+            (
+                Kind::Terminal,
+                t!("processes-terminal-your-shell", name = name.to_string(), within = within.to_string()),
+                "Running",
+            )
         } else if name.contains("claude") || child.cmd.iter().take(2).any(|a| a.contains("claude")) {
-            (Kind::Claude, "Claude Code: the assistant in the console".into(), "Running")
+            (Kind::Claude, ts!("processes-claude-code-the-assistant-in-the-console").into(), "Running")
         } else if name == "git" {
             let what = child.cmd.iter().skip(1).find(|a| !a.starts_with('-')).cloned().unwrap_or_default();
             (Kind::Other, format!("Git: {what}{within}").replace(":  ", ": "), "Running")
         } else {
-            (Kind::Other, format!("{name}: started by SnoutCode"), "Running")
+            (Kind::Other, t!("processes-started-by-snoutcode", name = name.to_string()), "Running")
         };
         let mut r = row(child, 1, kind, purpose, project.clone());
         r.state = state.into();
@@ -418,7 +435,7 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
         let folder = p.engine_folder().map(|f| dir_name(Path::new(f))).unwrap_or_default();
         leftovers.push(left(
             p,
-            format!("Java engine for {folder}, left over from an earlier session"),
+            t!("processes-java-engine-for-left-over-from-an-earlier", folder = folder.to_string()),
             "Left over".into(),
         ));
     }
@@ -428,7 +445,11 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
         if engine.is_some() || shown.contains(&p.pid) {
             continue;
         }
-        leftovers.push(left(p, "Java language server, left over from an earlier session".into(), "Left over".into()));
+        leftovers.push(left(
+            p,
+            ts!("processes-java-language-server-left-over-from-an-earlier").into(),
+            "Left over".into(),
+        ));
     }
     for d in &snap.daemons {
         if shown.contains(&d.pid) {
@@ -442,7 +463,11 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
         }
         let Some(p) = snap.get(d.pid) else { continue };
         let state = if d.busy { "Building".to_owned() } else { "Left over".to_owned() };
-        leftovers.push(left(p, format!("Gradle daemon {}, left over from an earlier session", d.version), state));
+        leftovers.push(left(
+            p,
+            t!("processes-gradle-daemon-left-over-from-an-earlier-session", version = (d.version).to_string()),
+            state,
+        ));
     }
     leftovers.sort_by_key(|r| r.start);
     out.extend(leftovers);
@@ -679,9 +704,9 @@ impl Processes {
         }
         let n = idle.len();
         self.notice = Some(match n {
-            0 => "Nothing idle to stop.".to_owned(),
-            1 => "Stopped 1 idle process.".to_owned(),
-            n => format!("Stopped {n} idle processes."),
+            0 => ts!("processes-nothing-idle-to-stop").to_owned(),
+            1 => ts!("processes-stopped-1-idle-process").to_owned(),
+            n => t!("processes-stopped-idle-processes", n = n.to_string()),
         });
         self.kill(kill, cx);
         self.look_soon(cx);

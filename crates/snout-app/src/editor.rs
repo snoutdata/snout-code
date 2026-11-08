@@ -252,7 +252,11 @@ impl FileInfo {
 
     /// What the status bar says about the indentation.
     pub fn indent_label(&self) -> String {
-        if self.tabs { format!("Tab, {}", self.width) } else { format!("{} spaces", self.width) }
+        if self.tabs {
+            t!("editor-tab", width = (self.width).to_string())
+        } else {
+            t!("editor-spaces", width = (self.width).to_string())
+        }
     }
 }
 
@@ -692,7 +696,10 @@ impl EditorPanel {
         }
         let (text, error) = match loaded.text {
             Ok(text) => (text, None),
-            Err(e) => (String::new(), Some(format!("Could not read {}: {e}", loaded.path.display()))),
+            Err(e) => (
+                String::new(),
+                Some(t!("editor-could-not-read", path = (loaded.path.display()).to_string(), e = e.to_string())),
+            ),
         };
         self.on_disk = error.is_none();
         self.info = FileInfo::detect_or(&text, EditorDefaults::now(cx).tab_size);
@@ -1150,7 +1157,10 @@ impl EditorPanel {
                 self.preview = false;
                 self.error = None;
             }
-            Err(e) => self.error = Some(format!("Could not save {}: {e}", self.path.display())),
+            Err(e) => {
+                self.error =
+                    Some(t!("editor-could-not-save", path = (self.path.display()).to_string(), e = e.to_string()))
+            }
         }
         cx.notify();
     }
@@ -1308,14 +1318,24 @@ impl EditorPanel {
             .border_1()
             .border_color(mix(p.warn, 0.4, p.panel))
             .child(crate::art::glyph(snout_core::art::Glyph::Alert, 14., p.warn))
-            .child(div().flex_1().child("This file changed on disk, and this tab has unsaved changes."))
+            .child(div().flex_1().child(ts!("editor-this-file-changed-on-disk-and-this-tab")))
             .child(
-                look::small_button("conflict-reload", crate::components::IconName::RefreshCw, "Reload from disk", &p)
-                    .on_click(cx.listener(|this, _, w, cx| this.reload(w, cx))),
+                look::small_button(
+                    "conflict-reload",
+                    crate::components::IconName::RefreshCw,
+                    ts!("editor-reload-from-disk"),
+                    &p,
+                )
+                .on_click(cx.listener(|this, _, w, cx| this.reload(w, cx))),
             )
             .child(
-                look::small_button("conflict-keep", crate::components::IconName::Save, "Keep my changes", &p)
-                    .on_click(cx.listener(|this, _, _, cx| this.keep_mine(cx))),
+                look::small_button(
+                    "conflict-keep",
+                    crate::components::IconName::Save,
+                    ts!("editor-keep-my-changes"),
+                    &p,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.keep_mine(cx))),
             )
     }
 }
@@ -1773,14 +1793,18 @@ pub fn context_menu(
     use gpui_component::input as i;
     let menu = match run {
         Some(name) => menu
-            .item(action_item(format!("Run '{name}'"), I::Play, Box::new(crate::menus::RunContext)))
-            .item(action_item(format!("Debug '{name}'"), I::Bug, Box::new(crate::menus::DebugContext)))
+            .item(action_item(t!("editor-run", name = name.to_string()), I::Play, Box::new(crate::menus::RunContext)))
+            .item(action_item(
+                t!("editor-debug", name = name.to_string()),
+                I::Bug,
+                Box::new(crate::menus::DebugContext),
+            ))
             .separator(),
         None => menu,
     };
     let menu = if spec {
-        menu.item(action_item("Record at Cursor", I::CircleDot, Box::new(crate::menus::RecordAtCursor)))
-            .item(action_item("Pick Locator", I::Crosshair, Box::new(crate::menus::PickLocator)))
+        menu.item(action_item(ts!("cmd-record-at-cursor"), I::CircleDot, Box::new(crate::menus::RecordAtCursor)))
+            .item(action_item(ts!("cmd-pick-locator"), I::Crosshair, Box::new(crate::menus::PickLocator)))
             .separator()
     } else {
         menu
@@ -1788,28 +1812,28 @@ pub fn context_menu(
     let menu = if lang {
         let refactor = PopupMenu::build(window, cx, |m, _, _| {
             crate::components::styled(m)
-                .item(action_item("Rename Symbol…", I::TextCursorInput, Box::new(RenameSymbol)))
+                .item(action_item(ts!("cmd-rename-symbol"), I::TextCursorInput, Box::new(RenameSymbol)))
                 .separator()
-                .item(action_item("Extract Method", I::SquareFunction, Box::new(ExtractMethod)))
-                .item(action_item("Extract Variable", I::Variable, Box::new(ExtractVariable)))
-                .item(action_item("Extract Constant", I::Pi, Box::new(ExtractConstant)))
-                .item(action_item("Extract Field", I::Box, Box::new(ExtractField)))
-                .item(action_item("Inline", I::FoldVertical, Box::new(Inline)))
+                .item(action_item(ts!("cmd-extract-method"), I::SquareFunction, Box::new(ExtractMethod)))
+                .item(action_item(ts!("cmd-extract-variable"), I::Variable, Box::new(ExtractVariable)))
+                .item(action_item(ts!("cmd-extract-constant"), I::Pi, Box::new(ExtractConstant)))
+                .item(action_item(ts!("cmd-extract-field"), I::Box, Box::new(ExtractField)))
+                .item(action_item(ts!("cmd-inline"), I::FoldVertical, Box::new(Inline)))
         });
-        menu.item(action_item("Go to Definition", I::SquareArrowOutUpRight, Box::new(i::GoToDefinition)))
-            .item(action_item("Show Context Actions…", I::Lightbulb, Box::new(ShowContextActions)))
-            .item(submenu_item("Refactor", I::Wrench, refactor))
+        menu.item(action_item(ts!("cmd-go-to-definition"), I::SquareArrowOutUpRight, Box::new(i::GoToDefinition)))
+            .item(action_item(ts!("cmd-show-context-actions"), I::Lightbulb, Box::new(ShowContextActions)))
+            .item(submenu_item(ts!("menu-refactor"), I::Wrench, refactor))
             .separator()
     } else {
         menu
     };
-    menu.item(action_item("Send Selection to Claude", I::Sparkles, Box::new(SendToClaude)))
+    menu.item(action_item(ts!("cmd-send-selection-to-claude"), I::Sparkles, Box::new(SendToClaude)))
         .separator()
-        .item(action_item("Cut", I::Scissors, Box::new(i::Cut)))
-        .item(action_item("Copy", I::Copy, Box::new(i::Copy)))
-        .item(action_item("Paste", I::ClipboardPaste, Box::new(i::Paste)))
+        .item(action_item(ts!("cmd-cut"), I::Scissors, Box::new(i::Cut)))
+        .item(action_item(ts!("cmd-copy"), I::Copy, Box::new(i::Copy)))
+        .item(action_item(ts!("cmd-paste"), I::ClipboardPaste, Box::new(i::Paste)))
         .separator()
-        .item(action_item("Select All", I::SquareDashedMousePointer, Box::new(i::SelectAll)))
+        .item(action_item(ts!("cmd-select-all"), I::SquareDashedMousePointer, Box::new(i::SelectAll)))
 }
 
 /// Close an editor tab (`then` does the closing), asking first whether to save it when
@@ -1824,9 +1848,9 @@ pub fn confirm_close(
     let name = editor.read(cx).name();
     let answer = window.prompt(
         PromptLevel::Warning,
-        &format!("Do you want to save the changes you made to {name}?"),
-        Some("Your changes are lost if you don't save them."),
-        &["Save", "Don't Save", "Cancel"],
+        &t!("editor-do-you-want-to-save-the-changes-you", name = name.to_string()),
+        Some(ts!("workspace-your-changes-are-lost-if-you-dont-save")),
+        &[ts!("cmd-save"), ts!("workspace-dont-save"), ts!("settings-cancel")],
         cx,
     );
     window

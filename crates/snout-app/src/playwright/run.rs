@@ -54,14 +54,14 @@ impl Scope {
     /// The session's title.
     pub fn title(&self) -> String {
         match self {
-            Scope::All => "All tests".into(),
-            Scope::Project(p) => format!("Tests in {p}"),
+            Scope::All => ts!("run-all-tests").into(),
+            Scope::Project(p) => t!("run-tests-in", p = p.to_string()),
             Scope::At { file, line, project } => {
                 let name = file.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                 let at = line.map_or(name.clone(), |l| format!("{name}:{l}"));
                 project.as_ref().map_or(at.clone(), |p| format!("{at} [{p}]"))
             }
-            Scope::LastFailed => "Failed tests".into(),
+            Scope::LastFailed => ts!("tests-failed-tests").into(),
         }
     }
 }
@@ -163,8 +163,9 @@ pub fn test_launch(
     extra: &[String],
     env: Vec<(String, String)>,
 ) -> Result<ProcessLaunch, String> {
-    let cli = cli(host, root).ok_or("The Playwright test runner is not installed: install the packages first.")?;
-    let reporter = reporter(host).map_err(|e| format!("The SnoutCode reporter could not be written: {e}"))?;
+    let cli = cli(host, root).ok_or(ts!("tests-the-playwright-test-runner-is-not-installed-install"))?;
+    let reporter =
+        reporter(host).map_err(|e| t!("tests-the-snoutcode-reporter-could-not-be-written", e = e.to_string()))?;
     let mut args =
         vec![cli.display().to_string(), "test".to_owned(), format!("--reporter={},list", reporter.display())];
     args.extend(scope.args(root));
@@ -187,7 +188,7 @@ pub fn test_launch(
 
 /// The project's tests, as `playwright test --list` finds them (nothing runs).
 pub fn list(host: &dyn Host, root: &Path, node: &Node, env: &[(String, String)]) -> Result<Run, String> {
-    let cli = cli(host, root).ok_or("The Playwright test runner is not installed.")?;
+    let cli = cli(host, root).ok_or(ts!("tests-the-playwright-test-runner-is-not-installed"))?;
     let reporter = reporter(host).map_err(|e| e.to_string())?;
     let mut cmd = Cmd::new(&node.bin)
         .arg(&cli)
@@ -207,7 +208,11 @@ pub fn list(host: &dyn Host, root: &Path, node: &Node, env: &[(String, String)])
     if !run.begun {
         let err = String::from_utf8_lossy(&out.stderr);
         let why = super::report::strip_ansi(err.trim());
-        return Err(if why.is_empty() { format!("Playwright listed no tests ({})", out.status) } else { why });
+        return Err(if why.is_empty() {
+            t!("tests-playwright-listed-no-tests", status = (out.status).to_string())
+        } else {
+            why
+        });
     }
     Ok(run)
 }

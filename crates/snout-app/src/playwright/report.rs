@@ -64,13 +64,13 @@ impl State {
 
     pub fn label(self) -> &'static str {
         match self {
-            State::Queued => "Queued",
-            State::Running => "Running",
-            State::Passed => "Passed",
-            State::Flaky => "Flaky, passed on a retry",
-            State::Failed => "Failed",
-            State::Skipped => "Skipped",
-            State::Interrupted => "Interrupted",
+            State::Queued => ts!("pwreport-queued"),
+            State::Running => ts!("console-running"),
+            State::Passed => ts!("runwin-passed"),
+            State::Flaky => ts!("pwreport-flaky-passed-on-a-retry"),
+            State::Failed => ts!("run-failed-3"),
+            State::Skipped => ts!("runwin-skipped"),
+            State::Interrupted => ts!("pwreport-interrupted"),
         }
     }
 }

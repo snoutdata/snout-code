@@ -50,7 +50,7 @@ fn gradle_value(text: impl Into<SharedString>, p: &Palette) -> AnyElement {
 
 /// "Edit in build file": a small ghost button.
 fn edit_button(id: impl Into<SharedString>) -> Button {
-    Button::new(id, IconName::SquarePen).compact().ghost().label("Edit in build file")
+    Button::new(id, IconName::SquarePen).compact().ghost().label(ts!("structure-edit-in-build-file"))
 }
 
 /// A tile with `ico` in a wash of `color`, as the pages' headers and cards draw them.
@@ -152,7 +152,7 @@ impl ProjectStructureView {
             );
         }
         if rows.is_empty() {
-            rows.push(div().px(px(12.)).text_color(p.fg_dim).child("Nothing matches").into_any_element());
+            rows.push(div().px(px(12.)).text_color(p.fg_dim).child(ts!("settings-nothing-matches")).into_any_element());
         }
         div()
             .w(px(210.))
@@ -175,21 +175,23 @@ impl ProjectStructureView {
     /// The empty state of a page that needs the model, when there is none to show.
     fn without_model(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = palette(cx);
-        let sync = || Button::new("structure-sync-empty", IconName::RefreshCw).label("Sync Gradle").primary();
+        let sync =
+            || Button::new("structure-sync-empty", IconName::RefreshCw).label(ts!("structure-sync-gradle")).primary();
         let state = match &self.load {
             Load::Ready(_) => return None,
-            Load::Loading => EmptyState::new(snout_core::art::building(), "Reading the Gradle model")
-                .hint("The pages fill in as soon as the last sync's model is read."),
-            Load::Missing => EmptyState::new(snout_core::art::spots::no_project(), "No Gradle model yet")
-                .hint(
-                    "This project has not been synced as a Gradle build. Sync it to see its modules and dependencies.",
-                )
-                .action(sync().on_click(cx.listener(|this, _, _, cx| this.sync(cx)))),
-            Load::Failed(e) => {
-                EmptyState::new(snout_core::art::spots::gradle_failed(), "The Gradle model could not be read")
-                    .hint(e.clone())
+            Load::Loading => EmptyState::new(snout_core::art::building(), ts!("background-reading-the-gradle-model"))
+                .hint(ts!("structure-the-pages-fill-in-as-soon-as-the")),
+            Load::Missing => {
+                EmptyState::new(snout_core::art::spots::no_project(), ts!("structure-no-gradle-model-yet"))
+                    .hint(ts!("structure-this-project-has-not-been-synced-as-a"))
                     .action(sync().on_click(cx.listener(|this, _, _, cx| this.sync(cx))))
             }
+            Load::Failed(e) => EmptyState::new(
+                snout_core::art::spots::gradle_failed(),
+                ts!("structure-the-gradle-model-could-not-be-read-2"),
+            )
+            .hint(e.clone())
+            .action(sync().on_click(cx.listener(|this, _, _, cx| this.sync(cx)))),
         };
         Some(div().h(px(420.)).child(state.on(p.card)).into_any_element())
     }
@@ -207,7 +209,7 @@ impl ProjectStructureView {
             .unwrap_or_default();
         let root_module = s.as_ref().and_then(|s| s.modules.first().map(|m| m.id.clone()));
         let mut body = div().flex().flex_col();
-        body = body.child(section("Project", &p)).child(row(
+        body = body.child(section(ts!("cmd-project"), &p)).child(row(
             "Name",
             div().flex().items_center().gap(px(8.)).child(gradle_value(name, &p)).when_some(
                 root_module.clone(),
@@ -233,7 +235,7 @@ impl ProjectStructureView {
         }
         // The JDK: SnoutCode's, for this project.
         let current = self.project.jdk.as_ref().map(|h| h.display().to_string()).unwrap_or_default();
-        let mut choices = vec![(String::new(), "Each build's own (your settings)".to_owned())];
+        let mut choices = vec![(String::new(), ts!("settings-each-builds-own-your-settings").to_owned())];
         let jdks = self.all_jdks();
         choices.extend(jdks.iter().map(|j| (j.home.display().to_string(), format!("JDK {} ({})", j.major, j.version))));
         if let Some(h) = &self.project.jdk
@@ -244,7 +246,7 @@ impl ProjectStructureView {
         let view = cx.entity();
         let set = self.project.jdk.is_some();
         body = body
-            .child(section("Java", &p))
+            .child(section(ts!("structure-java"), &p))
             .child(row(
                 "JDK",
                 div()
@@ -261,9 +263,14 @@ impl ProjectStructureView {
                         &p,
                     ))
                     .when(set, |d| {
-                        d.child(badge_with_icon("Set for this project", IconName::FolderCog, Tone::Accent, &p))
+                        d.child(badge_with_icon(
+                            ts!("settings-set-for-this-project"),
+                            IconName::FolderCog,
+                            Tone::Accent,
+                            &p,
+                        ))
                     })
-                    .when(self.detected.is_none(), |d| d.child(look::weak("Looking for JDKs…", &p))),
+                    .when(self.detected.is_none(), |d| d.child(look::weak(ts!("structure-looking-for-jdks"), &p))),
                 &p,
             ))
             .child(hint(
@@ -279,13 +286,13 @@ impl ProjectStructureView {
         levels.sort_by_key(|l| crate::lang::java::major_of(l).unwrap_or(0));
         levels.dedup();
         let level = match levels.as_slice() {
-            [] => "Not set (the JDK's own)".to_owned(),
+            [] => ts!("structure-not-set-the-jdks-own").to_owned(),
             [one] => format!("Java {one}"),
-            [lo, .., hi] => format!("Java {lo} to {hi}, per module"),
+            [lo, .., hi] => t!("structure-java-to-per-module", lo = lo.to_string(), hi = hi.to_string()),
         };
         let first_jvm = s.jvm_modules().next().map(|m| m.id.clone());
         body = body.child(row(
-            "Language level",
+            ts!("structure-language-level"),
             div().flex().items_center().gap(px(8.)).child(gradle_value(level, &p)).when_some(first_jvm, |d, id| {
                 d.child(edit_button("structure-edit-level").on_click(
                     cx.listener(move |this, _, _, cx| this.edit_in_build_file(id.clone(), Target::Level, cx)),
@@ -295,7 +302,7 @@ impl ProjectStructureView {
         ));
         // Each build's Gradle or Maven, and the JVM it ran on.
         let tools = match (s.builds.iter().any(|b| b.maven), s.builds.iter().any(|b| !b.maven)) {
-            (true, true) => "Gradle and Maven",
+            (true, true) => ts!("structure-gradle-and-maven"),
             (true, false) => "Maven",
             _ => "Gradle",
         };
@@ -303,7 +310,11 @@ impl ProjectStructureView {
         for (i, b) in s.builds.iter().enumerate() {
             let module = s.modules.iter().find(|m| m.build == b.id && m.included.is_none() && m.gradle_path == ":");
             let tool = if b.maven { "Maven" } else { "Gradle" };
-            let version = b.gradle_version.clone().map(|v| format!("{tool} {v}")).unwrap_or_else(|| "Unknown".into());
+            let version = b
+                .gradle_version
+                .clone()
+                .map(|v| format!("{tool} {v}"))
+                .unwrap_or_else(|| ts!("structure-unknown").into());
             let several = s.builds.len() > 1;
             body = body
                 .when(several, |d| {
@@ -320,12 +331,17 @@ impl ProjectStructureView {
                             ))
                             .child(div().font_weight(FontWeight::MEDIUM).child(b.id.clone()))
                             .when(!b.synced, |d| {
-                                d.child(badge_with_icon("Did not sync", IconName::TriangleAlert, Tone::Danger, &p))
+                                d.child(badge_with_icon(
+                                    ts!("structure-did-not-sync"),
+                                    IconName::TriangleAlert,
+                                    Tone::Danger,
+                                    &p,
+                                ))
                             }),
                     )
                 })
                 .child(row(
-                    if b.maven { "Maven version" } else { "Gradle version" },
+                    if b.maven { ts!("structure-maven-version") } else { ts!("structure-gradle-version") },
                     div().flex().items_center().gap(px(8.)).child(gradle_value(version, &p)).when_some(
                         module.map(|m| m.id.clone()),
                         |d, id| {
@@ -339,7 +355,7 @@ impl ProjectStructureView {
                     &p,
                 ))
                 .child(row(
-                    if b.maven { "Maven JVM" } else { "Gradle JVM" },
+                    if b.maven { ts!("structure-maven-jvm") } else { ts!("structure-gradle-jvm") },
                     match (&b.java_version, &b.gradle_java_home) {
                         (Some(v), Some(h)) => div()
                             .flex()
@@ -349,16 +365,16 @@ impl ProjectStructureView {
                             .child(crate::glyphs::icon(Icon::Jdk, 14., p.lanes()[1]))
                             .child(format!("JDK {v}"))
                             .child(look::weak(short(h, &home), &p)),
-                        _ => div().text_color(p.fg_dim).child("Not known until the build syncs"),
+                        _ => div().text_color(p.fg_dim).child(ts!("structure-not-known-until-the-build-syncs")),
                     },
                     &p,
                 ));
         }
         body = body.child(hint(
             if tools == "Maven" {
-                "The JDK Maven runs on and compiles with, chosen for the build's Java level: the JDK above when one is set."
+                ts!("structure-the-jdk-maven-runs-on-and-compiles-with")
             } else {
-                "The JVM the last sync ran Gradle on: the JDK above when one is set."
+                ts!("structure-the-jvm-the-last-sync-ran-gradle-on")
             },
             &p,
         ));
@@ -523,7 +539,7 @@ impl ProjectStructureView {
         let [_, _, blue, _, violet, _] = p.lanes();
         let kind = match m.kind {
             super::data::BuildKind::Root => None,
-            super::data::BuildKind::Included => Some(("Included build", Tone::Info)),
+            super::data::BuildKind::Included => Some((ts!("structure-included-build-2"), Tone::Info)),
             super::data::BuildKind::BuildSrc => Some(("buildSrc", Tone::Info)),
         };
         let mut out = div().flex().flex_col().gap(px(10.)).child(
@@ -546,7 +562,12 @@ impl ProjectStructureView {
                                 .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(m.name.clone()))
                                 .when_some(kind, |d, (k, t)| d.child(badge(k, t, &p)))
                                 .when(m.spring_boot.is_some(), |d| {
-                                    d.child(badge_with_icon("Spring Boot", Icon::Leaf, Tone::Success, &p))
+                                    d.child(badge_with_icon(
+                                        ts!("structure-spring-boot"),
+                                        Icon::Leaf,
+                                        Tone::Success,
+                                        &p,
+                                    ))
                                 }),
                         )
                         .child(look::weak(format!("{}  {}", m.build, m.gradle_path), &p).text_size(px(12.))),
@@ -570,7 +591,7 @@ impl ProjectStructureView {
         if let Some(f) = m.build_file.clone() {
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             facts = facts.child(row(
-                "Build file",
+                ts!("structure-build-file"),
                 div()
                     .id("structure-module-build-file")
                     .flex()
@@ -588,17 +609,17 @@ impl ProjectStructureView {
             let level_id = id.clone();
             facts = facts
                 .child(row(
-                    "Language level",
+                    ts!("structure-language-level"),
                     div()
                         .flex()
                         .items_center()
                         .gap(px(8.))
                         .child(gradle_value(
-                            m.level().map(|l| format!("Java {l}")).unwrap_or_else(|| "Not set".into()),
+                            m.level().map(|l| format!("Java {l}")).unwrap_or_else(|| ts!("structure-not-set").into()),
                             &p,
                         ))
                         .when_some(m.toolchain.clone(), |d, t| {
-                            d.child(badge(format!("toolchain {t}"), Tone::Neutral, &p))
+                            d.child(badge(t!("structure-toolchain", t = t.to_string()), Tone::Neutral, &p))
                         })
                         .child(edit_button("structure-module-level").on_click(cx.listener(move |this, _, _, cx| {
                             this.edit_in_build_file(level_id.clone(), Target::Level, cx)
@@ -606,12 +627,17 @@ impl ProjectStructureView {
                     &p,
                 ))
                 .child(row(
-                    "Target compatibility",
-                    gradle_value(m.target_level().map(|l| format!("Java {l}")).unwrap_or_else(|| "Not set".into()), &p),
+                    ts!("structure-target-compatibility"),
+                    gradle_value(
+                        m.target_level()
+                            .map(|l| format!("Java {l}"))
+                            .unwrap_or_else(|| ts!("structure-not-set").into()),
+                        &p,
+                    ),
                     &p,
                 ));
         } else {
-            facts = facts.child(hint("This project compiles no Java: it has no source sets.", &p));
+            facts = facts.child(hint(ts!("structure-this-project-compiles-no-java-it-has-no"), &p));
         }
         out = out.child(facts);
         for set in m.source_sets.iter().filter(|set| only.as_ref().is_none_or(|n| *n == set.name)) {
@@ -625,7 +651,7 @@ impl ProjectStructureView {
         let [green, _, blue, _, _, _] = p.lanes();
         let levels = match (set.level(), set.target_level()) {
             (Some(a), Some(b)) if a == b => format!("Java {a}"),
-            (Some(a), Some(b)) => format!("Java {a}, bytecode {b}"),
+            (Some(a), Some(b)) => t!("structure-java-bytecode", a = a.to_string(), b = b.to_string()),
             (Some(a), None) | (None, Some(a)) => format!("Java {a}"),
             _ => String::new(),
         };
@@ -641,13 +667,15 @@ impl ProjectStructureView {
                     if set.test { green } else { blue },
                 ))
                 .child(div().font_weight(FontWeight::SEMIBOLD).child(set.name.clone()))
-                .when(set.test, |d| d.child(badge_with_icon("Tests", IconName::FlaskConical, Tone::Success, &p)))
+                .when(set.test, |d| {
+                    d.child(badge_with_icon(ts!("stripes-tests"), IconName::FlaskConical, Tone::Success, &p))
+                })
                 .child(div().flex_1())
                 .when(!levels.is_empty(), |d| d.child(badge_with_icon(levels, Icon::Jdk, Tone::Neutral, &p))),
         );
-        c = c.child(div().pt(px(2.)).text_size(px(12.)).text_color(p.fg_dim).child("Content roots"));
+        c = c.child(div().pt(px(2.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("structure-content-roots")));
         if set.roots.is_empty() {
-            c = c.child(look::weak("None", &p));
+            c = c.child(look::weak(ts!("settings-none"), &p));
         }
         for (dir, kind, exists) in &set.roots {
             let (g, color) = crate::project_view::root_look(Some(*kind), false, &p);
@@ -663,13 +691,17 @@ impl ProjectStructureView {
                         inside(dir, &m.dir, home),
                         if *exists { p.fg } else { p.fg_dim },
                     ))
-                    .when(!exists, |d| d.child(badge("not there yet", Tone::Neutral, &p)))
+                    .when(!exists, |d| d.child(badge(ts!("structure-not-there-yet"), Tone::Neutral, &p)))
                     .child(look::weak(kind.label(), &p).text_size(px(11.5))),
             );
         }
-        c = c.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child("Output folders"));
+        c = c.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("structure-output-folders")));
         for (i, out) in set.outputs.iter().enumerate() {
-            let what = if i + 1 == set.outputs.len() && set.outputs.len() > 1 { "Resources" } else { "Classes" };
+            let what = if i + 1 == set.outputs.len() && set.outputs.len() > 1 {
+                ts!("structure-resources")
+            } else {
+                ts!("structure-classes")
+            };
             c = c.child(
                 div()
                     .h(px(24.))
@@ -811,8 +843,8 @@ impl ProjectStructureView {
             return div()
                 .h(px(420.))
                 .child(
-                    EmptyState::new(snout_core::art::spots::no_project(), "No module compiles Java")
-                        .hint("Dependencies show for the projects that apply a Java plugin.")
+                    EmptyState::new(snout_core::art::spots::no_project(), ts!("structure-no-module-compiles-java"))
+                        .hint(ts!("structure-dependencies-show-for-the-projects-that-apply-a"))
                         .on(p.card),
                 )
                 .into_any_element();
@@ -893,7 +925,7 @@ impl ProjectStructureView {
             .when(on, |d| d.bg(p.wash(p.warn)).border_color(mix(p.warn, 0.45, p.card)).text_color(p.fg))
             .when(!on, |d| d.border_color(p.border).text_color(p.fg_dim).hover(move |s| s.bg(hover)))
             .child(icon(IconName::TriangleAlert, 13., if on { p.warn } else { p.fg_dim }))
-            .child("Conflicts only")
+            .child(ts!("structure-conflicts-only"))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.conflicts_only = !this.conflicts_only;
                 cx.notify();
@@ -921,12 +953,12 @@ impl ProjectStructureView {
                     div().h(px(340.)).child(
                         EmptyState::new(
                             snout_core::art::spots::no_results(),
-                            format!("No {} dependencies", self.scope.label().to_lowercase()),
+                            t!("structure-no-scope-dependencies", scope = self.scope.label().to_lowercase()),
                         )
-                        .hint(format!(
-                            "{} declares nothing for this scope. {}",
-                            m.name,
-                            self.scope.detail_for(s.is_maven(m))
+                        .hint(t!(
+                            "structure-declares-nothing-for-this-scope",
+                            m = (m.name).to_string(),
+                            m_2 = (self.scope.detail_for(s.is_maven(m))).to_string()
                         ))
                         .on(p.card)
                         .compact(),
@@ -948,13 +980,17 @@ impl ProjectStructureView {
             .gap(px(8.))
             .text_size(px(12.))
             .text_color(p.fg_dim)
-            .child(format!("{declared} declared, {} in all.", graph.nodes.len()))
+            .child(t!(
+                "structure-declared-in-all",
+                declared = declared.to_string(),
+                count = (graph.nodes.len()).to_string()
+            ))
             .child(self.scope.detail_for(s.is_maven(m)))
             .child(div().flex_1())
             .when(!conflicts.is_empty(), |d| {
                 let n = conflicts.len();
                 d.child(badge_with_icon(
-                    format!("{n} version conflict{}", if n == 1 { "" } else { "s" }),
+                    t!("structure-version-conflicts", count = n),
                     IconName::TriangleAlert,
                     Tone::Warning,
                     &p,
@@ -962,7 +998,7 @@ impl ProjectStructureView {
             })
             .when(unresolved_count > 0, |d| {
                 d.child(badge_with_icon(
-                    format!("{unresolved_count} unresolved"),
+                    t!("structure-unresolved", unresolved_count = unresolved_count.to_string()),
                     IconName::OctagonAlert,
                     Tone::Danger,
                     &p,
@@ -973,11 +1009,11 @@ impl ProjectStructureView {
         let brought = Rc::new(graph.brought_by());
         let catalog = Rc::new(self.catalog.clone());
         let list: AnyElement = if rows.is_empty() {
-            EmptyState::new(snout_core::art::spots::no_results(), "Nothing matches")
+            EmptyState::new(snout_core::art::spots::no_results(), ts!("settings-nothing-matches"))
                 .hint(if self.conflicts_only {
-                    "No version lost a conflict here."
+                    ts!("structure-no-version-lost-a-conflict-here")
                 } else {
-                    "Try fewer letters of the group, name or version."
+                    ts!("structure-try-fewer-letters-of-the-group-name-or")
                 })
                 .on(p.card)
                 .compact()
@@ -1024,8 +1060,8 @@ impl ProjectStructureView {
         let home = self.home(cx);
         let warm = p.lanes()[1];
         let machine = match &self.host_name {
-            Some(h) => format!("on {h}"),
-            None => format!("on {}", crate::platform::this_machine()),
+            Some(h) => t!("structure-on", h = h.to_string()),
+            None => t!("structure-on-machine", machine = crate::platform::this_machine()),
         };
         let downloading = self.download.clone();
         let view = cx.entity();
@@ -1033,7 +1069,7 @@ impl ProjectStructureView {
             div().id("structure-sdk-download").debug_selector(|| "structure-sdk-download".into()).child(
                 Button::new("structure-sdk-download-button", IconName::Download)
                     .compact()
-                    .label("Download JDK")
+                    .label(ts!("structure-download-jdk"))
                     .disabled(downloading.is_some()),
             ),
         );
@@ -1048,28 +1084,25 @@ impl ProjectStructureView {
             }
             menu
         });
-        let mut body = div().flex().flex_col().gap(px(8.)).child(
-            div()
-                .pt(px(8.))
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(px(12.5))
-                        .text_color(p.fg_dim)
-                        .child(format!("Found where JDKs are installed {machine}, and added by you.")),
-                )
-                .child(
-                    Button::new("structure-sdk-add", IconName::FolderPlus)
-                        .compact()
-                        .label("Add from Folder…")
-                        .on_click(cx.listener(|this, _, _, cx| this.pick_jdk_folder(cx))),
-                )
-                .child(download),
-        );
+        let mut body =
+            div().flex().flex_col().gap(px(8.)).child(
+                div()
+                    .pt(px(8.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(div().flex_1().min_w_0().text_size(px(12.5)).text_color(p.fg_dim).child(t!(
+                        "structure-found-where-jdks-are-installed-and-added-by",
+                        machine = machine.to_string()
+                    )))
+                    .child(
+                        Button::new("structure-sdk-add", IconName::FolderPlus)
+                            .compact()
+                            .label(ts!("structure-add-from-folder"))
+                            .on_click(cx.listener(|this, _, _, cx| this.pick_jdk_folder(cx))),
+                    )
+                    .child(download),
+            );
         if let Some((major, progress)) = &downloading {
             let pct = progress.percent();
             body = body.child(
@@ -1081,8 +1114,9 @@ impl ProjectStructureView {
                             .flex_col()
                             .gap(px(5.))
                             .child(format!(
-                                "Downloading JDK {major}{}",
-                                pct.map(|p| format!(", {p}%")).unwrap_or_default()
+                                "{} {}",
+                                t!("structure-downloading-jdk", major = major.to_string()),
+                                pct.map(|p| format!("{p}%")).unwrap_or_default()
                             ))
                             .child(
                                 div().h(px(4.)).w_full().rounded(px(2.)).bg(p.border).child(
@@ -1098,7 +1132,7 @@ impl ProjectStructureView {
             );
         }
         let Some(detected) = self.detected.clone() else {
-            return body.child(look::weak("Looking for JDKs…", &p)).into_any_element();
+            return body.child(look::weak(ts!("structure-looking-for-jdks"), &p)).into_any_element();
         };
         let in_use = self.project.jdk.clone();
         let mut list: Vec<(crate::lang::java::Jdk, bool)> = detected.into_iter().map(|j| (j, false)).collect();
@@ -1121,8 +1155,11 @@ impl ProjectStructureView {
             return body
                 .child(
                     div().h(px(360.)).child(
-                        EmptyState::new(snout_core::art::spots::jdk(), "No JDK found")
-                            .hint(format!("No JDK is installed {machine} where JDKs usually are. Download one, or add the folder of one."))
+                        EmptyState::new(snout_core::art::spots::jdk(), ts!("structure-no-jdk-found"))
+                            .hint(t!(
+                                "structure-no-jdk-is-installed-where-jdks-usually-are",
+                                machine = machine.to_string()
+                            ))
                             .on(p.card),
                     ),
                 )
@@ -1134,11 +1171,11 @@ impl ProjectStructureView {
             let on = self.selected_jdk.as_ref() == Some(&j.home);
             let used = in_use.as_ref() == Some(&j.home);
             let origin = if *added {
-                ("Added", Tone::Accent)
+                (ts!("state-added"), Tone::Accent)
             } else if j.home.starts_with(&downloads) {
-                ("Downloaded", Tone::Info)
+                (ts!("structure-downloaded"), Tone::Info)
             } else {
-                ("Detected", Tone::Neutral)
+                (ts!("structure-detected"), Tone::Neutral)
             };
             let home_path = j.home.clone();
             let remove_path = j.home.clone();
@@ -1175,7 +1212,7 @@ impl ProjectStructureView {
                                     .child(badge(origin.0, origin.1, &p))
                                     .when(used, |d| {
                                         d.child(badge_with_icon(
-                                            "This project's",
+                                            ts!("structure-this-projects"),
                                             IconName::FolderCog,
                                             Tone::Success,
                                             &p,
@@ -1189,7 +1226,7 @@ impl ProjectStructureView {
                             IconButton::new(
                                 SharedString::from(format!("structure-sdk-remove-{i}")),
                                 IconName::Trash,
-                                "Remove from the list",
+                                ts!("structure-remove-from-the-list"),
                             )
                             .size(24.)
                             .on_click(cx.listener(move |this, _, _, cx| this.remove_jdk(&remove_path, cx))),
@@ -1221,14 +1258,14 @@ impl ProjectStructureView {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child("No JDK there now"))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child(ts!("structure-no-jdk-there-now")))
                             .child(look::weak(short(h, &home), &p).text_size(px(12.))),
                     )
                     .child(
                         IconButton::new(
                             SharedString::from(format!("structure-sdk-remove-missing-{i}")),
                             IconName::Trash,
-                            "Remove from the list",
+                            ts!("structure-remove-from-the-list"),
                         )
                         .size(24.)
                         .on_click(cx.listener(move |this, _, _, cx| this.remove_jdk(&remove_path, cx))),
@@ -1242,7 +1279,7 @@ impl ProjectStructureView {
             .map(|(j, added)| self.jdk_detail(j, *added, &home, cx));
         body.child(rows)
             .children(detail)
-            .child(look::weak("Removing an added JDK takes it off the list; its files stay where they are.", &p))
+            .child(look::weak(ts!("structure-removing-an-added-jdk-takes-it-off-the"), &p))
             .into_any_element()
     }
 
@@ -1254,19 +1291,23 @@ impl ProjectStructureView {
         let home_path = j.home.clone();
         card(&p)
             .debug_selector(|| "structure-sdk-detail".into())
-            .child(section("Selected JDK", &p).pt(px(0.)))
-            .child(row("Version", div().child(format!("{} (Java {})", j.version, j.major)), &p))
-            .child(row("Home", div().child(short(&j.home, home)), &p))
-            .child(row("Kept in", div().child(if added { "Your settings" } else { "Found by SnoutCode" }), &p))
+            .child(section(ts!("structure-selected-jdk"), &p).pt(px(0.)))
+            .child(row(ts!("structure-version"), div().child(format!("{} (Java {})", j.version, j.major)), &p))
+            .child(row(ts!("structure-home"), div().child(short(&j.home, home)), &p))
             .child(row(
-                "This project",
+                ts!("structure-kept-in"),
+                div().child(if added { ts!("structure-your-settings") } else { ts!("structure-found-by-snoutcode") }),
+                &p,
+            ))
+            .child(row(
+                ts!("structure-this-project"),
                 if used {
-                    div().child(badge_with_icon("Runs on it", IconName::CircleCheck, Tone::Success, &p))
+                    div().child(badge_with_icon(ts!("structure-runs-on-it"), IconName::CircleCheck, Tone::Success, &p))
                 } else {
                     div().child(
                         Button::new("structure-sdk-use", IconName::FolderCog)
                             .compact()
-                            .label("Use for This Project")
+                            .label(ts!("structure-use-for-this-project"))
                             .on_click(cx.listener(move |this, _, _, cx| this.set_jdk(Some(home_path.clone()), cx))),
                     )
                 },
@@ -1303,16 +1344,16 @@ impl ProjectStructureView {
                 .child(tile(Icon::Leaf, green, 30., &p))
                 .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child("Spring"))
                 .child(if detected {
-                    badge_with_icon("Detected", IconName::CircleCheck, Tone::Success, &p)
+                    badge_with_icon(ts!("structure-detected"), IconName::CircleCheck, Tone::Success, &p)
                 } else {
-                    badge("Not detected", Tone::Neutral, &p)
+                    badge(ts!("structure-not-detected"), Tone::Neutral, &p)
                 })
                 .child(div().flex_1())
                 .child(
                     Button::new("structure-facet-spring-settings", IconName::Settings)
                         .compact()
                         .ghost()
-                        .label("Spring Settings")
+                        .label(ts!("structure-spring-settings"))
                         .on_click(
                             cx.listener(|this, _, _, cx| this.open_settings(crate::settings_view::Page::Spring, cx)),
                         ),
@@ -1330,7 +1371,7 @@ impl ProjectStructureView {
                 .child(row(
                     "Modules",
                     div().child(if names.is_empty() {
-                        "None with the Spring Boot plugin".to_owned()
+                        ts!("structure-none-with-the-spring-boot-plugin").to_owned()
                     } else {
                         names.join(", ")
                     }),
@@ -1339,17 +1380,17 @@ impl ProjectStructureView {
                 .child(row(
                     "Beans",
                     div().child(if loaded {
-                        format!("{beans} in the Spring model")
+                        t!("structure-in-the-spring-model", beans = beans.to_string())
                     } else {
-                        "Read once the Java engine is ready".into()
+                        ts!("structure-read-once-the-java-engine-is-ready").into()
                     }),
                     &p,
                 ))
-                .child(row("Active profiles", div().child(crate::spring::mode_label(&mode, &info)), &p));
+                .child(row(ts!("settings-active-profiles"), div().child(crate::spring::mode_label(&mode, &info)), &p));
             let known = info.known();
             if !known.is_empty() {
                 spring_card = spring_card.child(row(
-                    "Profiles known",
+                    ts!("structure-profiles-known"),
                     div()
                         .flex()
                         .flex_wrap()
@@ -1358,11 +1399,12 @@ impl ProjectStructureView {
                     &p,
                 ));
             }
-            spring_card = spring_card
-                .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child("Configuration files"));
+            spring_card = spring_card.child(
+                div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("structure-configuration-files")),
+            );
             if self.config_files.is_empty() {
-                spring_card =
-                    spring_card.child(look::weak("No application.properties or application.yml in the resources", &p));
+                spring_card = spring_card
+                    .child(look::weak(ts!("structure-no-application-properties-or-application-yml-in-the"), &p));
             }
             for (i, f) in self.config_files.iter().enumerate() {
                 let file = f.clone();
@@ -1387,8 +1429,8 @@ impl ProjectStructureView {
         } else {
             spring_card = spring_card.child(
                 div().h(px(170.)).child(
-                    EmptyState::new(snout_core::art::spots::no_beans(), "No Spring here")
-                        .hint("No module applies the Spring Boot plugin, and the Spring model has no beans.")
+                    EmptyState::new(snout_core::art::spots::no_beans(), ts!("structure-no-spring-here"))
+                        .hint(ts!("structure-no-module-applies-the-spring-boot-plugin-and"))
                         .on(p.panel)
                         .compact(),
                 ),
@@ -1409,16 +1451,16 @@ impl ProjectStructureView {
                     .child(tile(IconName::Sparkles, claude, 30., &p))
                     .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child("Claude Code"))
                     .child(match (clients, program.is_some()) {
-                        (n, _) if n > 0 => badge_with_icon("Connected", IconName::Plug, Tone::Success, &p),
-                        (_, true) => badge_with_icon("Ready", IconName::CircleCheck, Tone::Claude, &p),
-                        (_, false) => badge_with_icon("Not found", IconName::Unplug, Tone::Warning, &p),
+                        (n, _) if n > 0 => badge_with_icon(ts!("console-connected"), IconName::Plug, Tone::Success, &p),
+                        (_, true) => badge_with_icon(ts!("model-ready"), IconName::CircleCheck, Tone::Claude, &p),
+                        (_, false) => badge_with_icon(ts!("structure-not-found"), IconName::Unplug, Tone::Warning, &p),
                     })
                     .child(div().flex_1())
                     .child(
                         Button::new("structure-facet-claude-settings", IconName::Settings)
                             .compact()
                             .ghost()
-                            .label("Claude Code Settings")
+                            .label(ts!("structure-claude-code-settings"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_settings(crate::settings_view::Page::ClaudeCode, cx)
                             })),
@@ -1428,16 +1470,16 @@ impl ProjectStructureView {
                 "Program",
                 match &program {
                     Some(path) => div().child(short(path, &home)),
-                    None => div().text_color(p.fg_dim).child("claude was not found on PATH or the usual places"),
+                    None => div().text_color(p.fg_dim).child(ts!("structure-claude-was-not-found-on-path-or-the")),
                 },
                 &p,
             ))
             .child(row(
-                "IDE connection",
+                ts!("structure-ide-connection"),
                 div().child(match clients {
-                    0 => "No session connected. A claude started in the console connects by itself.".to_owned(),
-                    1 => "1 session connected: it sees the open files, selection and problems".to_owned(),
-                    n => format!("{n} sessions connected"),
+                    0 => ts!("structure-no-session-connected-a-claude-started-in-the").to_owned(),
+                    1 => ts!("structure-1-session-connected-it-sees-the-open-files").to_owned(),
+                    n => t!("structure-sessions-connected", n = n.to_string()),
                 }),
                 &p,
             ));
@@ -1459,19 +1501,19 @@ impl ProjectStructureView {
         if self.structure().is_some_and(|s| s.tool() == "Maven") {
             match self.page {
                 Page::Project => {
-                    return "The project as a whole: the JDK it runs on is yours to pick, the rest is Maven's.";
+                    return ts!("structure-the-project-as-a-whole-the-jdk-it");
                 }
-                Page::Modules => return "Every Maven module of every build, with its source sets, roots and outputs.",
-                Page::Dependencies => return "What each module declares and what that brings in, as Maven resolved it.",
+                Page::Modules => return ts!("structure-every-maven-module-of-every-build-with-its"),
+                Page::Dependencies => return ts!("structure-what-each-module-declares-and-what-that-brings"),
                 _ => {}
             }
         }
         match self.page {
-            Page::Project => "The project as a whole: the JDK it runs on is yours to pick, the rest is Gradle's.",
-            Page::Modules => "Every Gradle project of every build, with its source sets, roots and outputs.",
-            Page::Dependencies => "What each module declares and what that brings in, as Gradle resolved it.",
-            Page::Sdks => "The JDKs SnoutCode can run Gradle and the Java engine on.",
-            Page::Facets => "Frameworks and tools, as they stand. Read only.",
+            Page::Project => ts!("structure-the-project-as-a-whole-the-jdk-it-2"),
+            Page::Modules => ts!("structure-every-gradle-project-of-every-build-with-its"),
+            Page::Dependencies => ts!("structure-what-each-module-declares-and-what-that-brings-2"),
+            Page::Sdks => ts!("structure-the-jdks-snoutcode-can-run-gradle-and-the"),
+            Page::Facets => ts!("structure-frameworks-and-tools-as-they-stand-read-only"),
         }
     }
 }
@@ -1516,7 +1558,7 @@ fn dep_row(
             .child(div().w(px(12.)))
             .child(icon(IconName::CircleAlert, 14., p.error))
             .child(div().text_color(p.error).child(requested.clone()))
-            .child(badge("Unresolved", Tone::Danger, &p))
+            .child(badge(ts!("structure-unresolved-2"), Tone::Danger, &p))
             .child(look::weak(reason.clone(), &p).text_size(px(11.5)).flex_1())
             .into_any_element();
     }
@@ -1567,8 +1609,11 @@ fn dep_row(
                                 .hover(move |s| s.text_color(hover_ink).underline())
                                 .child(format!("project {path}"))
                                 .tooltip(move |w, cx| {
-                                    gpui_component::tooltip::Tooltip::new(format!("Show {name} in Modules"))
-                                        .build(w, cx)
+                                    gpui_component::tooltip::Tooltip::new(t!(
+                                        "structure-show-in-modules",
+                                        name = name.to_string()
+                                    ))
+                                    .build(w, cx)
                                 })
                                 .on_click(move |_, _, cx| {
                                     let id = id.clone();
@@ -1583,7 +1628,11 @@ fn dep_row(
                             IconButton::new(
                                 SharedString::from(format!("structure-dep-show-{i}")),
                                 IconName::FileSearch,
-                                if declared { "Show in build file" } else { "Show the declaration that brings it in" },
+                                if declared {
+                                    ts!("structure-show-in-build-file")
+                                } else {
+                                    ts!("structure-show-the-declaration-that-brings-it-in")
+                                },
                             )
                             .size(22.)
                             .on_click(move |_, _, cx| {
@@ -1595,7 +1644,7 @@ fn dep_row(
                             IconButton::new(
                                 SharedString::from(format!("structure-dep-go-{i}")),
                                 IconName::ArrowRight,
-                                "Show its dependencies",
+                                ts!("structure-show-its-dependencies"),
                             )
                             .size(22.)
                             .on_click(move |_, _, cx| {
@@ -1624,13 +1673,18 @@ fn dep_row(
             match r.requested.as_deref() {
                 Some(asked) if !asked.is_empty() => {
                     let why = match node.reason.as_deref() {
-                        Some("conflict") => "a newer version asked for elsewhere won",
-                        Some("rule") => "dependency management chose it",
-                        Some("forced") => "it is forced",
-                        Some("constraint") => "a constraint asks for it",
-                        _ => "another request won",
+                        Some("conflict") => ts!("structure-a-newer-version-asked-for-elsewhere-won"),
+                        Some("rule") => ts!("structure-dependency-management-chose-it"),
+                        Some("forced") => ts!("structure-it-is-forced"),
+                        Some("constraint") => ts!("structure-a-constraint-asks-for-it"),
+                        _ => ts!("structure-another-request-won"),
                     };
-                    let tip = format!("{asked} was asked for here; {version} is used: {why}");
+                    let tip = t!(
+                        "structure-was-asked-for-here-is-used",
+                        asked = asked.to_string(),
+                        version = version.to_string(),
+                        why = why.to_string()
+                    );
                     row = row
                         .child(
                             div()
@@ -1644,7 +1698,7 @@ fn dep_row(
                                 .child(div().text_color(p.warn).font_weight(FontWeight::MEDIUM).child(version))
                                 .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(w, cx)),
                         )
-                        .child(badge_with_icon("Conflict", IconName::TriangleAlert, Tone::Warning, &p));
+                        .child(badge_with_icon(ts!("structure-conflict"), IconName::TriangleAlert, Tone::Warning, &p));
                 }
                 Some(_) => {
                     row = row.child(look::weak(version, &p)).child(badge("managed", Tone::Neutral, &p));
@@ -1653,7 +1707,7 @@ fn dep_row(
                     row = row.child(look::weak(version.clone(), &p));
                     if !lost.is_empty() {
                         row = row.child(badge_with_icon(
-                            format!("won over {}", lost.join(", ")),
+                            t!("structure-won-over", join = (lost.join(", ")).to_string()),
                             IconName::BadgeCheck,
                             Tone::Success,
                             &p,
@@ -1672,9 +1726,9 @@ fn dep_row(
             if let Some(target) = target {
                 let (v, id) = (view.clone(), m.id.clone());
                 let tip = if declared {
-                    "Show in build file".to_owned()
+                    ts!("structure-show-in-build-file").to_owned()
                 } else {
-                    "Show the declaration that brings it in".to_owned()
+                    ts!("structure-show-the-declaration-that-brings-it-in").to_owned()
                 };
                 row = row.child(
                     IconButton::new(SharedString::from(format!("structure-dep-show-{i}")), IconName::FileSearch, tip)
@@ -1691,7 +1745,7 @@ fn dep_row(
                     IconButton::new(
                         SharedString::from(format!("structure-dep-catalog-{i}")),
                         IconName::BookOpen,
-                        "Show in version catalog",
+                        ts!("structure-show-in-version-catalog"),
                     )
                     .size(22.)
                     .on_click(move |_, _, cx| {
@@ -1721,11 +1775,11 @@ impl Render for ProjectStructureView {
             self.structure().map(|s| {
                 let modules = s.modules.len();
                 (
-                    format!(
-                        "{} · {modules} module{} from the last {} sync",
-                        s.name,
-                        if modules == 1 { "" } else { "s" },
-                        s.tool()
+                    t!(
+                        "structure-modules-from-sync",
+                        count = modules,
+                        name = s.name.to_string(),
+                        tool = s.tool().to_string()
                     ),
                     p.fg_dim,
                 )
@@ -1753,7 +1807,7 @@ impl Render for ProjectStructureView {
                 crate::components::dialog_header_icon(
                     Tone::Accent,
                     IconName::LayoutGrid,
-                    "Project Structure",
+                    ts!("structure-project-structure"),
                     None,
                     &p,
                 )
@@ -1780,16 +1834,16 @@ impl Render for ProjectStructureView {
                                         .compact()
                                         .ghost()
                                         .label(match (syncing, tool) {
-                                            (true, _) => "Syncing…",
-                                            (_, "Maven") => "Reload Maven",
-                                            (_, "Gradle") => "Sync Gradle",
-                                            _ => "Sync",
+                                            (true, _) => ts!("structure-syncing"),
+                                            (_, "Maven") => ts!("structure-reload-maven"),
+                                            (_, "Gradle") => ts!("structure-sync-gradle"),
+                                            _ => ts!("lang-sync"),
                                         })
                                         .disabled(syncing)
                                         .tooltip(match tool {
-                                            "Maven" => "Read the Maven builds again",
-                                            "Gradle" => "Read the Gradle builds again",
-                                            _ => "Read the builds again",
+                                            "Maven" => ts!("structure-read-the-maven-builds-again"),
+                                            "Gradle" => ts!("structure-read-the-gradle-builds-again"),
+                                            _ => ts!("structure-read-the-builds-again"),
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| this.sync(cx))),
                                 )
@@ -1811,10 +1865,10 @@ impl Render for ProjectStructureView {
             .child(crate::components::dialog_footer(
                 status,
                 vec![
-                    button("structure-cancel", crate::components::CANCEL_ICON, "Cancel", false, true)
+                    button("structure-cancel", crate::components::CANCEL_ICON, ts!("settings-cancel"), false, true)
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(StructureEvent::Cancel)))
                         .into_any_element(),
-                    button("structure-apply", crate::components::APPLY_ICON, "Apply", false, changed)
+                    button("structure-apply", crate::components::APPLY_ICON, ts!("settings-apply"), false, changed)
                         .when(changed, |d| d.on_click(cx.listener(|this, _, _, cx| this.apply(false, cx))))
                         .into_any_element(),
                     button("structure-ok", crate::components::OK_ICON, "OK", true, true)

@@ -50,7 +50,7 @@ impl RunWindow {
         cx.observe(&runs, |_, _, cx| cx.notify()).detach();
         let eval =
             (place == Place::Debug).then(|| {
-                let state = cx.new(|cx| InputState::new(window, cx).placeholder("Evaluate an expression"));
+                let state = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("runwin-evaluate-an-expression")));
                 cx.subscribe(&state, |this, state, e: &InputEvent, cx| {
                     if let InputEvent::PressEnter { secondary, shift } = e {
                         let expr = state.read(cx).value().to_string();
@@ -78,9 +78,9 @@ impl RunWindow {
 
     fn name(&self) -> &'static str {
         match self.place {
-            Place::Run => "Run",
-            Place::Debug => "Debug",
-            Place::Build => "Build",
+            Place::Run => ts!("menu-run"),
+            Place::Debug => ts!("cmd-debug"),
+            Place::Build => ts!("menu-build"),
         }
     }
 }
@@ -134,7 +134,7 @@ fn console_menu(menu: PopupMenu, runs: &Entity<Runs>, id: u64, lines: Option<Rc<
     let menu = if lines.is_none() {
         let runs = runs.clone();
         menu.item(
-            PopupMenuItem::new("Clear All")
+            PopupMenuItem::new(ts!("runwin-clear-all"))
                 .icon(crate::components::menu_icon(crate::components::IconName::Eraser))
                 .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.clear_console(id, cx))),
         )
@@ -144,14 +144,14 @@ fn console_menu(menu: PopupMenu, runs: &Entity<Runs>, id: u64, lines: Option<Rc<
     };
     let copy = text.clone();
     let menu = menu.item(
-        PopupMenuItem::new("Copy All")
+        PopupMenuItem::new(ts!("runwin-copy-all"))
             .icon(crate::components::menu_icon(crate::components::IconName::Copy))
             .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy(cx)))),
     );
     if lines.is_none() {
         let runs = runs.clone();
         menu.item(
-            PopupMenuItem::new("Save Output to File…")
+            PopupMenuItem::new(ts!("runwin-save-output-to-file"))
                 .icon(crate::components::menu_icon(crate::components::IconName::Save))
                 .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.save_console(id, cx))),
         )
@@ -368,17 +368,24 @@ impl RunWindow {
             .border_r_1()
             .border_color(mix(p.border, 0.6, p.ground))
             .child(
-                tool("run-rerun", Icon::Rerun, "Rerun (⌘R)", true, ok, &p)
+                tool("run-rerun", Icon::Rerun, ts!("runwin-rerun-r"), true, ok, &p)
                     .on_click(move |_, _, cx| a.update(cx, |r, cx| r.rerun(id, cx))),
             )
             .child(
-                tool("run-stop", Icon::Stop, "Stop (⌘F2)", s.running(), p.error, &p)
+                tool("run-stop", Icon::Stop, ts!("title-stop-f2"), s.running(), p.error, &p)
                     .on_click(move |_, _, cx| b.update(cx, |r, cx| r.stop(id, cx))),
             )
             .when(s.launch.test_module().is_some(), |d| {
                 d.child(
-                    tool("run-rerun-failed", Icon::RerunFailed, "Rerun Failed Tests (⌥⌘R)", failed, p.error, &p)
-                        .on_click(move |_, _, cx| c.update(cx, |r, cx| r.rerun_failed(id, cx))),
+                    tool(
+                        "run-rerun-failed",
+                        Icon::RerunFailed,
+                        ts!("runwin-rerun-failed-tests-r"),
+                        failed,
+                        p.error,
+                        &p,
+                    )
+                    .on_click(move |_, _, cx| c.update(cx, |r, cx| r.rerun_failed(id, cx))),
                 )
             })
             .into_any_element()
@@ -455,7 +462,7 @@ impl RunWindow {
             .gap(px(6.))
             .cursor_pointer()
             .child(icon(g, 12., ink))
-            .child(div().font_weight(FontWeight::MEDIUM).child("Test Results"))
+            .child(div().font_weight(FontWeight::MEDIUM).child(ts!("runwin-test-results")))
             .child(div().text_color(p.fg_dim).child(millis_text(s.elapsed().as_millis() as u64)))
             .on_click(move |_, _, cx| {
                 runs.update(cx, |r, cx| {
@@ -571,17 +578,17 @@ impl RunWindow {
             }
         }
         if !n.output.is_empty() {
-            lines.push(ConsoleLine::system("Output"));
+            lines.push(ConsoleLine::system(ts!("cmd-output")));
             add(Stream::Out, &n.output, &mut lines);
         }
         if lines.is_empty() {
             let what = match n.state {
-                TestState::Passed => "Passed",
-                TestState::Skipped => "Skipped",
-                TestState::Running => "Running",
-                TestState::Failed => "Failed",
+                TestState::Passed => ts!("runwin-passed"),
+                TestState::Skipped => ts!("runwin-skipped"),
+                TestState::Running => ts!("console-running"),
+                TestState::Failed => ts!("run-failed-3"),
             };
-            lines.push(ConsoleLine::system(format!("{what}; nothing printed")));
+            lines.push(ConsoleLine::system(t!("runwin-nothing-printed", what = what.to_string())));
         }
         let header = diff.map(|(expected, actual)| {
             let pane = |title: &'static str, text: String, color: Hsla| {
@@ -603,8 +610,8 @@ impl RunWindow {
                 .p(px(8.))
                 .flex()
                 .gap(px(8.))
-                .child(pane("Expected", expected, p.ok))
-                .child(pane("Actual", actual, p.error))
+                .child(pane(ts!("runwin-expected"), expected, p.ok))
+                .child(pane(ts!("runwin-actual"), actual, p.error))
         });
         div()
             .size_full()
@@ -636,7 +643,7 @@ impl RunWindow {
             let text = match s.problems {
                 (e, 0) => format!("{e} {}", if e == 1 { "error" } else { "errors" }),
                 (0, w) => format!("{w} {}", if w == 1 { "warning" } else { "warnings" }),
-                (e, w) => format!("{e} errors, {w} warnings"),
+                (e, w) => t!("runwin-errors-warnings", e = e.to_string(), w = w.to_string()),
             };
             rows.push(
                 div()
@@ -663,10 +670,10 @@ impl RunWindow {
                 Some(_) => (Icon::Check, p.fg_dim),
             };
             let note = match t.outcome.as_deref() {
-                Some("up-to-date") => Some("up to date"),
-                Some("from-cache") => Some("from cache"),
+                Some("up-to-date") => Some(ts!("runwin-up-to-date")),
+                Some("from-cache") => Some(ts!("runwin-from-cache")),
                 Some("skipped") => Some("skipped"),
-                Some("no-source") => Some("no source"),
+                Some("no-source") => Some(ts!("runwin-no-source")),
                 _ => None,
             };
             rows.push(
@@ -725,8 +732,8 @@ impl RunWindow {
                 .when(on, |d| d.bg(p.button).font_weight(FontWeight::MEDIUM))
                 .when(!on, |d| d.text_color(p.fg_dim).hover(move |s| s.bg(hover)))
                 .child(match which {
-                    DebugTab::Debugger => "Debugger",
-                    DebugTab::Console => "Console",
+                    DebugTab::Debugger => ts!("runwin-debugger"),
+                    DebugTab::Console => ts!("console-console"),
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.debug_tab = which;
@@ -746,19 +753,19 @@ impl RunWindow {
             .child(tab("debug-tab-console", DebugTab::Console, self.debug_tab == DebugTab::Console, cx))
             .child(div().w(px(10.)))
             .child(
-                tool("debug-rerun", Icon::Rerun, "Rerun (⌘R)", true, p.ok, &p)
+                tool("debug-rerun", Icon::Rerun, ts!("runwin-rerun-r"), true, p.ok, &p)
                     .on_click(move |_, _, cx| a.update(cx, |r, cx| r.rerun(id, cx))),
             )
-            .child(step("debug-resume", Icon::Resume, "Resume (F9)", "continue", paused, p.ok))
-            .child(step("debug-pause", Icon::Pause, "Pause Program (⌥⌘F9)", "pause", live && !paused, p.fg))
+            .child(step("debug-resume", Icon::Resume, ts!("runwin-resume-f9"), "continue", paused, p.ok))
+            .child(step("debug-pause", Icon::Pause, ts!("runwin-pause-program-f9"), "pause", live && !paused, p.fg))
             .child(
-                tool("debug-stop", Icon::Stop, "Stop (⌘F2)", s.running(), p.error, &p)
+                tool("debug-stop", Icon::Stop, ts!("title-stop-f2"), s.running(), p.error, &p)
                     .on_click(move |_, _, cx| b.update(cx, |r, cx| r.stop(id, cx))),
             )
             .child(div().w(px(10.)))
-            .child(step("debug-step-over", Icon::StepOver, "Step Over (F8)", "next", paused, p.accent))
-            .child(step("debug-step-into", Icon::StepInto, "Step Into (F7)", "stepIn", paused, p.accent))
-            .child(step("debug-step-out", Icon::StepOut, "Step Out (⇧F8)", "stepOut", paused, p.accent))
+            .child(step("debug-step-over", Icon::StepOver, ts!("runwin-step-over-f8"), "next", paused, p.accent))
+            .child(step("debug-step-into", Icon::StepInto, ts!("runwin-step-into-f7"), "stepIn", paused, p.accent))
+            .child(step("debug-step-out", Icon::StepOut, ts!("runwin-step-out-f8"), "stepOut", paused, p.accent))
             .child(div().flex_1())
             .children(
                 d.and_then(|d| d.note.clone())
@@ -780,11 +787,11 @@ impl RunWindow {
         let mut frames: Vec<AnyElement> = Vec::new();
         if !d.paused {
             let text = if d.ended {
-                "The program ended."
+                ts!("runwin-the-program-ended")
             } else if d.dap.is_none() {
-                "Waiting for the program to start…"
+                ts!("runwin-waiting-for-the-program-to-start")
             } else {
-                "The program is running. Breakpoints stop it here."
+                ts!("runwin-the-program-is-running-breakpoints-stop-it-here")
             };
             frames.push(note(text));
         } else {
@@ -858,12 +865,14 @@ impl RunWindow {
                     .items_center()
                     .gap(px(4.))
                     .child(div().flex_1().child(look::field(eval, false, None, &p)))
-                    .child(tool("debug-add-watch", Icon::Eye, "Add to Watches (⇧↩)", d.paused, p.fg, &p).on_click(
-                        move |_, _, cx| {
-                            let expr = eval2.read(cx).value().to_string();
-                            runs.update(cx, |r, cx| r.add_watch(id, expr, cx));
-                        },
-                    ))
+                    .child(
+                        tool("debug-add-watch", Icon::Eye, ts!("runwin-add-to-watches"), d.paused, p.fg, &p).on_click(
+                            move |_, _, cx| {
+                                let expr = eval2.read(cx).value().to_string();
+                                runs.update(cx, |r, cx| r.add_watch(id, expr, cx));
+                            },
+                        ),
+                    )
                     .into_any_element(),
             );
         }
@@ -1002,16 +1011,21 @@ impl RunWindow {
         use snout_core::art::spots;
         let _ = cx;
         let state = match self.place {
-            Place::Run => EmptyState::new(spots::no_tests(), "Nothing running")
-                .hint("Run a configuration from the title bar, or a test from the gutter.")
-                .primary_action("run-empty-run", IconName::Play, "Run", crate::menus::RunSelected),
-            Place::Debug => EmptyState::new(spots::debugger_idle(), "No debug session")
-                .hint("Debug a configuration from the title bar, or a test from the gutter.")
-                .primary_action("debug-empty-debug", IconName::Bug, "Debug", crate::menus::DebugSelected),
-            Place::Build => EmptyState::new(snout_core::art::building(), "No build output")
-                .hint("Build the project, or run one of its Gradle tasks or Maven goals.")
-                .primary_action("build-empty-build", IconName::Hammer, "Build Project", crate::menus::BuildProject)
-                .secondary("build-empty-task", IconName::SquarePlay, "Run Task…", |_, w, cx| {
+            Place::Run => EmptyState::new(spots::no_tests(), ts!("runwin-nothing-running"))
+                .hint(ts!("runwin-run-a-configuration-from-the-title-bar-or"))
+                .primary_action("run-empty-run", IconName::Play, ts!("menu-run"), crate::menus::RunSelected),
+            Place::Debug => EmptyState::new(spots::debugger_idle(), ts!("runwin-no-debug-session"))
+                .hint(ts!("runwin-debug-a-configuration-from-the-title-bar-or"))
+                .primary_action("debug-empty-debug", IconName::Bug, ts!("cmd-debug"), crate::menus::DebugSelected),
+            Place::Build => EmptyState::new(snout_core::art::building(), ts!("runwin-no-build-output"))
+                .hint(ts!("runwin-build-the-project-or-run-one-of-its"))
+                .primary_action(
+                    "build-empty-build",
+                    IconName::Hammer,
+                    ts!("cmd-build-project"),
+                    crate::menus::BuildProject,
+                )
+                .secondary("build-empty-task", IconName::SquarePlay, ts!("runwin-run-task"), |_, w, cx| {
                     w.dispatch_action(Box::new(crate::menus::RunGradleTask), cx)
                 }),
         };

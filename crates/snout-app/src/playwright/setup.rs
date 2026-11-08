@@ -83,7 +83,7 @@ pub fn missing_browsers(host: &dyn Host, manifest: &Value, browsers: &Path) -> V
                 "chromium-headless-shell" => "Chromium Headless Shell",
                 "firefox" => "Firefox",
                 "webkit" => "WebKit",
-                "ffmpeg" => "FFmpeg (for videos)",
+                "ffmpeg" => ts!("pwsetup-ffmpeg-for-videos"),
                 other => other,
             };
             missing.push(title.to_owned());
@@ -104,7 +104,7 @@ pub fn summary(host: &dyn Host, root: &Path, stop: Option<&Path>) -> Option<Stri
     };
     let playwright = match (&project.installed, &project.declared) {
         (Some(v), _) => format!("Playwright {v}"),
-        (None, Some(v)) => format!("Playwright {v}, not installed"),
+        (None, Some(v)) => t!("pwsetup-playwright-not-installed", v = v.to_string()),
         (None, None) => "Playwright".to_owned(),
     };
     Some(format!("{playwright} · {} · {}", project.package_manager.name(), node_line(host, root, stop)))
@@ -116,7 +116,7 @@ fn node_line(host: &dyn Host, root: &Path, stop: Option<&Path>) -> String {
     let all = node::discover(host);
     match node::choose(&wanted, &all) {
         Some(n) => format!("Node {}", n.version),
-        None => "no Node fits".to_owned(),
+        None => ts!("pwsetup-no-node-fits").to_owned(),
     }
 }
 
@@ -156,10 +156,10 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
     let env = vec![("PATH".to_owned(), path), ("FORCE_COLOR".to_owned(), "1".to_owned())];
     match need {
         Need::Packages { manager: PackageManager::Npm, .. } => {
-            let npm = crate::lang::typescript::npm_cli(host, node).ok_or("npm is missing beside Node")?;
+            let npm = crate::lang::typescript::npm_cli(host, node).ok_or(ts!("run-npm-is-missing-beside-node"))?;
             let ci = uses_ci(host, root, need);
             Ok(ProcessLaunch {
-                title: "Install packages".into(),
+                title: ts!("pwsetup-install-packages").into(),
                 program: node.bin.clone(),
                 args: vec![npm.display().to_string(), if ci { "ci" } else { "install" }.into()],
                 cwd: root.to_owned(),
@@ -173,9 +173,9 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
         Need::Packages { manager, .. } => {
             let name = manager.name();
             let program = snout_host::which(host, &[name], &[node.bin_dir().to_owned()])
-                .ok_or_else(|| format!("{name} is not installed (the project's lockfile is {name}'s)"))?;
+                .ok_or_else(|| t!("run-is-not-installed-the-projects-lockfile-is-s", name = name.to_string()))?;
             Ok(ProcessLaunch {
-                title: "Install packages".into(),
+                title: ts!("pwsetup-install-packages").into(),
                 program,
                 args: vec!["install".into()],
                 cwd: root.to_owned(),
@@ -192,7 +192,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 .filter(|c| host.is_file(c))
                 .ok_or("the Playwright test runner is not installed")?;
             Ok(ProcessLaunch {
-                title: "Install Playwright browsers".into(),
+                title: ts!("pwsetup-install-playwright-browsers").into(),
                 program: node.bin.clone(),
                 args: vec![cli.display().to_string(), "install".into()],
                 cwd: root.to_owned(),
@@ -330,7 +330,7 @@ impl Setup {
             let all = node::discover(&*host);
             let n = node::choose(&wanted, &all)
                 .cloned()
-                .ok_or("No Node fits this project: download it from the bar above first.".to_owned())?;
+                .ok_or(ts!("pwsetup-no-node-fits-this-project-download-it-from").to_owned())?;
             install_launch(&*host, &root, &need, &n)
         });
         self.looking = Some(cx.spawn(async move |this, cx| {
@@ -359,7 +359,7 @@ impl Setup {
             .and_then(|s| s.ended.as_ref())
             .is_some_and(|e| e.outcome == crate::run::Outcome::Success);
         if !ok {
-            self.error = Some("The install did not finish: see the Build window.".into());
+            self.error = Some(ts!("pwsetup-the-install-did-not-finish-see-the-build").into());
         }
         if ok
             && matches!(self.need, Some(Need::Packages { .. }))

@@ -49,7 +49,10 @@ impl Runs {
                         if let Some(s) = this.session_mut(id) {
                             s.push(
                                 Stream::System,
-                                &format!("Downloading the JavaScript debugger (js-debug {})", js_debug::VERSION),
+                                &t!(
+                                    "run-downloading-the-javascript-debugger-js-debug",
+                                    version = (js_debug::VERSION).to_string()
+                                ),
                             );
                         }
                         cx.notify();
@@ -69,7 +72,7 @@ impl Runs {
                             let server = js_debug::start(&*host, &node, &script)
                                 .map_err(|e| format!("The JavaScript debugger did not start: {e:#}"))?;
                             let (dap, events) = Dap::connect(&*host, server.port, WAIT)
-                                .map_err(|e| format!("Could not connect the debugger: {e}"))?;
+                                .map_err(|e| t!("debug-could-not-connect-the-debugger", e = e.to_string()))?;
                             Ok((Arc::new(server), dap, events))
                         })
                         .await
@@ -109,8 +112,8 @@ impl Runs {
             if let Err(e) = dap.request(command, arguments).await {
                 let _ = this.update(cx, |this, cx| {
                     let why = match command {
-                        "attach" => format!("The debugger could not attach: {e}"),
-                        _ => format!("The debugger could not start the program: {e}"),
+                        "attach" => t!("debug-the-debugger-could-not-attach", e = e.to_string()),
+                        _ => t!("run-the-debugger-could-not-start-the-program", e = e.to_string()),
                     };
                     this.node_debug_failed(id, why, cx)
                 });
@@ -156,7 +159,7 @@ impl Runs {
         if !attached || s.ended.is_some() {
             return;
         }
-        s.push(Stream::System, "Detached");
+        s.push(Stream::System, ts!("run-detached"));
         s.ended = Some(Ended { outcome: Outcome::Success, elapsed: s.started.elapsed(), exit_code: None, error: None });
         cx.emit(super::RunsEvent::Ended(id));
         cx.notify();
@@ -215,7 +218,7 @@ impl Runs {
                 Err(e) => {
                     let _ = this.update(cx, |this, cx| {
                         if let Some(s) = this.session_mut(id) {
-                            s.push(Stream::Err, &format!("Could not connect the debugger to a Node process: {e}"));
+                            s.push(Stream::Err, &t!("run-could-not-connect-the-debugger-to-a-node", e = e.to_string()));
                         }
                         cx.notify();
                     });

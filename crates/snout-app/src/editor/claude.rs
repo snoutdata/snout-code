@@ -639,7 +639,11 @@ impl EditorPanel {
                     }
                     let ts = window.text_system().clone();
                     for (y, n) in labels {
-                        let label = if n == 1 { "1 line removed".to_owned() } else { format!("{n} lines removed") };
+                        let label = if n == 1 {
+                            ts!("editor-1-line-removed").to_owned()
+                        } else {
+                            t!("editor-lines-removed", n = n.to_string())
+                        };
                         let run = TextRun {
                             len: label.len(),
                             font: gpui::font(label_font.clone()),
@@ -732,8 +736,14 @@ impl EditorPanel {
         let up = line < first;
         let p = palette(cx);
         let color = pr.writer.color;
-        let what = if pr.left.is_none() { "is editing" } else { "edited" };
-        let label = format!("{} {what} line {} {}", pr.writer.name, line + 1, if up { "\u{2191}" } else { "\u{2193}" });
+        let arrow = if up { "\u{2191}" } else { "\u{2193}" };
+        let writer = pr.writer.name.to_string();
+        let shown = (line + 1).to_string();
+        let label = if pr.left.is_none() {
+            t!("editor-writer-editing-line", writer = writer, line = shown, arrow = arrow)
+        } else {
+            t!("editor-writer-edited-line", writer = writer, line = shown, arrow = arrow)
+        };
         let chip = div()
             .id("agent-chip")
             .debug_selector(|| "agent-chip".into())
@@ -801,11 +811,11 @@ impl EditorPanel {
         let (plus, minus) = review::counts(&r.marks);
         let waiting = self.queue.len();
         let what = if r.streaming() {
-            "Claude Code is writing a change…"
+            ts!("editor-claude-code-is-writing-a-change")
         } else if r.new_file {
-            "Claude Code proposes a new file"
+            ts!("editor-claude-code-proposes-a-new-file")
         } else {
-            "Claude Code proposes a change"
+            ts!("editor-claude-code-proposes-a-change")
         };
         let hint = |text: &'static str| div().text_color(p.fg_dim).text_size(px(11.)).child(crate::keymap::shown(text));
         Some(
@@ -850,11 +860,15 @@ impl EditorPanel {
                                 .child(div().text_color(p.removed).child(format!("−{minus}"))),
                         )
                         .when(waiting > 0, |d| {
-                            d.child(div().flex_none().child(look::chip(format!("{waiting} more"), p.accent, &p)))
+                            d.child(div().flex_none().child(look::chip(
+                                t!("editor-more", waiting = waiting.to_string()),
+                                p.accent,
+                                &p,
+                            )))
                         }),
                 )
                 .child(
-                    look::small_button("review-reject", crate::components::IconName::Ban, "Reject", &p)
+                    look::small_button("review-reject", crate::components::IconName::Ban, ts!("editor-reject"), &p)
                         .debug_selector(|| "review-reject".into())
                         .flex_none()
                         .px(px(8.))
@@ -879,7 +893,7 @@ impl EditorPanel {
                         .cursor_pointer()
                         .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
                         .child(crate::components::icon(crate::components::IconName::Check, 13., p.on_accent))
-                        .child("Accept")
+                        .child(ts!("editor-accept"))
                         .child(div().text_size(px(11.)).opacity(0.8).child(crate::keymap::shown("⌘↩")))
                         .on_click(cx.listener(|this, _, w, cx| this.accept_review(w, cx))),
                 ),
@@ -1307,9 +1321,9 @@ impl EditorPanel {
             self.claude_hunks.iter().fold((0, 0), |(a, r), h| (a + h.new_lines.len(), r + h.old_lines.len()));
         let n = self.claude_hunks.len();
         let what = match n {
-            0 => "Claude's changes, all reviewed".to_owned(),
-            1 => "Claude changed this file: 1 change to review".to_owned(),
-            n => format!("Claude changed this file: {n} changes to review"),
+            0 => ts!("editor-claudes-changes-all-reviewed").to_owned(),
+            1 => ts!("editor-claude-changed-this-file-1-change-to-review").to_owned(),
+            n => t!("editor-claude-changed-this-file-changes-to-review", n = n.to_string()),
         };
         let hint = |text: &'static str| div().text_color(p.fg_dim).text_size(px(11.)).child(crate::keymap::shown(text));
         Some(
@@ -1354,14 +1368,19 @@ impl EditorPanel {
                                 .child(div().text_color(c.removed).child(format!("−{minus}"))),
                         )
                         .child(div().flex_1())
-                        .child(div().flex_none().child(hint("⌃⌥⇧↓ next"))),
+                        .child(div().flex_none().child(hint(ts!("editor-next")))),
                 )
                 .child(
-                    look::small_button("claude-revert-file", crate::components::IconName::Undo2, "Revert File", &p)
-                        .debug_selector(|| "claude-revert-file".into())
-                        .flex_none()
-                        .h(px(24.))
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::RevertFile)))),
+                    look::small_button(
+                        "claude-revert-file",
+                        crate::components::IconName::Undo2,
+                        ts!("editor-revert-file"),
+                        &p,
+                    )
+                    .debug_selector(|| "claude-revert-file".into())
+                    .flex_none()
+                    .h(px(24.))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::RevertFile)))),
                 )
                 .child(
                     div()
@@ -1379,14 +1398,14 @@ impl EditorPanel {
                         .cursor_pointer()
                         .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
                         .child(crate::components::icon(crate::components::IconName::Check, 13., p.on_accent))
-                        .child("Accept File")
+                        .child(ts!("editor-accept-file"))
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Claude(ClaudeRequest::AcceptFile)))),
                 )
                 .child(
                     look::icon_button(
                         "claude-bar-close",
                         snout_core::art::Glyph::Close,
-                        "Hide the inline changes",
+                        ts!("editor-hide-the-inline-changes"),
                         true,
                         &p,
                     )
@@ -1615,18 +1634,18 @@ impl EditorPanel {
         let color = agent.color(&p);
         let when = edit.as_ref().map(|e| crate::claude_ide::ledger::clock(e.time()));
         let title = match &when {
-            Some(t) => format!("Changed by {} at {t}", agent.short),
-            None => format!("Changed by {}", agent.short),
+            Some(t) => t!("editor-changed-by-at", short = (agent.short).to_string(), t = t.to_string()),
+            None => t!("editor-changed-by", short = (agent.short).to_string()),
         };
         let prompt = edit.as_ref().and_then(|e| e.prompt.clone());
         let hunk = self.hunk_of(&card.lines);
         let lines = card.lines.clone();
         let what = if lines.is_empty() {
-            "Lines taken out here".to_owned()
+            ts!("editor-lines-taken-out-here").to_owned()
         } else if lines.len() == 1 {
-            format!("Line {}", lines.start + 1)
+            t!("editor-line", start = (lines.start + 1).to_string())
         } else {
-            format!("Lines {}\u{2013}{}", lines.start + 1, lines.end)
+            t!("editor-lines-2", start = (lines.start + 1).to_string(), end = (lines.end).to_string())
         };
         let (h1, h2, h3) = (hunk.clone(), hunk.clone(), hunk.clone());
         let body = div()
@@ -1678,7 +1697,7 @@ impl EditorPanel {
                             .child(div().font_weight(gpui::FontWeight::MEDIUM).child(title))
                             .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(what)),
                     )
-                    .when(hunk.is_none(), |d| d.child(look::chip("Reviewed", p.ok, &p))),
+                    .when(hunk.is_none(), |d| d.child(look::chip(ts!("editor-reviewed"), p.ok, &p))),
             )
             .when_some(prompt, |d, prompt| {
                 d.child(
@@ -1708,7 +1727,7 @@ impl EditorPanel {
                     .justify_end()
                     .gap(px(6.))
                     .child(
-                        look::small_button("agent-card-diff", IconName::GitCompare, "Show Diff", &p)
+                        look::small_button("agent-card-diff", IconName::GitCompare, ts!("editor-show-diff"), &p)
                             .debug_selector(|| "agent-card-diff".into())
                             .h(px(24.))
                             .on_click(cx.listener(move |this, _, w, cx| {
@@ -1720,7 +1739,7 @@ impl EditorPanel {
                     .when_some(h2, |d, h| {
                         let lines = h.new_lines.clone();
                         d.child(
-                            look::small_button("agent-card-revert", IconName::Undo2, "Revert", &p)
+                            look::small_button("agent-card-revert", IconName::Undo2, ts!("editor-revert"), &p)
                                 .debug_selector(|| "agent-card-revert".into())
                                 .h(px(24.))
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -1747,7 +1766,7 @@ impl EditorPanel {
                                 .cursor_pointer()
                                 .hover(move |s| s.bg(mix(p.accent, 0.88, p.fg)))
                                 .child(crate::components::icon(IconName::Check, 13., p.on_accent))
-                                .child("Accept")
+                                .child(ts!("editor-accept"))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.agent_card = None;
                                     cx.emit(EditorEvent::Claude(ClaudeRequest::AcceptHunk(lines.clone())));

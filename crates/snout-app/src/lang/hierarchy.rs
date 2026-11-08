@@ -47,10 +47,10 @@ impl Mode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Mode::Supertypes => "Supertypes",
-            Mode::Subtypes => "Subtypes",
-            Mode::Callers => "Callers",
-            Mode::Callees => "Callees",
+            Mode::Supertypes => ts!("editor-supertypes"),
+            Mode::Subtypes => ts!("editor-subtypes"),
+            Mode::Callers => ts!("editor-callers"),
+            Mode::Callees => ts!("editor-callees"),
         }
     }
 }
@@ -134,7 +134,7 @@ impl HierarchyWindow {
             mode: Mode::Subtypes,
             nodes: Vec::new(),
             selected: None,
-            note: Some(crate::keymap::shown("Put the caret on a type or a method, then ⌃H or ⌃⌥H.")),
+            note: Some(crate::keymap::shown(ts!("editor-put-the-caret-on-a-type-or-a"))),
             _tasks: Vec::new(),
             focus: cx.focus_handle(),
         }
@@ -172,9 +172,9 @@ impl HierarchyWindow {
                     }
                     None => {
                         this.note = Some(if mode.is_type() {
-                            "Put the caret on a class or an interface for its hierarchy.".into()
+                            ts!("editor-put-the-caret-on-a-class-or-an").into()
                         } else {
-                            "Put the caret on a method for its calls.".into()
+                            ts!("editor-put-the-caret-on-a-method-for-its").into()
                         })
                     }
                 }
@@ -303,7 +303,7 @@ impl Render for HierarchyWindow {
         let (first, second) =
             if mode.is_type() { (Mode::Supertypes, Mode::Subtypes) } else { (Mode::Callers, Mode::Callees) };
         let title = self.nodes.first().map(|n| {
-            let what = if mode.is_type() { "Type hierarchy of" } else { "Calls of" };
+            let what = if mode.is_type() { ts!("editor-type-hierarchy-of") } else { ts!("editor-calls-of") };
             format!("{what} {}", n.name)
         });
         let toolbar = div()
@@ -322,30 +322,31 @@ impl Render for HierarchyWindow {
         let selected = self.selected;
         let this = cx.entity();
         let body = match &self.note {
-            Some(note) if note == ASKING => {
-                crate::components::EmptyState::new(snout_core::art::spots::hierarchy(), "Reading the hierarchy")
-                    .hint("The Java engine is looking it up.")
-                    .compact()
-                    .into_any_element()
-            }
+            Some(note) if note == ASKING => crate::components::EmptyState::new(
+                snout_core::art::spots::hierarchy(),
+                ts!("editor-reading-the-hierarchy"),
+            )
+            .hint(ts!("editor-the-java-engine-is-looking-it-up"))
+            .compact()
+            .into_any_element(),
             Some(note) => {
                 let first = self.root.is_none();
                 crate::components::EmptyState::new(
                     snout_core::art::spots::hierarchy(),
-                    if first { "No hierarchy yet" } else { "No hierarchy" },
+                    if first { ts!("editor-no-hierarchy-yet") } else { ts!("editor-no-hierarchy") },
                 )
                 .hint(note.clone())
                 .compact()
                 .primary_action(
                     "hierarchy-empty-type",
                     crate::components::IconName::Network,
-                    "Type Hierarchy",
+                    ts!("cmd-type-hierarchy"),
                     crate::menus::TypeHierarchy,
                 )
                 .secondary(
                     "hierarchy-empty-call",
                     crate::components::IconName::PhoneIncoming,
-                    "Call Hierarchy",
+                    ts!("cmd-call-hierarchy"),
                     |_, w, cx| w.dispatch_action(Box::new(crate::menus::CallHierarchy), cx),
                 )
                 .into_any_element()

@@ -54,7 +54,7 @@ pub enum Source {
 impl Source {
     fn label(self) -> &'static str {
         match self {
-            Source::All => "All sources",
+            Source::All => ts!("spring-all-sources"),
             Source::Java => "Java",
             Source::Scala => "Scala",
             Source::Xml => "XML",
@@ -213,7 +213,7 @@ pub fn bean_rows(
             beans.sort_by_key(|b| b.name.to_lowercase());
             let gkey = format!("{mkey}:{name}");
             let gopen = filtering || single || open.contains(&gkey);
-            let label = if name.is_empty() { "(default package)".to_owned() } else { name };
+            let label = if name.is_empty() { ts!("spring-default-package").to_owned() } else { name };
             out.push(BeanRow::Group { key: gkey, name: label, count: beans.len(), open: gopen });
             if gopen {
                 out.extend(beans.into_iter().map(|b| BeanRow::Bean(Box::new(b.clone()))));
@@ -263,8 +263,10 @@ pub struct SpringWindow {
 impl SpringWindow {
     pub fn new(spring: Entity<Spring>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&spring, |_, _, cx| cx.notify()).detach();
-        let bean_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search beans by name or type"));
-        let endpoint_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search paths and handlers"));
+        let bean_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(ts!("spring-search-beans-by-name-or-type")));
+        let endpoint_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(ts!("spring-search-paths-and-handlers")));
         cx.subscribe(&bean_search, |this, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 this.beans.query = input.read(cx).value().to_string();
@@ -429,11 +431,11 @@ impl SpringWindow {
         let p = palette(cx);
         let spring = self.spring.read(cx);
         let profiles_exist = !spring.profiles().is_empty();
-        let stereo_label = self.beans.stereotype.clone().unwrap_or_else(|| "All stereotypes".into());
+        let stereo_label = self.beans.stereotype.clone().unwrap_or_else(|| ts!("spring-all-stereotypes").into());
         let profile_label = match &self.beans.profile {
-            ProfileFilter::Any => "Any profile".to_owned(),
-            ProfileFilter::Unprofiled => "No profile".to_owned(),
-            ProfileFilter::Named(p) => format!("Profile {p}"),
+            ProfileFilter::Any => ts!("spring-any-profile").to_owned(),
+            ProfileFilter::Unprofiled => ts!("spring-no-profile").to_owned(),
+            ProfileFilter::Named(p) => t!("spring-profile", p = p.to_string()),
         };
         let mode = spring.profile_mode.clone();
         let info = spring.profile_info.clone();
@@ -446,7 +448,7 @@ impl SpringWindow {
             .items_center()
             .gap(px(6.))
             .child(icon(Icon::Leaf, 13., green(&p)))
-            .child(div().text_size(px(12.)).text_color(p.fg_dim).child("Active profiles"))
+            .child(div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-active-profiles")))
             .child(self.chip(
                 "spring-active-profiles",
                 crate::spring::mode_label(&mode, &info),
@@ -460,7 +462,7 @@ impl SpringWindow {
                         .debug_selector(|| "spring-inactive-count".into())
                         .text_size(px(11.5))
                         .text_color(p.fg_dim)
-                        .child(format!("{} inactive", thousands(inactive))),
+                        .child(t!("spring-inactive", inactive = (thousands(inactive)).to_string())),
                 )
             });
         let rows: Rc<Vec<BeanRow>> = Rc::new(self.bean_rows(cx));
@@ -522,8 +524,8 @@ impl SpringWindow {
                         move |s| s.bg(h)
                     })
                     .child(match grouping {
-                        Grouping::Package => "By package",
-                        Grouping::Stereotype => "By stereotype",
+                        Grouping::Package => ts!("spring-by-package"),
+                        Grouping::Stereotype => ts!("spring-by-stereotype"),
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.grouping = match this.grouping {
@@ -536,9 +538,14 @@ impl SpringWindow {
             );
         let body: AnyElement = if rows.is_empty() {
             if self.spring.read(cx).bean_count() == 0 {
-                note("No beans", "The project declares no Spring bean yet.", true, cx)
+                note(ts!("spring-no-beans"), ts!("spring-the-project-declares-no-spring-bean-yet"), true, cx)
             } else {
-                note("No bean matches", "Try fewer letters, or another stereotype or source.", false, cx)
+                note(
+                    ts!("spring-no-bean-matches"),
+                    ts!("spring-try-fewer-letters-or-another-stereotype-or-source"),
+                    false,
+                    cx,
+                )
             }
         } else {
             let this = cx.entity();
@@ -560,10 +567,10 @@ impl SpringWindow {
                                 .child(crate::look::chevron(open, p.fg_dim))
                                 .child(icon(Icon::Module, 14., p.accent))
                                 .child(div().font_weight(FontWeight::MEDIUM).child(name))
-                                .child(div().text_color(p.fg_dim).child(format!(
-                                    "{} beans, {} from libraries",
-                                    thousands(count),
-                                    thousands(library)
+                                .child(div().text_color(p.fg_dim).child(t!(
+                                    "spring-beans-from-libraries",
+                                    count = (thousands(count)).to_string(),
+                                    library = (thousands(library)).to_string()
                                 )))
                                 .on_click(move |_, _, cx| this.update(cx, |w, cx| w.toggle(&key, cx))),
                             BeanRow::Group { key, name, count, open } => base
@@ -584,15 +591,15 @@ impl SpringWindow {
                                     b.ty,
                                     b.stereotype_label(),
                                     match b.injected_count() {
-                                        0 => "Not injected anywhere".to_owned(),
-                                        1 => "Injected in 1 place".to_owned(),
-                                        n => format!("Injected in {n} places"),
+                                        0 => ts!("spring-not-injected-anywhere-2").to_owned(),
+                                        1 => ts!("spring-injected-in-1-place-2").to_owned(),
+                                        n => t!("spring-injected-in-places-2", n = n.to_string()),
                                     },
                                     if b.profiles.is_empty() {
                                         String::new()
                                     } else {
-                                        format!("\nProfiles: {}", b.profiles.join(", "))
-                                    } + if b.active { "" } else { "\nNot active: the active profiles leave it out" }
+                                        t!("spring-profiles", join = (b.profiles.join(", ")).to_string())
+                                    } + if b.active { "" } else { ts!("spring-not-active-note") }
                                 )
                                 .into();
                                 let off = !b.active;
@@ -603,7 +610,9 @@ impl SpringWindow {
                                     .child(icon(Icon::Leaf, 13., if off { p.fg_dim } else { leaf }))
                                     .child(div().when(off, |d| d.text_color(p.fg_dim)).child(b.name.clone()))
                                     .child(div().text_color(p.fg_dim).child(simple(&b.ty).to_owned()))
-                                    .when(b.primary, |d| d.child(crate::look::chip("Primary", p.accent, &p)))
+                                    .when(b.primary, |d| {
+                                        d.child(crate::look::chip(ts!("spring-primary"), p.accent, &p))
+                                    })
                                     .when(b.language == "scala", |d| d.child(crate::look::chip("Scala", p.warn, &p)))
                                     .when(b.language == "xml", |d| d.child(crate::look::chip("XML", p.fg_dim, &p)))
                                     .children(b.profiles.iter().map(|pr| crate::look::chip(pr.clone(), leaf, &p)))
@@ -637,7 +646,11 @@ impl SpringWindow {
                     .text_size(px(11.5))
                     .text_color(p.fg_dim)
                     .debug_selector(|| "spring-bean-count".into())
-                    .child(format!("{} of {} beans", thousands(shown), thousands(self.spring.read(cx).bean_count()))),
+                    .child(t!(
+                        "spring-of-beans",
+                        shown = (thousands(shown)).to_string(),
+                        bean_count = (thousands(self.spring.read(cx).bean_count())).to_string()
+                    )),
             )
             .child(body)
             .into_any_element()
@@ -669,7 +682,7 @@ impl SpringWindow {
                     .text_size(px(12.))
                     .when(on, |d| d.bg(p.button).font_weight(FontWeight::MEDIUM))
                     .when(!on, |d| d.text_color(p.fg_dim).hover(move |s| s.bg(hover)))
-                    .child(m)
+                    .child(if m == "All" { ts!("spring-method-all") } else { m })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.endpoints.method = (m != "All").then(|| m.to_owned());
                         cx.notify();
@@ -696,18 +709,24 @@ impl SpringWindow {
         let method_w = px(58.);
         let header = crate::components::header_bar(&p)
             .mx(px(4.))
-            .child(header_cell("spring-sort-method", Column::Method, "Method", cx).w(method_w).flex_none())
-            .child(header_cell("spring-sort-path", Column::Path, "Path", cx).flex_1().min_w_0())
-            .child(header_cell("spring-sort-handler", Column::Handler, "Handler", cx).w(relative(0.3)).flex_none())
+            .child(header_cell("spring-sort-method", Column::Method, ts!("spring-method"), cx).w(method_w).flex_none())
+            .child(header_cell("spring-sort-path", Column::Path, ts!("spring-path"), cx).flex_1().min_w_0())
+            .child(
+                header_cell("spring-sort-handler", Column::Handler, ts!("spring-handler"), cx)
+                    .w(relative(0.3))
+                    .flex_none(),
+            )
             .when(modules, |d| {
-                d.child(header_cell("spring-sort-module", Column::Module, "Module", cx).w(px(80.)).flex_none())
+                d.child(
+                    header_cell("spring-sort-module", Column::Module, ts!("find-module"), cx).w(px(80.)).flex_none(),
+                )
             })
             .child(div().w(px(18.)).flex_none());
         let body: AnyElement = if rows.is_empty() {
             if total == 0 {
-                note("No endpoints", "No controller of the project maps a request yet.", true, cx)
+                note(ts!("spring-no-endpoints"), ts!("spring-no-controller-of-the-project-maps-a-request"), true, cx)
             } else {
-                note("No endpoint matches", "Try fewer letters of the path or the method.", false, cx)
+                note(ts!("spring-no-endpoint-matches"), ts!("spring-try-fewer-letters-of-the-path-or-the"), false, cx)
             }
         } else {
             let this = cx.entity();
@@ -789,7 +808,7 @@ impl SpringWindow {
                                     .justify_center()
                                     .rounded(px(3.))
                                     .hover(move |s| s.bg(hover))
-                                    .tooltip(|w, cx| Tooltip::new("Copy Path").build(w, cx))
+                                    .tooltip(|w, cx| Tooltip::new(ts!("tabs-copy-path")).build(w, cx))
                                     .child(icon(Icon::Copy, 12., p.fg_dim))
                                     .on_click(move |_, _, cx| {
                                         cx.stop_propagation();
@@ -827,7 +846,11 @@ impl SpringWindow {
                     .text_size(px(11.5))
                     .text_color(p.fg_dim)
                     .debug_selector(|| "spring-endpoint-count".into())
-                    .child(format!("{} of {} endpoints", thousands(shown), thousands(total))),
+                    .child(t!(
+                        "spring-of-endpoints",
+                        shown = (thousands(shown)).to_string(),
+                        total = (thousands(total)).to_string()
+                    )),
             )
             .child(header)
             .child(body)
@@ -844,7 +867,7 @@ impl SpringWindow {
         let (at, items): (Point<Pixels>, Vec<(String, bool, Pick)>) = match menu {
             Menu::Stereotype(at) => {
                 let mut items: Vec<(String, bool, Pick)> = vec![(
-                    "All stereotypes".into(),
+                    ts!("spring-all-stereotypes").into(),
                     self.beans.stereotype.is_none(),
                     Rc::new(|w: &mut SpringWindow, _: &mut Context<SpringWindow>| w.beans.stereotype = None),
                 )];
@@ -864,14 +887,14 @@ impl SpringWindow {
             Menu::Profile(at) => {
                 let mut items: Vec<(String, bool, Pick)> = vec![
                     (
-                        "Any profile".into(),
+                        ts!("spring-any-profile").into(),
                         self.beans.profile == ProfileFilter::Any,
                         Rc::new(|w: &mut SpringWindow, _: &mut Context<SpringWindow>| {
                             w.beans.profile = ProfileFilter::Any
                         }),
                     ),
                     (
-                        "No profile".into(),
+                        ts!("spring-no-profile").into(),
                         self.beans.profile == ProfileFilter::Unprofiled,
                         Rc::new(|w: &mut SpringWindow, _: &mut Context<SpringWindow>| {
                             w.beans.profile = ProfileFilter::Unprofiled
@@ -903,11 +926,15 @@ impl SpringWindow {
                 };
                 let files = info.config_active();
                 let mut items: Vec<(String, bool, Pick)> = vec![
-                    ("Any profile: every bean may be there".into(), mode == ProfileMode::Any, set(ProfileMode::Any)),
                     (
-                        format!(
-                            "As the application files say ({})",
-                            if files.is_empty() { "default".to_owned() } else { files.join(", ") }
+                        ts!("debug-any-profile-every-bean-may-be-there").into(),
+                        mode == ProfileMode::Any,
+                        set(ProfileMode::Any),
+                    ),
+                    (
+                        t!(
+                            "debug-as-the-application-files-say",
+                            join = (if files.is_empty() { "default".to_owned() } else { files.join(", ") }).to_string()
                         ),
                         mode == ProfileMode::Config,
                         set(ProfileMode::Config),
@@ -921,7 +948,7 @@ impl SpringWindow {
                         c.profiles.split(',').map(|p| p.trim().to_owned()).filter(|p| !p.is_empty()).collect();
                     let on = mode == ProfileMode::Chosen(list.clone());
                     items.push((
-                        format!("As '{}' runs ({})", c.name, list.join(", ")),
+                        t!("spring-as-runs", c = (c.name).to_string(), join = (list.join(", ")).to_string()),
                         on,
                         set(ProfileMode::Chosen(list)),
                     ));
@@ -1004,9 +1031,9 @@ impl SpringWindow {
 /// A note in the middle of an empty tab.
 fn note(title: &'static str, text: &'static str, refresh: bool, cx: &App) -> AnyElement {
     use snout_core::art::spots;
-    let art = if title.contains("matches") {
+    let art = if title == ts!("spring-no-bean-matches") || title == ts!("spring-no-endpoint-matches") {
         spots::no_results()
-    } else if title.starts_with("Reading") {
+    } else if title == ts!("spring-reading-the-spring-model") {
         snout_core::art::building()
     } else {
         spots::no_beans()
@@ -1019,7 +1046,7 @@ fn note(title: &'static str, text: &'static str, refresh: bool, cx: &App) -> Any
             e.primary_action(
                 "spring-empty-refresh",
                 crate::components::IconName::RefreshCw,
-                "Read the Spring Model",
+                ts!("spring-read-the-spring-model"),
                 crate::menus::RefreshSpring,
             )
         }))
@@ -1033,17 +1060,21 @@ impl Render for SpringWindow {
         let base = div().size_full().flex().flex_col().bg(p.ground).text_size(px(crate::look::BODY)).text_color(p.fg);
         if !spring.loaded {
             let (title, text, refresh) = match &spring.load {
-                Load::Loading => ("Reading the Spring model", "The beans and endpoints are being read.", false),
+                Load::Loading => (
+                    ts!("spring-reading-the-spring-model"),
+                    ts!("spring-the-beans-and-endpoints-are-being-read"),
+                    false,
+                ),
                 Load::Failed(_) | Load::Idle => (
-                    "No Spring model yet",
-                    "Beans and endpoints appear once the Java engine has imported the project.",
+                    ts!("spring-no-spring-model-yet"),
+                    ts!("spring-beans-and-endpoints-appear-once-the-java-engine"),
                     true,
                 ),
             };
             return base.child(note(title, text, refresh, cx));
         }
-        let beans = format!("Beans {}", thousands(spring.bean_count()));
-        let endpoints = format!("Endpoints {}", thousands(spring.endpoints.len()));
+        let beans = t!("spring-beans-2", bean_count = (thousands(spring.bean_count())).to_string());
+        let endpoints = t!("spring-endpoints", count = (thousands(spring.endpoints.len())).to_string());
         let loading = spring.load == Load::Loading;
         let tabs = div()
             .flex_none()
@@ -1055,7 +1086,7 @@ impl Render for SpringWindow {
             .child(self.tab_button(Tab::Beans, beans, cx))
             .child(self.tab_button(Tab::Endpoints, endpoints, cx))
             .child(div().flex_1())
-            .when(loading, |d| d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child("Reading…")));
+            .when(loading, |d| d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(ts!("spring-reading"))));
         let body = match self.tab {
             Tab::Beans => self.beans_tab(cx),
             Tab::Endpoints => self.endpoints_tab(cx),

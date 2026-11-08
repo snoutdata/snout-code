@@ -36,11 +36,11 @@ impl Refactoring {
     /// What the menus call it.
     pub fn name(self) -> &'static str {
         match self {
-            Refactoring::ExtractMethod => "Extract Method",
-            Refactoring::ExtractVariable => "Extract Variable",
-            Refactoring::ExtractConstant => "Extract Constant",
-            Refactoring::ExtractField => "Extract Field",
-            Refactoring::Inline => "Inline",
+            Refactoring::ExtractMethod => ts!("cmd-extract-method"),
+            Refactoring::ExtractVariable => ts!("cmd-extract-variable"),
+            Refactoring::ExtractConstant => ts!("cmd-extract-constant"),
+            Refactoring::ExtractField => ts!("cmd-extract-field"),
+            Refactoring::Inline => ts!("cmd-inline"),
         }
     }
 
@@ -69,13 +69,13 @@ impl Refactoring {
     /// What to say when the engine offers nothing for the selection.
     pub fn not_here(self) -> &'static str {
         match self {
-            Refactoring::ExtractMethod => "Cannot extract a method here: select whole statements, or an expression",
-            Refactoring::ExtractVariable => "Cannot extract a variable here: select an expression",
+            Refactoring::ExtractMethod => ts!("editor-cannot-extract-a-method-here-select-whole-statements"),
+            Refactoring::ExtractVariable => ts!("editor-cannot-extract-a-variable-here-select-an-expression"),
             Refactoring::ExtractConstant => {
-                "Cannot extract a constant here: select an expression of constants, such as a literal"
+                ts!("editor-cannot-extract-a-constant-here-select-an-expression")
             }
-            Refactoring::ExtractField => "Cannot extract a field here: select an expression",
-            Refactoring::Inline => "Nothing to inline here: put the caret on a local variable, a method or a constant",
+            Refactoring::ExtractField => ts!("editor-cannot-extract-a-field-here-select-an-expression"),
+            Refactoring::Inline => ts!("editor-nothing-to-inline-here-put-the-caret-on"),
         }
     }
 }
@@ -98,7 +98,7 @@ impl EditorPanel {
     pub fn refactor(&mut self, r: Refactoring, window: &mut Window, cx: &mut Context<Self>) {
         let Some(link) = self.lang.clone() else { return };
         if self.class_file.is_some() {
-            return self.show_hint("A library class is read only", cx);
+            return self.show_hint(ts!("editor-a-library-class-is-read-only"), cx);
         }
         let (rope, selection) = {
             let s = self.state.read(cx);
@@ -126,7 +126,7 @@ impl EditorPanel {
                     Ok(v) => serde_json::from_value(v).unwrap_or_default(),
                     Err(e) => {
                         eprintln!("[java] {}: {e}", r.name());
-                        return this.show_hint("The Java engine is not ready yet", cx);
+                        return this.show_hint(ts!("run-the-java-engine-is-not-ready-yet"), cx);
                     }
                 };
                 let items = distinct(
@@ -331,8 +331,8 @@ impl EditorPanel {
 fn choice_label(title: &str, ways: usize) -> String {
     const ALL: &str = " (replace all occurrences)";
     match title.strip_suffix(ALL) {
-        Some(_) => "Replace all occurrences".into(),
-        None if ways == 2 && title.starts_with("Extract to") => "Replace this occurrence only".into(),
+        Some(_) => ts!("editor-replace-all-occurrences").into(),
+        None if ways == 2 && title.starts_with("Extract to") => ts!("editor-replace-this-occurrence-only").into(),
         None => title.to_owned(),
     }
 }

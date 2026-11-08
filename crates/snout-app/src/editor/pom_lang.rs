@@ -168,9 +168,9 @@ impl CompletionProvider for PomProviders {
                     .unwrap_or_default()
             };
             let detail = match s.element {
-                "groupId" => "group in the local repository",
-                "artifactId" => "artifact in the local repository",
-                _ => "version in the local repository",
+                "groupId" => ts!("editor-group-in-the-local-repository"),
+                "artifactId" => ts!("editor-artifact-in-the-local-repository"),
+                _ => ts!("editor-version-in-the-local-repository"),
             };
             let items = completions(&s, &repo, &list)
                 .into_iter()

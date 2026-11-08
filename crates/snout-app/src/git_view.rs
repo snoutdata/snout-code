@@ -1103,14 +1103,14 @@ impl GitView {
             t!(
                 "git-writes-the-message-from-building-on-anything-you",
                 agent = agent.to_string(),
-                what = (scope.what()).to_string()
+                what = crate::core_text::scope_what(&scope)
             )
             .into()
         } else {
             ts!("git-nothing-to-commit").into()
         };
         let commit_tip: SharedString =
-            crate::keymap::shown(&t!("git-commits", what = (scope.what()).to_string())).into();
+            crate::keymap::shown(&t!("git-commits", what = crate::core_text::scope_what(&scope))).into();
         let header = div()
             .flex_none()
             .h(px(22.))
@@ -1161,7 +1161,7 @@ impl GitView {
             .items_center()
             .justify_end()
             .gap(px(8.))
-            .when(!tiny, |d| d.child(weak(scope.label(), &p)))
+            .when(!tiny, |d| d.child(weak(crate::core_text::scope_label(&scope), &p)))
             .child(
                 look::primary_button("commit", crate::components::IconName::Check, ts!("cmd-commit"), can_commit, &p)
                     .tooltip(move |w, cx| Tooltip::new(commit_tip.clone()).build(w, cx))
@@ -1215,14 +1215,14 @@ impl GitView {
                 .border_color(mix(p.fg, 0.08, p.button))
                 .cursor_pointer()
                 .whitespace_nowrap()
-                .child(base.label())
+                .child(crate::core_text::diff_base(base))
                 .child(look::disclosure(true, p.fg)),
         )
         .dropdown_menu(move |mut menu, _, _| {
             for b in DiffBase::ALL {
                 let model = model.clone();
                 menu = menu.item(
-                    PopupMenuItem::new(b.label())
+                    PopupMenuItem::new(crate::core_text::diff_base(b))
                         .checked(b == base)
                         .on_click(move |_, _, cx| model.update(cx, |m, cx| m.set_diff_base(b, cx))),
                 );
@@ -1251,7 +1251,15 @@ impl GitView {
                 cx,
             )
         } else {
-            diff_body("diff-lines", m.diff.as_ref(), base.sides(), m.settings.side_by_side, &empty, short, cx)
+            diff_body(
+                "diff-lines",
+                m.diff.as_ref(),
+                crate::core_text::diff_sides(base),
+                m.settings.side_by_side,
+                &empty,
+                short,
+                cx,
+            )
         };
         pane(&p).child(header).child(separator(&p)).child(body).into_any_element()
     }

@@ -46,9 +46,9 @@ impl ConnectDialog {
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(if cfg!(windows) {
-                    "user@host, a Host of your ssh config, or WSL: Ubuntu"
+                    ts!("remote-user-host-a-host-of-your-ssh-config")
                 } else {
-                    "user@host, or a Host of your ssh config"
+                    ts!("remote-user-host-or-a-host-of-your-ssh")
                 })
                 .default_value(first)
         });
@@ -102,10 +102,10 @@ impl ConnectDialog {
         let mut out = Vec::new();
         for (i, host) in self.hosts.iter().enumerate() {
             if i == 0 && self.recent > 0 {
-                out.push(heading("Recent", cx));
+                out.push(heading(ts!("remote-recent"), cx));
             }
             if i == self.recent {
-                out.push(heading("From your ssh config", cx));
+                out.push(heading(ts!("remote-from-your-ssh-config"), cx));
             }
             let on = *host == typed;
             let id = format!("ssh-host-{i}");
@@ -183,7 +183,7 @@ impl Render for ConnectDialog {
         let busy = self.connecting.is_some();
         let can = !busy && !self.host(cx).is_empty();
         let status = match (&self.connecting, &self.error) {
-            (Some(h), _) => Some((format!("Connecting to {h}…"), p.fg_dim)),
+            (Some(h), _) => Some((t!("remote-connecting-to", h = h.to_string()), p.fg_dim)),
             (None, Some(e)) => Some((e.clone(), p.error)),
             _ => None,
         };
@@ -195,8 +195,8 @@ impl Render for ConnectDialog {
                 .flex_1()
                 .min_h_0()
                 .child(
-                    EmptyState::new(spots::remote_connecting(), format!("Connecting to {host}…"))
-                        .hint("The first time takes a little longer: SnoutCode installs its server there.")
+                    EmptyState::new(spots::remote_connecting(), t!("remote-connecting-to-2", host = host.to_string()))
+                        .hint(ts!("remote-the-first-time-takes-a-little-longer-snoutcode"))
                         .on(p.card)
                         .compact(),
                 )
@@ -218,7 +218,7 @@ impl Render for ConnectDialog {
                             .gap(px(8.))
                             .text_color(p.fg_dim)
                             .child(ico(IconName::Info, 14., p.fg_dim))
-                            .child("No hosts in your ssh config: type one."),
+                            .child(ts!("remote-no-hosts-in-your-ssh-config-type-one")),
                     )
                 })
                 .into_any_element(),
@@ -227,8 +227,8 @@ impl Render for ConnectDialog {
             "connect-ssh",
             Tone::Info,
             Some(spots::ssh()),
-            if cfg!(windows) { "Connect to SSH Host or WSL" } else { "Connect to SSH Host" },
-            Some("SnoutCode installs its server on the host the first time (Linux, x86_64 or aarch64).".into()),
+            if cfg!(windows) { ts!("remote-connect-to-ssh-host-or-wsl") } else { ts!("remote-connect-to-ssh-host") },
+            Some(ts!("remote-snoutcode-installs-its-server-on-the-host-the").into()),
             520.,
             Some(480.),
             cx,
@@ -245,18 +245,18 @@ impl Render for ConnectDialog {
                 .flex()
                 .flex_col()
                 .gap(px(6.))
-                .child(field_label("Host", &p))
+                .child(field_label(ts!("remote-host"), &p))
                 .child(look::field(&self.input, false, None, &p)),
         )
         .child(list)
         .child(footer(
             status,
             vec![
-                button("connect-ssh-cancel", crate::components::CANCEL_ICON, "Cancel", false, true, cx)
+                button("connect-ssh-cancel", crate::components::CANCEL_ICON, ts!("settings-cancel"), false, true, cx)
                     .child(crate::components::kbd("Esc", p.fg_dim))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(ConnectEvent::Cancel)))
                     .into_any_element(),
-                button("connect-ssh-connect", IconName::Plug, "Connect", true, can, cx)
+                button("connect-ssh-connect", IconName::Plug, ts!("remote-connect"), true, can, cx)
                     .child(crate::components::kbd(
                         "⏎",
                         crate::components::button_ink(crate::components::Variant::Primary, !can, &p).opacity(0.85),

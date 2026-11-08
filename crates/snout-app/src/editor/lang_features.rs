@@ -330,7 +330,7 @@ impl EditorPanel {
         let (at, word, rope) = self.at_caret(cx);
         link.sync(&rope, cx);
         if let Some(hub) = link.hub.upgrade() {
-            let name = if word.trim().is_empty() { "the symbol".to_owned() } else { word };
+            let name = if word.trim().is_empty() { ts!("editor-the-symbol").to_owned() } else { word };
             hub.update(cx, |h, cx| h.find_references(link.uri.clone(), at, name, cx));
         }
     }
@@ -621,7 +621,7 @@ impl EditorPanel {
             .border_color(p.border)
             .shadow_lg()
             .text_size(px(12.))
-            .child(div().text_color(p.weak()).child("Rename to (Enter renames everywhere)"))
+            .child(div().text_color(p.weak()).child(ts!("editor-rename-to-enter-renames-everywhere")))
             .child(look::field(input, false, None, &p));
         Some(
             gpui::deferred(gpui::anchored().position(b.bottom_left()).child(field)).with_priority(1).into_any_element(),

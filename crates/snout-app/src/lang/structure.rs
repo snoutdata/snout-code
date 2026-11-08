@@ -47,7 +47,7 @@ pub struct StructureWindow {
 
 impl StructureWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by name"));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("editor-filter-by-name")));
         cx.subscribe(&filter, |this, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 this.reveal_current(cx);
@@ -206,6 +206,15 @@ impl StructureWindow {
 const NO_FILE: &str = "Open a Java file to see its structure.";
 const LOADING: &str = "The Java engine is reading the file.";
 
+/// A note in the language in use: the window keeps the English one, to tell which it is.
+fn shown_note(note: &'static str) -> &'static str {
+    match note {
+        NO_FILE => ts!("editor-open-a-java-file"),
+        LOADING => ts!("editor-java-engine-reading"),
+        other => other,
+    }
+}
+
 crate::panels::panel!(StructureWindow, "Structure", |_, _| "Structure".into(), true);
 
 /// A symbol's row: `lead` (a fold arrow), its badge, its visibility, its name and what the
@@ -247,7 +256,7 @@ impl Render for StructureWindow {
         let sort = crate::components::IconButton::new(
             "structure-sort",
             Icon::Sort,
-            if alphabetical { "Sorted by Name (click for File Order)" } else { "Sort by Name" },
+            if alphabetical { ts!("editor-sorted-by-name-click-for-file-order") } else { ts!("editor-sort-by-name") },
         )
         .selected(alphabetical)
         .on_click(move |_, _, cx| {
@@ -268,20 +277,27 @@ impl Render for StructureWindow {
         use snout_core::art::spots;
         let filtering = !self.filter.read(cx).value().is_empty();
         let body = match (self.note, count) {
-            (Some(NO_FILE), _) => empty(spots::outline(), "No structure", NO_FILE)
+            (Some(NO_FILE), _) => empty(spots::outline(), ts!("editor-no-structure"), shown_note(NO_FILE))
                 .primary_action(
                     "structure-empty-open",
                     crate::components::IconName::FileSearch,
-                    "Go to File…",
+                    ts!("cmd-go-to-file"),
                     crate::menus::GoToFile,
                 )
                 .into_any_element(),
-            (Some(note), _) => empty(spots::outline(), "Reading the structure", note).into_any_element(),
-            (None, 0) if filtering => {
-                empty(spots::no_results(), "No symbol matches", "Try fewer letters of the name.").into_any_element()
+            (Some(note), _) => {
+                empty(spots::outline(), ts!("editor-reading-the-structure"), shown_note(note)).into_any_element()
             }
-            (None, 0) => empty(spots::outline(), "Nothing declared", "The file declares no class, field or method.")
-                .into_any_element(),
+            (None, 0) if filtering => {
+                empty(spots::no_results(), ts!("search-no-symbol-matches"), ts!("editor-try-fewer-letters-of-the-name"))
+                    .into_any_element()
+            }
+            (None, 0) => empty(
+                spots::outline(),
+                ts!("editor-nothing-declared"),
+                ts!("editor-the-file-declares-no-class-field-or-method"),
+            )
+            .into_any_element(),
             (None, _) => uniform_list("structure-rows", count, move |range, _, _| {
                 range
                     .map(|i| {

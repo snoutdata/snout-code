@@ -248,7 +248,7 @@ impl EditorPanel {
     pub fn go_to_declaration(&mut self, at: Option<Point<Pixels>>, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.clone();
         let Some(provider) = state.update(cx, |s, _| s.lsp_mut().definition_provider.clone()) else {
-            return self.show_hint("Go to Declaration needs the Java engine for this file.", cx);
+            return self.show_hint(ts!("editor-go-to-declaration-needs-the-java-engine-for"), cx);
         };
         let (rope, caret) = {
             let s = state.read(cx);
@@ -262,7 +262,7 @@ impl EditorPanel {
             let Ok(links) = task.await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
                 let Some(first) = links.first() else {
-                    return this.show_hint("No declaration found here.", cx);
+                    return this.show_hint(ts!("editor-no-declaration-found-here"), cx);
                 };
                 let at_declaration = own.as_ref().is_some_and(|u| *u == first.target_uri)
                     && contains(&first.target_selection_range, here);
@@ -303,8 +303,8 @@ impl EditorPanel {
         self.ask_places(
             "textDocument/references",
             json!({ "context": { "includeDeclaration": false } }),
-            format!("Usages of {word}"),
-            format!("No usages of {word} found."),
+            t!("editor-usages-of", word = word.to_string()),
+            t!("editor-no-usages-of-found", word = word.to_string()),
             at,
             window,
             cx,
@@ -323,8 +323,8 @@ impl EditorPanel {
         self.ask_places(
             "textDocument/implementation",
             json!({}),
-            format!("Implementations of {word}"),
-            format!("No implementations of {word} found."),
+            t!("editor-implementations-of", word = word.to_string()),
+            t!("editor-no-implementations-of-found", word = word.to_string()),
             at,
             window,
             cx,
@@ -345,7 +345,7 @@ impl EditorPanel {
         cx: &mut Context<Self>,
     ) {
         let Some(link) = self.lang.clone() else {
-            return self.show_hint("This needs the Java engine for this file.", cx);
+            return self.show_hint(ts!("editor-this-needs-the-java-engine-for-this-file"), cx);
         };
         let (rope, caret) = {
             let s = self.state.read(cx);
@@ -477,7 +477,12 @@ impl EditorPanel {
                     .child(crate::components::icon(crate::components::IconName::Search, 13., p.accent))
                     .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(popup.title.clone()))
                     .child(div().flex_1())
-                    .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(format!("{} found", items.len()))),
+                    .child(
+                        div()
+                            .text_size(px(11.5))
+                            .text_color(p.fg_dim)
+                            .child(t!("editor-found", count = (items.len()).to_string())),
+                    ),
             )
             .child(div().id("nav-popup-list").flex().flex_col().overflow_y_scroll().children(
                 items.iter().enumerate().map(|(i, item)| {

@@ -89,7 +89,11 @@ impl Suite {
     /// What the Tests window calls it: `Vitest`, `Vitest in apps/web`.
     pub fn label(&self, root: &Path) -> String {
         let rel = self.dir.strip_prefix(root).unwrap_or(&self.dir).to_string_lossy().replace('\\', "/");
-        if rel.is_empty() { self.runner.name().to_owned() } else { format!("{} in {rel}", self.runner.name()) }
+        if rel.is_empty() {
+            self.runner.name().to_owned()
+        } else {
+            t!("tests-in-2", runner = (self.runner.name()).to_string(), rel = rel.to_string())
+        }
     }
 }
 
@@ -195,8 +199,9 @@ pub fn test_launch(
     debug: bool,
 ) -> Result<ProcessLaunch, String> {
     let cli = cli(host, dir, runner)
-        .ok_or_else(|| format!("{} is not installed: install the packages first.", runner.name()))?;
-    let reporter = reporter(host, runner).map_err(|e| format!("The SnoutCode reporter could not be written: {e}"))?;
+        .ok_or_else(|| t!("tests-is-not-installed-install-the-packages-first", runner = (runner.name()).to_string()))?;
+    let reporter = reporter(host, runner)
+        .map_err(|e| t!("tests-the-snoutcode-reporter-could-not-be-written", e = e.to_string()))?;
     let mut args = vec![cli.display().to_string()];
     let (files, names): (Vec<String>, Vec<(Vec<String>, bool)>) = match scope {
         Scope::All => (Vec::new(), Vec::new()),
@@ -244,11 +249,15 @@ pub fn test_launch(
     let what = match scope {
         Scope::All => {
             let rel = file_arg(root, dir);
-            if rel.is_empty() { runner.name().to_owned() } else { format!("{} in {rel}", runner.name()) }
+            if rel.is_empty() {
+                runner.name().to_owned()
+            } else {
+                t!("tests-in-2", runner = (runner.name()).to_string(), rel = rel.to_string())
+            }
         }
         Scope::File(f) => f.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
         Scope::At { path, .. } => path.last().cloned().unwrap_or_default(),
-        Scope::Tests(t) => format!("{} tests", t.len()),
+        Scope::Tests(t) => t!("tests-tests", count = (t.len()).to_string()),
     };
     Ok(ProcessLaunch {
         title: what,

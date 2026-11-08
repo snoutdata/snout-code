@@ -120,7 +120,7 @@ impl TestsWindow {
             cx.notify();
         })
         .detach();
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter tests"));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("tests-filter-tests")));
         let t = tests.clone();
         cx.subscribe(&filter, move |_, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -190,26 +190,30 @@ impl TestsWindow {
         let c = run.map(|r| r.counts()).unwrap_or_default();
         let total = run.map_or_else(|| t.listing.as_ref().map_or(0, |l| l.tests.len()), |r| r.tests.len());
         let (state_text, ink) = match run {
-            None => ("Not run yet".to_owned(), p.fg_dim),
-            Some(_) if running => ("Running".to_owned(), p.accent),
-            Some(r) if !r.errors.is_empty() && r.tests.is_empty() => ("Did not start".to_owned(), p.error),
-            Some(_) if c.failed > 0 => ("Failed".to_owned(), p.error),
-            Some(r) if r.status.as_deref() == Some("interrupted") => ("Stopped".to_owned(), p.fg_dim),
-            Some(_) => ("Passed".to_owned(), p.ok),
+            None => (ts!("tests-not-run-yet").to_owned(), p.fg_dim),
+            Some(_) if running => (ts!("console-running").to_owned(), p.accent),
+            Some(r) if !r.errors.is_empty() && r.tests.is_empty() => (ts!("tests-did-not-start").to_owned(), p.error),
+            Some(_) if c.failed > 0 => (ts!("run-failed-3").to_owned(), p.error),
+            Some(r) if r.status.as_deref() == Some("interrupted") => (ts!("run-stopped").to_owned(), p.fg_dim),
+            Some(_) => (ts!("runwin-passed").to_owned(), p.ok),
         };
         let projects = t.projects(cx);
         let workers = run.map_or(0, |r| r.workers);
         let detail = if projects.is_empty() {
             String::new()
         } else if workers > 0 {
-            format!("{} · {workers} {}", projects.join(", "), if workers == 1 { "worker" } else { "workers" })
+            t!("tests-workers", count = workers, projects = projects.join(", "))
         } else {
             projects.join(", ")
         };
         let elapsed = t.elapsed_ms(cx);
         let eta = run.filter(|_| running).and_then(|r| t.history.eta(r));
         let time = match eta {
-            Some(left) => format!("{} · about {} left", duration_text(elapsed), duration_text(left)),
+            Some(left) => t!(
+                "tests-about-left",
+                elapsed = (duration_text(elapsed)).to_string(),
+                left = (duration_text(left)).to_string()
+            ),
             None if run.is_some() => duration_text(elapsed),
             None => String::new(),
         };
@@ -247,8 +251,8 @@ impl TestsWindow {
                     .flex_wrap()
                     .items_center()
                     .gap(px(10.))
-                    .child(tab_button("tests-tab-live", "Live run", Tab::Live))
-                    .child(tab_button("tests-tab-history", "History", Tab::History))
+                    .child(tab_button("tests-tab-live", ts!("tests-live-run"), Tab::Live))
+                    .child(tab_button("tests-tab-history", ts!("tests-history"), Tab::History))
                     .child(div().w(px(8.)))
                     .child(div().font_weight(FontWeight::SEMIBOLD).text_color(ink).child(state_text))
                     // The detail gives way first; below this the buttons take a row of their own.
@@ -266,7 +270,7 @@ impl TestsWindow {
                             )
                             .when(watch, |d| d.border_color(p.accent).bg(p.wash(p.accent)))
                             .tooltip(|w, cx| {
-                                Tooltip::new("Run with the browsers showing, one test at a time").build(w, cx)
+                                Tooltip::new(ts!("tests-run-with-the-browsers-showing-one-test-at")).build(w, cx)
                             })
                             .on_click({
                                 let tests = tests.clone();
@@ -276,22 +280,28 @@ impl TestsWindow {
                     })
                     .when(failed_any, |d| {
                         d.child(
-                            button("tests-rerun-failed", "Rerun failed", Some(Icon::RerunFailed), p.error, &p)
-                                .on_click({
-                                    let tests = tests.clone();
-                                    move |_, _, cx| tests.update(cx, |t, cx| t.start(Scope::LastFailed, cx))
-                                }),
+                            button(
+                                "tests-rerun-failed",
+                                ts!("tests-rerun-failed"),
+                                Some(Icon::RerunFailed),
+                                p.error,
+                                &p,
+                            )
+                            .on_click({
+                                let tests = tests.clone();
+                                move |_, _, cx| tests.update(cx, |t, cx| t.start(Scope::LastFailed, cx))
+                            }),
                         )
                     })
                     .child(if running {
-                        button("tests-stop", "Stop", Some(Icon::Stop), p.error, &p)
+                        button("tests-stop", ts!("cmd-stop"), Some(Icon::Stop), p.error, &p)
                             .on_click({
                                 let tests = tests.clone();
                                 move |_, _, cx| tests.update(cx, |t, cx| t.stop(cx))
                             })
                             .into_any_element()
                     } else {
-                        button("tests-run-all", "Run all", Some(Icon::Play), p.ok, &p)
+                        button("tests-run-all", ts!("tests-run-all"), Some(Icon::Play), p.ok, &p)
                             .on_click({
                                 let tests = tests.clone();
                                 move |_, _, cx| tests.update(cx, |t, cx| t.start(Scope::All, cx))
@@ -313,10 +323,10 @@ impl TestsWindow {
                         }),
                     ))
                     .child(div().child(format!("{} / {total}", c.done)))
-                    .child(count(Icon::Check, c.passed, p.ok, "passed"))
-                    .child(count(Icon::Close, c.failed, p.error, "failed"))
-                    .child(count(Icon::Warning, c.flaky, p.warn, "flaky"))
-                    .child(count(Icon::Minus, c.skipped, p.fg_dim, "skipped"))
+                    .child(count(Icon::Check, c.passed, p.ok, ts!("tests-count-passed")))
+                    .child(count(Icon::Close, c.failed, p.error, ts!("tests-count-failed")))
+                    .child(count(Icon::Warning, c.flaky, p.warn, ts!("tests-count-flaky")))
+                    .child(count(Icon::Minus, c.skipped, p.fg_dim, ts!("tests-count-skipped")))
                     .child(div().flex_1())
                     .child(div().text_color(p.fg_dim).child(time)),
             )
@@ -377,15 +387,15 @@ impl TestsWindow {
                 (r.environment().cloned(), r.project.environments.clone())
             })
             .unwrap_or_default();
-        let label = current.as_ref().map_or_else(|| "No environment".to_owned(), |e| e.name.clone());
+        let label = current.as_ref().map_or_else(|| ts!("tests-no-environment").to_owned(), |e| e.name.clone());
         let detail = current.as_ref().map(|e| e.detail()).filter(|d| !d.is_empty());
         let current_name = current.map(|e| e.name);
         // Compact: its icon alone, the title bar's Run and Search keeping their room. The
         // tooltip says what it is set to.
         let trigger = if compact {
             let tip = match &detail {
-                Some(d) => format!("Environment: {label}, {d}"),
-                None => format!("Environment: {label}"),
+                Some(d) => t!("tests-environment", label = label.to_string(), d = d.to_string()),
+                None => t!("tests-environment-2", label = label.to_string()),
             };
             button(id, "", Some(Icon::Endpoint), p.accent, &p)
                 .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
@@ -409,7 +419,7 @@ impl TestsWindow {
                     }
                 };
                 menu = menu.item(
-                    PopupMenuItem::new("No environment (the configuration's own)")
+                    PopupMenuItem::new(ts!("tests-no-environment-the-configurations-own"))
                         .checked(current_name.is_none())
                         .on_click(pick(None)),
                 );
@@ -419,7 +429,7 @@ impl TestsWindow {
                         menu.item(PopupMenuItem::new(e.name.clone()).checked(on).on_click(pick(Some(e.name.clone()))));
                 }
                 menu.separator().item(
-                    PopupMenuItem::new("Edit Environments…")
+                    PopupMenuItem::new(ts!("cmd-edit-environments"))
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::EditEnvironments), cx)),
                 )
             })
@@ -494,10 +504,10 @@ impl TestsWindow {
             .flex()
             .items_center()
             .gap(px(6.))
-            .child(chip_for("tests-filter-all", format!("All {total}"), Filter::All))
-            .child(chip_for("tests-filter-failed", format!("Failed {}", c.failed), Filter::Failed))
-            .child(chip_for("tests-filter-flaky", format!("Flaky {}", c.flaky), Filter::Flaky))
-            .child(chip_for("tests-filter-slow", "Slow, over 4 s".into(), Filter::Slow))
+            .child(chip_for("tests-filter-all", t!("tests-all", total = total.to_string()), Filter::All))
+            .child(chip_for("tests-filter-failed", t!("tests-failed", failed = (c.failed).to_string()), Filter::Failed))
+            .child(chip_for("tests-filter-flaky", t!("tests-flaky", flaky = (c.flaky).to_string()), Filter::Flaky))
+            .child(chip_for("tests-filter-slow", ts!("tests-slow-over-4-s").into(), Filter::Slow))
             .child(div().flex_1())
             .child(div().w(px(220.)).child(Input::new(&self.filter).small()))
             .into_any_element()
@@ -521,10 +531,10 @@ impl TestsWindow {
             .text_color(p.fg_dim)
             .border_b_1()
             .border_color(mix(p.border, 0.6, p.ground))
-            .child(div().flex_1().child("Test"))
+            .child(div().flex_1().child(ts!("structure-test")))
             .children(projects.iter().map(|pr| div().w(col).flex_none().child(pr.clone())))
-            .child(div().w(px(100.)).flex_none().child("Last 10 runs"))
-            .child(div().w(px(48.)).flex_none().child("Flaky"));
+            .child(div().w(px(100.)).flex_none().child(ts!("tests-last-10-runs")))
+            .child(div().w(px(48.)).flex_none().child(ts!("tests-flaky-2")));
         let mut list: Vec<AnyElement> = Vec::new();
         let mut file = String::new();
         for (i, row) in rows.iter().enumerate() {
@@ -668,13 +678,13 @@ impl TestsWindow {
         }
         if rows.is_empty() {
             let note = if t.listing_now {
-                "Finding the tests…".to_owned()
+                ts!("tests-finding-the-tests").to_owned()
             } else if let Some(e) = &t.listing_error {
                 e.clone()
             } else if t.filter != Filter::All || !t.text.is_empty() {
-                "No test matches the filter.".to_owned()
+                ts!("tests-no-test-matches-the-filter").to_owned()
             } else {
-                "No tests yet. Run them, or add a spec file.".to_owned()
+                ts!("tests-no-tests-yet-run-them-or-add-a").to_owned()
             };
             list.push(div().p(px(16.)).text_color(p.fg_dim).child(note).into_any_element());
         }
@@ -704,9 +714,9 @@ impl TestsWindow {
         let (g, ink) = mark(state, &p);
         let last = test.last_try();
         let badge = match state {
-            State::Failed => format!("Failed in {}", test.project),
-            State::Flaky => format!("Flaky in {}", test.project),
-            other => format!("{} in {}", other.label(), test.project),
+            State::Failed => t!("tests-failed-in", project = (test.project).to_string()),
+            State::Flaky => t!("tests-flaky-in", project = (test.project).to_string()),
+            other => t!("tests-in", other = (other.label()).to_string(), project = (test.project).to_string()),
         };
         let retries = test.tries.len().saturating_sub(1);
         let location = run.and_then(|r| r.location(&test.id));
@@ -714,11 +724,7 @@ impl TestsWindow {
             "{}:{}{}",
             test.file.to_string_lossy().replace('\\', "/"),
             test.line,
-            if retries > 0 {
-                format!(" · {} {}", retries, if retries == 1 { "retry" } else { "retries" })
-            } else {
-                String::new()
-            }
+            if retries > 0 { t!("tests-retries", count = retries) } else { String::new() }
         );
         let mut body: Vec<AnyElement> = Vec::new();
         // The error, and the lines around it.
@@ -774,14 +780,14 @@ impl TestsWindow {
                     )
             };
             let tests = self.tests.clone();
-            body.push(section("Screenshot comparison", &p).into_any_element());
+            body.push(section(ts!("tests-screenshot-comparison"), &p).into_any_element());
             body.push(
                 div()
                     .flex()
                     .gap(px(8.))
-                    .child(pane("Expected", cmp.expected.as_deref()))
-                    .child(pane("Actual", Some(&cmp.actual)))
-                    .child(pane("Difference", cmp.diff.as_deref()))
+                    .child(pane(ts!("runwin-expected"), cmp.expected.as_deref()))
+                    .child(pane(ts!("runwin-actual"), Some(&cmp.actual)))
+                    .child(pane(ts!("tests-difference"), cmp.diff.as_deref()))
                     .into_any_element(),
             );
             body.push(
@@ -791,12 +797,17 @@ impl TestsWindow {
                     .items_center()
                     .gap(px(8.))
                     .child(
-                        button("tests-accept-screenshot", "Accept new screenshot", Some(Icon::Check), p.ok, &p)
-                            .tooltip(|w, cx| {
-                                Tooltip::new("Runs the test again, keeping its screenshots as they are now")
-                                    .build(w, cx)
-                            })
-                            .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.accept_screenshots(cx))),
+                        button(
+                            "tests-accept-screenshot",
+                            ts!("tests-accept-new-screenshot"),
+                            Some(Icon::Check),
+                            p.ok,
+                            &p,
+                        )
+                        .tooltip(|w, cx| {
+                            Tooltip::new(ts!("tests-runs-the-test-again-keeping-its-screenshots-as")).build(w, cx)
+                        })
+                        .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.accept_screenshots(cx))),
                     )
                     .child(div().text_size(px(12.)).text_color(p.fg_dim).child(cmp.name.clone()))
                     .into_any_element(),
@@ -804,7 +815,7 @@ impl TestsWindow {
         }
         // The steps.
         if let Some(l) = last.filter(|l| !l.steps.is_empty()) {
-            body.push(section("Steps", &p).into_any_element());
+            body.push(section(ts!("tests-steps"), &p).into_any_element());
             body.push(
                 div()
                     .flex()
@@ -836,7 +847,7 @@ impl TestsWindow {
         // From the trace.
         let trace_path = last.and_then(|l| l.trace()).map(Path::to_path_buf);
         if let Some(loaded) = self.trace.as_ref().filter(|l| Some(&l.path) == trace_path.as_ref()) {
-            body.push(section("From the trace", &p).into_any_element());
+            body.push(section(ts!("tests-from-the-trace"), &p).into_any_element());
             match &loaded.trace {
                 Ok(tr) => {
                     if !loaded.frames.is_empty() {
@@ -905,7 +916,7 @@ impl TestsWindow {
                                 .gap(px(8.))
                                 .font_family(mono.clone())
                                 .text_size(px(12.))
-                                .child(div().text_color(p.error).child("console error"))
+                                .child(div().text_color(p.error).child(ts!("tests-console-error")))
                                 .child(div().flex_1().min_w_0().child(e.clone()))
                                 .into_any_element(),
                         );
@@ -916,7 +927,10 @@ impl TestsWindow {
                                 .pt(px(4.))
                                 .text_size(px(12.))
                                 .text_color(p.fg_dim)
-                                .child(format!("{} actions; no failed requests or console errors.", tr.actions.len()))
+                                .child(t!(
+                                    "tests-actions-no-failed-requests-or-console-errors",
+                                    count = (tr.actions.len()).to_string()
+                                ))
                                 .into_any_element(),
                         );
                     }
@@ -925,17 +939,19 @@ impl TestsWindow {
                     div()
                         .text_size(px(12.))
                         .text_color(p.fg_dim)
-                        .child(format!("The trace could not be read: {why}"))
+                        .child(t!("tests-the-trace-could-not-be-read", why = why.to_string()))
                         .into_any_element(),
                 ),
             }
         } else if trace_path.is_some() {
-            body.push(section("From the trace", &p).into_any_element());
-            body.push(div().text_size(px(12.)).text_color(p.fg_dim).child("Reading the trace…").into_any_element());
+            body.push(section(ts!("tests-from-the-trace"), &p).into_any_element());
+            body.push(
+                div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("tests-reading-the-trace")).into_any_element(),
+            );
         }
         // What it printed.
         if let Some(out) = last.map(|l| l.output.trim()).filter(|o| !o.is_empty()) {
-            body.push(section("Output", &p).into_any_element());
+            body.push(section(ts!("cmd-output"), &p).into_any_element());
             body.push(
                 div()
                     .font_family(mono.clone())
@@ -951,14 +967,14 @@ impl TestsWindow {
         if let Some(path) = trace_path.clone() {
             let tests = self.tests.clone();
             actions.push(
-                button("tests-open-trace", "Open full trace", Some(Icon::Search), p.accent, &p)
+                button("tests-open-trace", ts!("tests-open-full-trace"), Some(Icon::Search), p.accent, &p)
                     .on_click(move |_, _, cx| open_trace(&tests, &path, cx))
                     .into_any_element(),
             );
         }
         if let Some(video) = last.and_then(|l| l.video()).map(Path::to_path_buf) {
             actions.push(
-                button("tests-video", "Video", Some(Icon::Play), p.fg, &p)
+                button("tests-video", ts!("tests-video"), Some(Icon::Play), p.fg, &p)
                     .on_click(move |_, _, cx| cx.open_with_system(&video))
                     .into_any_element(),
             );
@@ -966,20 +982,20 @@ impl TestsWindow {
         {
             let tests = self.tests.clone();
             actions.push(
-                button("tests-run-this", "Run this test", Some(Icon::Rerun), p.ok, &p)
+                button("tests-run-this", ts!("tests-run-this-test"), Some(Icon::Rerun), p.ok, &p)
                     .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.run_selected(cx)))
                     .into_any_element(),
             );
             let tests = self.tests.clone();
             actions.push(
-                button("tests-debug-this", "Debug this test", Some(Icon::Bug), p.fg, &p)
+                button("tests-debug-this", ts!("tests-debug-this-test"), Some(Icon::Bug), p.fg, &p)
                     .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.debug_selected(cx)))
                     .into_any_element(),
             );
             let tests = self.tests.clone();
             if !self.tests.read(cx).unit_run(cx) {
                 actions.push(
-                    button("tests-inspect-this", "Debug in Inspector", Some(Icon::Search), p.fg, &p)
+                    button("tests-inspect-this", ts!("tests-debug-in-inspector"), Some(Icon::Search), p.fg, &p)
                         .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.inspect_selected(cx)))
                         .into_any_element(),
                 );
@@ -987,7 +1003,7 @@ impl TestsWindow {
         }
         if let Some((file, line)) = location {
             actions.push(
-                button("tests-open-source", "Show in editor", Some(Icon::Code), p.fg, &p)
+                button("tests-open-source", ts!("tests-show-in-editor"), Some(Icon::Code), p.fg, &p)
                     .on_click(move |_, _, cx| {
                         if let Some(runs) = crate::run::runs(cx) {
                             let (file, line) = (file.clone(), line.saturating_sub(1));
@@ -1000,7 +1016,7 @@ impl TestsWindow {
         if let Some(e) = error {
             let text = format!("{}\n\n{}", e.text(), super::report::strip_ansi(&e.stack));
             actions.push(
-                button("tests-copy-error", "Copy error", Some(Icon::Copy), p.fg, &p)
+                button("tests-copy-error", ts!("tests-copy-error"), Some(Icon::Copy), p.fg, &p)
                     .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone())))
                     .into_any_element(),
             );
@@ -1031,15 +1047,15 @@ impl TestsWindow {
         let t = self.tests.read(cx);
         let runs = &t.history.runs;
         let cols: [(&str, f32); 9] = [
-            ("When", 130.),
-            ("What", 160.),
-            ("Environment", 110.),
-            ("Branch", 120.),
-            ("Commit", 70.),
-            ("Passed", 56.),
-            ("Failed", 56.),
-            ("Flaky", 50.),
-            ("Time", 64.),
+            (ts!("tests-when"), 130.),
+            (ts!("tests-what"), 160.),
+            (ts!("settings-environment"), 110.),
+            (ts!("tests-branch"), 120.),
+            (ts!("cmd-commit"), 70.),
+            (ts!("runwin-passed"), 56.),
+            (ts!("run-failed-3"), 56.),
+            (ts!("tests-flaky-2"), 50.),
+            (ts!("tests-time"), 64.),
         ];
         let header = div()
             .flex_none()
@@ -1053,7 +1069,7 @@ impl TestsWindow {
             .border_b_1()
             .border_color(p.border)
             .children(cols.iter().map(|(n, w)| div().w(px(*w)).flex_none().child(*n)))
-            .child(div().flex_1().child("New since the run before"));
+            .child(div().flex_1().child(ts!("tests-new-since-the-run-before")));
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let rows = runs.iter().enumerate().rev().map(|(i, r)| {
             let before = i.checked_sub(1).and_then(|j| runs.get(j));
@@ -1061,7 +1077,7 @@ impl TestsWindow {
             let fresh_text = match fresh.len() {
                 0 => String::new(),
                 1 => fresh[0].clone(),
-                n => format!("{} and {} more", fresh[0], n - 1),
+                n => t!("project-and-more", builds = fresh[0].to_string(), n = (n - 1).to_string()),
             };
             let cell = |w: f32, text: String, ink: Hsla| {
                 div()
@@ -1116,8 +1132,8 @@ impl TestsWindow {
                     .pt(px(8.))
                     .flex()
                     .gap(px(8.))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child("Runs of this project"))
-                    .child(div().text_color(p.fg_dim).child("Kept on this machine, outside the repository")),
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child(ts!("tests-runs-of-this-project")))
+                    .child(div().text_color(p.fg_dim).child(ts!("tests-kept-on-this-machine-outside-the-repository"))),
             )
             .child(header)
             .child(
@@ -1128,7 +1144,7 @@ impl TestsWindow {
                     .min_h_0()
                     .overflow_y_scrollbar()
                     .when(rows.is_empty(), |d| {
-                        d.child(div().p(px(16.)).text_color(p.fg_dim).child("No runs kept yet."))
+                        d.child(div().p(px(16.)).text_color(p.fg_dim).child(ts!("tests-no-runs-kept-yet")))
                     })
                     .children(rows),
             )
@@ -1150,11 +1166,11 @@ fn worst(a: State, b: State) -> State {
 /// `12 min ago`, `yesterday`, …
 fn ago(secs: u64) -> String {
     match secs {
-        0..60 => "just now".into(),
-        60..3600 => format!("{} min ago", secs / 60),
-        3600..86_400 => format!("{} h ago", secs / 3600),
-        86_400..172_800 => "yesterday".into(),
-        _ => format!("{} days ago", secs / 86_400),
+        0..60 => ts!("welcome-just-now").into(),
+        60..3600 => t!("tests-min-ago", secs = (secs / 60).to_string()),
+        3600..86_400 => t!("tests-h-ago", secs = (secs / 3600).to_string()),
+        86_400..172_800 => ts!("welcome-yesterday").into(),
+        _ => t!("tests-days-ago", days = (secs / 86_400).to_string()),
     }
 }
 
@@ -1165,12 +1181,12 @@ fn open_trace(tests: &Entity<PwTests>, path: &Path, cx: &mut App) {
     let host = crate::host::host(cx);
     let path = path.to_owned();
     let find = cx.background_executor().spawn(async move {
-        let cli = super::run::cli(&*host, &root).ok_or("The Playwright test runner is not installed.")?;
+        let cli = super::run::cli(&*host, &root).ok_or(ts!("tests-the-playwright-test-runner-is-not-installed"))?;
         let wanted = crate::lang::node::wanted(&*host, &root, Some(&root));
         let all = crate::lang::node::discover(&*host);
-        let node = crate::lang::node::choose(&wanted, &all).cloned().ok_or("No Node fits this project.")?;
+        let node = crate::lang::node::choose(&wanted, &all).cloned().ok_or(ts!("tests-no-node-fits-this-project"))?;
         Ok::<_, &str>(crate::run::process::ProcessLaunch {
-            title: "Trace viewer".into(),
+            title: ts!("tests-trace-viewer").into(),
             program: node.bin.clone(),
             args: vec![cli.display().to_string(), "show-trace".into(), path.display().to_string()],
             cwd: root,
@@ -1196,8 +1212,8 @@ impl Render for TestsWindow {
         let base = div().size_full().flex().flex_col().bg(p.ground).text_size(px(look::BODY)).text_color(p.fg);
         if t.root.is_none() {
             return base.child(
-                crate::components::EmptyState::new(snout_core::art::spots::no_tests(), "No tests found")
-                    .hint("Open a Playwright project, or a project whose packages test with Vitest or Jest, to run its tests here.")
+                crate::components::EmptyState::new(snout_core::art::spots::no_tests(), ts!("tests-no-tests-found"))
+                    .hint(ts!("tests-open-a-playwright-project-or-a-project-whose"))
                     .compact(),
             );
         }

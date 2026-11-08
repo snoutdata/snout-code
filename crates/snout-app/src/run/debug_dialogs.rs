@@ -52,7 +52,8 @@ impl Focusable for BreakpointsDialog {
 
 impl BreakpointsDialog {
     pub fn new(runs: Entity<Runs>, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let condition = cx.new(|cx| InputState::new(window, cx).placeholder("Stop only when this is true, as `i > 3`"));
+        let condition =
+            cx.new(|cx| InputState::new(window, cx).placeholder(ts!("debug-stop-only-when-this-is-true-as-i")));
         cx.subscribe(&condition, |this, _, e: &InputEvent, cx| {
             if let InputEvent::PressEnter { .. } = e {
                 this.apply_condition(cx);
@@ -160,14 +161,19 @@ impl Render for BreakpointsDialog {
                     )
                     .child(components::path_text(("bp-dir", i), dir, p.fg_dim))
                     .when_some(b.condition.clone(), |d, c| {
-                        d.child(components::badge(format!("if {c}"), Tone::Warning, &p).font_family(look::MONO))
+                        d.child(
+                            components::badge(t!("debug-if", c = c.to_string()), Tone::Warning, &p)
+                                .font_family(look::MONO),
+                        )
                     })
-                    .child(IconButton::new(format!("bp-remove-{i}"), IconName::Trash, "Remove").size(22.).on_click(
-                        move |_, w, cx| {
-                            cx.stop_propagation();
-                            v2.update(cx, |d, cx| d.remove(&b2, w, cx))
-                        },
-                    ))
+                    .child(
+                        IconButton::new(format!("bp-remove-{i}"), IconName::Trash, ts!("debug-remove"))
+                            .size(22.)
+                            .on_click(move |_, w, cx| {
+                                cx.stop_propagation();
+                                v2.update(cx, |d, cx| d.remove(&b2, w, cx))
+                            }),
+                    )
                     .on_click(move |e, w, cx| {
                         v3.update(cx, |d, cx| {
                             d.pick(i, w, cx);
@@ -185,10 +191,8 @@ impl Render for BreakpointsDialog {
             div()
                 .flex_1()
                 .child(
-                    components::EmptyState::new(snout_core::art::spots::no_results(), "No breakpoints")
-                        .hint(crate::keymap::shown(
-                            "Click left of a line number, or press ⌘F8 in an editor, to set one.",
-                        ))
+                    components::EmptyState::new(snout_core::art::spots::no_results(), ts!("debug-no-breakpoints"))
+                        .hint(crate::keymap::shown(ts!("debug-click-left-of-a-line-number-or-press")))
                         .on(p.card)
                         .compact(),
                 )
@@ -212,7 +216,11 @@ impl Render for BreakpointsDialog {
                             .flex_col()
                             .gap(px(6.))
                             .child(components::field_label(
-                                format!("Condition of {}:{}", self.relative(&b.path), b.line + 1),
+                                t!(
+                                    "debug-condition-of",
+                                    path = (self.relative(&b.path)).to_string(),
+                                    line = (b.line + 1).to_string()
+                                ),
                                 &p,
                             ))
                             .child(
@@ -222,7 +230,7 @@ impl Render for BreakpointsDialog {
                                     .child(div().flex_1().child(look::field(&self.condition, false, None, &p)))
                                     .child(
                                         Button::new("bp-apply", crate::components::APPLY_ICON)
-                                            .label("Apply")
+                                            .label(ts!("settings-apply"))
                                             .compact()
                                             .on_click(cx.listener(|this, _, _, cx| this.apply_condition(cx))),
                                     ),
@@ -236,7 +244,11 @@ impl Render for BreakpointsDialog {
         let status = match (count, off) {
             (0, _) => String::new(),
             (n, 0) => format!("{n} {}", if n == 1 { "breakpoint" } else { "breakpoints" }),
-            (n, off) => format!("{n} {}, {off} disabled", if n == 1 { "breakpoint" } else { "breakpoints" }),
+            (n, off) => t!(
+                "debug-breakpoints-disabled",
+                breakpoints = t!("debug-breakpoints-count", count = n),
+                off = off.to_string()
+            ),
         };
         div()
             .id("breakpoints-dialog")
@@ -262,7 +274,7 @@ impl Render for BreakpointsDialog {
                 Tone::Danger,
                 IconName::CircleDot,
                 "Breakpoints",
-                Some("Untick one to keep it without stopping there. A double click shows its line.".into()),
+                Some(ts!("debug-untick-one-to-keep-it-without-stopping-there").into()),
                 &p,
             ))
             .child(body)
@@ -270,17 +282,17 @@ impl Render for BreakpointsDialog {
                 Some((status, p.fg_dim)),
                 vec![
                     Button::new("bp-remove-all", IconName::Trash)
-                        .label("Remove All")
+                        .label(ts!("debug-remove-all"))
                         .disabled(empty)
                         .on_click(cx.listener(|this, _, w, cx| this.remove_all(w, cx)))
                         .into_any_element(),
                     Button::new("bp-close", crate::components::CLOSE_ICON)
-                        .label("Close")
+                        .label(ts!("dialogs-close"))
                         .kbd("Esc")
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(DebugDialogEvent::Close)))
                         .into_any_element(),
                     Button::new("bp-go-to", IconName::CornerDownRight)
-                        .label("Go to Line")
+                        .label(ts!("debug-go-to-line"))
                         .primary()
                         .disabled(empty)
                         .on_click(cx.listener(|this, _, _, cx| this.go_to(cx)))
@@ -309,7 +321,7 @@ impl Focusable for EvaluateDialog {
 
 impl EvaluateDialog {
     pub fn new(runs: Entity<Runs>, initial: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("An expression, as `total * 2`"));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("debug-an-expression-as-total-2")));
         input.update(cx, |s, cx| s.set_value(initial.clone(), window, cx));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| {
             if let InputEvent::PressEnter { secondary, .. } = e {
@@ -358,15 +370,11 @@ impl Render for EvaluateDialog {
         let result: AnyElement = match (&paused, evaluated) {
             (None, _) => components::callout(
                 Tone::Info,
-                crate::keymap::shown(
-                    "Evaluate works while the program is stopped at a breakpoint: debug it (⌃D) and set one (⌘F8).",
-                ),
+                crate::keymap::shown(ts!("debug-evaluate-works-while-the-program-is-stopped-at")),
                 &p,
             )
             .into_any_element(),
-            (Some(_), None) => {
-                look::weak("Press ⏎ to evaluate it in the frame the debugger stopped in.", &p).into_any_element()
-            }
+            (Some(_), None) => look::weak(ts!("debug-press-to-evaluate-it-in-the-frame-the"), &p).into_any_element(),
             (Some(_), Some((expr, Err(e)))) => {
                 components::callout_with(Tone::Danger, Some(expr.into()), e, &p).into_any_element()
             }
@@ -397,9 +405,12 @@ impl Render for EvaluateDialog {
                         .when_some(v.ty.clone(), |d, ty| d.child(components::badge(ty, Tone::Neutral, &p))),
                 )
                 .when(v.reference > 0, |d| {
-                    d.child(div().text_size(px(12.)).text_color(p.fg_dim).child(crate::keymap::shown(
-                        "Add it to the watches (⌘⏎) to open its fields in the Debug window.",
-                    )))
+                    d.child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(crate::keymap::shown(ts!("debug-add-it-to-the-watches-to-open-its"))),
+                    )
                 })
                 .into_any_element(),
         };
@@ -426,8 +437,8 @@ impl Render for EvaluateDialog {
             .child(components::dialog_header_icon(
                 Tone::Accent,
                 IconName::SquareFunction,
-                "Evaluate Expression",
-                Some("Java, in the frame the debugger stopped in.".into()),
+                ts!("debug-evaluate-expression"),
+                Some(ts!("debug-java-in-the-frame-the-debugger-stopped-in").into()),
                 &p,
             ))
             .child(
@@ -439,18 +450,18 @@ impl Render for EvaluateDialog {
                 None,
                 vec![
                     Button::new("evaluate-watch", IconName::Eye)
-                        .label("Add to Watches")
+                        .label(ts!("debug-add-to-watches"))
                         .kbd(crate::keymap::shown("⌘⏎"))
                         .disabled(!live)
                         .on_click(cx.listener(|this, _, _, cx| this.add_watch(cx)))
                         .into_any_element(),
                     Button::new("evaluate-close", crate::components::CLOSE_ICON)
-                        .label("Close")
+                        .label(ts!("dialogs-close"))
                         .kbd("Esc")
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(DebugDialogEvent::Close)))
                         .into_any_element(),
                     Button::new("evaluate-run", IconName::Play)
-                        .label("Evaluate")
+                        .label(ts!("debug-evaluate"))
                         .kbd("⏎")
                         .primary()
                         .disabled(!live)

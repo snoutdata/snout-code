@@ -68,22 +68,21 @@ impl EditorPanel {
         let red = p.error;
         let text = match bar {
             RecordBar::Recording { lost: true, .. } => {
-                "Recording, but the recorded steps were edited here: the rest stays in the recorder's window."
-                    .to_owned()
+                ts!("editor-recording-but-the-recorded-steps-were-edited-here").to_owned()
             }
             RecordBar::Recording { steps, .. } => {
                 let n = match steps {
-                    0 => "no steps yet".to_owned(),
-                    1 => "1 step".to_owned(),
-                    n => format!("{n} steps"),
+                    0 => ts!("editor-no-steps-yet").to_owned(),
+                    1 => ts!("editor-1-step").to_owned(),
+                    n => t!("editor-steps", n = n.to_string()),
                 };
-                format!("Recording into this file: {n}. Act in the browser, then Stop or close it.")
+                t!("editor-recording-into-this-file-act-in-the-browser", n = n.to_string())
             }
             RecordBar::Picking { picked: 0 } => {
-                "Picking locators: click an element in the browser to put its locator at the caret.".to_owned()
+                ts!("editor-picking-locators-click-an-element-in-the-browser").to_owned()
             }
             RecordBar::Picking { picked } => {
-                format!("Picking locators: {picked} picked. Click another, or Stop.")
+                t!("editor-picking-locators-picked-click-another-or-stop", picked = picked.to_string())
             }
         };
         Some(
@@ -105,7 +104,7 @@ impl EditorPanel {
                 .child(div().flex_none().size(px(9.)).rounded_full().bg(red))
                 .child(div().flex_1().min_w_0().child(text))
                 .child(
-                    look::small_button("record-stop", crate::components::IconName::Square, "Stop", &p)
+                    look::small_button("record-stop", crate::components::IconName::Square, ts!("cmd-stop"), &p)
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::StopRecording), cx)),
                 ),
         )

@@ -96,14 +96,14 @@ impl ConfigDialog {
             cx.new(|cx| InputState::new(window, cx).placeholder(hint))
         };
         let fields = Fields {
-            name: field("Name", window, cx),
+            name: field(ts!("dialogs-name"), window, cx),
             main_class: field("com.example.App", window, cx),
             task: field(":app:bootRun", window, cx),
-            args: field("Arguments the program gets", window, cx),
+            args: field(ts!("config-arguments-the-program-gets"), window, cx),
             jvm_args: field("-Xmx1g -Dkey=value", window, cx),
             env: field("NAME=value; OTHER=value", window, cx),
             profiles: field("dev, local", window, cx),
-            port: field("9229 (empty: run the file)", window, cx),
+            port: field(ts!("config-9229-empty-run-the-file"), window, cx),
         };
         let next = list.len() + 1;
         let mut this = Self { runs, list, engine, selected, fields, modules, next, focus: cx.focus_handle() };
@@ -162,7 +162,7 @@ impl ConfigDialog {
         let module = self.modules.first().cloned().unwrap_or_default();
         self.list.push(RunConfig {
             id: format!("user:{}:{}", std::process::id(), self.next),
-            name: format!("Unnamed {}", self.next),
+            name: t!("config-unnamed", next = (self.next).to_string()),
             kind: Kind::Main,
             module,
             user: true,
@@ -250,7 +250,7 @@ impl ConfigDialog {
                     .debug_selector(|| "config-profiles".into())
                     .outline()
                     .icon(crate::components::menu_icon(crate::components::IconName::Leaf))
-                    .label("Profiles")
+                    .label(ts!("settings-profiles"))
                     .dropdown_menu(move |mut menu, _, _| {
                         for (name, from) in &known {
                             let this = this.clone();
@@ -277,7 +277,7 @@ impl ConfigDialog {
                 .items_center()
                 .justify_center()
                 .text_color(p.fg_dim)
-                .child("No configuration. Add one with +.")
+                .child(ts!("config-no-configuration-add-one-with"))
                 .into_any_element();
         };
         let label = |text: &'static str| div().flex_none().w(px(150.)).text_color(p.fg_dim).child(text);
@@ -315,7 +315,7 @@ impl ConfigDialog {
                 .debug_selector(|| "config-module".into())
                 .outline()
                 .icon(crate::components::menu_icon(crate::components::IconName::Package))
-                .label(if current.is_empty() { "Choose a module".to_owned() } else { current.clone() })
+                .label(if current.is_empty() { ts!("config-choose-a-module").to_owned() } else { current.clone() })
                 .dropdown_menu(move |mut menu, _, _| {
                     for m in &modules {
                         let this = this.clone();
@@ -342,48 +342,48 @@ impl ConfigDialog {
             .flex_col()
             .gap(px(10.))
             .overflow_y_scrollbar()
-            .child(row("Name", input(&self.fields.name)))
-            .child(row("Kind", div().flex().child(kind_menu).into_any_element()))
-            .when(!node, |d| d.child(row("Module", div().flex().child(module_menu).into_any_element())))
-            .when(c.kind == Kind::Main, |d| d.child(row("Main class", input(&self.fields.main_class))))
+            .child(row(ts!("dialogs-name"), input(&self.fields.name)))
+            .child(row(ts!("config-kind"), div().flex().child(kind_menu).into_any_element()))
+            .when(!node, |d| d.child(row(ts!("find-module"), div().flex().child(module_menu).into_any_element())))
+            .when(c.kind == Kind::Main, |d| d.child(row(ts!("config-main-class"), input(&self.fields.main_class))))
             .when(c.kind != Kind::Main && !pw, |d| {
                 d.child(row(
                     match c.kind {
-                        Kind::Maven => "Goals",
-                        Kind::Npm => "Script",
-                        Kind::Node => "File",
-                        _ => "Task",
+                        Kind::Maven => ts!("config-goals"),
+                        Kind::Npm => ts!("config-script"),
+                        Kind::Node => ts!("config-file"),
+                        _ => ts!("config-task"),
                     },
                     input(&self.fields.task),
                 ))
             })
             .child(row(
                 match c.kind {
-                    Kind::Gradle => "Gradle arguments",
-                    Kind::Maven => "Maven arguments",
-                    Kind::Playwright => "Playwright arguments",
-                    Kind::Npm => "Script arguments",
-                    _ => "Program arguments",
+                    Kind::Gradle => ts!("config-gradle-arguments"),
+                    Kind::Maven => ts!("config-maven-arguments"),
+                    Kind::Playwright => ts!("config-playwright-arguments"),
+                    Kind::Npm => ts!("config-script-arguments"),
+                    _ => ts!("config-program-arguments"),
                 },
                 input(&self.fields.args),
             ))
             .when(!node || c.kind == Kind::Node, |d| {
                 d.child(row(
-                    if c.kind == Kind::Node { "Node options" } else { "VM options" },
+                    if c.kind == Kind::Node { ts!("config-node-options") } else { ts!("config-vm-options") },
                     input(&self.fields.jvm_args),
                 ))
             })
-            .child(row("Environment variables", input(&self.fields.env)))
-            .when(c.kind == Kind::Node, |d| d.child(row("Attach to port", input(&self.fields.port))))
-            .when(!node, |d| d.child(row("Active profiles", self.profiles_field(cx))))
+            .child(row(ts!("config-environment-variables"), input(&self.fields.env)))
+            .when(c.kind == Kind::Node, |d| d.child(row(ts!("config-attach-to-port"), input(&self.fields.port))))
+            .when(!node, |d| d.child(row(ts!("settings-active-profiles"), self.profiles_field(cx))))
             .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(if from_build {
                 if c.user {
-                    "From the build, with your changes. Remove puts it back as the build has it."
+                    ts!("config-from-the-build-with-your-changes-remove-puts")
                 } else {
-                    "From the build. A change you make stands in for it."
+                    ts!("config-from-the-build-a-change-you-make-stands")
                 }
             } else {
-                "Your own configuration."
+                ts!("config-your-own-configuration")
             }))
             .into_any_element()
     }
@@ -395,7 +395,8 @@ impl Render for ConfigDialog {
         let mut items: Vec<AnyElement> = Vec::new();
         let mut last_group = "";
         for (i, c) in self.list.iter().enumerate() {
-            let group = if c.user && !self.engine.iter().any(|e| e.id == c.id) { "Yours" } else { c.group() };
+            let group =
+                if c.user && !self.engine.iter().any(|e| e.id == c.id) { ts!("title-yours") } else { c.group() };
             if group != last_group {
                 last_group = group;
                 items.push(
@@ -470,8 +471,8 @@ impl Render for ConfigDialog {
                 crate::components::dialog_header_icon(
                     crate::components::Tone::Success,
                     crate::components::IconName::Play,
-                    "Run Configurations",
-                    Some("What Run and Debug start: an application, a Gradle task, tests, a script.".into()),
+                    ts!("config-run-configurations"),
+                    Some(ts!("config-what-run-and-debug-start-an-application-a").into()),
                     &p,
                 )
                 .pb(px(12.))
@@ -502,12 +503,16 @@ impl Render for ConfigDialog {
                                     .items_center()
                                     .gap(px(2.))
                                     .child(
-                                        small("config-add", Icon::Plus, "Add Configuration")
+                                        small("config-add", Icon::Plus, ts!("config-add-configuration"))
                                             .on_click(cx.listener(|this, _, w, cx| this.add(w, cx))),
                                     )
                                     .child(
-                                        small("config-remove", Icon::Minus, "Remove, or Put Back as the Build Has It")
-                                            .on_click(cx.listener(|this, _, w, cx| this.remove(w, cx))),
+                                        small(
+                                            "config-remove",
+                                            Icon::Minus,
+                                            ts!("config-remove-or-put-back-as-the-build-has"),
+                                        )
+                                        .on_click(cx.listener(|this, _, w, cx| this.remove(w, cx))),
                                     ),
                             )
                             .child(
@@ -536,15 +541,17 @@ impl Render for ConfigDialog {
                     .border_color(p.border)
                     .bg(p.dialog_footer())
                     .child(
-                        button("config-cancel", crate::components::CANCEL_ICON, "Cancel", false)
+                        button("config-cancel", crate::components::CANCEL_ICON, ts!("settings-cancel"), false)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ConfigEvent::Close))),
                     )
-                    .child(button("config-apply", crate::components::APPLY_ICON, "Apply", false).on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.apply(cx);
-                            cx.notify();
-                        },
-                    )))
+                    .child(
+                        button("config-apply", crate::components::APPLY_ICON, ts!("settings-apply"), false).on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.apply(cx);
+                                cx.notify();
+                            }),
+                        ),
+                    )
                     .child(button("config-ok", crate::components::OK_ICON, "OK", true).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.apply(cx);

@@ -42,12 +42,12 @@ pub enum TsStage {
 impl TsStage {
     pub fn label(&self) -> String {
         match self {
-            TsStage::FindingNode => "Finding Node".into(),
-            TsStage::NeedsNode(what) => format!("Needs Node {what}"),
-            TsStage::Installing => "Installing the language server".into(),
-            TsStage::Starting => "Starting".into(),
-            TsStage::Ready => "Ready".into(),
-            TsStage::Restarting => "Restarting".into(),
+            TsStage::FindingNode => ts!("editor-finding-node").into(),
+            TsStage::NeedsNode(what) => t!("editor-needs-node", what = what.to_string()),
+            TsStage::Installing => ts!("editor-installing-the-language-server").into(),
+            TsStage::Starting => ts!("console-starting").into(),
+            TsStage::Ready => ts!("model-ready").into(),
+            TsStage::Restarting => ts!("editor-restarting").into(),
             TsStage::Failed(why) => why.clone(),
         }
     }
@@ -112,7 +112,7 @@ impl TsServer {
             (TsStage::Ready, Some(work)) => work.label(),
             (stage, _) => stage.label(),
         };
-        format!("TypeScript: {what}")
+        t!("editor-typescript", what = what.to_string())
     }
 
     pub fn ready(&self) -> bool {
@@ -369,7 +369,7 @@ impl LangHub {
                     .exact
                     .clone()
                     .or(wanted.major.map(|m| m.to_string()))
-                    .or(wanted.min_major.map(|m| format!("{m} or newer")))
+                    .or(wanted.min_major.map(|m| t!("editor-or-newer", m = m.to_string())))
                     .unwrap_or_default();
                 eprintln!("[ts] no Node fits {} (asks for {what:?})", root.display());
                 server.stage = TsStage::NeedsNode(what.clone());
@@ -408,7 +408,8 @@ impl LangHub {
                     .map_err(|e| format!("The TypeScript language server could not be installed: {e:#}"))?,
             };
             let command = server_command(&*host, &node, &script, &root_buf);
-            Client::spawn(&*host, &command).map_err(|e| format!("The TypeScript language server did not start: {e}"))
+            Client::spawn(&*host, &command)
+                .map_err(|e| t!("editor-the-typescript-language-server-did-not-start", e = e.to_string()))
         });
         let root_buf = root.to_owned();
         cx.spawn(async move |this, cx| {
@@ -466,7 +467,8 @@ impl LangHub {
                 let Some(client) = server.client.clone() else { return };
                 if let Err(e) = result {
                     eprintln!("[ts] initialize failed: {e}");
-                    server.stage = TsStage::Failed(format!("The TypeScript language server failed: {e}"));
+                    server.stage =
+                        TsStage::Failed(t!("editor-the-typescript-language-server-failed", e = e.to_string()));
                     cx.notify();
                     return;
                 }
@@ -570,7 +572,7 @@ impl LangHub {
         }
         server.crashes += 1;
         if server.crashes > 5 {
-            server.stage = TsStage::Failed("The TypeScript language server keeps stopping".into());
+            server.stage = TsStage::Failed(ts!("editor-the-typescript-language-server-keeps-stopping").into());
         } else {
             server.stage = TsStage::Restarting;
             let delay = Duration::from_millis(200) * (1 << server.crashes.min(6));

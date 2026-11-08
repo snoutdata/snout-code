@@ -406,7 +406,7 @@ impl EditorPanel {
     fn open_condition(&mut self, line: u32, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(runs) = crate::run::runs(cx) else { return };
         let current = runs.read(cx).breakpoints_in(&self.path).into_iter().find(|b| b.line == line).cloned();
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Stop only when this is true, as `i > 3`"));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("debug-stop-only-when-this-is-true-as-i")));
         let text = current.and_then(|b| b.condition).unwrap_or_default();
         input.update(cx, |s, cx| s.set_value(text, window, cx));
         cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, window, cx| {
@@ -494,7 +494,11 @@ impl EditorPanel {
                     .flex()
                     .flex_col()
                     .gap(px(6.))
-                    .child(div().font_weight(FontWeight::MEDIUM).child(format!("Breakpoint on line {}", line + 1)))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(t!("editor-breakpoint-on-line", line = (line + 1).to_string())),
+                    )
                     .child(crate::look::field(input, false, None, &p))
                     .child(
                         div()

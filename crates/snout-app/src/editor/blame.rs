@@ -200,21 +200,6 @@ pub fn short_date(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-const MONTHS: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-];
-
 /// `secs` in full: "March 15, 2024 at 3:39 PM".
 pub fn long_date(secs: i64) -> String {
     let (y, m, d, h, min) = local(secs);
@@ -224,7 +209,26 @@ pub fn long_date(secs: i64) -> String {
         12 => (12, "PM"),
         _ => (h - 12, "PM"),
     };
-    format!("{} {d}, {y} at {h12}:{min:02} {half}", MONTHS[(m - 1).clamp(0, 11) as usize])
+    let time = if crate::i18n::current() == crate::i18n::Language::English {
+        format!("{h12}:{min:02} {half}")
+    } else {
+        format!("{h}:{min:02}")
+    };
+    let month = match m {
+        1 => ts!("blame-month-1"),
+        2 => ts!("blame-month-2"),
+        3 => ts!("blame-month-3"),
+        4 => ts!("blame-month-4"),
+        5 => ts!("blame-month-5"),
+        6 => ts!("blame-month-6"),
+        7 => ts!("blame-month-7"),
+        8 => ts!("blame-month-8"),
+        9 => ts!("blame-month-9"),
+        10 => ts!("blame-month-10"),
+        11 => ts!("blame-month-11"),
+        _ => ts!("blame-month-12"),
+    };
+    t!("blame-long-date", month = month, day = d.to_string(), year = y.to_string(), time = time)
 }
 
 fn now_secs() -> i64 {
@@ -533,9 +537,9 @@ impl EditorPanel {
     /// Why Annotate with Git Blame does nothing here, if it does nothing.
     pub fn blame_unavailable(&self) -> Option<&'static str> {
         if self.class_file.is_some() {
-            Some("A library's class file has no Git history.")
+            Some(ts!("editor-a-librarys-class-file-has-no-git-history"))
         } else if self.root.is_none() {
-            Some("Not a Git project: no Git repository holds this file.")
+            Some(ts!("editor-not-a-git-project-no-git-repository-holds"))
         } else {
             None
         }
@@ -794,7 +798,7 @@ impl EditorPanel {
                     let commit = &d.blame.commits[c as usize];
                     format!("{} {}", d.dates[c as usize], commit.author)
                 }
-                Row::Uncommitted => "Not committed yet".into(),
+                Row::Uncommitted => ts!("editor-not-committed-yet").into(),
                 Row::Agent(e) => match looks.get(e as usize) {
                     Some(l) => format!("{} {} \u{b7} {}", l.glyph, l.name, l.when),
                     None => continue,
@@ -937,7 +941,11 @@ impl EditorPanel {
                                 texts.push((point(ax, *top), shape(mode.author(&commit.author), p.fg, is_selected)));
                             }
                             Row::Uncommitted => {
-                                let label = if mode == Mode::Initials { "Uncommitted" } else { "Not committed yet" };
+                                let label = if mode == Mode::Initials {
+                                    ts!("editor-uncommitted")
+                                } else {
+                                    ts!("editor-not-committed-yet")
+                                };
                                 texts.push((point(x, *top), shape(label.into(), mix(p.modified, 0.75, p.fg), false)));
                             }
                             Row::Agent(e) => {
@@ -957,7 +965,7 @@ impl EditorPanel {
                     if loading && let Some((_, top)) = visible.first() {
                         texts.push((
                             point(column.left() + px(8.), *top),
-                            shape("Reading history\u{2026}".into(), p.fg_dim, false),
+                            shape(ts!("editor-reading-history").into(), p.fg_dim, false),
                         ));
                     }
                     for (at, shaped) in texts {
@@ -1123,30 +1131,32 @@ impl EditorPanel {
                 use crate::components::{PopupMenuItem, action_item};
                 let menu = crate::components::styled(menu);
                 let menu = match (why, shown) {
-                    (_, true) => {
-                        menu.item(action_item("Close Annotations", IconName::X, Box::new(super::AnnotateWithGitBlame)))
-                    }
+                    (_, true) => menu.item(action_item(
+                        ts!("editor-close-annotations"),
+                        IconName::X,
+                        Box::new(super::AnnotateWithGitBlame),
+                    )),
                     (None, false) => menu.item(action_item(
-                        "Annotate with Git Blame",
+                        ts!("cmd-annotate-with-git-blame"),
                         IconName::FileClock,
                         Box::new(super::AnnotateWithGitBlame),
                     )),
                     (Some(why), false) => menu
                         .item(
-                            PopupMenuItem::new("Annotate with Git Blame")
+                            PopupMenuItem::new(ts!("cmd-annotate-with-git-blame"))
                                 .icon(gpui_component::Icon::new(IconName::FileClock))
                                 .disabled(true),
                         )
                         .item(PopupMenuItem::label(why)),
                 };
                 let menu = menu.item(action_item(
-                    "Annotate with Agents",
+                    ts!("cmd-annotate-with-agents"),
                     IconName::UserPen,
                     Box::new(crate::claude_ide::AnnotateWithAgents),
                 ));
                 match line.filter(|_| breakpoints) {
                     Some(l) => menu.separator().item(action_item(
-                        "Breakpoint Condition\u{2026}",
+                        ts!("editor-breakpoint-condition"),
                         IconName::CircleDot,
                         Box::new(super::BreakpointConditionAt(l)),
                     )),
@@ -1191,7 +1201,7 @@ impl EditorPanel {
                 let commit = self.blame_commit(card.line)?.clone();
                 let color = person_color(&commit.author, &p);
                 let when =
-                    format!("{} \u{b7} {}", long_date(commit.time), snout_core::blame::ago(commit.time, now_secs()));
+                    format!("{} \u{b7} {}", long_date(commit.time), crate::core_text::ago(commit.time, now_secs()));
                 let path = commit.path.clone();
                 let (id1, id2, id3) = (commit.id.clone(), commit.id.clone(), commit.id.clone());
                 let previous = commit.previous.is_some();
@@ -1251,7 +1261,7 @@ impl EditorPanel {
                         .child(
                             Button::new("blame-card-diff", IconName::GitCompare)
                                 .compact()
-                                .label("Show Diff")
+                                .label(ts!("editor-show-diff"))
                                 .debug_selector("blame-card-diff")
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.blame.card = None;
@@ -1262,7 +1272,7 @@ impl EditorPanel {
                         .child(
                             Button::new("blame-card-log", IconName::GitCommitHorizontal)
                                 .compact()
-                                .label("Show in Git Log")
+                                .label(ts!("editor-show-in-git-log"))
                                 .debug_selector("blame-card-log")
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.blame.card = None;
@@ -1273,24 +1283,27 @@ impl EditorPanel {
                         .child(
                             Button::new("blame-card-copy", IconName::Copy)
                                 .compact()
-                                .label("Copy Hash")
+                                .label(ts!("editor-copy-hash"))
                                 .debug_selector("blame-card-copy")
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(id3.clone()));
                                     this.blame.card = None;
-                                    this.show_hint(format!("Copied {}", &id3[..id3.len().min(8)]), cx);
+                                    this.show_hint(
+                                        t!("editor-copied", count = id3[..id3.len().min(8)].to_string()),
+                                        cx,
+                                    );
                                 })),
                         )
                         .child(
                             Button::new("blame-card-previous", IconName::StepBack)
                                 .compact()
-                                .label("Annotate Previous Revision")
+                                .label(ts!("editor-annotate-previous-revision"))
                                 .debug_selector("blame-card-previous")
                                 .disabled(!previous)
                                 .tooltip(if previous {
-                                    "The file as it was before this commit"
+                                    ts!("editor-the-file-as-it-was-before-this-commit")
                                 } else {
-                                    "This commit brought the file in"
+                                    ts!("editor-this-commit-brought-the-file-in")
                                 })
                                 .on_click(cx.listener(move |this, _, w, cx| this.annotate_previous(&c2, w, cx))),
                         ),
@@ -1316,10 +1329,13 @@ impl EditorPanel {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("Not committed yet"))
-                            .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(
-                                "You changed this line since the last commit. Commit it and the column says so.",
-                            )),
+                            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(ts!("editor-not-committed-yet")))
+                            .child(
+                                div()
+                                    .text_size(px(11.5))
+                                    .text_color(p.fg_dim)
+                                    .child(ts!("editor-you-changed-this-line-since-the-last-commit")),
+                            ),
                     ),
             ),
             _ => return None,
@@ -1369,10 +1385,17 @@ impl EditorPanel {
                     .pb(px(2.))
                     .child(crate::components::icon(IconName::Users, 14., p.accent))
                     .child(
-                        div().font_weight(gpui::FontWeight::SEMIBOLD).child(format!("Authors of {}", card.decl.name)),
+                        div()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(t!("editor-authors-of", decl = (card.decl.name).to_string())),
                     )
                     .child(div().flex_1())
-                    .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(format!("{total} committed lines"))),
+                    .child(
+                        div()
+                            .text_size(px(11.5))
+                            .text_color(p.fg_dim)
+                            .child(t!("editor-committed-lines", total = total.to_string())),
+                    ),
             )
             .children(authors.into_iter().map(|a| {
                 let share = if total > 0 { a.lines as f32 / total as f32 } else { 0. };
@@ -1384,10 +1407,10 @@ impl EditorPanel {
                     .py(px(3.))
                     .child(avatar(&initials(&a.name), color, 24., &p))
                     .child(div().flex_1().min_w_0().flex().flex_col().child(div().child(a.name.clone())).child(
-                        div().text_size(px(11.)).text_color(p.fg_dim).child(format!(
-                            "{} \u{b7} last {}",
-                            a.email,
-                            snout_core::blame::ago(a.latest, now)
+                        div().text_size(px(11.)).text_color(p.fg_dim).child(t!(
+                            "editor-last",
+                            email = (a.email).to_string(),
+                            now = (crate::core_text::ago(a.latest, now)).to_string()
                         )),
                     ))
                     .child(
@@ -1398,9 +1421,9 @@ impl EditorPanel {
                             .items_end()
                             .gap(px(2.))
                             .child(div().text_size(px(11.5)).child(if a.lines == 1 {
-                                "1 line".to_owned()
+                                ts!("editor-1-line").to_owned()
                             } else {
-                                format!("{} lines", a.lines)
+                                t!("editor-lines", lines = (a.lines).to_string())
                             }))
                             .child(
                                 div()
@@ -1464,7 +1487,7 @@ impl EditorPanel {
                 cx.notify();
             });
         });
-        let label = format!("before {}", commit.short_id());
+        let label = t!("editor-before", short_id = (commit.short_id()).to_string());
         self.blame.revisions.push(Revision { rev, path, label, data: None, error: None, state, _task: Some(task) });
         self.blame.shown = true;
         cx.notify();
@@ -1504,7 +1527,7 @@ impl EditorPanel {
                 .child(label)
         };
         let mut crumbs: Vec<AnyElement> =
-            vec![crumb("blame-crumb-0".into(), "Now".into(), 0, false, cx).into_any_element()];
+            vec![crumb("blame-crumb-0".into(), ts!("editor-now").into(), 0, false, cx).into_any_element()];
         for (i, r) in self.blame.revisions.iter().enumerate() {
             crumbs.push(crate::components::icon(IconName::ChevronRight, 11., p.fg_dim).into_any_element());
             crumbs.push(
@@ -1514,7 +1537,7 @@ impl EditorPanel {
         }
         let status = match (&last.data, &last.error) {
             (_, Some(e)) => Some(e.clone()),
-            (None, None) => Some("Reading history\u{2026}".into()),
+            (None, None) => Some(ts!("editor-reading-history").into()),
             _ => None,
         };
         Some(
@@ -1538,18 +1561,18 @@ impl EditorPanel {
                 .children(crumbs)
                 .children(status.map(|s| div().text_size(px(11.5)).text_color(p.fg_dim).child(s)))
                 .child(div().flex_1())
-                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child("Read only"))
+                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(ts!("status-read-only")))
                 .child(
                     Button::new("blame-revision-back", IconName::ArrowLeft)
                         .compact()
-                        .label("Back")
+                        .label(ts!("editor-back"))
                         .debug_selector("blame-revision-back")
                         .on_click(cx.listener(move |this, _, _, cx| this.revision_back(depth - 1, cx))),
                 )
                 .child(
                     Button::new("blame-revision-close", IconName::X)
                         .compact()
-                        .label("Back to Now")
+                        .label(ts!("editor-back-to-now"))
                         .debug_selector("blame-revision-close")
                         .on_click(cx.listener(|this, _, _, cx| this.revision_back(0, cx))),
                 ),
@@ -1592,9 +1615,9 @@ impl EditorPanel {
         match self.blame_row(line) {
             Row::Commit(_) => {
                 let c = self.blame_commit(line)?;
-                Some(format!("{}, {} \u{b7} {}", c.author, snout_core::blame::ago(c.time, now_secs()), c.summary))
+                Some(format!("{}, {} \u{b7} {}", c.author, crate::core_text::ago(c.time, now_secs()), c.summary))
             }
-            Row::Uncommitted => Some("You, not committed yet".into()),
+            Row::Uncommitted => Some(ts!("editor-you-not-committed-yet").into()),
             Row::Agent(e) => {
                 let edit = self.agent_edits.get(e as usize)?;
                 let a = crate::agents::by_id(&edit.agent, cx);

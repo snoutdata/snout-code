@@ -515,7 +515,7 @@ impl EditorPanel {
                         .gap(px(6.))
                         .text_color(p.fg_dim)
                         .child(icon(IconName::LoaderCircle, 13., p.fg_dim))
-                        .child("Looking for fixes\u{2026}"),
+                        .child(ts!("editor-looking-for-fixes")),
                 ),
                 Fixes::Found(list) => {
                     let main = match fixes::best_fix(list).cloned() {
@@ -538,7 +538,7 @@ impl EditorPanel {
                             let (this, problem) = (this.clone(), problem.clone());
                             Button::new("hover-ask", agent.icon)
                                 .compact()
-                                .label(format!("Ask {} to fix", agent.short))
+                                .label(t!("editor-ask-to-fix-2", short = (agent.short).to_string()))
                                 .on_click(move |_, _, cx| {
                                     let problem = problem.clone();
                                     let _ = this.update(cx, |e, cx| {
@@ -553,7 +553,7 @@ impl EditorPanel {
                         Button::new("hover-more", IconName::Ellipsis)
                             .compact()
                             .ghost()
-                            .label("More actions\u{2026}")
+                            .label(ts!("editor-more-actions"))
                             .kbd(more_keys)
                             .on_click(move |_, window, cx| {
                                 let problem = problem.clone();
@@ -665,14 +665,21 @@ impl EditorPanel {
             let (edits, n) = fixes::fix_all_from(&all, &uri, answers);
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.revision != revision {
-                    return this.show_hint("The file changed meanwhile: try Fix all again", cx);
+                    return this.show_hint(ts!("editor-the-file-changed-meanwhile-try-fix-all-again"), cx);
                 }
                 if n == 0 {
-                    return this.show_hint("None of these problems could be fixed this way", cx);
+                    return this.show_hint(ts!("editor-none-of-these-problems-could-be-fixed-this"), cx);
                 }
                 this.apply_lsp_edits(&edits, window, cx);
                 if n < all.targets.len() {
-                    this.show_hint(format!("Fixed {n} of {} problems; the rest need a look", all.targets.len()), cx);
+                    this.show_hint(
+                        t!(
+                            "editor-fixed-of-problems-the-rest-need-a-look",
+                            n = n.to_string(),
+                            count = (all.targets.len()).to_string()
+                        ),
+                        cx,
+                    );
                 }
             });
         }));
@@ -691,7 +698,7 @@ impl EditorPanel {
         self.hide_card(cx);
         let here = self.problems_at_caret(cx);
         let Some(first) = here.first().cloned() else {
-            return self.show_hint("No problem at the caret", cx);
+            return self.show_hint(ts!("editor-no-problem-at-the-caret"), cx);
         };
         let task = self.request_actions(first.range, here, cx);
         let revision = self.revision;
@@ -705,7 +712,10 @@ impl EditorPanel {
                     Some(fix) => this.apply_action(fix, window, cx),
                     None => {
                         let (_, more) = Self::fix_keys(cx);
-                        this.show_hint(format!("No quick fix for this problem: {more} for more actions"), cx);
+                        this.show_hint(
+                            t!("editor-no-quick-fix-for-this-problem-for-more", more = more.to_string()),
+                            cx,
+                        );
                     }
                 }
             });
@@ -759,7 +769,7 @@ impl EditorPanel {
                 }
                 if entries.is_empty() {
                     this.close_actions(window, cx);
-                    return this.show_hint("No actions here", cx);
+                    return this.show_hint(ts!("editor-no-actions-here"), cx);
                 }
                 if let Some(list) = this.hover.actions.as_mut() {
                     list.fill(entries);

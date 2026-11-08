@@ -161,9 +161,12 @@ impl ProfileInfo {
 pub fn mode_label(mode: &ProfileMode, info: &ProfileInfo) -> String {
     let list = |v: &[String]| if v.is_empty() { "default".to_owned() } else { v.join(", ") };
     match mode {
-        ProfileMode::Any => "Any profile".into(),
+        ProfileMode::Any => ts!("spring-any-profile").into(),
         ProfileMode::Config => {
-            format!("{} (from the files)", list(&info.active().unwrap_or_else(|| info.config_active())))
+            t!(
+                "spring-from-the-files",
+                config_active = (list(&info.active().unwrap_or_else(|| info.config_active()))).to_string()
+            )
         }
         ProfileMode::Chosen(p) => list(p),
     }
@@ -347,7 +350,7 @@ impl BeanRef {
             (Some(d), None) => simple(d).to_owned(),
             (None, _) => simple(&self.ty).to_owned(),
         };
-        format!("{} ({from})", self.name)
+        t!("spring-text", name = (self.name).to_string(), from = from.to_string())
     }
 }
 
@@ -433,10 +436,10 @@ impl Endpoint {
         let paths = if self.paths.is_empty() { vec![self.path.clone()] } else { self.paths.clone() };
         let mut out = paths.iter().map(|p| format!("{} {p}", self.methods_label())).collect::<Vec<_>>().join("\n");
         if !self.consumes.is_empty() {
-            out.push_str(&format!("\nConsumes {}", self.consumes.join(", ")));
+            out.push_str(&t!("spring-consumes", join = (self.consumes.join(", ")).to_string()));
         }
         if !self.produces.is_empty() {
-            out.push_str(&format!("\nProduces {}", self.produces.join(", ")));
+            out.push_str(&t!("spring-produces", join = (self.produces.join(", ")).to_string()));
         }
         out
     }
@@ -499,28 +502,37 @@ impl SpringLine {
         }
         for b in &self.beans {
             if !b.active {
-                parts.push(format!(
-                    "Bean '{}' ({}): not active with the active profiles",
-                    b.name,
-                    b.stereotype_label()
+                parts.push(t!(
+                    "spring-bean-not-active-with-the-active-profiles",
+                    b = (b.name).to_string(),
+                    stereotype_label = (b.stereotype_label()).to_string()
                 ));
                 continue;
             }
             let n = b.injected_count();
             let used = match n {
-                0 => "not injected anywhere".to_owned(),
-                1 => "injected in 1 place".to_owned(),
-                n => format!("injected in {n} places"),
+                0 => ts!("spring-not-injected-anywhere").to_owned(),
+                1 => ts!("spring-injected-in-1-place").to_owned(),
+                n => t!("spring-injected-in-places", n = n.to_string()),
             };
-            parts.push(format!("Bean '{}' ({}), {used}", b.name, b.stereotype_label()));
+            parts.push(t!(
+                "spring-bean",
+                b = (b.name).to_string(),
+                stereotype_label = (b.stereotype_label()).to_string(),
+                used = used.to_string()
+            ));
         }
         for i in &self.injections {
             let what = i.name.clone().unwrap_or_default();
             let text = match (i.status.as_str(), i.beans.as_slice()) {
-                ("value", _) => format!("{what}: {}", i.value.clone().unwrap_or_default()),
-                (_, [one]) => format!("{what}: bean '{}'", one.name),
-                (_, []) => i.message.clone().unwrap_or_else(|| format!("{what}: no bean")),
-                (_, many) => format!("{what}: {} beans", many.len()),
+                ("value", _) => t!(
+                    "spring-text-2",
+                    what = what.to_string(),
+                    value = (i.value.clone().unwrap_or_default()).to_string()
+                ),
+                (_, [one]) => t!("spring-bean-2", what = what.to_string(), one = (one.name).to_string()),
+                (_, []) => i.message.clone().unwrap_or_else(|| t!("spring-no-bean", what = what.to_string())),
+                (_, many) => t!("spring-beans", what = what.to_string(), count = (many.len()).to_string()),
             };
             parts.push(text);
         }
@@ -723,7 +735,7 @@ impl Spring {
     /// Read the beans and the endpoints again, the engine told the profiles first.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let Some((_, pid)) = self.runs.read(cx).engine(cx) else {
-            self.load = Load::Failed("The Java engine is not ready yet".into());
+            self.load = Load::Failed(ts!("run-the-java-engine-is-not-ready-yet").into());
             cx.notify();
             return;
         };

@@ -28,7 +28,6 @@ pub struct FolderPicker {
     /// The machine's name, for the title.
     name: String,
     /// What the dialog is for: "Open".
-    verb: &'static str,
     pub input: Entity<InputState>,
     /// The folder shown, and its folders (hidden ones last), once read.
     pub dir: PathBuf,
@@ -61,7 +60,6 @@ impl FolderPicker {
         let mut this = Self {
             host,
             name,
-            verb: "Open",
             input,
             dir: start.clone(),
             folders: None,
@@ -198,7 +196,7 @@ impl Render for FolderPicker {
             "remote-picker",
             crate::components::Tone::Accent,
             crate::components::IconName::FolderOpen,
-            format!("{} a Folder on {}", self.verb, self.name),
+            t!("remote-open-folder-on", name = self.name.to_string()),
             None,
             560.,
             Some(480.),
@@ -241,27 +239,33 @@ impl Render for FolderPicker {
                 .pb(px(6.))
                 .overflow_y_scrollbar()
                 .children(rows)
-                .when(loading, |d| d.child(div().px(px(16.)).py(px(10.)).text_color(p.fg_dim).child("Reading…")))
+                .when(loading, |d| {
+                    d.child(div().px(px(16.)).py(px(10.)).text_color(p.fg_dim).child(ts!("spring-reading")))
+                })
                 .when(empty, |d| {
                     d.child(
-                        crate::components::EmptyState::new(snout_core::art::spots::no_results(), "No folders here")
-                            .on(p.card)
-                            .compact(),
+                        crate::components::EmptyState::new(
+                            snout_core::art::spots::no_results(),
+                            ts!("remote-no-folders-here"),
+                        )
+                        .on(p.card)
+                        .compact(),
                     )
                 }),
         )
-        .child(div().flex_none().px(px(16.)).pb(px(8.)).child(
-            look::checkbox("remote-picker-hidden", "Show hidden folders", self.show_hidden, true, &p).on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.show_hidden = !this.show_hidden;
-                    cx.notify();
-                }),
+        .child(
+            div().flex_none().px(px(16.)).pb(px(8.)).child(
+                look::checkbox("remote-picker-hidden", ts!("remote-show-hidden-folders"), self.show_hidden, true, &p)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_hidden = !this.show_hidden;
+                        cx.notify();
+                    })),
             ),
-        ))
+        )
         .child(footer(
             status,
             vec![
-                button("remote-picker-cancel", crate::components::CANCEL_ICON, "Cancel", false, true, cx)
+                button("remote-picker-cancel", crate::components::CANCEL_ICON, ts!("settings-cancel"), false, true, cx)
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(PickerEvent::Cancel)))
                     .into_any_element(),
                 button(

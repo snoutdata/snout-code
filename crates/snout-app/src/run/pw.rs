@@ -42,14 +42,14 @@ impl Runs {
         let mut list = vec![RunConfig {
             id: "playwright:all".into(),
             kind: Kind::Playwright,
-            name: "All tests".into(),
+            name: ts!("run-all-tests").into(),
             ..Default::default()
         }];
         for p in projects {
             list.push(RunConfig {
                 id: format!("playwright:project:{p}"),
                 kind: Kind::Playwright,
-                name: format!("Tests in {p}"),
+                name: t!("run-tests-in", p = p.to_string()),
                 args: vec![format!("--project={p}")],
                 ..Default::default()
             });
@@ -125,7 +125,7 @@ impl Runs {
         cx: &mut Context<Self>,
     ) {
         let Some(project) = self.model.read(cx).project_root() else {
-            then(self, Err("Open a Playwright project first".into()), cx);
+            then(self, Err(ts!("run-open-a-playwright-project-first").into()), cx);
             return;
         };
         let host = crate::host::host(cx);
@@ -140,7 +140,7 @@ impl Runs {
             let all = node::discover(&*host);
             let n = node::choose(&wanted, &all)
                 .cloned()
-                .ok_or("No Node fits this project: download it from the bar above the editor first.".to_owned())?;
+                .ok_or(ts!("run-no-node-fits-this-project-download-it-from").to_owned())?;
             let vars =
                 environment.map(|e| e.variables(|f| host.read_to_string(&root.join(f)).ok())).unwrap_or_default();
             build(&*host, &root, &n, vars)
@@ -149,7 +149,7 @@ impl Runs {
             let found = find.await;
             let _ = this.update(cx, |this, cx| {
                 let started = found.and_then(|launch| {
-                    this.start(Launch::Process(launch), cx).ok_or_else(|| "It did not start".to_owned())
+                    this.start(Launch::Process(launch), cx).ok_or_else(|| ts!("record-it-did-not-start").to_owned())
                 });
                 then(this, started, cx);
             });

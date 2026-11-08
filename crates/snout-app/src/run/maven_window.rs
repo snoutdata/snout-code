@@ -126,7 +126,12 @@ impl MavenWindow {
         }
         if !profiles.is_empty() {
             let open = self.is_open("profiles", true);
-            out.push(Row::Section { key: "profiles".into(), name: "Profiles".into(), count: profiles.len(), open });
+            out.push(Row::Section {
+                key: "profiles".into(),
+                name: ts!("settings-profiles").into(),
+                count: profiles.len(),
+                open,
+            });
             if open {
                 for (id, active) in profiles {
                     let on = runs.project.maven.profile_on(&id, active);
@@ -138,8 +143,11 @@ impl MavenWindow {
         for b in builds {
             let bkey = format!("b:{}", b.build);
             let bopen = self.is_open(&bkey, true);
-            let note =
-                if b.wrapper { format!("Maven {} (wrapper)", b.version) } else { format!("Maven {}", b.version) };
+            let note = if b.wrapper {
+                t!("run-maven-wrapper", version = (b.version).to_string())
+            } else {
+                format!("Maven {}", b.version)
+            };
             out.push(Row::Build {
                 key: bkey,
                 name: b.build.clone().into(),
@@ -153,7 +161,7 @@ impl MavenWindow {
             for m in &b.modules {
                 let mkey = format!("m:{}:{}", b.build, m.project);
                 let mopen = self.is_open(&mkey, single);
-                let name = if m.project == ":" { format!("{} (root)", m.name) } else { m.name.clone() };
+                let name = if m.project == ":" { t!("run-root", name = m.name.to_string()) } else { m.name.clone() };
                 out.push(Row::Module {
                     key: mkey.clone(),
                     name: name.into(),
@@ -165,7 +173,7 @@ impl MavenWindow {
                 }
                 let lkey = format!("{mkey}:lifecycle");
                 let lopen = self.is_open(&lkey, single);
-                out.push(Row::Group { key: lkey, name: "Lifecycle".into(), lifecycle: true, open: lopen });
+                out.push(Row::Group { key: lkey, name: ts!("run-lifecycle").into(), lifecycle: true, open: lopen });
                 if lopen {
                     for phase in &m.lifecycle {
                         out.push(Row::Goal {
@@ -181,7 +189,7 @@ impl MavenWindow {
                 }
                 let pkey = format!("{mkey}:plugins");
                 let popen = self.is_open(&pkey, false);
-                out.push(Row::Group { key: pkey, name: "Plugins".into(), lifecycle: false, open: popen });
+                out.push(Row::Group { key: pkey, name: ts!("run-plugins").into(), lifecycle: false, open: popen });
                 if !popen {
                     continue;
                 }
@@ -235,15 +243,15 @@ impl MavenWindow {
 /// What a lifecycle phase does, for its tooltip.
 fn phase_tip(phase: &str) -> Option<&'static str> {
     Some(match phase {
-        "clean" => "Delete the build output (target)",
-        "validate" => "Check the project is correct and complete",
-        "compile" => "Compile the main sources",
-        "test" => "Run the unit tests",
-        "package" => "Package the compiled code (a jar or war)",
-        "verify" => "Run the checks on the package, integration tests among them",
-        "install" => "Put the package in the local repository",
-        "site" => "Make the project's site",
-        "deploy" => "Copy the package to the remote repository",
+        "clean" => ts!("run-delete-the-build-output-target"),
+        "validate" => ts!("run-check-the-project-is-correct-and-complete"),
+        "compile" => ts!("run-compile-the-main-sources"),
+        "test" => ts!("run-run-the-unit-tests"),
+        "package" => ts!("run-package-the-compiled-code-a-jar-or-war"),
+        "verify" => ts!("run-run-the-checks-on-the-package-integration-tests"),
+        "install" => ts!("run-put-the-package-in-the-local-repository"),
+        "site" => ts!("run-make-the-projects-site"),
+        "deploy" => ts!("run-copy-the-package-to-the-remote-repository"),
         _ => return None,
     })
 }
@@ -262,7 +270,7 @@ impl Render for MavenWindow {
                 e.primary_action(
                     "maven-empty-sync",
                     IconName::RefreshCw,
-                    "Reload the Maven Project",
+                    ts!("tabs-reload-the-maven-project"),
                     crate::menus::SyncGradle,
                 )
             })
@@ -270,17 +278,27 @@ impl Render for MavenWindow {
         if runs.maven.builds.is_empty() {
             let ready = runs.engine(cx).is_some();
             return base.child(match (&runs.maven.error, runs.maven.loading, ready) {
-                (_, true, _) => {
-                    note(spots::maven(), "Reading the Maven goals", "The plugins' goals are being read.".into(), false)
+                (_, true, _) => note(
+                    spots::maven(),
+                    ts!("run-reading-the-maven-goals"),
+                    ts!("run-the-plugins-goals-are-being-read").into(),
+                    false,
+                ),
+                (Some(e), _, _) => {
+                    note(spots::gradle_failed(), ts!("run-the-goals-could-not-be-read"), e.clone(), true)
                 }
-                (Some(e), _, _) => note(spots::gradle_failed(), "The goals could not be read", e.clone(), true),
                 (None, _, false) => note(
                     spots::maven(),
-                    "No goals yet",
-                    "The goals appear once the Java engine has imported the project.".into(),
+                    ts!("run-no-goals-yet"),
+                    ts!("run-the-goals-appear-once-the-java-engine-has").into(),
                     true,
                 ),
-                (None, _, true) => note(spots::maven(), "No Maven builds", "This project has no pom.xml.".into(), true),
+                (None, _, true) => note(
+                    spots::maven(),
+                    ts!("run-no-maven-builds"),
+                    ts!("run-this-project-has-no-pom-xml").into(),
+                    true,
+                ),
             });
         }
         let choices = runs.project.maven.clone();
@@ -298,9 +316,11 @@ impl Render for MavenWindow {
             .items_center()
             .gap(px(4.))
             .child(
-                crate::look::toggle("maven-offline", IconName::WifiOff, "Offline", choices.offline, &p)
+                crate::look::toggle("maven-offline", IconName::WifiOff, ts!("run-offline"), choices.offline, &p)
                     .debug_selector(|| "maven-offline".into())
-                    .tooltip(|w, cx| Tooltip::new("Run Maven offline (-o): only the local repository").build(w, cx))
+                    .tooltip(|w, cx| {
+                        Tooltip::new(ts!("run-run-maven-offline-o-only-the-local-repository")).build(w, cx)
+                    })
                     .on_click(move |_, _, cx| {
                         offline_runs.update(cx, |r, cx| {
                             let on = !r.project.maven.offline;
@@ -312,12 +332,12 @@ impl Render for MavenWindow {
                 crate::look::toggle(
                     "maven-skip-tests",
                     IconName::FlaskConicalOff,
-                    "Skip Tests",
+                    ts!("run-skip-tests"),
                     choices.skip_tests,
                     &p,
                 )
                 .debug_selector(|| "maven-skip-tests".into())
-                .tooltip(|w, cx| Tooltip::new("Run goals without the tests (-DskipTests)").build(w, cx))
+                .tooltip(|w, cx| Tooltip::new(ts!("run-run-goals-without-the-tests-dskiptests")).build(w, cx))
                 .on_click(move |_, _, cx| {
                     skip_runs.update(cx, |r, cx| {
                         let on = !r.project.maven.skip_tests;
@@ -339,7 +359,7 @@ impl Render for MavenWindow {
                                 None,
                                 Icon::Check,
                                 id.clone().into(),
-                                active.then(|| SharedString::from("active in the POM")),
+                                active.then(|| SharedString::from(ts!("run-active-in-the-pom"))),
                                 None,
                             ),
                             Row::Build { name, note, open, error, .. } => (

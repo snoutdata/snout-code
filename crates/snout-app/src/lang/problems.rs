@@ -193,7 +193,7 @@ impl EventEmitter<ProblemsEvent> for ProblemsPanel {}
 impl ProblemsPanel {
     pub fn new(hub: Entity<LangHub>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&hub, |this, _, cx| this.rebuild(cx)).detach();
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter problems"));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("editor-filter-problems")));
         // The rows follow the filter's text, typed or set.
         cx.observe(&filter, |this, filter, cx| {
             let text = filter.read(cx).value().to_string();
@@ -527,7 +527,9 @@ impl ProblemsPanel {
                 .text_color(if on { p.fg } else { p.fg_dim })
                 .child(icon(ico, 13., if on { color } else { p.fg_dim }))
                 .child(counts[rank].to_string())
-                .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(format!("Show {what}")).build(w, cx))
+                .tooltip(move |w, cx| {
+                    gpui_component::tooltip::Tooltip::new(t!("editor-show", what = what.to_string())).build(w, cx)
+                })
                 .on_click(cx.listener(move |this, _, _, cx| this.toggle_severity(rank, cx)))
         };
         let all_collapsed = !self.groups.is_empty() && self.collapsed.len() >= self.groups.len();
@@ -550,7 +552,7 @@ impl ProblemsPanel {
                 IconButton::new(
                     "problems-collapse",
                     if all_collapsed { IconName::ChevronsUpDown } else { IconName::ChevronsDownUp },
-                    if all_collapsed { "Expand all" } else { "Collapse all" },
+                    if all_collapsed { ts!("editor-expand-all") } else { ts!("editor-collapse-all") },
                 )
                 .on_click(cx.listener(move |this, _, _, cx| this.collapse_all(!all_collapsed, cx))),
             )
@@ -700,22 +702,28 @@ impl Render for ProblemsPanel {
             .when(!none, |d| d.child(self.toolbar(cx)))
             .when(none, |d| {
                 d.child(
-                    crate::components::EmptyState::new(snout_core::art::spots::no_problems(), "No problems")
-                        .hint("Nothing to fix in the files the Java engine checked.")
-                        .compact()
-                        .primary_action(
-                            "problems-empty-build",
-                            crate::components::IconName::Hammer,
-                            "Build Project",
-                            crate::menus::BuildProject,
-                        ),
+                    crate::components::EmptyState::new(
+                        snout_core::art::spots::no_problems(),
+                        ts!("editor-no-problems"),
+                    )
+                    .hint(ts!("editor-nothing-to-fix-in-the-files-the-java"))
+                    .compact()
+                    .primary_action(
+                        "problems-empty-build",
+                        crate::components::IconName::Hammer,
+                        ts!("cmd-build-project"),
+                        crate::menus::BuildProject,
+                    ),
                 )
             })
             .when(!none && empty, |d| {
                 d.child(
-                    crate::components::EmptyState::new(snout_core::art::spots::no_results(), "No problems match")
-                        .hint("Clear the filter, or turn on more of errors, warnings and information above.")
-                        .compact(),
+                    crate::components::EmptyState::new(
+                        snout_core::art::spots::no_results(),
+                        ts!("editor-no-problems-match"),
+                    )
+                    .hint(ts!("editor-clear-the-filter-or-turn-on-more-of"))
+                    .compact(),
                 )
             })
             .when(!empty, |d| d.child(list))

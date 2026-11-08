@@ -46,9 +46,9 @@ impl Kind {
 
     fn note(self) -> &'static str {
         match self {
-            Kind::Java => "Gradle or Maven",
-            Kind::SpringBoot => "From start.spring.io",
-            Kind::Playwright => "End-to-end tests in TypeScript",
+            Kind::Java => ts!("newproject-gradle-or-maven"),
+            Kind::SpringBoot => ts!("newproject-from-start-spring-io"),
+            Kind::Playwright => ts!("newproject-end-to-end-tests-in-typescript"),
         }
     }
 }
@@ -130,13 +130,13 @@ impl NewProjectView {
             .detach();
             state
         };
-        let name = input("untitled", "Project name", window, cx);
-        let location = input(&location.display().to_string(), "Folder", window, cx);
+        let name = input("untitled", ts!("newproject-project-name"), window, cx);
+        let location = input(&location.display().to_string(), ts!("newproject-folder"), window, cx);
         let group = input("com.example", "com.example", window, cx);
         let artifact = input("", "", window, cx);
         let package = input("", "", window, cx);
         let base_url = input("", "http://localhost:8080", window, cx);
-        let dep_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search dependencies"));
+        let dep_search = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("newproject-search-dependencies")));
         cx.subscribe(&dep_search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 cx.notify();
@@ -278,7 +278,7 @@ impl NewProjectView {
             return Some(p);
         }
         if self.kind == Kind::SpringBoot && self.catalog.is_none() {
-            return Some("Waiting for start.spring.io…".into());
+            return Some(ts!("newproject-waiting-for-start-spring-io").into());
         }
         None
     }
@@ -308,7 +308,8 @@ impl NewProjectView {
                 match result {
                     Ok(c) => this.catalog = Some(c),
                     Err(e) => {
-                        this.catalog_error = Some(format!("start.spring.io could not be reached ({e})."));
+                        this.catalog_error =
+                            Some(t!("newproject-start-spring-io-could-not-be-reached", e = e.to_string()));
                         this.catalog = Some(Catalog::offline(cache.as_deref().and_then(initializr::cached_boot)));
                     }
                 }
@@ -373,7 +374,7 @@ impl NewProjectView {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Choose".into()),
+            prompt: Some(ts!("settings-choose").into()),
         });
         let location = self.location.clone();
         cx.spawn_in(window, async move |_, cx| {
@@ -443,7 +444,7 @@ impl NewProjectView {
                         look::small_button(
                             "new-project-browse",
                             crate::components::IconName::FolderOpen,
-                            "Choose…",
+                            ts!("find-choose"),
                             &p,
                         )
                         .flex_none()
@@ -458,34 +459,47 @@ impl NewProjectView {
                     .pl(px(162.))
                     .text_size(px(12.))
                     .text_color(p.fg_dim)
-                    .child(format!("The project goes in {}", target.display())),
+                    .child(t!("newproject-the-project-goes-in", target = (target.display()).to_string())),
             );
         if self.kind == Kind::SpringBoot && self.catalog.is_none() {
             return body
-                .child(div().pt(px(24.)).text_color(p.fg_dim).child("Asking start.spring.io what it offers…"))
+                .child(
+                    div()
+                        .pt(px(24.))
+                        .text_color(p.fg_dim)
+                        .child(ts!("newproject-asking-start-spring-io-what-it-offers")),
+                )
                 .into_any_element();
         }
         if self.kind == Kind::Playwright {
             return body
-                .child(section("Tests", &p))
+                .child(section(ts!("stripes-tests"), &p))
                 .child(row(
-                    "Application URL",
+                    ts!("newproject-application-url"),
                     div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.base_url, false, None, &p)),
                     &p,
                 ))
                 .child(
-                    div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                        "The address the tests open. A BASE_URL environment variable replaces it when it is set.",
-                    ),
+                    div()
+                        .pl(px(162.))
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child(ts!("newproject-the-address-the-tests-open-a-base-url")),
                 )
                 .child(
                     div().pt(px(14.)).child(
-                        look::checkbox("new-project-git", "Create a Git repository", self.git, true, &p)
-                            .debug_selector(|| "new-project-git".into())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.git = !this.git;
-                                cx.notify();
-                            })),
+                        look::checkbox(
+                            "new-project-git",
+                            ts!("newproject-create-a-git-repository"),
+                            self.git,
+                            true,
+                            &p,
+                        )
+                        .debug_selector(|| "new-project-git".into())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.git = !this.git;
+                            cx.notify();
+                        })),
                     ),
                 )
                 .into_any_element();
@@ -504,8 +518,8 @@ impl NewProjectView {
                 },
             ))
         };
-        body = body.child(section("Build", &p)).child(row(
-            "Build tool",
+        body = body.child(section(ts!("menu-build"), &p)).child(row(
+            ts!("newproject-build-tool"),
             div()
                 .flex()
                 .gap(px(4.))
@@ -562,7 +576,7 @@ impl NewProjectView {
             ));
         }
         body = body
-            .child(section("Coordinates", &p))
+            .child(section(ts!("newproject-coordinates"), &p))
             .child(row(
                 "Group",
                 div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.group, false, None, &p)),
@@ -580,7 +594,7 @@ impl NewProjectView {
             ));
         body.child(
             div().pt(px(14.)).child(
-                look::checkbox("new-project-git", "Create a Git repository", self.git, true, &p)
+                look::checkbox("new-project-git", ts!("newproject-create-a-git-repository"), self.git, true, &p)
                     .debug_selector(|| "new-project-git".into())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.git = !this.git;
@@ -599,7 +613,8 @@ impl NewProjectView {
         let hover = p.button_hover;
         let mut chosen = div().flex().flex_wrap().gap(px(4.)).min_h(px(22.));
         if self.deps.is_empty() {
-            chosen = chosen.child(div().text_size(px(12.)).text_color(p.fg_dim).child("None chosen yet."));
+            chosen =
+                chosen.child(div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("newproject-none-chosen-yet")));
         }
         for (i, id) in self.deps.iter().enumerate() {
             let name = catalog.dependency(id).map(|d| d.name.clone()).unwrap_or_else(|| id.clone());
@@ -697,13 +712,13 @@ impl NewProjectView {
             }
         }
         if !any {
-            list = list.child(div().p(px(6.)).text_color(p.fg_dim).child("No dependency matches."));
+            list = list.child(div().p(px(6.)).text_color(p.fg_dim).child(ts!("newproject-no-dependency-matches")));
         }
-        let mut out = div().flex().flex_col().gap(px(6.)).child(section("Dependencies", &p)).child(
-            div().text_size(px(12.)).text_color(p.fg_dim).child(format!(
-                "Spring Boot {}, Java {}. Choose what the application uses; more can be added to the build later.",
-                self.boot().version,
-                self.basics(cx).java
+        let mut out = div().flex().flex_col().gap(px(6.)).child(section(ts!("newproject-dependencies"), &p)).child(
+            div().text_size(px(12.)).text_color(p.fg_dim).child(t!(
+                "newproject-spring-boot-java-choose-what-the-application-uses",
+                version = (self.boot().version).to_string(),
+                java = (self.basics(cx).java).to_string()
             )),
         );
         if let Some(why) = &self.catalog_error {
@@ -722,7 +737,7 @@ impl NewProjectView {
                         look::small_button(
                             "new-project-retry",
                             crate::components::IconName::RotateCcw,
-                            "Try Again",
+                            ts!("git-try-again"),
                             &p,
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.load_catalog(cx))),
@@ -809,9 +824,9 @@ impl Render for NewProjectView {
             Some((
                 match self.kind {
                     Kind::SpringBoot if !self.catalog.as_ref().is_some_and(|c| c.offline) => {
-                        "Getting the project from start.spring.io…".into()
+                        ts!("newproject-getting-the-project-from-start-spring-io").into()
                     }
-                    _ => "Creating the project…".into(),
+                    _ => ts!("newproject-creating-the-project").into(),
                 },
                 p.fg_dim,
             ))
@@ -843,8 +858,8 @@ impl Render for NewProjectView {
                 crate::components::dialog_header_icon(
                     crate::components::Tone::Accent,
                     crate::components::IconName::FolderPlus,
-                    "New Project",
-                    Some("A Java or Spring Boot project, built with Gradle or Maven.".into()),
+                    ts!("newproject-new-project"),
+                    Some(ts!("newproject-a-java-or-spring-boot-project-built-with").into()),
                     &p,
                 )
                 .pb(px(12.))
@@ -907,35 +922,39 @@ impl Render for NewProjectView {
                     )
                     .when(self.offer_offline && !self.creating, |d| {
                         d.child(
-                            button("new-project-offline", "Create Without the Network", false, true)
+                            button("new-project-offline", ts!("newproject-create-without-the-network"), false, true)
                                 .on_click(cx.listener(|this, _, _, cx| this.create(true, cx))),
                         )
                     })
                     .child(
-                        button("new-project-cancel", "Cancel", false, true)
+                        button("new-project-cancel", ts!("settings-cancel"), false, true)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(NewProjectEvent::Cancel))),
                     )
                     .when(self.kind == Kind::SpringBoot && self.picking, |d| {
-                        d.child(button("new-project-back", "Previous", false, !self.creating).on_click(cx.listener(
-                            |this, _, _, cx| {
+                        d.child(button("new-project-back", ts!("newproject-previous"), false, !self.creating).on_click(
+                            cx.listener(|this, _, _, cx| {
                                 this.picking = false;
                                 cx.notify();
-                            },
-                        )))
+                            }),
+                        ))
                     })
                     .map(|d| {
                         if self.kind == Kind::SpringBoot && !self.picking {
-                            d.child(button("new-project-next", "Next", true, can_create).when(can_create, |d| {
-                                d.on_click(cx.listener(|this, _, _, cx| {
-                                    this.picking = true;
-                                    cx.notify();
-                                }))
-                            }))
+                            d.child(button("new-project-next", ts!("newproject-next"), true, can_create).when(
+                                can_create,
+                                |d| {
+                                    d.on_click(cx.listener(|this, _, _, cx| {
+                                        this.picking = true;
+                                        cx.notify();
+                                    }))
+                                },
+                            ))
                         } else {
                             d.child(
-                                button("new-project-create", "Create", true, can_create).when(can_create, |d| {
-                                    d.on_click(cx.listener(|this, _, _, cx| this.create(false, cx)))
-                                }),
+                                button("new-project-create", ts!("dialogs-create"), true, can_create)
+                                    .when(can_create, |d| {
+                                        d.on_click(cx.listener(|this, _, _, cx| this.create(false, cx)))
+                                    }),
                             )
                         }
                     }),

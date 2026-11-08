@@ -117,7 +117,7 @@ pub fn codegen_launch(
     out: &Path,
     vars: Vec<(String, String)>,
 ) -> Result<ProcessLaunch, String> {
-    let cli = cli(host, root).ok_or("The Playwright test runner is not installed: install the packages first.")?;
+    let cli = cli(host, root).ok_or(ts!("tests-the-playwright-test-runner-is-not-installed-install"))?;
     if let Some(dir) = out.parent() {
         host.create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -126,7 +126,7 @@ pub fn codegen_launch(
     let mut args = vec![cli.display().to_string()];
     args.extend(start.codegen_args(out, storage));
     Ok(ProcessLaunch {
-        title: "Recording".into(),
+        title: ts!("tests-recording").into(),
         program: node.bin.clone(),
         args,
         cwd: root.to_owned(),
@@ -146,12 +146,12 @@ pub fn picker_launch(
     start: &Start,
     vars: Vec<(String, String)>,
 ) -> Result<ProcessLaunch, String> {
-    cli(host, root).ok_or("The Playwright test runner is not installed: install the packages first.")?;
+    cli(host, root).ok_or(ts!("tests-the-playwright-test-runner-is-not-installed-install"))?;
     let script = write_tool(host, "snout-picker", PICKER)
-        .map_err(|e| format!("The SnoutCode locator picker could not be written: {e}"))?;
+        .map_err(|e| t!("tests-the-snoutcode-locator-picker-could-not-be-written", e = e.to_string()))?;
     let storage = start.storage.as_ref().is_some_and(|s| host.is_file(s));
     Ok(ProcessLaunch {
-        title: "Pick Locator".into(),
+        title: ts!("cmd-pick-locator").into(),
         program: node.bin.clone(),
         args: vec![script.display().to_string(), start.picker_args(storage)],
         cwd: root.to_owned(),
@@ -170,9 +170,9 @@ pub fn ui_launch(
     node: &Node,
     vars: Vec<(String, String)>,
 ) -> Result<ProcessLaunch, String> {
-    let cli = cli(host, root).ok_or("The Playwright test runner is not installed: install the packages first.")?;
+    let cli = cli(host, root).ok_or(ts!("tests-the-playwright-test-runner-is-not-installed-install"))?;
     Ok(ProcessLaunch {
-        title: "UI Mode".into(),
+        title: ts!("tests-ui-mode").into(),
         program: node.bin.clone(),
         args: vec![cli.display().to_string(), "test".into(), "--ui".into(), "--ui-port=0".into()],
         cwd: root.to_owned(),

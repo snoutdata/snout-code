@@ -195,12 +195,12 @@ pub fn describe(root: &Value, s: &Value) -> String {
         .filter(|t| *t != "null" && !named_types.contains(&t.as_str()))
         .map(|t| {
             match t.as_str() {
-                "boolean" => "true or false",
-                "integer" => "a whole number",
-                "number" => "a number",
-                "string" => "a string",
-                "array" => "a list",
-                "object" => "an object",
+                "boolean" => ts!("json-true-or-false"),
+                "integer" => ts!("json-a-whole-number"),
+                "number" => ts!("json-a-number"),
+                "string" => ts!("json-a-string"),
+                "array" => ts!("json-a-list"),
+                "object" => ts!("json-an-object"),
                 other => other,
             }
             .to_owned()
@@ -212,16 +212,16 @@ pub fn describe(root: &Value, s: &Value) -> String {
         && only.starts_with('a')
         && max < 1e9
     {
-        return format!("{only} from {min} to {max}");
+        return t!("json-from-to", only = only.to_string(), min = min.to_string(), max = max.to_string());
     }
-    if words.is_empty() { "any value".to_owned() } else { one_of(&words) }
+    if words.is_empty() { ts!("json-any-value").to_owned() } else { one_of(&words) }
 }
 
 fn one_of(items: &[String]) -> String {
     match items {
         [] => String::new(),
         [one] => one.clone(),
-        [init @ .., last] => format!("{} or {last}", init.join(", ")),
+        [init @ .., last] => t!("json-or", join = (init.join(", ")).to_string(), last = last.to_string()),
     }
 }
 
@@ -496,7 +496,7 @@ pub fn hover(which: Which, text: &str, offset: usize) -> Option<(String, Range<u
     if let Some(d) = s.get("default").filter(|d| !d.is_null()) {
         let shown = d.to_string();
         if shown.len() <= 60 {
-            md.push_str(&format!("\n\nDefault: `{shown}`"));
+            md.push_str(&t!("json-default", shown = shown.to_string()));
         }
     }
     Some((md, range))
@@ -532,7 +532,7 @@ pub fn problems(which: Which, text: &str) -> Vec<Problem> {
     }
     let node = match p.value().and_then(|n| {
         p.ws();
-        if p.i < text.len() { Err((p.i, "Unexpected text after the settings".to_owned())) } else { Ok(n) }
+        if p.i < text.len() { Err((p.i, ts!("json-unexpected-text-after-the-settings").to_owned())) } else { Ok(n) }
     }) {
         Ok(n) => n,
         Err((at, message)) => {
@@ -579,17 +579,17 @@ fn check(root: &Value, s: &Value, node: &Node, path: &[String], out: &mut Vec<Pr
         match closest {
             Some(found) => out.extend(found),
             None => {
-                let what = path.last().map_or("The settings".to_owned(), |k| format!("`{k}`"));
+                let what = path.last().map_or(ts!("json-the-settings").to_owned(), |k| format!("`{k}`"));
                 out.push(Problem {
                     range: node.span.clone(),
                     error: true,
-                    message: format!("{what} takes {}", describe(root, s)),
+                    message: t!("json-takes", what = what.to_string(), s = (describe(root, s)).to_string()),
                 });
             }
         }
         return;
     }
-    let what = || path.last().map_or("The settings".to_owned(), |k| format!("`{k}`"));
+    let what = || path.last().map_or(ts!("json-the-settings").to_owned(), |k| format!("`{k}`"));
     let ts = types(root, s);
     let kind = json_type(&node.value);
     let fits = ts.is_empty() || ts.iter().any(|t| t == kind || (t == "number" && kind == "integer"));
@@ -597,7 +597,7 @@ fn check(root: &Value, s: &Value, node: &Node, path: &[String], out: &mut Vec<Pr
         out.push(Problem {
             range: node.span.clone(),
             error: true,
-            message: format!("{} takes {}", what(), describe(root, s)),
+            message: t!("json-takes", what = (what()).to_string(), s = (describe(root, s)).to_string()),
         });
         return;
     }
@@ -606,7 +606,7 @@ fn check(root: &Value, s: &Value, node: &Node, path: &[String], out: &mut Vec<Pr
         out.push(Problem {
             range: node.span.clone(),
             error: true,
-            message: format!("{} takes {}", what(), describe(root, s)),
+            message: t!("json-takes", what = (what()).to_string(), s = (describe(root, s)).to_string()),
         });
         return;
     }
@@ -617,7 +617,7 @@ fn check(root: &Value, s: &Value, node: &Node, path: &[String], out: &mut Vec<Pr
             out.push(Problem {
                 range: node.span.clone(),
                 error: true,
-                message: format!("{} is at least {min}", what()),
+                message: t!("json-is-at-least", what = (what()).to_string(), min = min.to_string()),
             });
         }
         if let Some(max) = s.get("maximum").and_then(Value::as_f64)
@@ -626,7 +626,7 @@ fn check(root: &Value, s: &Value, node: &Node, path: &[String], out: &mut Vec<Pr
             out.push(Problem {
                 range: node.span.clone(),
                 error: true,
-                message: format!("{} is at most {max}", what()),
+                message: t!("json-is-at-most", what = (what()).to_string(), max = max.to_string()),
             });
         }
     }
@@ -644,7 +644,7 @@ fn check(root: &Value, s: &Value, node: &Node, path: &[String], out: &mut Vec<Pr
                     _ if known.is_some() || extra == Some(&Value::Bool(false)) => out.push(Problem {
                         range: key_span.clone(),
                         error: false,
-                        message: format!("Unknown setting `{key}`: SnoutCode ignores it"),
+                        message: t!("json-unknown-setting-snoutcode-ignores-it", key = key.to_string()),
                     }),
                     _ => {}
                 },
@@ -655,7 +655,7 @@ fn check(root: &Value, s: &Value, node: &Node, path: &[String], out: &mut Vec<Pr
                 out.push(Problem {
                     range: node.span.clone(),
                     error: true,
-                    message: format!("{} needs `{req}`", what()),
+                    message: t!("json-needs", what = (what()).to_string(), req = req.to_string()),
                 });
             }
         }
@@ -685,7 +685,7 @@ impl Parser<'_> {
     fn value(&mut self) -> Parsed<Node> {
         self.ws();
         let start = self.i;
-        let Some(&c) = self.text.get(self.i) else { return Err((self.i, "A value is missing here".into())) };
+        let Some(&c) = self.text.get(self.i) else { return Err((self.i, ts!("json-a-value-is-missing-here").into())) };
         match c {
             b'{' => {
                 self.i += 1;
@@ -699,13 +699,13 @@ impl Parser<'_> {
                         self.ws();
                         let key_start = self.i;
                         if self.text.get(self.i) != Some(&b'"') {
-                            return Err((self.i, "A key in double quotes is expected here".into()));
+                            return Err((self.i, ts!("json-a-key-in-double-quotes-is-expected-here").into()));
                         }
                         let key = self.string()?;
                         let key_span = key_start..self.i;
                         self.ws();
                         if self.text.get(self.i) != Some(&b':') {
-                            return Err((self.i, format!("A colon is expected after \"{key}\"")));
+                            return Err((self.i, t!("json-colon-expected", key = key.to_string())));
                         }
                         self.i += 1;
                         let value = self.value()?;
@@ -718,7 +718,7 @@ impl Parser<'_> {
                                 self.i += 1;
                                 break;
                             }
-                            _ => return Err((self.i, "A comma or a closing brace is expected here".into())),
+                            _ => return Err((self.i, ts!("json-a-comma-or-a-closing-brace-is-expected").into())),
                         }
                     }
                 }
@@ -740,7 +740,7 @@ impl Parser<'_> {
                                 self.i += 1;
                                 break;
                             }
-                            _ => return Err((self.i, "A comma or a closing bracket is expected here".into())),
+                            _ => return Err((self.i, ts!("json-a-comma-or-a-closing-bracket-is-expected").into())),
                         }
                     }
                 }
@@ -760,8 +760,8 @@ impl Parser<'_> {
                     .ok()
                     .filter(|v| !v.is_object() && !v.is_array() && !v.is_string())
                     .ok_or_else(|| {
-                        let shown = if word.is_empty() { "this".to_owned() } else { format!("`{word}`") };
-                        (start, format!("{shown} is not a JSON value (strings take double quotes)"))
+                        let shown = if word.is_empty() { ts!("json-this").to_owned() } else { format!("`{word}`") };
+                        (start, t!("json-is-not-a-json-value-strings-take-double", shown = shown.to_string()))
                     })?;
                 Ok(Node { span: start..self.i, value, members: Vec::new(), items: Vec::new() })
             }
@@ -779,13 +779,13 @@ impl Parser<'_> {
                     self.i += 1;
                     let raw = std::str::from_utf8(&self.text[start..self.i]).unwrap_or_default();
                     return serde_json::from_str::<String>(raw)
-                        .map_err(|e| (start, format!("This string cannot be read: {e}")));
+                        .map_err(|e| (start, t!("json-this-string-cannot-be-read", e = e.to_string())));
                 }
                 b'\n' => break,
                 _ => self.i += 1,
             }
         }
-        Err((start, "This string has no closing quote".into()))
+        Err((start, ts!("json-this-string-has-no-closing-quote").into()))
     }
 }
 

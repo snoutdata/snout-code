@@ -176,7 +176,11 @@ impl Runs {
                 }
             }
             Err(e) => {
-                let _ = tx.unbounded_send(Event::Failed(format!("{} did not start: {e}", launch.program.display())));
+                let _ = tx.unbounded_send(Event::Failed(t!(
+                    "run-did-not-start",
+                    program = (launch.program.display()).to_string(),
+                    e = e.to_string()
+                )));
             }
         }
         cx.spawn(async move |this, cx| {
@@ -224,9 +228,9 @@ impl Runs {
                     _ => Outcome::Failed,
                 };
                 let what = match (outcome, code) {
-                    (Outcome::Cancelled, _) => "Stopped".to_owned(),
-                    (_, Some(c)) => format!("Process finished with exit code {c}"),
-                    (_, None) => "Process ended by a signal".to_owned(),
+                    (Outcome::Cancelled, _) => ts!("run-stopped").to_owned(),
+                    (_, Some(c)) => t!("run-process-finished-with-exit-code", c = c.to_string()),
+                    (_, None) => ts!("run-process-ended-by-a-signal").to_owned(),
                 };
                 s.push(Stream::System, &what);
                 s.ended =

@@ -479,13 +479,20 @@ impl PwTests {
         let before = self.history.runs.last().cloned();
         let fresh = record.new_failures(before.as_ref()).len();
         let failed = record.failed;
-        let note = format!(
-            "{}: {} passed, {} failed{}{}",
-            s.title,
-            record.passed,
-            record.failed,
-            if record.flaky > 0 { format!(", {} flaky", record.flaky) } else { String::new() },
-            if fresh > 0 { format!(" ({fresh} new since the last run)") } else { String::new() },
+        let note = t!(
+            "tests-passed-failed",
+            title = (s.title).to_string(),
+            passed = (record.passed).to_string(),
+            failed = (record.failed).to_string(),
+            new = (if record.flaky > 0 {
+                t!("tests-flaky-3", flaky = (record.flaky).to_string())
+            } else {
+                String::new()
+            })
+            .to_string(),
+            new_2 =
+                (if fresh > 0 { t!("tests-new-since-the-last-run", fresh = fresh.to_string()) } else { String::new() })
+                    .to_string()
         );
         self.kept.insert(id);
         self.history.add(record);

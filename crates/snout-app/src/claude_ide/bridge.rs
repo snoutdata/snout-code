@@ -847,9 +847,17 @@ pub fn mention_text(rel: &str, lines: Option<(u32, u32)>) -> String {
 /// What the note by the console says was sent.
 pub fn sent_note(name: &str, lines: Option<(u32, u32)>, agent: &str) -> String {
     match lines {
-        Some((a, b)) if a == b => format!("Sent {name} line {} to {agent}", a + 1),
-        Some((a, b)) => format!("Sent {name} lines {}\u{2013}{} to {agent}", a + 1, b + 1),
-        None => format!("Sent {name} to {agent}"),
+        Some((a, b)) if a == b => {
+            t!("agents-sent-line-to", name = name.to_string(), a = (a + 1).to_string(), agent = agent.to_string())
+        }
+        Some((a, b)) => t!(
+            "agents-sent-lines-to",
+            name = name.to_string(),
+            a = (a + 1).to_string(),
+            b = (b + 1).to_string(),
+            agent = agent.to_string()
+        ),
+        None => t!("agents-sent-to", name = name.to_string(), agent = agent.to_string()),
     }
 }
 
@@ -950,8 +958,19 @@ pub fn ask_to_fix(
     }
     if let Some(console) = console {
         let note = match lines {
-            (a, b) if a == b => format!("Asked {} to fix {name} line {}", agent.short, a + 1),
-            (a, b) => format!("Asked {} to fix {name} lines {}\u{2013}{}", agent.short, a + 1, b + 1),
+            (a, b) if a == b => t!(
+                "agents-asked-to-fix-line",
+                short = (agent.short).to_string(),
+                name = name.to_string(),
+                a = (a + 1).to_string()
+            ),
+            (a, b) => t!(
+                "agents-asked-to-fix-lines",
+                short = (agent.short).to_string(),
+                name = name.to_string(),
+                a = (a + 1).to_string(),
+                b = (b + 1).to_string()
+            ),
         };
         console.update(cx, |c, cx| c.show_note(note, cx));
     }
@@ -991,7 +1010,7 @@ pub fn ask_for_draft(ws: &mut Workspace, window: &mut Window, cx: &mut Context<W
     let dir = ws.claude.as_ref().and_then(|b| b.settings_dir.clone());
     let console = crate::console::console_of(ws, cx);
     let (Some(dir), Some(console)) = (dir, console) else {
-        let why = "SnoutCode cannot reach the agent in this window. Close the project and open it again.";
+        let why = ts!("agents-snoutcode-cannot-reach-the-agent-in-this-window");
         ws.model.update(cx, |m, cx| m.draft_stuck(why.to_owned(), cx));
         return;
     };
@@ -1022,7 +1041,7 @@ pub fn ask_for_draft(ws: &mut Workspace, window: &mut Window, cx: &mut Context<W
                 c.ensure_session(&root, window, cx);
                 c.send_when_ready(&root, &draft_prompt(&api), cx);
                 let name = c.session_agent(&root, cx).short;
-                c.show_note(format!("Asked {name} for the commit message"), cx);
+                c.show_note(t!("agents-asked-for-the-commit-message", name = name.to_string()), cx);
             });
         });
         await_sandboxed_message(ws, host, dir, cx).await;
@@ -1992,14 +2011,19 @@ pub fn indicator(changes: &ClaudeChanges, cx: &App) -> Option<(gpui::Stateful<gp
     let p = palette(cx);
     let c = p.claude();
     let (what, path, tool, mark) = if let Some(d) = changes.pending.iter().find(|d| d.front) {
-        ("Claude is waiting for your review".to_owned(), d.path.clone(), None, c.mark)
+        (ts!("agents-claude-is-waiting-for-your-review").to_owned(), d.path.clone(), None, c.mark)
     } else {
         let a = changes
             .activity
             .as_ref()
             .filter(|a| (!a.done && a.at.elapsed() < super::panel::ACTIVE) || (a.done && a.at.elapsed() < LINGER))?;
         let agent = agents::by_id(a.agent, cx);
-        (format!("{} is editing", agent.short), a.path.clone(), Some(a.tool.clone()), agent.color(&p))
+        (
+            t!("agents-is-editing", short = (agent.short).to_string()),
+            a.path.clone(),
+            Some(a.tool.clone()),
+            agent.color(&p),
+        )
     };
     let (name, _) = changes.display(&path);
     let el = div()

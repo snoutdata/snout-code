@@ -83,7 +83,7 @@ impl Launch {
     pub fn title(&self) -> String {
         match self {
             Launch::Config { config, .. } => config.name.clone(),
-            Launch::Tests { label, rerun_failed: true, .. } => format!("{label} (failed)"),
+            Launch::Tests { label, rerun_failed: true, .. } => t!("run-failed", label = label.to_string()),
             Launch::Tests { label, .. } => label.clone(),
             Launch::Task { task, .. } => task.clone(),
             Launch::Maven { module, goals, .. } => format!("{module} [{goals}]"),
@@ -263,12 +263,12 @@ impl Session {
             format!("{}:{:02}", t.as_secs() / 60, t.as_secs() % 60)
         };
         match &self.ended {
-            None if self.debug.as_ref().is_some_and(|d| d.paused) => format!("Paused, running {time}"),
-            None => format!("Running {time}"),
+            None if self.debug.as_ref().is_some_and(|d| d.paused) => t!("run-paused-running", time = time.to_string()),
+            None => t!("run-running", time = time.to_string()),
             Some(e) => match e.outcome {
-                Outcome::Success => format!("Finished in {time}"),
-                Outcome::Failed => format!("Failed after {time}"),
-                Outcome::Cancelled => format!("Stopped after {time}"),
+                Outcome::Success => t!("run-finished-in", time = time.to_string()),
+                Outcome::Failed => t!("run-failed-after", time = time.to_string()),
+                Outcome::Cancelled => t!("run-stopped-after", time = time.to_string()),
             },
         }
     }
@@ -280,13 +280,13 @@ impl Session {
         let total = passed + failed + skipped + running;
         let mut parts = Vec::new();
         if failed > 0 {
-            parts.push(format!("{failed} failed"));
+            parts.push(t!("run-failed-2", failed = failed.to_string()));
         }
-        parts.push(format!("{passed} passed"));
+        parts.push(t!("run-passed", passed = passed.to_string()));
         if skipped > 0 {
-            parts.push(format!("{skipped} skipped"));
+            parts.push(t!("run-skipped", skipped = skipped.to_string()));
         }
-        Some(format!("{}, {total} {}", parts.join(", "), if total == 1 { "test" } else { "tests" }))
+        Some(t!("run-tests-count", count = total, parts = parts.join(", ")))
     }
 }
 
@@ -757,7 +757,7 @@ impl Runs {
         async move {
             match call {
                 Some(call) => call.await,
-                None => Err(anyhow::anyhow!("The Java engine is not ready yet")),
+                None => Err(anyhow::anyhow!("{}", ts!("run-the-java-engine-is-not-ready-yet"))),
             }
         }
     }
@@ -782,7 +782,7 @@ impl Runs {
             if Some(engine) == now || alive.contains(&engine) {
                 continue;
             }
-            let text = "The Java engine stopped, and this run with it.";
+            let text = ts!("run-the-java-engine-stopped-and-this-run-with");
             s.push(Stream::Err, text);
             if let Some(d) = s.debug.as_mut() {
                 d.disconnect();
@@ -822,7 +822,7 @@ impl Runs {
     /// Read the Maven builds' modules, goals and profiles.
     pub fn load_maven_goals(&mut self, refresh: bool, cx: &mut Context<Self>) {
         let Some((_, pid)) = self.engine(cx) else {
-            self.maven.error = Some("The Java engine is not ready yet".into());
+            self.maven.error = Some(ts!("run-the-java-engine-is-not-ready-yet").into());
             cx.notify();
             return;
         };
@@ -900,7 +900,7 @@ impl Runs {
     /// Read the Gradle tasks; `refresh` makes the engine configure the builds again.
     pub fn load_gradle_tasks(&mut self, refresh: bool, cx: &mut Context<Self>) {
         let Some((_, pid)) = self.engine(cx) else {
-            self.gradle.error = Some("The Java engine is not ready yet".into());
+            self.gradle.error = Some(ts!("run-the-java-engine-is-not-ready-yet").into());
             cx.notify();
             return;
         };
@@ -1005,8 +1005,11 @@ impl Runs {
             if let Err(e) = written.await {
                 let _ = this.update(cx, |r, cx| {
                     if let Some(s) = r.session_mut(id) {
-                        s.lines
-                            .push(ConsoleLine::system(format!("Could not save the output to {}: {e}", path.display())));
+                        s.lines.push(ConsoleLine::system(t!(
+                            "run-could-not-save-the-output-to",
+                            path = (path.display()).to_string(),
+                            e = e.to_string()
+                        )));
                     }
                     cx.notify();
                 });
@@ -1064,17 +1067,17 @@ impl Runs {
     pub fn engine_state(&self, classes: bool, cx: &App) -> EngineState {
         use crate::lang::hub::Stage;
         let Some(project) = self.model.read(cx).project_root() else {
-            return EngineState::Unavailable("Open a project to run it.".into());
+            return EngineState::Unavailable(ts!("run-open-a-project-to-run-it").into());
         };
         let hub = self.hub.read(cx);
         let Some(root) = hub.engine_root(&project) else {
             return if !crate::project_model::project_has_gradle(&project, cx) {
-                EngineState::Unavailable(format!(
-                    "{} has no Gradle or Maven build: runs, tests and the debugger need one.",
-                    Model::dir_name(&project)
+                EngineState::Unavailable(t!(
+                    "run-has-no-gradle-or-maven-build-runs-tests",
+                    project = (Model::dir_name(&project)).to_string()
                 ))
             } else if !hub.enabled {
-                EngineState::Unavailable("Java support is off.".into())
+                EngineState::Unavailable(ts!("run-java-support-is-off").into())
             } else {
                 EngineState::Waiting("starting".into())
             };
@@ -1089,7 +1092,9 @@ impl Runs {
                 "This build needs JDK {v}, which isn't installed. Download it from the bar above the editor, \
                  or pick a JDK in Settings."
             )),
-            Stage::Failed(why) => EngineState::Unavailable(format!("The Java engine is not running: {why}")),
+            Stage::Failed(why) => {
+                EngineState::Unavailable(t!("run-the-java-engine-is-not-running", why = why.to_string()))
+            }
             other => EngineState::Waiting(other.label().to_lowercase()),
         }
     }
@@ -1153,15 +1158,17 @@ impl Runs {
         };
         let what = match &launch {
             Launch::Config { config, .. } => match (config.kind, &config.main_class, &config.task) {
-                (Kind::Main, Some(c), _) => format!("Starting {c}"),
-                (_, _, Some(t)) => format!("Running {t}"),
-                _ => format!("Running {}", config.name),
+                (Kind::Main, Some(c), _) => t!("run-starting", c = c.to_string()),
+                (_, _, Some(t)) => t!("run-running-2", t = t.to_string()),
+                _ => t!("run-running-3", config = (config.name).to_string()),
             },
-            Launch::Tests { label, .. } => format!("Testing {label}"),
-            Launch::Task { task, .. } => format!("Running {task}"),
-            Launch::Maven { goals, module, .. } => format!("Running mvn {goals} in {module}"),
+            Launch::Tests { label, .. } => t!("run-testing", label = label.to_string()),
+            Launch::Task { task, .. } => t!("run-running-4", task = task.to_string()),
+            Launch::Maven { goals, module, .. } => {
+                t!("run-running-mvn-in", goals = goals.to_string(), module = module.to_string())
+            }
             Launch::Process(p) => match p.attach {
-                Some(port) => format!("Attaching to the Node listening on port {port}"),
+                Some(port) => t!("run-attaching-to-the-node-listening-on-port", port = port.to_string()),
                 None => p.command_line(),
             },
         };
@@ -1177,7 +1184,7 @@ impl Runs {
                 session.waiting = true;
                 session.push(
                     Stream::System,
-                    &format!("Waiting for the Java engine ({doing}): the run starts as soon as it is ready."),
+                    &t!("run-waiting-for-the-java-engine-the-run-starts", doing = doing.to_string()),
                 );
             }
             EngineState::Unavailable(why) => {
@@ -1212,7 +1219,7 @@ impl Runs {
         s.waiting = false;
         if let Launch::Process(p) = &s.launch {
             let p = p.clone();
-            s.push(Stream::System, &format!("Working directory: {}", p.cwd.display()));
+            s.push(Stream::System, &t!("run-working-directory", cwd = (p.cwd.display()).to_string()));
             match p.debug_node.clone() {
                 // js-debug starts first, and asks for the program once it is ready for it.
                 Some(node) => self.start_node_debug(id, p, node, cx),
@@ -1290,7 +1297,7 @@ impl Runs {
             match self.engine_state(classes, cx) {
                 EngineState::Ready => {
                     if let Some(s) = self.session_mut(id) {
-                        s.push(Stream::System, "The Java engine is ready.");
+                        s.push(Stream::System, ts!("run-the-java-engine-is-ready"));
                     }
                     self.dispatch(id, cx);
                 }
@@ -1340,7 +1347,7 @@ impl Runs {
             process: None,
             playwright: matches!(&launch, Launch::Process(p) if p.report).then(Default::default),
         };
-        s.lines.push(ConsoleLine::system(format!("Running {}", launch.title())));
+        s.lines.push(ConsoleLine::system(t!("run-running-3", config = (launch.title()).to_string())));
         if matches!(launch, Launch::Tests { .. }) {
             s.tests = Some(TestTree::default());
         }
@@ -1386,7 +1393,7 @@ impl Runs {
             s.push(Stream::System, &words.join(" "));
         }
         if let Some(dir) = v.get("workingDir").and_then(Value::as_str) {
-            s.push(Stream::System, &format!("Working directory: {dir}"));
+            s.push(Stream::System, &t!("run-working-directory-2", dir = dir.to_string()));
         }
         if let Some(tasks) = v.get("tasks").and_then(Value::as_array) {
             let names: Vec<&str> = tasks.iter().filter_map(Value::as_str).collect();
@@ -1566,12 +1573,12 @@ impl Runs {
                     s.push(Stream::Err, e);
                 }
                 let mut summary = match outcome {
-                    Outcome::Success => "Finished".to_owned(),
-                    Outcome::Failed => "Failed".to_owned(),
-                    Outcome::Cancelled => "Stopped".to_owned(),
+                    Outcome::Success => ts!("run-finished").to_owned(),
+                    Outcome::Failed => ts!("run-failed-3").to_owned(),
+                    Outcome::Cancelled => ts!("run-stopped").to_owned(),
                 };
                 if let Some(code) = exit_code {
-                    summary.push_str(&format!(" with exit code {code}"));
+                    summary.push_str(&t!("run-with-exit-code", code = code.to_string()));
                 }
                 s.push(Stream::System, &summary);
                 s.ended = Some(Ended {
@@ -1672,7 +1679,7 @@ impl Runs {
                             .collect();
                         if !errors.is_empty() {
                             this.scala_error = Some(errors.join("; "));
-                            this.say("The Scala compile failed: see Problems", cx);
+                            this.say(ts!("run-the-scala-compile-failed-see-problems"), cx);
                         }
                     }
                     Err(e) => this.scala_error = Some(e.to_string()),
@@ -1691,7 +1698,7 @@ impl Runs {
         if self.scala.is_some() {
             out.push(crate::background::BgTask {
                 title: "Scala".into(),
-                stage: "Compiling the changed Scala".into(),
+                stage: ts!("run-compiling-the-changed-scala").into(),
                 percent: None,
                 ..Default::default()
             });
@@ -1699,7 +1706,7 @@ impl Runs {
         if self.gradle.loading {
             out.push(crate::background::BgTask {
                 title: "Gradle".into(),
-                stage: "Reading the tasks".into(),
+                stage: ts!("run-reading-the-tasks").into(),
                 percent: None,
                 ..Default::default()
             });
@@ -1710,7 +1717,7 @@ impl Runs {
                 .iter()
                 .rev()
                 .find(|t| t.outcome.is_none())
-                .map_or_else(|| "Running".to_owned(), |t| t.path.clone());
+                .map_or_else(|| ts!("console-running").to_owned(), |t| t.path.clone());
             out.push(crate::background::BgTask {
                 title: format!(
                     "{}: {}",
@@ -1783,7 +1790,7 @@ impl Runs {
             }
             Target::TestClass { class } | Target::TestMethod { class, .. } => {
                 let Some(module) = module else {
-                    self.say("The engine does not know this file's module yet", cx);
+                    self.say(ts!("run-the-engine-does-not-know-this-files-module"), cx);
                     return;
                 };
                 let filter = match target {
@@ -1802,7 +1809,7 @@ impl Runs {
                     Some(c) => c,
                     None => {
                         let Some(module) = module else {
-                            self.say("The engine does not know this file's module yet", cx);
+                            self.say(ts!("run-the-engine-does-not-know-this-files-module"), cx);
                             return;
                         };
                         RunConfig {

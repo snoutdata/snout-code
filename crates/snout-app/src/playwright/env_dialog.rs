@@ -114,7 +114,7 @@ impl EnvDialog {
         let name = names
             .iter()
             .find(|n| !self.list.iter().any(|e| e.name == **n))
-            .map_or_else(|| format!("Environment {}", self.list.len() + 1), |n| (*n).to_owned());
+            .map_or_else(|| t!("env-environment", count = (self.list.len() + 1).to_string()), |n| (*n).to_owned());
         let base_url = if name == "Local" { "http://localhost:8080".to_owned() } else { String::new() };
         self.list.push(Environment { name, base_url, ..Default::default() });
         self.selected = Some(self.list.len() - 1);
@@ -151,7 +151,7 @@ impl EnvDialog {
                 .items_center()
                 .justify_center()
                 .text_color(p.fg_dim)
-                .child("No environment. Add one with +.")
+                .child(ts!("env-no-environment-add-one-with"))
                 .into_any_element();
         }
         let label = |text: &'static str| div().flex_none().w(px(150.)).text_color(p.fg_dim).child(text);
@@ -167,9 +167,9 @@ impl EnvDialog {
             .flex_col()
             .gap(px(10.))
             .overflow_y_scrollbar()
-            .child(row("Name", input(&self.fields.name)))
-            .child(row("Application URL", input(&self.fields.base_url)))
-            .child(row("Variables", input(&self.fields.vars)))
+            .child(row(ts!("dialogs-name"), input(&self.fields.name)))
+            .child(row(ts!("newproject-application-url"), input(&self.fields.base_url)))
+            .child(row(ts!("env-variables"), input(&self.fields.vars)))
             .child(row(".env file", input(&self.fields.env_file)))
             .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
                 "Runs get the URL as BASE_URL, which the configuration's baseURL reads. The file's variables come \
@@ -204,7 +204,7 @@ impl Render for EnvDialog {
                 .cursor_pointer()
                 .child(icon(Icon::Endpoint, 12., p.accent))
                 .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(e.name.clone()))
-                .when(current, |d| d.child(div().text_size(px(11.)).text_color(p.fg_dim).child("in use")))
+                .when(current, |d| d.child(div().text_size(px(11.)).text_color(p.fg_dim).child(ts!("env-in-use"))))
                 .on_click(cx.listener(move |this, _, w, cx| this.pick(i, w, cx)))
                 .into_any_element()
             })
@@ -237,7 +237,7 @@ impl Render for EnvDialog {
                     crate::components::Tone::Success,
                     crate::components::IconName::Globe,
                     "Environments",
-                    Some("Where the tests point: the application's URL and the variables they read.".into()),
+                    Some(ts!("env-where-the-tests-point-the-applications-url-and").into()),
                     &p,
                 )
                 .pb(px(12.))
@@ -268,11 +268,11 @@ impl Render for EnvDialog {
                                     .items_center()
                                     .gap(px(2.))
                                     .child(
-                                        small("env-add", Icon::Plus, "Add Environment")
+                                        small("env-add", Icon::Plus, ts!("env-add-environment"))
                                             .on_click(cx.listener(|this, _, w, cx| this.add(w, cx))),
                                     )
                                     .child(
-                                        small("env-remove", Icon::Minus, "Remove Environment")
+                                        small("env-remove", Icon::Minus, ts!("env-remove-environment"))
                                             .on_click(cx.listener(|this, _, w, cx| this.remove(w, cx))),
                                     ),
                             )
@@ -302,7 +302,7 @@ impl Render for EnvDialog {
                     .border_color(p.border)
                     .bg(p.dialog_footer())
                     .child(
-                        button("env-cancel", crate::components::CANCEL_ICON, "Cancel", false)
+                        button("env-cancel", crate::components::CANCEL_ICON, ts!("settings-cancel"), false)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(EnvEvent::Close))),
                     )
                     .child(button("env-ok", crate::components::OK_ICON, "OK", true).on_click(cx.listener(

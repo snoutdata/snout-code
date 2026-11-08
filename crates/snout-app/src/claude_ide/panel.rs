@@ -223,13 +223,13 @@ impl ChangesPanel {
         let turn = changes.set.turn_of(id);
         let agent = crate::agents::by_id(turn.map_or(agent, |t| t.agent), cx);
         let color = agent.color(p);
-        let title = turn.and_then(|t| t.prompt.clone()).unwrap_or_else(|| format!("Turn {id}"));
+        let title = turn.and_then(|t| t.prompt.clone()).unwrap_or_else(|| t!("agents-turn", id = id.to_string()));
         let when = turn.map(|t| super::ledger::clock(t.at));
         let files = changes.set.files_of_turn(id).len();
         let sub = [
             Some(agent.name.to_string()),
             when,
-            Some(if files == 1 { "1 file".into() } else { format!("{files} files") }),
+            Some(if files == 1 { ts!("agents-1-file").into() } else { t!("agents-files", files = files.to_string()) }),
         ]
         .into_iter()
         .flatten()
@@ -287,14 +287,14 @@ impl ChangesPanel {
                     ),
             )
             .child(
-                row_button(("claude-revert-turn", i), Glyph::Discard, "Revert what this prompt changed", p)
+                row_button(("claude-revert-turn", i), Glyph::Discard, ts!("agents-revert-what-this-prompt-changed"), p)
                     .debug_selector(move || format!("claude-revert-turn-{i}"))
                     .on_click(cx.listener(move |this, _, w, cx| {
                         this.act(w, cx, move |ws, w, cx| bridge::revert_turn(ws, id, w, cx))
                     })),
             )
             .child(
-                row_button(("claude-accept-turn", i), Glyph::Stage, "Accept what this prompt changed", p)
+                row_button(("claude-accept-turn", i), Glyph::Stage, ts!("agents-accept-what-this-prompt-changed"), p)
                     .debug_selector(move || format!("claude-accept-turn-{i}"))
                     .on_click(cx.listener(move |this, _, w, cx| {
                         this.act(w, cx, move |ws, w, cx| bridge::accept_turn(ws, id, w, cx))
@@ -357,7 +357,7 @@ impl Render for ChangesPanel {
                     .rounded(px(6.))
                     .bg(p.wash(mark))
                     .child(super::bridge::pulse_dot(mark, "claude-activity-dot"))
-                    .child(div().text_color(p.fg_dim).child("Editing"))
+                    .child(div().text_color(p.fg_dim).child(ts!("agents-editing")))
                     .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
                     .child(div().flex_1())
                     .child(look::chip(a.tool.clone(), mark, &p))
@@ -367,7 +367,7 @@ impl Render for ChangesPanel {
 
         // The changes Claude asks to make.
         if !changes.pending.is_empty() {
-            rows.push(section("Waiting for your review", &p).into_any_element());
+            rows.push(section(ts!("agents-waiting-for-your-review"), &p).into_any_element());
             for (ix, d) in changes.pending.iter().enumerate() {
                 let (name, dir) = changes.display(&d.path);
                 let (accept_tab, reject_tab) = (d.tab.clone(), d.tab.clone());
@@ -413,9 +413,9 @@ impl Render for ChangesPanel {
                                 .when(d.new_file, |r| r.child(new_chip(&p))),
                         )
                         .child(div().text_color(p.fg_dim).text_size(px(11.5)).child(if d.front {
-                            "Claude asks to make this change"
+                            ts!("agents-claude-asks-to-make-this-change")
                         } else {
-                            "Waiting behind another change to this file"
+                            ts!("agents-waiting-behind-another-change-to-this-file")
                         }))
                         .child(
                             div()
@@ -464,7 +464,7 @@ impl Render for ChangesPanel {
                                                 12.,
                                                 p.on_accent,
                                             ))
-                                            .child("Accept")
+                                            .child(ts!("editor-accept"))
                                             .on_click(cx.listener(move |this, _, w, cx| {
                                                 cx.stop_propagation();
                                                 let tab = accept_tab.clone();
@@ -483,7 +483,11 @@ impl Render for ChangesPanel {
         // The changes made.
         let (files, added, removed) = changes.set.totals();
         if files > 0 {
-            let what = if files == 1 { "1 file changed".to_owned() } else { format!("{files} files changed") };
+            let what = if files == 1 {
+                ts!("agents-1-file-changed").to_owned()
+            } else {
+                t!("agents-files-changed", files = files.to_string())
+            };
             rows.push(
                 div()
                     .debug_selector(|| "claude-summary".into())
@@ -508,17 +512,19 @@ impl Render for ChangesPanel {
                     .justify_end()
                     .gap(px(4.))
                     .child(
-                        look::chip_button("claude-revert-all", Glyph::Discard, "Revert All", true, &p)
+                        look::chip_button("claude-revert-all", Glyph::Discard, ts!("agents-revert-all"), true, &p)
                             .debug_selector(|| "claude-revert-all".into())
                             .tooltip(|w, cx| {
-                                Tooltip::new("Put back every file as it was before Claude changed it").build(w, cx)
+                                Tooltip::new(ts!("agents-put-back-every-file-as-it-was-before")).build(w, cx)
                             })
                             .on_click(cx.listener(|this, _, w, cx| this.act(w, cx, bridge::revert_all))),
                     )
                     .child(
-                        look::chip_button("claude-accept-all", Glyph::Stage, "Accept All", true, &p)
+                        look::chip_button("claude-accept-all", Glyph::Stage, ts!("agents-accept-all"), true, &p)
                             .debug_selector(|| "claude-accept-all".into())
-                            .tooltip(|w, cx| Tooltip::new("Keep every change; the files leave this list").build(w, cx))
+                            .tooltip(|w, cx| {
+                                Tooltip::new(ts!("agents-keep-every-change-the-files-leave-this-list")).build(w, cx)
+                            })
                             .on_click(cx.listener(|this, _, w, cx| this.act(w, cx, bridge::accept_all))),
                     )
                     .into_any_element(),
@@ -598,10 +604,7 @@ impl Render for ChangesPanel {
                             .text_color(p.fg_dim)
                             .text_size(px(11.))
                             .tooltip(|w, cx| {
-                                Tooltip::new(
-                                    "Seen on disk while Claude Code was connected; its hooks did not report it",
-                                )
-                                .build(w, cx)
+                                Tooltip::new(ts!("agents-seen-on-disk-while-claude-code-was-connected")).build(w, cx)
                             })
                             .child("seen"),
                     )
@@ -614,7 +617,7 @@ impl Render for ChangesPanel {
                         .opacity(0.)
                         .group_hover(group.clone(), |s| s.opacity(1.))
                         .child(
-                            row_button(("claude-revert-file", ix), Glyph::Discard, "Revert the file", &p)
+                            row_button(("claude-revert-file", ix), Glyph::Discard, ts!("agents-revert-the-file"), &p)
                                 .debug_selector(move || format!("claude-revert-file-{ix}"))
                                 .on_click(cx.listener(move |this, _, w, cx| {
                                     cx.stop_propagation();
@@ -623,7 +626,7 @@ impl Render for ChangesPanel {
                                 })),
                         )
                         .child(
-                            row_button(("claude-accept-file", ix), Glyph::Stage, "Accept the file", &p)
+                            row_button(("claude-accept-file", ix), Glyph::Stage, ts!("agents-accept-the-file"), &p)
                                 .debug_selector(move || format!("claude-accept-file-{ix}"))
                                 .on_click(cx.listener(move |this, _, w, cx| {
                                     cx.stop_propagation();
@@ -644,11 +647,15 @@ impl Render for ChangesPanel {
                             t[h.new.clone()].lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_owned()
                         })
                         .filter(|l| !l.is_empty())
-                        .unwrap_or_else(|| format!("{} lines removed", h.old_lines.len()));
+                        .unwrap_or_else(|| t!("agents-lines-removed", count = (h.old_lines.len()).to_string()));
                     let lines = if h.new_lines.len() <= 1 {
-                        format!("Line {}", h.new_lines.start + 1)
+                        t!("editor-line", start = (h.new_lines.start + 1).to_string())
                     } else {
-                        format!("Lines {}–{}", h.new_lines.start + 1, h.new_lines.end)
+                        t!(
+                            "editor-lines-2",
+                            start = (h.new_lines.start + 1).to_string(),
+                            end = (h.new_lines.end).to_string()
+                        )
                     };
                     let hgroup: SharedString = format!("claude-hunk-{id}").into();
                     let (q1, q2, q3) = (f.path.clone(), f.path.clone(), f.path.clone());
@@ -693,20 +700,34 @@ impl Render for ChangesPanel {
                                 .opacity(0.)
                                 .group_hover(hgroup, |s| s.opacity(1.))
                                 .child(
-                                    row_button(("claude-revert-hunk", id), Glyph::Discard, "Revert this change", &p)
-                                        .on_click(cx.listener(move |this, _, w, cx| {
+                                    row_button(
+                                        ("claude-revert-hunk", id),
+                                        Glyph::Discard,
+                                        ts!("agents-revert-this-change"),
+                                        &p,
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, w, cx| {
                                             cx.stop_propagation();
                                             let path = q2.clone();
                                             this.act(w, cx, move |ws, w, cx| bridge::revert_hunk(ws, &path, hx, w, cx))
-                                        })),
+                                        },
+                                    )),
                                 )
                                 .child(
-                                    row_button(("claude-accept-hunk", id), Glyph::Stage, "Accept this change", &p)
-                                        .on_click(cx.listener(move |this, _, w, cx| {
+                                    row_button(
+                                        ("claude-accept-hunk", id),
+                                        Glyph::Stage,
+                                        ts!("agents-accept-this-change"),
+                                        &p,
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, w, cx| {
                                             cx.stop_propagation();
                                             let path = q3.clone();
                                             this.act(w, cx, move |ws, w, cx| bridge::accept_hunk(ws, &path, hx, w, cx))
-                                        })),
+                                        },
+                                    )),
                                 ),
                         )
                         .into_any_element(),
@@ -716,17 +737,19 @@ impl Render for ChangesPanel {
         }
         if rows.is_empty() {
             let connected = changes.hooks_heard || cx.try_global::<super::IdeStatus>().is_some_and(|s| s.clients > 0);
-            let state =
-                crate::components::EmptyState::new(snout_core::art::spots::claude_idle(), "No changes from agents yet")
-                    .hint("The files an agent changes show here as it works, each change to accept or revert.")
-                    .compact();
+            let state = crate::components::EmptyState::new(
+                snout_core::art::spots::claude_idle(),
+                ts!("agents-no-changes-from-agents-yet"),
+            )
+            .hint(ts!("agents-the-files-an-agent-changes-show-here-as"))
+            .compact();
             return base.child(if connected {
                 state
             } else {
                 state.primary_action(
                     "changes-empty-console",
                     crate::components::IconName::Sparkles,
-                    "Open the Agent Console",
+                    ts!("agents-open-the-agent-console"),
                     crate::menus::ToggleConsole,
                 )
             });
@@ -739,7 +762,7 @@ impl Render for ChangesPanel {
 fn new_chip(p: &Palette) -> gpui::Stateful<gpui::Div> {
     look::chip("new", p.ok, p)
         .id("agent-new-file")
-        .tooltip(|w, cx| Tooltip::new("A new file: the agent created it; reverting deletes it").build(w, cx))
+        .tooltip(|w, cx| Tooltip::new(ts!("agents-a-new-file-the-agent-created-it-reverting")).build(w, cx))
 }
 
 /// A section's label.
