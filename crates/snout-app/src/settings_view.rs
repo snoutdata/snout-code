@@ -1525,7 +1525,7 @@ impl SettingsView {
                                     },
                                     &p,
                                 ))
-                                .child(div().text_color(p.fg_dim).child("minutes")),
+                                .child(div().text_color(p.fg_dim).child(ts!("settings-unit-minutes"))),
                             &p,
                         ),
                         fetch_mark,
@@ -1700,7 +1700,7 @@ impl SettingsView {
                                 },
                                 &p,
                             ))
-                            .child(div().text_color(p.fg_dim).child("minutes")),
+                            .child(div().text_color(p.fg_dim).child(ts!("settings-unit-minutes"))),
                         &p,
                     ),
                     idle_mark,

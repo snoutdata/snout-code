@@ -429,6 +429,7 @@ settings-engine-hint = O mecanismo lê o que roda nos terminais e no console do 
 settings-ghostty-preview-hint = O Ghostty também desenha riscada a chamada obsoleta, a linha ondulada de aviso e o link do relatório de testes.
 settings-custom-terminal-hint = Executado com /bin/sh. { "{dir}" } é a pasta; em uma máquina remota, { "{ssh}" } é o comando ssh que abre um shell lá.
 settings-external-terminal-hint = Abrir em um terminal externo, no menu Arquivo e no menu de um arquivo ou pasta, abre nessa pasta. Em um projeto remoto, abre uma sessão ssh lá.
+settings-unit-minutes = minutos
 
 ## dialogs
 

@@ -434,6 +434,7 @@ settings-engine-hint = The engine reads what runs in the terminals and the Claud
 settings-ghostty-preview-hint = Ghostty also draws the deprecated call struck through, its curly warning line, and the test report’s link.
 settings-custom-terminal-hint = Run with /bin/sh. { "{dir}" } is the folder; on a remote machine, { "{ssh}" } is the ssh command that opens a shell there.
 settings-external-terminal-hint = Open in External Terminal, in the File menu and on a file’s or folder’s menu, opens it at the folder. On a remote project it opens an ssh session there.
+settings-unit-minutes = minutes
 
 ## dialogs
 

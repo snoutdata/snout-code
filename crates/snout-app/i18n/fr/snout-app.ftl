@@ -429,6 +429,7 @@ settings-engine-hint = Le moteur lit ce qui s’exécute dans les terminaux et l
 settings-ghostty-preview-hint = Ghostty affiche aussi l’appel obsolète barré, sa ligne d’avertissement ondulée et le lien du rapport de tests.
 settings-custom-terminal-hint = Exécuté avec /bin/sh. { "{dir}" } est le dossier ; sur une machine distante, { "{ssh}" } est la commande ssh qui y ouvre un shell.
 settings-external-terminal-hint = Ouvrir dans un terminal externe, dans le menu Fichier et dans le menu d’un fichier ou dossier, l’ouvre à ce dossier. Sur un projet distant, il y ouvre une session ssh.
+settings-unit-minutes = minutes
 
 ## dialogs
 
