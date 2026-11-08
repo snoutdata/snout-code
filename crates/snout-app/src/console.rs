@@ -339,7 +339,7 @@ impl gpui_component::dock::Panel for ConsolePanel {
     fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         // The agent's name is in the header row under it, with its status.
         match self.kind {
-            Kind::Claude => "Console",
+            Kind::Claude => ts!("console-console"),
             Kind::Shell => self.kind.title(),
         }
     }
@@ -440,7 +440,7 @@ impl ConsolePanel {
         let root = self.root(cx);
         if root.as_ref().and_then(|r| self.sessions.get(r)).and_then(|s| s.agent.as_ref()).is_some_and(|a| *a != agent)
         {
-            self.show_note(format!("{} starts with the next session", agent.name), cx);
+            self.show_note(t!("console-starts-with-the-next-session", agent = (agent.name).to_string()), cx);
         }
     }
 
@@ -535,7 +535,7 @@ impl ConsolePanel {
             && s.install.is_some()
             && s.pty.exit_status().is_none()
         {
-            self.show_note("The installer is still at work; End stops it", cx);
+            self.show_note(ts!("console-the-installer-is-still-at-work-end-stops"), cx);
             return;
         }
         self.model.update(cx, |m, cx| {
@@ -566,8 +566,12 @@ impl ConsolePanel {
                 && s.pty.exit_status().is_none()
                 && let Some(was) = s.agent.as_ref()
             {
-                let resume = if continue_args(was).is_empty() { "" } else { "; Continue resumes it" };
-                note = Some(format!("{} ended{resume}", was.name));
+                let name = was.name.to_string();
+                note = Some(if continue_args(was).is_empty() {
+                    t!("console-ended", name = name)
+                } else {
+                    t!("console-ended-resume", name = name)
+                });
             }
         }
         if let Some(text) = note {
@@ -587,7 +591,7 @@ impl ConsolePanel {
         let waits = self.model.read(cx).draft.as_ref().is_some_and(|d| d.root == root);
         if alive && waits {
             let name = self.agent(cx).name;
-            let why = format!("Draft stopped: the console started a new session. Click Draft to ask {name}.");
+            let why = t!("console-draft-stopped-the-console-started-a-new-session", name = name.to_string());
             self.model.update(cx, |m, cx| m.draft_gone(why, cx));
         }
     }
@@ -636,8 +640,9 @@ impl ConsolePanel {
                 };
                 let launch =
                     Launch { program: &program, args: &args, cwd: &root, env: &[], env_remove: &[], scrollback, size };
-                Pty::spawn(&*host, &launch, engine, fg, bg, || {})
-                    .map_err(|e| format!("Could not start {}: {e}", program.display()))
+                Pty::spawn(&*host, &launch, engine, fg, bg, || {}).map_err(|e| {
+                    t!("console-could-not-start", program = (program.display()).to_string(), e = e.to_string())
+                })
             }
         });
         cx.spawn_in(window, async move |this, cx| {
@@ -1048,8 +1053,9 @@ impl ConsolePanel {
                 }
                 let launch =
                     Launch { program: &program, args: &args, cwd: &root, env: &env, env_remove, scrollback, size };
-                Pty::spawn(&*host, &launch, engine, fg, bg, || {})
-                    .map_err(|e| Some(format!("Could not start {}: {e}", program.display())))
+                Pty::spawn(&*host, &launch, engine, fg, bg, || {}).map_err(|e| {
+                    Some(t!("console-could-not-start", program = (program.display()).to_string(), e = e.to_string()))
+                })
             }
         });
         cx.spawn_in(window, async move |this, cx| {
@@ -1264,19 +1270,16 @@ impl ConsolePanel {
         if let Some(missing) = self.missing_of(root) {
             return Some(match missing {
                 Missing::Program(_) => {
-                    format!("{} is not installed yet. Install it in the console, then click Draft again.", agent.name)
+                    t!("console-is-not-installed-yet-install-it-in-the", agent = (agent.name).to_string())
                 }
-                Missing::Command => {
-                    "Your own agent has no command yet. Give it one in Settings, Agents, then click Draft again."
-                        .to_owned()
-                }
+                Missing::Command => ts!("console-your-own-agent-has-no-command-yet-give").to_owned(),
             });
         }
         if let Some(e) = self.error_of(root) {
             return Some(e.to_owned());
         }
         let alive = self.sessions.get_mut(root).is_some_and(|s| s.pty.exit_status().is_none());
-        (!alive).then(|| format!("{} is not running.", agent.name))
+        (!alive).then(|| t!("console-is-not-running-2", agent = (agent.name).to_string()))
     }
 
     /// While a draft of the commit message waits on the agent: give up when the agent is gone.
@@ -1421,7 +1424,7 @@ impl ConsolePanel {
             self.selection.and_then(|sel| s.pty.frame().selected_text(sel)).filter(|t| !t.contains('\n'))
         });
         if self.find.is_none() {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in terminal"));
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("console-find-in-terminal")));
             let changes = cx.subscribe_in(&input, window, |this, _, e: &InputEvent, _, cx| match e {
                 InputEvent::Change => this.search(cx),
                 InputEvent::PressEnter { secondary, shift } => {
@@ -1503,8 +1506,8 @@ impl ConsolePanel {
         let f = self.find.as_ref()?;
         let count = match (f.current, f.matches.len()) {
             (_, 0) if f.input.read(cx).value().is_empty() => String::new(),
-            (_, 0) => "No matches".to_owned(),
-            (Some(i), n) => format!("{} of {n}", i + 1),
+            (_, 0) => ts!("projects-no-matches").to_owned(),
+            (Some(i), n) => t!("console-of", i = (i + 1).to_string(), n = n.to_string()),
             (None, n) => format!("{n}"),
         };
         Some(
@@ -1524,17 +1527,21 @@ impl ConsolePanel {
                 .child(look::field(&f.input, true, Some(260.), p))
                 .child(div().min_w(px(70.)).text_size(px(12.)).text_color(p.fg_dim).child(count))
                 .child(
-                    IconButton::new("terminal-find-prev", IconName::ChevronUp, "Previous match (Return)")
+                    IconButton::new("terminal-find-prev", IconName::ChevronUp, ts!("console-previous-match-return"))
                         .size(22.)
                         .on_click(cx.listener(|this, _, _, cx| this.step_find(-1, cx))),
                 )
                 .child(
-                    IconButton::new("terminal-find-next", IconName::ChevronDown, "Next match (Shift+Return)")
-                        .size(22.)
-                        .on_click(cx.listener(|this, _, _, cx| this.step_find(1, cx))),
+                    IconButton::new(
+                        "terminal-find-next",
+                        IconName::ChevronDown,
+                        ts!("console-next-match-shift-return"),
+                    )
+                    .size(22.)
+                    .on_click(cx.listener(|this, _, _, cx| this.step_find(1, cx))),
                 )
                 .child(
-                    IconButton::new("terminal-find-close", IconName::X, "Close (Esc)")
+                    IconButton::new("terminal-find-close", IconName::X, ts!("console-close-esc"))
                         .size(22.)
                         .on_click(cx.listener(|this, _, w, cx| this.close_find(w, cx))),
                 )
@@ -1551,10 +1558,10 @@ impl Render for ConsolePanel {
         let Some(root) = root else {
             let hint = match kind {
                 Kind::Claude => format!("Open a project to run {} in it.", self.agent(cx).name),
-                Kind::Shell => "Open a project to run a shell in it.".to_owned(),
+                Kind::Shell => ts!("console-open-a-project-to-run-a-shell-in").to_owned(),
             };
             return div().size_full().bg(p.panel).flex().flex_col().child(self.header(None, &p, cx)).child(
-                crate::components::EmptyState::new(snout_core::art::spots::no_project(), "No project open")
+                crate::components::EmptyState::new(snout_core::art::spots::no_project(), ts!("files-no-project-open"))
                     .hint(hint)
                     .on(p.panel)
                     .compact(),
@@ -1614,30 +1621,27 @@ pub enum Status {
 impl Status {
     fn label(self) -> &'static str {
         match self {
-            Status::NotRunning => "Not running",
-            Status::Starting => "Starting",
-            Status::Connected => "Connected",
-            Status::NotConnected => "Not connected",
-            Status::Running => "Running",
-            Status::Working => "Working",
-            Status::Installing => "Installing",
-            Status::Exited => "Ended",
+            Status::NotRunning => ts!("console-not-running"),
+            Status::Starting => ts!("console-starting"),
+            Status::Connected => ts!("console-connected"),
+            Status::NotConnected => ts!("console-not-connected"),
+            Status::Running => ts!("console-running"),
+            Status::Working => ts!("console-working"),
+            Status::Installing => ts!("console-installing"),
+            Status::Exited => ts!("console-ended-2"),
         }
     }
 
     fn tip(self, agent: &str) -> String {
         match self {
-            Status::NotRunning => format!("{agent} is not running"),
-            Status::Starting => format!("{agent} is starting"),
-            Status::Connected => format!(
-                "{agent} sees the editor: its selection, open files and problems; it proposes changes there for \
-                 you to accept or reject, and its edits show as it makes them"
-            ),
-            Status::NotConnected => format!("{agent} runs, but has not connected to the editor yet"),
-            Status::Running => format!("{agent} runs; the files it changes show as it works"),
-            Status::Working => format!("{agent} is at work on your prompt"),
-            Status::Installing => format!("{agent} is being installed"),
-            Status::Exited => format!("{agent} has ended"),
+            Status::NotRunning => t!("console-is-not-running", agent = agent.to_string()),
+            Status::Starting => t!("console-is-starting", agent = agent.to_string()),
+            Status::Connected => t!("console-sees-the-editor-its-selection-open-files-and", agent = agent.to_string()),
+            Status::NotConnected => t!("console-runs-but-has-not-connected-to-the-editor", agent = agent.to_string()),
+            Status::Running => t!("console-runs-the-files-it-changes-show-as-it", agent = agent.to_string()),
+            Status::Working => t!("console-is-at-work-on-your-prompt", agent = agent.to_string()),
+            Status::Installing => t!("console-is-being-installed", agent = agent.to_string()),
+            Status::Exited => t!("console-has-ended", agent = agent.to_string()),
         }
     }
 }
@@ -1730,7 +1734,7 @@ impl ConsolePanel {
             Status::Running | Status::Starting | Status::Installing => p.info(),
             Status::NotRunning | Status::Exited => p.fg_dim,
         };
-        let tip = status.tip(if kind == Kind::Shell { "The shell" } else { agent.name.as_ref() });
+        let tip = status.tip(if kind == Kind::Shell { ts!("console-the-shell") } else { agent.name.as_ref() });
         let pill = div()
             .id("console-status")
             .debug_selector(|| "console-status".into())
@@ -1760,7 +1764,7 @@ impl ConsolePanel {
                 look::toggle(
                     "follow",
                     IconName::ArrowDownToLine,
-                    if self.compact() { "" } else { "Follow" },
+                    if self.compact() { "" } else { ts!("console-follow") },
                     follow,
                     p,
                 )
@@ -1768,9 +1772,9 @@ impl ConsolePanel {
                 .when(self.compact(), |d| d.gap(px(0.)).px(px(5.)))
                 .tooltip(move |w, cx| {
                     let tip = if follow {
-                        "Following: the editor goes to the files the agent changes, as it types"
+                        ts!("console-following-the-editor-goes-to-the-files-the")
                     } else {
-                        "Not following: the editor stays where you are; dots mark what the agent changed"
+                        ts!("console-not-following-the-editor-stays-where-you-are")
                     };
                     gpui_component::tooltip::Tooltip::new(tip).build(w, cx)
                 })
@@ -1786,12 +1790,12 @@ impl ConsolePanel {
         }
         if let Some(root) = root.cloned() {
             let tip: &'static str = match kind {
-                Kind::Claude => "Start again with a new conversation",
-                Kind::Shell => "Start a new shell",
+                Kind::Claude => ts!("console-start-again-with-a-new-conversation"),
+                Kind::Shell => ts!("console-start-a-new-shell"),
             };
             let r = root.clone();
             buttons.push(
-                self.chip("new", Glyph::Plus, "New", p)
+                self.chip("new", Glyph::Plus, ts!("console-new"), p)
                     .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip).build(w, cx))
                     .on_click(cx.listener(move |this, _, window, cx| this.start(&r, &[], window, cx)))
                     .into_any_element(),
@@ -1800,11 +1804,11 @@ impl ConsolePanel {
             if kind == Kind::Claude && !resume.is_empty() {
                 let r = root.clone();
                 buttons.push(
-                    self.chip("continue", Glyph::Refresh, "Continue", p)
+                    self.chip("continue", Glyph::Refresh, ts!("console-continue"), p)
                         .tooltip(|w, cx| {
-                            gpui_component::tooltip::Tooltip::new(
-                                "Start again on the most recent conversation in this folder",
-                            )
+                            gpui_component::tooltip::Tooltip::new(ts!(
+                                "console-start-again-on-the-most-recent-conversation-in"
+                            ))
                             .build(w, cx)
                         })
                         .on_click(cx.listener(move |this, _, window, cx| this.start(&r, &resume, window, cx)))
@@ -1814,8 +1818,10 @@ impl ConsolePanel {
             if running {
                 let r = root.clone();
                 buttons.push(
-                    self.chip("end", Glyph::Stop, "End", p)
-                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("End this session").build(w, cx))
+                    self.chip("end", Glyph::Stop, ts!("console-end"), p)
+                        .tooltip(|w, cx| {
+                            gpui_component::tooltip::Tooltip::new(ts!("console-end-this-session")).build(w, cx)
+                        })
                         .on_click(cx.listener(move |this, _, _, cx| this.end_session(&r, cx)))
                         .into_any_element(),
                 );
@@ -1826,7 +1832,7 @@ impl ConsolePanel {
         if kind == Kind::Claude && in_git {
             buttons.push(div().w(px(2.)).into_any_element());
             buttons.push(
-                look::icon_button("hide", Glyph::Close, "Hide (⌘J); the session keeps running", true, p)
+                look::icon_button("hide", Glyph::Close, ts!("console-hide-j-the-session-keeps-running"), true, p)
                     .on_click(
                         cx.listener(|this, _, _, cx| {
                             this.model.update(cx, |m, cx| m.handle(Action::ToggleConsole, cx))
@@ -1907,8 +1913,10 @@ impl ConsolePanel {
         let labels: Vec<SharedString> = agents
             .iter()
             .map(|a| match a.command.as_deref() {
-                Some(c) if c.trim().is_empty() => format!("{} (set up)", a.name).into(),
-                None if self.found.get(a.id) == Some(&false) => format!("{} (install)", a.name).into(),
+                Some(c) if c.trim().is_empty() => t!("console-set-up", a = (a.name).to_string()).into(),
+                None if self.found.get(a.id) == Some(&false) => {
+                    t!("console-install-2", a = (a.name).to_string()).into()
+                }
                 _ => a.name.clone(),
             })
             .collect();
@@ -1976,11 +1984,14 @@ impl ConsolePanel {
     /// (the user's shell may be asked), and an empty pane looks like nothing happened.
     fn starting_view(&self, root: &Path, p: &Palette, cx: &App) -> gpui::AnyElement {
         let what = match self.starting.get(root) {
-            _ if self.kind == Kind::Shell => "Starting the shell\u{2026}".to_owned(),
+            _ if self.kind == Kind::Shell => ts!("console-starting-the-shell").to_owned(),
             Some((_, Some(id))) => {
-                format!("Starting {}\u{2026}", crate::agents::Agent::of(id, &self.model.read(cx).settings).name)
+                t!(
+                    "console-starting-2",
+                    agent = (crate::agents::Agent::of(id, &self.model.read(cx).settings).name).to_string()
+                )
             }
-            _ => format!("Starting {}\u{2026}", self.agent(cx).name),
+            _ => t!("console-starting-2", agent = (self.agent(cx).name).to_string()),
         };
         div()
             .debug_selector(|| "console-starting".into())
@@ -2006,22 +2017,24 @@ impl ConsolePanel {
             return self.missing_view(root, &agent, missing, p, cx);
         }
         let (title, hint, start): (String, String, &'static str) = match self.kind {
-            Kind::Shell => ("The shell is not running".into(), "Start a shell in the project.".into(), "Start Shell"),
+            Kind::Shell => (
+                ts!("console-the-shell-is-not-running").into(),
+                ts!("console-start-a-shell-in-the-project").into(),
+                ts!("console-start-shell"),
+            ),
             Kind::Claude => {
                 let start = match agent.id {
-                    crate::agents::CLAUDE => "Start Claude",
-                    crate::agents::CODEX => "Start Codex",
-                    crate::agents::OPENCODE => "Start opencode",
-                    crate::agents::AMP => "Start Amp",
-                    _ => "Start Agent",
+                    crate::agents::CLAUDE => ts!("console-start-claude"),
+                    crate::agents::CODEX => ts!("console-start-codex"),
+                    crate::agents::OPENCODE => ts!("console-start-opencode"),
+                    crate::agents::AMP => ts!("console-start-amp"),
+                    _ => ts!("console-start-agent"),
                 };
                 let hint = match agent.id {
-                    crate::agents::CLAUDE => {
-                        "It sees the editor, and its edits type themselves in, in its colour, for you to review.".into()
-                    }
-                    _ => "The files it changes type themselves in, in its colour, for you to review.".to_owned(),
+                    crate::agents::CLAUDE => ts!("console-it-sees-the-editor-and-its-edits-type").into(),
+                    _ => ts!("console-the-files-it-changes-type-themselves-in-in").to_owned(),
                 };
-                (format!("{} is not running", agent.name), hint, start)
+                (t!("console-is-not-running", agent = (agent.name).to_string()), hint, start)
             }
         };
         let hint = if self.kind == Kind::Claude && self.model.read(cx).project_root().is_none() {
@@ -2037,7 +2050,7 @@ impl ConsolePanel {
         let (r1, r2) = (root.to_owned(), root.to_owned());
         let resume = continue_args(&agent);
         let continue_button = (self.kind == Kind::Claude && !resume.is_empty()).then(|| {
-            look::small_button("console-continue", IconName::RotateCcw, "Continue last session", p)
+            look::small_button("console-continue", IconName::RotateCcw, ts!("console-continue-last-session"), p)
                 .debug_selector(|| "console-continue".into())
                 .h(px(28.))
                 .px(px(12.))
@@ -2124,34 +2137,35 @@ impl ConsolePanel {
             Missing::Command => None,
         };
         let (title, hint) = match (missing, line) {
-            (Missing::Program(_), Some(line)) => {
-                let needs = if line.starts_with("npm ") { " It needs Node.js." } else { "" };
-                (
-                    format!("{} is not installed", agent.name),
-                    format!(
-                        "Install runs its installer here in the console.{needs} If it is installed somewhere \
-                         else, set its path in Settings, Agents."
-                    ),
-                )
-            }
-            (Missing::Program(_), None) => {
-                (format!("{} is not installed", agent.name), "Set its path in Settings, Agents.".to_owned())
-            }
+            (Missing::Program(_), Some(line)) => (
+                t!("console-is-not-installed", agent = (agent.name).to_string()),
+                if line.starts_with("npm ") { t!("console-install-here-node") } else { t!("console-install-here") },
+            ),
+            (Missing::Program(_), None) => (
+                t!("console-is-not-installed", agent = (agent.name).to_string()),
+                ts!("console-set-its-path-in-settings-agents").to_owned(),
+            ),
             (Missing::Command, _) => (
-                "Your own agent has no command yet".to_owned(),
-                "Name the command line agent to run here, and the name to show for it, in Settings, Agents.".to_owned(),
+                ts!("console-your-own-agent-has-no-command-yet").to_owned(),
+                ts!("console-name-the-command-line-agent-to-run-here").to_owned(),
             ),
         };
         let settings_button = |primary: bool| {
             let on_click =
                 cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(crate::menus::SettingsAgents), cx));
             if primary {
-                look::primary_button("console-agent-settings", IconName::Settings, "Agent Settings", true, p)
-                    .debug_selector(|| "console-agent-settings".into())
-                    .on_click(on_click)
-                    .into_any_element()
+                look::primary_button(
+                    "console-agent-settings",
+                    IconName::Settings,
+                    ts!("console-agent-settings"),
+                    true,
+                    p,
+                )
+                .debug_selector(|| "console-agent-settings".into())
+                .on_click(on_click)
+                .into_any_element()
             } else {
-                look::small_button("console-agent-settings", IconName::Settings, "Set Its Path", p)
+                look::small_button("console-agent-settings", IconName::Settings, ts!("console-set-its-path"), p)
                     .debug_selector(|| "console-agent-settings".into())
                     .h(px(28.))
                     .px(px(12.))
@@ -2191,9 +2205,9 @@ impl ConsolePanel {
         let name = agent.name.clone();
         let unix = crate::agents::install_line(id, false).unwrap_or_default().to_owned();
         let windows = crate::agents::install_line(id, true).unwrap_or_default().to_owned();
-        let makers = format!("{name}'s developers recommend running it in WSL.");
+        let makers = t!("console-s-developers-recommend-running-it-in-wsl", name = name.to_string());
         let mut buttons: Vec<gpui::AnyElement> = Vec::new();
-        let settings = look::small_button("console-agent-settings", IconName::Settings, "Set Its Path", p)
+        let settings = look::small_button("console-agent-settings", IconName::Settings, ts!("console-set-its-path"), p)
             .debug_selector(|| "console-agent-settings".into())
             .h(px(28.))
             .px(px(12.))
@@ -2202,7 +2216,7 @@ impl ConsolePanel {
             )
             .into_any_element();
         if self.wsl_looking.contains(id) && !self.in_wsl.contains_key(id) {
-            let title = format!("Looking for {name} in WSL…");
+            let title = t!("console-looking-for-in-wsl", name = name.to_string());
             return (title, makers, Vec::new(), vec![settings]);
         }
         let has = self.in_wsl.get(id).cloned().unwrap_or_default();
@@ -2213,7 +2227,7 @@ impl ConsolePanel {
                     look::primary_button(
                         ("console-open-wsl", i),
                         IconName::FolderOpen,
-                        format!("Open a Folder in {d}"),
+                        t!("console-open-a-folder-in", d = d.to_string()),
                         true,
                         p,
                     )
@@ -2225,26 +2239,35 @@ impl ConsolePanel {
                 );
             }
             buttons.push(settings);
-            let title = format!("{name} is installed in {}", has.join(" and "));
-            let hint = format!("{makers} Open a folder in {} and the console runs {name} there.", has[0]);
+            let title =
+                t!("console-is-installed-in", name = name.to_string(), and_value = (has.join(" and ")).to_string());
+            let hint = t!(
+                "console-open-a-folder-in-and-the-console-runs",
+                makers = makers.to_string(),
+                has = (has[0]).to_string(),
+                name = name.to_string()
+            );
             return (title, hint, Vec::new(), buttons);
         }
         let distros = cx.try_global::<crate::remote::Remote>().map(|r| r.wsl_distros.clone()).unwrap_or_default();
         let title = format!("{name} is not installed");
         let Some(first) = distros.first().cloned() else {
-            let hint = format!(
-                "{makers} This PC has no WSL distribution yet: `wsl --install` in PowerShell sets one up. \
-                 To run {name} on Windows itself instead, install it with the line below, or set its path."
+            let hint = t!(
+                "console-this-pc-has-no-wsl-distribution-yet-wsl",
+                makers = makers.to_string(),
+                name = name.to_string()
             );
-            return (title, hint, vec![(Some("On Windows itself"), windows)], vec![settings]);
+            return (title, hint, vec![(Some(ts!("console-on-windows-itself")), windows)], vec![settings]);
         };
-        let hint = format!(
-            "{makers} Install runs its installer in {first}; then open a folder there and the console runs \
-             {name} in it. On Windows itself, it installs with the second line."
+        let hint = t!(
+            "console-install-runs-its-installer-in-then-open-a",
+            makers = makers.to_string(),
+            first = first.to_string(),
+            name = name.to_string()
         );
         for (i, d) in distros.iter().take(3).enumerate() {
             let (r, d) = (root.to_owned(), d.clone());
-            let label = format!("Install in {d}");
+            let label = t!("console-install-in", d = d.to_string());
             let button = if i == 0 {
                 look::primary_button(("console-install-wsl", i), IconName::Download, label, true, p)
             } else {
@@ -2258,7 +2281,12 @@ impl ConsolePanel {
             );
         }
         buttons.push(settings);
-        (title, hint, vec![(Some("In WSL"), unix), (Some("On Windows itself"), windows)], buttons)
+        (
+            title,
+            hint,
+            vec![(Some(ts!("console-in-wsl")), unix), (Some(ts!("console-on-windows-itself")), windows)],
+            buttons,
+        )
     }
 
     /// The not-installed view: the agent's drawing beside `title`, `hint`, the install `lines`
@@ -2356,9 +2384,9 @@ impl ConsolePanel {
         let install = self.sessions.get(root).and_then(|s| s.install);
         let install_in = self.sessions.get(root).and_then(|s| s.install_in.clone());
         let (ended, again) = match (self.kind, install) {
-            (_, Some(_)) => ("The installer".to_owned(), "Try again"),
-            (Kind::Claude, None) => (self.session_agent(root, cx).name.to_string(), "Start a new session"),
-            (Kind::Shell, None) => (self.kind.title().to_owned(), "Start a new session"),
+            (_, Some(_)) => (ts!("console-the-installer").to_owned(), ts!("console-try-again")),
+            (Kind::Claude, None) => (self.session_agent(root, cx).name.to_string(), ts!("console-start-a-new-session")),
+            (Kind::Shell, None) => (self.kind.title().to_owned(), ts!("console-start-a-new-session")),
         };
         let find_bar = self.find_bar(&p, cx);
         let grid = div()
@@ -2486,12 +2514,12 @@ impl ConsolePanel {
                 Some(link) => {
                     let copy = link.clone();
                     menu.item(
-                        PopupMenuItem::new("Open Link")
+                        PopupMenuItem::new(ts!("console-open-link"))
                             .icon(menu_icon(IconName::Globe))
                             .on_click(move |_, _, cx| cx.open_url(&link)),
                     )
                     .item(
-                        PopupMenuItem::new("Copy Link")
+                        PopupMenuItem::new(ts!("console-copy-link"))
                             .icon(menu_icon(IconName::Copy))
                             .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))),
                     )
@@ -2501,15 +2529,17 @@ impl ConsolePanel {
             };
             let (copy_panel, copy_root) = (panel.clone(), menu_root.clone());
             let (paste_panel, paste_root) = (panel.clone(), menu_root.clone());
-            menu.item(PopupMenuItem::new("Copy").icon(menu_icon(IconName::Copy)).disabled(!has_selection).on_click(
-                move |_, _, cx| {
-                    copy_panel.update(cx, |this, cx| {
-                        this.copy_selection(&copy_root, cx);
-                    })
-                },
-            ))
+            menu.item(
+                PopupMenuItem::new(ts!("cmd-copy")).icon(menu_icon(IconName::Copy)).disabled(!has_selection).on_click(
+                    move |_, _, cx| {
+                        copy_panel.update(cx, |this, cx| {
+                            this.copy_selection(&copy_root, cx);
+                        })
+                    },
+                ),
+            )
             .item(
-                PopupMenuItem::new("Paste")
+                PopupMenuItem::new(ts!("cmd-paste"))
                     .on_click(move |_, _, cx| paste_panel.update(cx, |this, cx| this.paste_clipboard(&paste_root, cx))),
             )
         });
@@ -2814,11 +2844,11 @@ pub fn continue_args(agent: &crate::agents::Agent) -> Vec<String> {
 /// The Install button's words for the agent `id`.
 fn install_label(id: &str) -> &'static str {
     match id {
-        crate::agents::CLAUDE => "Install Claude Code",
-        crate::agents::CODEX => "Install Codex",
-        crate::agents::OPENCODE => "Install opencode",
-        crate::agents::AMP => "Install Amp",
-        _ => "Install",
+        crate::agents::CLAUDE => ts!("console-install-claude-code"),
+        crate::agents::CODEX => ts!("console-install-codex"),
+        crate::agents::OPENCODE => ts!("console-install-opencode"),
+        crate::agents::AMP => ts!("console-install-amp"),
+        _ => ts!("console-install"),
     }
 }
 

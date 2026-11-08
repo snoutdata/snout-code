@@ -69,11 +69,11 @@ impl Workspace {
             .root
             .clone()
             .filter(|_| self.pw_tests.read(cx).playwright)
-            .ok_or(format!("{what} works in a Playwright project"))?;
+            .ok_or(t!("record-works-in-a-playwright-project", what = what.to_string()))?;
         let editor = self
             .active_editor(window, cx)
             .filter(|e| scriptable(&e.read(cx).path))
-            .ok_or(format!("{what}: open a spec file and put the caret where it goes"))?;
+            .ok_or(t!("record-open-a-spec-file-and-put-the-caret", what = what.to_string()))?;
         Ok((editor, root))
     }
 
@@ -98,10 +98,10 @@ impl Workspace {
     /// Record at Cursor: the recorder, its steps written where the caret is.
     pub fn record_at_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.recording.is_some() {
-            self.note("A recording is going: stop it first", cx);
+            self.note(ts!("record-a-recording-is-going-stop-it-first"), cx);
             return;
         }
-        let (editor, root) = match self.spec_tab("Record at Cursor", window, cx) {
+        let (editor, root) = match self.spec_tab(ts!("cmd-record-at-cursor"), window, cx) {
             Ok(found) => found,
             Err(why) => return self.note(why, cx),
         };
@@ -141,7 +141,7 @@ impl Workspace {
             )
         });
         cx.spawn_in(window, async move |this, cx| {
-            let started = rx.await.unwrap_or_else(|_| Err("It did not start".into()));
+            let started = rx.await.unwrap_or_else(|_| Err(ts!("record-it-did-not-start").into()));
             let _ = this.update_in(cx, |w, window, cx| w.recording_started(started, window, cx));
         })
         .detach();
@@ -239,10 +239,14 @@ impl Workspace {
                 e.read(cx).path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
             });
             let text = match (r.steps, failed) {
-                (0, true) => "The recorder stopped: the Build window says why".to_owned(),
-                (0, false) => "The recording ended with no steps".to_owned(),
-                (1, _) => format!("Recorded 1 step into {}", name.unwrap_or_default()),
-                (n, _) => format!("Recorded {n} steps into {}", name.unwrap_or_default()),
+                (0, true) => ts!("record-the-recorder-stopped-the-build-window-says-why").to_owned(),
+                (0, false) => ts!("record-the-recording-ended-with-no-steps").to_owned(),
+                (1, _) => t!("record-recorded-1-step-into", unwrap_or_default = (name.unwrap_or_default()).to_string()),
+                (n, _) => t!(
+                    "record-recorded-steps-into",
+                    n = n.to_string(),
+                    unwrap_or_default = (name.unwrap_or_default()).to_string()
+                ),
             };
             self.note(text, cx);
         }
@@ -258,10 +262,10 @@ impl Workspace {
     /// locator at the caret.
     pub fn pick_locator(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.picking.is_some() {
-            self.note("Picking is on: click an element in the browser", cx);
+            self.note(ts!("record-picking-is-on-click-an-element-in-the"), cx);
             return;
         }
-        let (editor, root) = match self.spec_tab("Pick Locator", window, cx) {
+        let (editor, root) = match self.spec_tab(ts!("cmd-pick-locator"), window, cx) {
             Ok(found) => found,
             Err(why) => return self.note(why, cx),
         };
@@ -281,7 +285,7 @@ impl Workspace {
             )
         });
         cx.spawn_in(window, async move |this, cx| {
-            let started = rx.await.unwrap_or_else(|_| Err("It did not start".into()));
+            let started = rx.await.unwrap_or_else(|_| Err(ts!("record-it-did-not-start").into()));
             let _ = this.update_in(cx, |w, _, cx| match started {
                 Ok(id) => {
                     if let Some(p) = w.picking.as_mut() {
@@ -310,7 +314,8 @@ impl Workspace {
                 self.picked(locator, window, cx);
             }
             Some("error") => {
-                let why = v.get("message").and_then(|m| m.as_str()).unwrap_or("Pick Locator stopped").to_owned();
+                let why =
+                    v.get("message").and_then(|m| m.as_str()).unwrap_or(ts!("record-pick-locator-stopped")).to_owned();
                 self.note(why, cx);
             }
             _ => {}
@@ -333,7 +338,7 @@ impl Workspace {
         p.picked += 1;
         let picked = p.picked;
         editor.update(cx, |e, cx| e.set_record_bar(Some(RecordBar::Picking { picked }), cx));
-        self.note(format!("Picked {locator}"), cx);
+        self.note(t!("record-picked", locator = locator.to_string()), cx);
     }
 
     /// Stop Recording: end the recording and the pick going.
@@ -355,7 +360,7 @@ impl Workspace {
     /// Open UI Mode: Playwright's own runner, in the system browser.
     pub fn open_ui_mode(&mut self, cx: &mut Context<Self>) {
         if self.pw_tests.read(cx).root.is_none() {
-            return self.note("UI Mode works in a Playwright project", cx);
+            return self.note(ts!("record-ui-mode-works-in-a-playwright-project"), cx);
         }
         let model = self.model.clone();
         self.runs.update(cx, |r, cx| {
@@ -364,7 +369,7 @@ impl Workspace {
                 record::ui_launch,
                 move |_, started, cx| {
                     let text = match started {
-                        Ok(_) => "UI Mode opens in your browser".to_owned(),
+                        Ok(_) => ts!("record-ui-mode-opens-in-your-browser").to_owned(),
                         Err(why) => why,
                     };
                     model.update(cx, |m, cx| {

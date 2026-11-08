@@ -177,16 +177,16 @@ impl EventEmitter<SearchEvent> for SearchView {}
 impl SearchView {
     pub fn new(model: Entity<Model>, root: PathBuf, mode: Mode, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let placeholder = match mode {
-            Mode::GoToFile => "Go to file",
-            Mode::GoToLine => "Line, or line:column",
-            Mode::Commands => "Type a command",
-            Mode::Tasks => "Run a Gradle task or Maven goal: its name or path",
-            Mode::Profiles => "Spring profiles: pick one to turn it on or off",
-            Mode::Symbols => "Go to symbol",
-            Mode::Structure => "Filter the file's symbols",
-            Mode::Classes => "Go to class, in the project, its libraries and the JDK",
-            Mode::RecentFiles => "Recent files",
-            Mode::NewFile => "New file: its path in the project, like src/main/java/App.java",
+            Mode::GoToFile => ts!("search-go-to-file"),
+            Mode::GoToLine => ts!("search-line-or-line-column"),
+            Mode::Commands => ts!("search-type-a-command"),
+            Mode::Tasks => ts!("search-run-a-gradle-task-or-maven-goal-its"),
+            Mode::Profiles => ts!("search-spring-profiles-pick-one-to-turn-it-on"),
+            Mode::Symbols => ts!("search-go-to-symbol"),
+            Mode::Structure => ts!("search-filter-the-files-symbols"),
+            Mode::Classes => ts!("search-go-to-class-in-the-project-its-libraries"),
+            Mode::RecentFiles => ts!("welcome-recent-files-2"),
+            Mode::NewFile => ts!("search-new-file-its-path-in-the-project-like"),
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         cx.subscribe(&input, |this, _, e: &InputEvent, cx| match e {
@@ -384,25 +384,29 @@ impl Render for SearchView {
         let view = cx.entity();
         let count = items.len();
         let empty: SharedString = match self.mode {
-            Mode::GoToFile => "No file matches".into(),
+            Mode::GoToFile => ts!("search-no-file-matches").into(),
             Mode::GoToLine => SharedString::default(),
-            Mode::Commands => "No command matches".into(),
-            Mode::Tasks => "No task matches".into(),
-            Mode::Profiles => "No profile matches".into(),
-            Mode::Symbols if self.input.read(cx).value().is_empty() => "Type a name".into(),
-            Mode::Symbols => "No symbol matches".into(),
-            Mode::Structure => "No symbol matches".into(),
-            Mode::Classes if self.input.read(cx).value().is_empty() => "Type a class name, or its capitals".into(),
-            Mode::Classes => "No class matches".into(),
-            Mode::RecentFiles => "No recent file matches".into(),
-            Mode::NewFile => "Return makes the file and opens it".into(),
+            Mode::Commands => ts!("search-no-command-matches").into(),
+            Mode::Tasks => ts!("search-no-task-matches").into(),
+            Mode::Profiles => ts!("search-no-profile-matches").into(),
+            Mode::Symbols if self.input.read(cx).value().is_empty() => ts!("search-type-a-name").into(),
+            Mode::Symbols => ts!("search-no-symbol-matches").into(),
+            Mode::Structure => ts!("search-no-symbol-matches").into(),
+            Mode::Classes if self.input.read(cx).value().is_empty() => {
+                ts!("search-type-a-class-name-or-its-capitals").into()
+            }
+            Mode::Classes => ts!("search-no-class-matches").into(),
+            Mode::RecentFiles => ts!("search-no-recent-file-matches").into(),
+            Mode::NewFile => ts!("search-return-makes-the-file-and-opens-it").into(),
         };
         // Nothing typed yet: a plain line saying what to type, no drawing.
         let blank = self.input.read(cx).value().trim().is_empty();
         if self.mode == Mode::GoToLine {
             let hint = match parse_line(&self.input.read(cx).value()) {
-                Some((line, column)) => format!("Go to line {}, column {}", line + 1, column + 1),
-                None => "Type a line number, or line:column".to_owned(),
+                Some((line, column)) => {
+                    t!("search-go-to-line-column", line = ((line + 1) as u64), column = ((column + 1) as u64))
+                }
+                None => ts!("search-type-a-line-number-or-line-column").to_owned(),
             };
             return div()
                 .id("search")
@@ -523,7 +527,7 @@ impl Render for SearchView {
             .when(count == 0 && !blank, |d| {
                 d.child(
                     crate::components::EmptyState::new(snout_core::art::spots::no_results(), empty.clone())
-                        .hint("Try fewer letters, or another word.")
+                        .hint(ts!("search-try-fewer-letters-or-another-word"))
                         .on(p.card)
                         .compact(),
                 )

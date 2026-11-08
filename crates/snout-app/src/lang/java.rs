@@ -577,7 +577,7 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
         let tmp = tempfile::Builder::new().prefix("snout-temurin").tempdir()?;
         let file = tmp.path().join("jdk.tar.gz");
         fetch_file(&*local, link, &file, progress)
-            .with_context(|| format!("download the JDK on {}", crate::platform::THIS_MACHINE))?;
+            .with_context(|| format!("download the JDK on {}", crate::platform::this_machine()))?;
         if !sha.is_empty() && sha256_on(&*local, &file)? != sha {
             bail!("the download is damaged (its checksum does not match)");
         }

@@ -65,12 +65,12 @@ pub struct BgTask {
 /// A Java server's stage, as the background tasks name it.
 pub fn stage_text(stage: &Stage) -> String {
     match stage {
-        Stage::Importing => "Reading the Gradle model".into(),
-        Stage::CompilingScala => "Compiling Scala".into(),
-        Stage::Starting => "Starting Java".into(),
-        Stage::Indexing => "Indexing".into(),
-        Stage::Restarting => "Restarting Java".into(),
-        Stage::WaitingForEngine => "Waiting for snout-engine".into(),
+        Stage::Importing => ts!("background-reading-the-gradle-model").into(),
+        Stage::CompilingScala => ts!("background-compiling-scala").into(),
+        Stage::Starting => ts!("background-starting-java").into(),
+        Stage::Indexing => ts!("background-indexing").into(),
+        Stage::Restarting => ts!("background-restarting-java").into(),
+        Stage::WaitingForEngine => ts!("background-waiting-for-snout-engine").into(),
         other => other.label(),
     }
 }
@@ -99,12 +99,16 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
                     (Stage::Indexing | Stage::Ready, Some(w)) => w.label(),
                     (stage, _) => stage_text(stage),
                 };
-                let again = if n > 1 { format!(" (attempt {n} of 5)") } else { String::new() };
+                let again = if n > 1 { t!("background-attempt-of-5", n = n.to_string()) } else { String::new() };
                 out.push(BgTask {
                     title,
-                    stage: format!("The Java engine stopped unexpectedly and is starting again{again}: {doing}"),
+                    stage: t!(
+                        "background-the-java-engine-stopped-unexpectedly-and-is-starting",
+                        again = again.to_string(),
+                        doing = doing.to_string()
+                    ),
                     percent: work.and_then(|w| w.percentage),
-                    compact: Some("Java stopped, starting again".into()),
+                    compact: Some(ts!("background-java-stopped-starting-again").into()),
                     parts: Vec::new(),
                 });
                 continue;
@@ -121,7 +125,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
                     .map(|(name, r)| (name.clone(), r.label().to_owned(), r.percent.filter(|_| !r.is_ready())))
                     .collect();
                 // The ones still on their way first.
-                parts.sort_by_key(|(name, stage, _)| (stage == "Ready", name.clone()));
+                parts.sort_by_key(|(name, stage, _)| (stage == ts!("model-ready"), name.clone()));
                 out.push(BgTask {
                     title,
                     stage: if s.readiness.total > 0 {
@@ -153,7 +157,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
     out.extend(crate::updates::task(cx));
     if let Some((stage, percent)) = &model.reload {
         out.push(BgTask {
-            title: "Reload from Disk".into(),
+            title: ts!("tabs-reload-from-disk").into(),
             stage: stage.clone(),
             percent: *percent,
             ..Default::default()

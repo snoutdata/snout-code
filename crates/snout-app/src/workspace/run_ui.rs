@@ -99,8 +99,10 @@ impl Workspace {
                 }
                 None => this.model.update(cx, |m, cx| {
                     m.message = match &link {
-                        Link::Frame { class, .. } => format!("{class} is not among the project's sources"),
-                        Link::Path { path, .. } => format!("{} does not exist", path.display()),
+                        Link::Frame { class, .. } => {
+                            t!("run-is-not-among-the-projects-sources", class = class.to_string())
+                        }
+                        Link::Path { path, .. } => t!("model-does-not-exist", path = (path.display()).to_string()),
                     };
                     cx.notify();
                 }),
@@ -151,7 +153,7 @@ impl Workspace {
         match found {
             Some((target, module)) => runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx)),
             None => self.model.update(cx, |m, cx| {
-                m.message = "The file in front has no tests, main class or script to run".into();
+                m.message = ts!("run-the-file-in-front-has-no-tests-main").into();
                 cx.notify();
             }),
         }
@@ -171,7 +173,7 @@ impl Workspace {
                 self.runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx));
             }
             None => self.model.update(cx, |m, cx| {
-                m.message = "Nothing to run here: put the caret in a main class, a test or a script".into();
+                m.message = ts!("run-nothing-to-run-here-put-the-caret-in").into();
                 cx.notify();
             }),
         }

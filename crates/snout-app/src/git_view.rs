@@ -227,9 +227,9 @@ pub struct GitView {
 
 fn file_columns(state_w: f32) -> Vec<Column> {
     vec![
-        Column::new("Name", Some(260.)).min(80.),
-        Column::new("State", Some(state_w)).min(92.),
-        Column::new("Relative Directory", None).min(60.).drop_below(430.),
+        Column::new(ts!("dialogs-name"), Some(260.)).min(80.),
+        Column::new(ts!("git-state"), Some(state_w)).min(92.),
+        Column::new(ts!("git-relative-directory"), None).min(60.).drop_below(430.),
     ]
 }
 const DIFF_ROW: f32 = 17.;
@@ -245,9 +245,9 @@ impl GitView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("File filter"));
-        let journal_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Message, author, SHA or ref"));
-        let message = cx.new(|cx| TextareaState::new(window, cx).placeholder("Commit message"));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("git-file-filter")));
+        let journal_filter = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("git-message-author-sha-or-ref")));
+        let message = cx.new(|cx| TextareaState::new(window, cx).placeholder(ts!("git-commit-message")));
         cx.subscribe(&filter, |this, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 let text = input.read(cx).value().to_string();
@@ -317,9 +317,9 @@ impl GitView {
             journal_columns: TableColumns::new(
                 vec![
                     Column::new("", Some(14.)),
-                    Column::new("Message", None).min(300.),
-                    Column::new("Author", Some(160.)).min(70.).drop_below(500.),
-                    Column::new("Date", Some(130.)).min(124.),
+                    Column::new(ts!("git-message"), None).min(300.),
+                    Column::new(ts!("git-author"), Some(160.)).min(70.).drop_below(500.),
+                    Column::new(ts!("git-date"), Some(130.)).min(124.),
                     Column::new("SHA", Some(80.)).min(60.).drop_below(440.),
                 ],
                 cx,
@@ -423,13 +423,16 @@ impl GitView {
         let entries = m.selected_entries();
         let in_tree = m.commit_view.is_none();
         let push = match m.status.branch.ahead {
-            0 => "Push".to_owned(),
-            n => format!("Push ({n})"),
+            0 => ts!("cmd-push").to_owned(),
+            n => t!("git-push", n = n.to_string()),
         };
         let agent = crate::agents::console_agent(cx);
-        let console: SharedString =
-            if m.settings.console_open { format!("Hide {}", agent.short).into() } else { agent.short.clone() };
-        let console_tip = format!("{} console in this repository (⌘J)", agent.name);
+        let console: SharedString = if m.settings.console_open {
+            t!("git-hide", short = (agent.short).to_string()).into()
+        } else {
+            agent.short.clone()
+        };
+        let console_tip = t!("git-console-in-this-repository-j", agent = (agent.name).to_string());
         // Words while they fit; then the first buttons, GitHub and the agent keep theirs;
         // then icons alone. A word gone moves to the button's tooltip.
         let words = |s: &str| s.chars().count() as f32 * 7.5;
@@ -437,7 +440,7 @@ impl GitView {
         let (all_words, main_words) = (self.width >= 1222. + longer, self.width >= 820. + longer);
         let theme = m.settings.theme;
         let has_github = m.github_url.is_some();
-        let github_tip = m.github_url.clone().unwrap_or_else(|| "No GitHub remote".into());
+        let github_tip = m.github_url.clone().unwrap_or_else(|| ts!("git-no-github-remote").into());
         let model = self.model.clone();
         let tool = |id: &'static str, g: Glyph, label: String, enabled: bool, tip: &'static str, action: Action| {
             let word = all_words || (main_words && matches!(id, "tb-open" | "tb-pull" | "tb-fetch" | "tb-push"));
@@ -462,16 +465,44 @@ impl GitView {
             .px(px(8.))
             .py(px(6.))
             .bg(p.ground)
-            .child(tool("tb-open", Glyph::Open, "Open".into(), true, "Open local repository (⌘O)", Action::PickFolder))
+            .child(tool(
+                "tb-open",
+                Glyph::Open,
+                ts!("find-open").into(),
+                true,
+                ts!("git-open-local-repository-o"),
+                Action::PickFolder,
+            ))
             .child(look::vseparator(&p))
-            .child(tool("tb-pull", Glyph::Pull, "Pull".into(), net, "git pull", Action::Pull(PullMode::Default)))
-            .child(tool("tb-fetch", Glyph::Fetch, "Fetch".into(), net, "git fetch --all --prune", Action::Fetch))
-            .child(tool("tb-push", Glyph::Push, push, net, "git push (sets upstream on first push)", Action::Push))
+            .child(tool(
+                "tb-pull",
+                Glyph::Pull,
+                ts!("cmd-pull").into(),
+                net,
+                "git pull",
+                Action::Pull(PullMode::Default),
+            ))
+            .child(tool(
+                "tb-fetch",
+                Glyph::Fetch,
+                ts!("cmd-fetch").into(),
+                net,
+                "git fetch --all --prune",
+                Action::Fetch,
+            ))
+            .child(tool(
+                "tb-push",
+                Glyph::Push,
+                push,
+                net,
+                ts!("git-git-push-sets-upstream-on-first-push"),
+                Action::Push,
+            ))
             .child(look::vseparator(&p))
             .child(tool(
                 "tb-stage",
                 Glyph::Stage,
-                "Stage".into(),
+                ts!("cmd-stage").into(),
                 in_tree && entries.iter().any(FileEntry::has_unstaged),
                 "",
                 Action::Stage(stage_paths(&entries)),
@@ -479,7 +510,7 @@ impl GitView {
             .child(tool(
                 "tb-unstage",
                 Glyph::Unstage,
-                "Unstage".into(),
+                ts!("cmd-unstage").into(),
                 in_tree && entries.iter().any(FileEntry::has_staged),
                 "",
                 Action::Unstage(unstage_paths(&entries)),
@@ -487,7 +518,7 @@ impl GitView {
             .child(tool(
                 "tb-discard",
                 Glyph::Discard,
-                "Discard".into(),
+                ts!("dialogs-discard").into(),
                 in_tree && !entries.is_empty(),
                 "",
                 Action::AskDiscard(entries.clone()),
@@ -495,22 +526,29 @@ impl GitView {
             .child(tool(
                 "tb-trash",
                 Glyph::Trash,
-                "Delete".into(),
+                ts!("dialogs-delete").into(),
                 in_tree && entries.iter().any(on_disk),
-                "Move to the Trash (⌘⌫)",
+                ts!("git-move-to-the-trash"),
                 Action::AskDeleteFiles(entries.clone()),
             ))
             .child(look::vseparator(&p))
-            .child(tool("tb-refresh", Glyph::Refresh, "Refresh".into(), has_repo, "F5 / ⌘R", Action::Refresh))
+            .child(tool("tb-refresh", Glyph::Refresh, ts!("cmd-refresh").into(), has_repo, "F5 / ⌘R", Action::Refresh))
             .child(tool(
                 "tb-checkout",
                 Glyph::Switch,
-                "Check Out…".into(),
+                ts!("cmd-check-out").into(),
                 has_repo,
-                "Branch, tag or commit (⇧⌘O)",
+                ts!("git-branch-tag-or-commit-o"),
                 Action::ShowCheckout,
             ))
-            .child(tool("tb-branch", Glyph::Branch, "New Branch".into(), has_repo, "", Action::ShowNewBranch(None)))
+            .child(tool(
+                "tb-branch",
+                Glyph::Branch,
+                ts!("git-new-branch").into(),
+                has_repo,
+                "",
+                Action::ShowNewBranch(None),
+            ))
             .child(div().flex_1())
             .child(Trigger(look::glyph_button("tb-theme", Glyph::Theme, "", true, &p)).dropdown_menu(
                 move |mut menu, _, _| {
@@ -578,7 +616,7 @@ impl GitView {
         let tags = m.tags.clone();
         let mut rows: Vec<AnyElement> = Vec::new();
         if !has_repo {
-            rows.push(weak("No repository open", &p).into_any_element());
+            rows.push(weak(ts!("git-no-repository-open"), &p).into_any_element());
         }
         if let Some(label) = detached {
             rows.push(
@@ -590,7 +628,7 @@ impl GitView {
             );
         }
         if has_repo {
-            let (open, header) = self.section("local", "Local Branches".into(), true, cx);
+            let (open, header) = self.section("local", ts!("git-local-branches").into(), true, cx);
             rows.push(header);
             if open {
                 for b in branches.iter().filter(|b| b.kind == BranchKind::Local) {
@@ -609,7 +647,7 @@ impl GitView {
                 }
             }
             if !tags.is_empty() {
-                let (open, header) = self.section("tags", format!("Tags ({})", tags.len()), false, cx);
+                let (open, header) = self.section("tags", t!("git-tags", count = (tags.len()).to_string()), false, cx);
                 rows.push(header);
                 if open {
                     for t in &tags {
@@ -631,11 +669,17 @@ impl GitView {
                     .flex()
                     .items_center()
                     .gap(px(2.))
-                    .child(title("Branches"))
+                    .child(title(ts!("git-branches")))
                     .child(div().flex_1())
-                    .child(button("br-checkout", Glyph::Switch, "Check out… (⇧⌘O)", has_repo, Action::ShowCheckout))
-                    .child(button("br-new", Glyph::Branch, "New branch", has_repo, Action::ShowNewBranch(None)))
-                    .child(button("br-fetch", Glyph::Fetch, "Fetch", has_repo && idle, Action::Fetch)),
+                    .child(button("br-checkout", Glyph::Switch, ts!("git-check-out-o"), has_repo, Action::ShowCheckout))
+                    .child(button(
+                        "br-new",
+                        Glyph::Branch,
+                        ts!("dialogs-new-branch"),
+                        has_repo,
+                        Action::ShowNewBranch(None),
+                    ))
+                    .child(button("br-fetch", Glyph::Fetch, ts!("cmd-fetch"), has_repo && idle, Action::Fetch)),
             )
             .child(separator(&p))
             .child(div().id("branch-list").flex_1().min_h_0().flex().flex_col().overflow_y_scrollbar().children(rows))
@@ -649,28 +693,29 @@ impl GitView {
             BranchKind::Local => b.name.clone(),
             BranchKind::Remote => b.local_name().to_owned(),
         };
-        let tip: SharedString = format!(
-            "{}{}\n{} {}\n\nDouble-click to check out",
-            b.name,
-            b.upstream.as_ref().map(|u| format!(" → {u}")).unwrap_or_default(),
-            b.target,
-            b.subject
+        let tip: SharedString = t!(
+            "git-double-click-to-check-out",
+            b = (b.name).to_string(),
+            u = (b.upstream.as_ref().map(|u| format!(" → {u}")).unwrap_or_default()).to_string(),
+            target = (b.target).to_string(),
+            subject = (b.subject).to_string()
         )
         .into();
         let key = format!("{:?}:{}", b.kind, b.name);
         let hovered = self.hovered.as_deref() == Some(key.as_str());
         let delete_label = match b.kind {
-            BranchKind::Local => "Delete…".to_owned(),
-            BranchKind::Remote => format!("Delete from {}…", b.remote.as_deref().unwrap_or("remote")),
+            BranchKind::Local => ts!("git-delete").to_owned(),
+            BranchKind::Remote => t!("git-delete-from", remote = (b.remote.as_deref().unwrap_or("remote")).to_string()),
         };
         let checkout_label = match b.kind {
-            BranchKind::Local => "Check out".to_owned(),
-            BranchKind::Remote => format!("Check out as local “{}”", b.local_name()),
+            BranchKind::Local => ts!("dialogs-check-out-3").to_owned(),
+            BranchKind::Remote => t!("git-check-out-as-local", local_name = (b.local_name()).to_string()),
         };
         let (b1, b2, b3) = (b.clone(), b.clone(), b.clone());
         let model = self.model.clone();
         let hover_key = key.clone();
-        let trash_tip = if b.kind == BranchKind::Local { "Delete branch…" } else { "Delete from the remote…" };
+        let trash_tip =
+            if b.kind == BranchKind::Local { ts!("git-delete-branch") } else { ts!("git-delete-from-the-remote") };
         let head_ink = if b.is_head { p.fg } else { mix(p.fg, 0.8, p.fg_dim) };
         let (ahead, behind, gone) = (b.ahead, b.behind, b.upstream_gone);
         crate::components::tree_row(SharedString::from(format!("branch-{key}")), RowState::default(), p)
@@ -734,7 +779,7 @@ impl GitView {
                                 .on_click(send(Action::RequestCheckout((&b).into()))),
                         )
                         .item(
-                            PopupMenuItem::new("Create branch from here…")
+                            PopupMenuItem::new(ts!("git-create-branch-from-here"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::GitBranch))
                                 .on_click(send(Action::ShowNewBranch(Some(StartPoint {
                                     label: b.name.clone(),
@@ -749,7 +794,7 @@ impl GitView {
                         )
                         .separator()
                         .item(
-                            PopupMenuItem::new("Copy name")
+                            PopupMenuItem::new(ts!("git-copy-name"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                 .on_click(send(Action::Copy(b.name.clone()))),
                         )
@@ -767,8 +812,13 @@ impl GitView {
     }
 
     fn tag_row(&mut self, t: &Tag, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let tip: SharedString =
-            format!("{} {}\n{}\n\nDouble-click to check out (detached)", t.target, t.subject, t.date).into();
+        let tip: SharedString = t!(
+            "git-double-click-to-check-out-detached",
+            target = (t.target).to_string(),
+            subject = (t.subject).to_string(),
+            date = (t.date).to_string()
+        )
+        .into();
         let target = CheckoutTarget::Tag(t.name.clone());
         let (t1, name) = (target.clone(), t.name.clone());
         let model = self.model.clone();
@@ -798,20 +848,23 @@ impl GitView {
                                 model.update(cx, |m, cx| m.handle(a, cx))
                             }
                         };
-                        let start = StartPoint { label: format!("tag {name}"), rev: format!("refs/tags/{name}") };
+                        let start = StartPoint {
+                            label: t!("git-tag", name = name.to_string()),
+                            rev: format!("refs/tags/{name}"),
+                        };
                         menu.item(
-                            PopupMenuItem::new("Check out (detached)")
+                            PopupMenuItem::new(ts!("git-check-out-detached"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::ArrowRightLeft))
                                 .on_click(send(Action::RequestCheckout(target.clone()))),
                         )
                         .item(
-                            PopupMenuItem::new("Create branch from tag…")
+                            PopupMenuItem::new(ts!("git-create-branch-from-tag"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::GitBranch))
                                 .on_click(send(Action::ShowNewBranch(Some(start)))),
                         )
                         .separator()
                         .item(
-                            PopupMenuItem::new("Copy name")
+                            PopupMenuItem::new(ts!("git-copy-name"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                 .on_click(send(Action::Copy(name.clone()))),
                         )
@@ -825,13 +878,17 @@ impl GitView {
     fn files(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let m = self.model.read(cx);
-        let summary = format!("{} changed, {} staged", m.status.files.len(), m.status.staged_count());
+        let summary = t!(
+            "git-changed-staged",
+            count = (m.status.files.len()).to_string(),
+            staged_count = (m.status.staged_count()).to_string()
+        );
         let files_w = self.fitted.map_or(f32::MAX, |f| f.middle - f.commit);
         let dir = m.dir_filter.clone();
         let clean = m.status.files.is_empty();
         let clean_text = match &m.status.branch.head {
-            Some(head) => format!("Nothing to commit on {head}"),
-            None => "Nothing to commit".to_owned(),
+            Some(head) => t!("git-nothing-to-commit-on", head = head.to_string()),
+            None => ts!("git-nothing-to-commit").to_owned(),
         };
         let rows: Vec<FileEntry> = m.visible_files().into_iter().cloned().collect();
         let selected = m.selected.clone();
@@ -844,19 +901,24 @@ impl GitView {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(title("Files"))
+            .child(title(ts!("panels-files")))
             .when(files_w >= 340., |d| d.child(weak(summary, &p)))
             .when_some(dir, |d, dir| {
                 d.child(
-                    look::small_button("dir-chip", crate::components::IconName::FolderX, format!("in {dir}/"), &p)
-                        .tooltip(|w, cx| Tooltip::new("Show all files").build(w, cx))
-                        .on_click(self.on_click(Action::FilterDir(None))),
+                    look::small_button(
+                        "dir-chip",
+                        crate::components::IconName::FolderX,
+                        t!("git-in", dir = dir.to_string()),
+                        &p,
+                    )
+                    .tooltip(|w, cx| Tooltip::new(ts!("git-show-all-files")).build(w, cx))
+                    .on_click(self.on_click(Action::FilterDir(None))),
                 )
             })
             .child(div().flex_1())
             .child(look::field(&self.filter, true, Some(220.), &p).flex_shrink(1.).min_w(px(80.)));
         let body = if clean {
-            look::art_note(snout_core::art::clean(), "The working tree is clean", clean_text, cx)
+            look::art_note(snout_core::art::clean(), ts!("git-the-working-tree-is-clean"), clean_text, cx)
         } else {
             let sorts = [SortColumn::Name, SortColumn::State, SortColumn::Directory];
             let sorted = sorts.iter().position(|c| *c == by).map(|i| (i, asc));
@@ -927,24 +989,24 @@ impl GitView {
                                 };
                                 let mut menu = menu
                                     .item(
-                                        PopupMenuItem::new("Stage")
+                                        PopupMenuItem::new(ts!("cmd-stage"))
                                             .icon(crate::components::menu_icon(crate::components::IconName::Plus))
                                             .disabled(!entries.iter().any(FileEntry::has_unstaged))
                                             .on_click(send(Action::Stage(stage_paths(&entries)))),
                                     )
                                     .item(
-                                        PopupMenuItem::new("Unstage")
+                                        PopupMenuItem::new(ts!("cmd-unstage"))
                                             .icon(crate::components::menu_icon(crate::components::IconName::Minus))
                                             .disabled(!entries.iter().any(FileEntry::has_staged))
                                             .on_click(send(Action::Unstage(unstage_paths(&entries)))),
                                     )
                                     .item(
-                                        PopupMenuItem::new("Discard…")
+                                        PopupMenuItem::new(ts!("git-discard"))
                                             .icon(crate::components::menu_icon(crate::components::IconName::Undo2))
                                             .on_click(send(Action::AskDiscard(entries.clone()))),
                                     )
                                     .item(
-                                        PopupMenuItem::new("Delete…")
+                                        PopupMenuItem::new(ts!("git-delete"))
                                             .icon(crate::components::menu_icon(crate::components::IconName::Trash))
                                             .disabled(!entries.iter().any(on_disk))
                                             .on_click(send(Action::AskDeleteFiles(entries.clone()))),
@@ -956,7 +1018,7 @@ impl GitView {
                                 let rules = snout_core::ignore_rules(&untracked);
                                 if rules.is_empty() {
                                     menu = menu.item(
-                                        PopupMenuItem::new("Add to .gitignore")
+                                        PopupMenuItem::new(ts!("git-add-to-gitignore"))
                                             .icon(crate::components::menu_icon(crate::components::IconName::EyeOff))
                                             .disabled(true),
                                     );
@@ -964,7 +1026,7 @@ impl GitView {
                                     let model = model.clone();
                                     menu = menu.submenu_with_icon(
                                         Some(crate::components::menu_icon(crate::components::IconName::EyeOff)),
-                                        "Add to .gitignore",
+                                        ts!("git-add-to-gitignore"),
                                         window,
                                         cx,
                                         move |sub, _, _| {
@@ -991,7 +1053,7 @@ impl GitView {
                                                 .on_click(send(Action::Reveal(root.join(&f2.path)))),
                                         )
                                         .item(
-                                            PopupMenuItem::new("Open in External Terminal")
+                                            PopupMenuItem::new(ts!("cmd-open-in-external-terminal"))
                                                 .icon(crate::components::menu_icon(
                                                     crate::components::IconName::SquareTerminal,
                                                 ))
@@ -999,7 +1061,7 @@ impl GitView {
                                         );
                                 }
                                 menu.item(
-                                    PopupMenuItem::new("Copy path")
+                                    PopupMenuItem::new(ts!("projects-copy-path"))
                                         .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                         .on_click(send(Action::Copy(f2.path.clone()))),
                                 )
@@ -1029,40 +1091,45 @@ impl GitView {
         let has_changes = m.repo.is_some() && scope != snout_core::Scope::Nothing;
         let drafting = m.drafting();
         let agent = crate::agents::console_agent(cx).short;
-        let waiting: SharedString =
-            if m.draft.as_ref().is_some_and(|d| d.asking) { "See console".into() } else { "Writing\u{2026}".into() };
+        let waiting: SharedString = if m.draft.as_ref().is_some_and(|d| d.asking) {
+            ts!("git-see-console").into()
+        } else {
+            ts!("git-writing").into()
+        };
         let can_commit = m.can_commit();
         let amend = m.amend;
         let has_log = !m.log.is_empty();
         let draft_tip: SharedString = if has_changes {
-            format!(
-                "{agent} writes the message from {}, building on anything you typed. If it is not running, it starts in the console.",
-                scope.what()
+            t!(
+                "git-writes-the-message-from-building-on-anything-you",
+                agent = agent.to_string(),
+                what = (scope.what()).to_string()
             )
             .into()
         } else {
-            "Nothing to commit".into()
+            ts!("git-nothing-to-commit").into()
         };
-        let commit_tip: SharedString = crate::keymap::shown(&format!("Commits {}  ⌘↩", scope.what())).into();
+        let commit_tip: SharedString =
+            crate::keymap::shown(&t!("git-commits", what = (scope.what()).to_string())).into();
         let header = div()
             .flex_none()
             .h(px(22.))
             .flex()
             .items_center()
             .gap(px(6.))
-            .child(title("Commit"))
+            .child(title(ts!("cmd-commit")))
             .child(div().flex_1())
             .when(drafting, |d| {
                 d.child(div().min_w_0().truncate().text_size(px(11.5)).text_color(p.fg_dim).child(waiting))
                     .child(Spinner::new().xsmall())
                     .child(
-                        look::chip_button("stop-draft", Glyph::Close, "Stop", true, &p)
+                        look::chip_button("stop-draft", Glyph::Close, ts!("cmd-stop"), true, &p)
                             .on_click(self.on_click(Action::CancelDraft)),
                     )
             })
             .when(!drafting, |d| {
                 d.child(
-                    look::chip_button("draft", Glyph::Spark, "Draft", has_changes, &p)
+                    look::chip_button("draft", Glyph::Spark, ts!("git-draft"), has_changes, &p)
                         .tooltip(move |w, cx| Tooltip::new(draft_tip.clone()).build(w, cx))
                         .when(has_changes, |b| b.on_click(self.on_click(Action::DraftMessage))),
                 )
@@ -1078,7 +1145,13 @@ impl GitView {
         );
         // In a very narrow box the words give way to the buttons.
         let tiny = self.fitted.is_some_and(|f| f.commit < 200.);
-        let amend_box = look::checkbox("amend", if tiny { "Amend" } else { "Amend last commit" }, amend, has_log, &p);
+        let amend_box = look::checkbox(
+            "amend",
+            if tiny { ts!("git-amend") } else { ts!("git-amend-last-commit") },
+            amend,
+            has_log,
+            &p,
+        );
         let amend_box = amend_box.when(has_log, |c| {
             c.on_click(cx.listener(move |this, _, _, cx| this.model.update(cx, |m, cx| m.set_amend(!amend, cx))))
         });
@@ -1090,7 +1163,7 @@ impl GitView {
             .gap(px(8.))
             .when(!tiny, |d| d.child(weak(scope.label(), &p)))
             .child(
-                look::primary_button("commit", crate::components::IconName::Check, "Commit", can_commit, &p)
+                look::primary_button("commit", crate::components::IconName::Check, ts!("cmd-commit"), can_commit, &p)
                     .tooltip(move |w, cx| Tooltip::new(commit_tip.clone()).build(w, cx))
                     .when(can_commit, |b| b.on_click(self.on_click(Action::Commit))),
             );
@@ -1122,9 +1195,9 @@ impl GitView {
         let m = self.model.read(cx);
         let base = m.settings.diff_base;
         let empty = if m.selected.len() > 1 {
-            format!("{} files selected", m.selected.len())
+            t!("git-files-selected", count = (m.selected.len()).to_string())
         } else {
-            "Select a file to see its changes".to_owned()
+            ts!("git-select-a-file-to-see-its-changes").to_owned()
         };
         let model = self.model.clone();
         let compare = Trigger(
@@ -1162,7 +1235,7 @@ impl GitView {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(title("Changes"))
+            .child(title(ts!("git-changes")))
             .child(diff_title(m.diff.as_ref(), &p))
             .child(div().flex_1())
             .child(compare)
@@ -1173,8 +1246,8 @@ impl GitView {
             pane_note(
                 short,
                 snout_core::art::spots::nothing_staged(),
-                "Nothing staged",
-                "Stage files to see what the next commit holds.",
+                ts!("git-nothing-staged"),
+                ts!("git-stage-files-to-see-what-the-next-commit"),
                 cx,
             )
         } else {
@@ -1201,7 +1274,7 @@ impl GitView {
                 look::toggle(
                     "tab-journal",
                     crate::components::IconName::NotebookText,
-                    "Journal",
+                    ts!("git-journal"),
                     tab == BottomTab::Journal,
                     &p,
                 )
@@ -1214,7 +1287,7 @@ impl GitView {
                 look::toggle(
                     "tab-output",
                     crate::components::IconName::SquareTerminal,
-                    "Output",
+                    ts!("cmd-output"),
                     tab == BottomTab::Output,
                     &p,
                 )
@@ -1226,18 +1299,19 @@ impl GitView {
             )
             .child(div().flex_1())
             .when(tab == BottomTab::Journal, |d| {
-                d.when(hint, |d| d.child(weak("Click a commit to see what it changed", &p)))
+                d.when(hint, |d| d.child(weak(ts!("git-click-a-commit-to-see-what-it-changed"), &p)))
                     .child(look::field(&self.journal_filter, true, Some(240.), &p).flex_shrink(1.).min_w(px(80.)))
             })
             .when(tab == BottomTab::Output, |d| {
-                d.child(look::small_button("clear-output", crate::components::IconName::Eraser, "Clear", &p).on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.model.update(cx, |m, cx| {
-                            m.output.clear();
-                            cx.notify();
-                        })
-                    }),
-                ))
+                d.child(
+                    look::small_button("clear-output", crate::components::IconName::Eraser, ts!("tabs-clear"), &p)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.model.update(cx, |m, cx| {
+                                m.output.clear();
+                                cx.notify();
+                            })
+                        })),
+                )
             });
         let body = match tab {
             BottomTab::Output => div()
@@ -1256,8 +1330,8 @@ impl GitView {
             BottomTab::Journal if m.log.is_empty() => pane_note(
                 self.rows.is_some_and(|r| r.journal < ART_LEAST_H),
                 snout_core::art::seed(),
-                "No commits yet",
-                "Stage some files and make the first one",
+                ts!("git-no-commits-yet"),
+                ts!("git-stage-some-files-and-make-the-first-one"),
                 cx,
             ),
             BottomTab::Journal => self.journal_table(cx),
@@ -1391,29 +1465,29 @@ impl GitView {
                             };
                             let start = StartPoint { label: format!("{short} {summary}"), rev: id.clone() };
                             menu.item(
-                                PopupMenuItem::new("Show changes")
+                                PopupMenuItem::new(ts!("git-show-changes"))
                                     .icon(crate::components::menu_icon(crate::components::IconName::FileDiff))
                                     .on_click(send(Action::ShowCommit(id.clone()))),
                             )
                             .separator()
                             .item(
-                                PopupMenuItem::new("Check out this commit (detached)")
+                                PopupMenuItem::new(ts!("git-check-out-this-commit-detached"))
                                     .icon(crate::components::menu_icon(crate::components::IconName::ArrowRightLeft))
                                     .on_click(send(Action::RequestCheckout(CheckoutTarget::Commit(id.clone())))),
                             )
                             .item(
-                                PopupMenuItem::new("Create branch here…")
+                                PopupMenuItem::new(ts!("git-create-branch-here"))
                                     .icon(crate::components::menu_icon(crate::components::IconName::GitBranch))
                                     .on_click(send(Action::ShowNewBranch(Some(start)))),
                             )
                             .separator()
                             .item(
-                                PopupMenuItem::new("Copy SHA")
+                                PopupMenuItem::new(ts!("git-copy-sha"))
                                     .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                     .on_click(send(Action::Copy(id.clone()))),
                             )
                             .item(
-                                PopupMenuItem::new("Copy message")
+                                PopupMenuItem::new(ts!("git-copy-message"))
                                     .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                     .on_click(send(Action::Copy(summary.clone()))),
                             )
@@ -1438,8 +1512,8 @@ impl GitView {
         let model = self.model.clone();
         let m = self.model.read(cx);
         let Some(view) = &m.commit_view else { return div().into_any_element() };
-        let back = look::glyph_button("back", Glyph::Back, "Working tree", true, &p)
-            .tooltip(|w, cx| Tooltip::new("Back (Esc)").build(w, cx))
+        let back = look::glyph_button("back", Glyph::Back, ts!("git-working-tree"), true, &p)
+            .tooltip(|w, cx| Tooltip::new(ts!("git-back-esc")).build(w, cx))
             .on_click(self.on_click(Action::CloseCommit));
         let d = match &view.details {
             Ok(d) => d.clone(),
@@ -1451,7 +1525,7 @@ impl GitView {
                     .child(back)
                     .child(look::art_note(
                         snout_core::art::spots::warning(),
-                        "The commit could not be read",
+                        ts!("git-the-commit-could-not-be-read"),
                         e.clone(),
                         cx,
                     ))
@@ -1471,7 +1545,9 @@ impl GitView {
                     .map(|i| {
                         let f = &rows[i];
                         let dir = match &f.orig_path {
-                            Some(orig) => format!("{}  (from {orig})", f.directory()),
+                            Some(orig) => {
+                                t!("git-from", directory = (f.directory()).to_string(), orig = orig.to_string())
+                            }
                             None => f.directory().to_owned(),
                         };
                         let is_sel = selected.as_ref() == Some(&f.path);
@@ -1508,7 +1584,7 @@ impl GitView {
                                                 .on_click(send(Action::Reveal(root.join(&path)))),
                                         )
                                         .item(
-                                            PopupMenuItem::new("Open in External Terminal")
+                                            PopupMenuItem::new(ts!("cmd-open-in-external-terminal"))
                                                 .icon(crate::components::menu_icon(
                                                     crate::components::IconName::SquareTerminal,
                                                 ))
@@ -1517,7 +1593,7 @@ impl GitView {
                                     None => menu,
                                 };
                                 menu.item(
-                                    PopupMenuItem::new("Copy path")
+                                    PopupMenuItem::new(ts!("projects-copy-path"))
                                         .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                         .on_click(send(Action::Copy(path.clone()))),
                                 )
@@ -1529,7 +1605,7 @@ impl GitView {
         })
         .flex_1();
         let files_body = if d.files.is_empty() {
-            look::art_note(snout_core::art::clean(), "", "This commit changes no files", cx)
+            look::art_note(snout_core::art::clean(), "", ts!("git-this-commit-changes-no-files"), cx)
         } else {
             let focus = self.commit_focus.clone();
             table(table_header("commit-files-head", &self.commit_columns, None, None, cx), list)
@@ -1562,8 +1638,8 @@ impl GitView {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(title("Files"))
-                    .child(weak(format!("{} changed", d.files.len()), &p)),
+                    .child(title(ts!("panels-files")))
+                    .child(weak(t!("git-changed", count = (d.files.len()).to_string()), &p)),
             )
             .child(separator(&p))
             .child(files_body);
@@ -1594,7 +1670,7 @@ impl GitView {
             })
             .collect();
         let details = pane(&p)
-            .child(div().flex_none().h(px(15.)).flex().items_center().child(title("Commit")))
+            .child(div().flex_none().h(px(15.)).flex().items_center().child(title(ts!("cmd-commit"))))
             .child(separator(&p))
             .child(
                 div()
@@ -1624,16 +1700,19 @@ impl GitView {
                             .flex_col()
                             .gap(px(6.))
                             .child(fact(
-                                "Author",
+                                ts!("git-author"),
                                 div().child(format!("{} <{}>", d.author, d.email)).into_any_element(),
                             ))
-                            .child(fact("Date", div().child(d.date.clone()).into_any_element()))
+                            .child(fact(ts!("git-date"), div().child(d.date.clone()).into_any_element()))
                             .when(differs, |e| {
                                 e.child(fact(
-                                    "Committer",
+                                    ts!("git-committer"),
                                     div().child(format!("{} <{}>", d.committer, d.committer_email)).into_any_element(),
                                 ))
-                                .child(fact("Committed", div().child(d.committer_date.clone()).into_any_element()))
+                                .child(fact(
+                                    ts!("git-committed"),
+                                    div().child(d.committer_date.clone()).into_any_element(),
+                                ))
                             })
                             .child(fact(
                                 "SHA",
@@ -1658,9 +1737,9 @@ impl GitView {
                                     .into_any_element(),
                             ))
                             .child(fact(
-                                if d.parents.len() > 1 { "Parents" } else { "Parent" },
+                                if d.parents.len() > 1 { ts!("git-parents") } else { ts!("git-parent") },
                                 if d.parents.is_empty() {
-                                    weak("none, this is the first commit", &p).into_any_element()
+                                    weak(ts!("git-none-this-is-the-first-commit"), &p).into_any_element()
                                 } else {
                                     div().flex().flex_col().children(parents).into_any_element()
                                 },
@@ -1668,8 +1747,8 @@ impl GitView {
                     ),
             );
 
-        let empty = if d.files.is_empty() { "This commit changes no files" } else { "Select a file" };
-        let parent = if d.parents.is_empty() { "(nothing)" } else { "Parent" };
+        let empty = if d.files.is_empty() { ts!("git-this-commit-changes-no-files") } else { ts!("git-select-a-file") };
+        let parent = if d.parents.is_empty() { ts!("git-nothing") } else { ts!("git-parent") };
         let diff = pane(&p)
             .child(
                 div()
@@ -1678,7 +1757,7 @@ impl GitView {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(title("Changes"))
+                    .child(title(ts!("git-changes")))
                     .child(diff_title(view.diff.as_ref(), &p))
                     .child(div().flex_1())
                     .child(diff_controls(&self.model, self.middle_w < DIFF_WORDS_W, cx)),
@@ -1687,7 +1766,7 @@ impl GitView {
             .child(diff_body(
                 "commit-diff",
                 view.diff.as_ref(),
-                (parent, "This commit"),
+                (parent, ts!("git-this-commit")),
                 m.settings.side_by_side,
                 empty,
                 self.rows.is_some_and(|r| r.commit_changes < ART_LEAST_H),
@@ -1737,12 +1816,9 @@ impl GitView {
         // Git refused the folder, so there may well be a repository: nothing here starts another.
         let refused = trouble.is_some();
         let (title, line) = if refused {
-            ("Git could not read this folder", "The project works without it, but its changes and history cannot show.")
+            (ts!("git-git-could-not-read-this-folder"), ts!("git-the-project-works-without-it-but-its-changes"))
         } else {
-            (
-                "This folder has no Git repository",
-                "The project works without Git. Start a repository to track its changes and history.",
-            )
+            (ts!("git-this-folder-has-no-git-repository"), ts!("git-the-project-works-without-git-start-a-repository"))
         };
         pane(&p)
             .child(
@@ -1779,7 +1855,7 @@ impl GitView {
                         d.child(button(
                             "git-no-repo-retry",
                             Glyph::Refresh,
-                            "Try Again",
+                            ts!("git-try-again"),
                             Action::OpenRepo(root.clone()),
                         ))
                     })
@@ -1787,13 +1863,13 @@ impl GitView {
                         d.child(button(
                             "git-no-repo-init",
                             Glyph::Branch,
-                            "Initialize a Repository Here",
+                            ts!("git-initialize-a-repository-here"),
                             Action::InitRepo(root.clone()),
                         ))
                         .child(button(
                             "git-no-repo-find",
                             Glyph::Open,
-                            "Find Repositories Inside",
+                            ts!("git-find-repositories-inside"),
                             Action::Scan(root.clone()),
                         ))
                     }),
@@ -1820,11 +1896,11 @@ impl GitView {
                     .justify_center()
                     .gap(px(6.))
                     .child(drawing(snout_core::art::welcome(), 240., 152., None))
-                    .child(div().mt(px(6.)).text_size(px(16.)).child("No project open"))
-                    .child(div().text_color(p.fg_dim).child("Open a project to see its changes, branches and history."))
+                    .child(div().mt(px(6.)).text_size(px(16.)).child(ts!("files-no-project-open")))
+                    .child(div().text_color(p.fg_dim).child(ts!("git-open-a-project-to-see-its-changes-branches")))
                     .child(div().h(px(10.)))
-                    .child(button("git-empty-open", Glyph::Open, "Open Project…   ⌘O", Action::PickFolder))
-                    .child(button("git-empty-clone", Glyph::Pull, "Clone Repository…", Action::ShowClone)),
+                    .child(button("git-empty-open", Glyph::Open, ts!("git-open-project-o"), Action::PickFolder))
+                    .child(button("git-empty-clone", Glyph::Pull, ts!("welcome-clone-repository"), Action::ShowClone)),
             )
             .into_any_element()
     }
@@ -2017,16 +2093,16 @@ fn diff_controls(model: &Entity<Model>, narrow: bool, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .gap(px(if narrow { 2. } else { 8. }))
-        .child(toggle("uni", IconName::Rows2, "Unified", !sbs).on_click(set(Some(false), None)))
-        .child(toggle("sbs", IconName::Columns2, "Side by Side", sbs).on_click(set(Some(true), None)))
+        .child(toggle("uni", IconName::Rows2, ts!("git-unified"), !sbs).on_click(set(Some(false), None)))
+        .child(toggle("sbs", IconName::Columns2, ts!("git-side-by-side"), sbs).on_click(set(Some(true), None)))
         .child(look::vseparator(&p))
         .child(if narrow {
             look::icon_toggle("compact", IconName::FoldVertical, compact, &p)
-                .tooltip(|w, cx| Tooltip::new("Compact: hide unchanged lines away from changes").build(w, cx))
+                .tooltip(|w, cx| Tooltip::new(ts!("git-compact-hide-unchanged-lines-away-from-changes")).build(w, cx))
                 .on_click(set(None, Some(!compact)))
         } else {
-            look::toggle("compact", IconName::FoldVertical, "Compact", compact, &p)
-                .tooltip(|w, cx| Tooltip::new("Hide unchanged lines away from changes").build(w, cx))
+            look::toggle("compact", IconName::FoldVertical, ts!("git-compact"), compact, &p)
+                .tooltip(|w, cx| Tooltip::new(ts!("git-hide-unchanged-lines-away-from-changes")).build(w, cx))
                 .on_click(set(None, Some(!compact)))
         })
         .into_any_element()
@@ -2045,19 +2121,25 @@ fn diff_body(
     let p = palette(cx);
     let view = match diff {
         None => return pane_note(short, snout_core::art::pick(), "", empty.to_owned(), cx),
-        Some(Err(e)) => return pane_note(short, snout_core::art::spots::warning(), "No diff", e.clone(), cx),
+        Some(Err(e)) => return pane_note(short, snout_core::art::spots::warning(), ts!("git-no-diff"), e.clone(), cx),
         Some(Ok(view)) => view.clone(),
     };
     let d = &view.diff;
     if d.binary {
-        return pane_note(short, snout_core::art::spots::info(), "Binary file", "Its versions differ, as bytes.", cx);
+        return pane_note(
+            short,
+            snout_core::art::spots::info(),
+            ts!("git-binary-file"),
+            ts!("git-its-versions-differ-as-bytes"),
+            cx,
+        );
     }
     if d.too_large {
         return pane_note(
             short,
             snout_core::art::spots::info(),
-            "Too large to show",
-            "The file is too large to diff here.",
+            ts!("git-too-large-to-show"),
+            ts!("git-the-file-is-too-large-to-diff-here"),
             cx,
         );
     }
@@ -2065,8 +2147,8 @@ fn diff_body(
         return pane_note(
             short,
             snout_core::art::clean(),
-            "No differences",
-            format!("{left} and {right} are the same."),
+            ts!("git-no-differences"),
+            t!("git-and-are-the-same", left = left.to_string(), right = right.to_string()),
             cx,
         );
     }

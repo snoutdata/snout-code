@@ -255,8 +255,8 @@ impl ShowHover {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::AfterDelay => "After a delay",
-            Self::WhileCommandHeld => "Only while \u{2318} is held",
+            Self::AfterDelay => ts!("settings-after-a-delay"),
+            Self::WhileCommandHeld => ts!("settings-only-while-is-held"),
         }
     }
 }
@@ -303,9 +303,9 @@ impl TerminalCursor {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Block => "Block",
-            Self::Bar => "Bar",
-            Self::Underline => "Underline",
+            Self::Block => ts!("settings-block"),
+            Self::Bar => ts!("settings-bar"),
+            Self::Underline => ts!("settings-underline"),
         }
     }
 }

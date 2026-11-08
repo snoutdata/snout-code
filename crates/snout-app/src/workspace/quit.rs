@@ -82,24 +82,24 @@ impl Workspace {
         let mut stops = Vec::new();
         for s in self.runs.read(cx).sessions.iter().filter(|s| s.running()) {
             let what = match (s.place(), s.tests.is_some()) {
-                (Place::Build, true) | (Place::Run, true) => "Tests",
-                (Place::Debug, _) => "Debugging",
-                (Place::Build, false) => "Gradle build",
-                (Place::Run, false) => "Running",
+                (Place::Build, true) | (Place::Run, true) => ts!("stripes-tests"),
+                (Place::Debug, _) => ts!("quit-debugging"),
+                (Place::Build, false) => ts!("quit-gradle-build"),
+                (Place::Run, false) => ts!("console-running"),
             };
             stops.push(format!("{what} {}", s.title));
         }
         if self.runs.read(cx).scala.is_some() {
-            stops.push("Compiling the Scala classes".into());
+            stops.push(ts!("quit-compiling-the-scala-classes").into());
         }
         if let Some(a) = crate::claude_ide::bridge::changes_of(self, cx).read(cx).busy() {
             let name = a.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            stops.push(format!("Claude Code, editing {name}"));
+            stops.push(t!("quit-claude-code-editing", name = name.to_string()));
         }
         if let Some((host, _)) = crate::remote::connection(cx)
             && !stops.is_empty()
         {
-            stops.push(format!("The connection to {host}, and what the project runs there"));
+            stops.push(t!("quit-the-connection-to-and-what-the-project-runs", host = host.to_string()));
         }
         QuitInfo { unsaved, stops }
     }
@@ -157,7 +157,7 @@ impl Workspace {
                             this.quit_now(cx);
                         } else {
                             this.model.update(cx, |m, cx| {
-                                m.message = "A file could not be saved, so SnoutCode did not quit".into();
+                                m.message = ts!("quit-a-file-could-not-be-saved-so-snoutcode").into();
                                 cx.notify();
                             });
                         }

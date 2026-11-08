@@ -10,7 +10,9 @@
 //! system's. [`select`] puts it in place for the whole app; what is drawn after reads it.
 //! Nothing here runs in the tests unless a test asks: they see English.
 
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{LazyLock, RwLock};
 
 use i18n_embed::fluent::{FluentLanguageLoader, fluent_language_loader};
 use i18n_embed::{DesktopLanguageRequester, LanguageLoader as _};
@@ -42,11 +44,19 @@ macro_rules! t {
     ($id:literal, $($args:tt)*) => {{ i18n_embed_fl::fl!($crate::i18n::LOADER, $id, $($args)*) }};
 }
 
+/// A message that takes no values, as a `&'static str` like the literal it stands for, in the
+/// language in use: `ts!("settings-cancel")`. Each message is made once per language (see
+/// [`intern`]).
+#[macro_export]
+macro_rules! ts {
+    ($id:literal) => {{ $crate::i18n::intern($id, || i18n_embed_fl::fl!($crate::i18n::LOADER, $id)) }};
+}
+
 /// Whether `System` follows the system's languages yet.
 const FOLLOW_SYSTEM: bool = false;
 
 /// The language the interface speaks: the system's, or one chosen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum Language {
     /// The first of the system's preferred languages SnoutCode speaks, else English.
     #[default]
@@ -125,12 +135,30 @@ pub fn select(choice: Language) -> Language {
         }
         LOADER.set_use_isolating(false);
     }
+    CURRENT.store(Language::ALL.iter().position(|l| *l == language).unwrap_or(1) as u8, Ordering::Relaxed);
     language
 }
 
 /// The language in use.
 pub fn current() -> Language {
-    from_requested(&[LOADER.current_language()])
+    Language::ALL[CURRENT.load(Ordering::Relaxed) as usize]
+}
+
+/// The language in use, as its place in [`Language::ALL`]. English until [`select`] says.
+static CURRENT: AtomicU8 = AtomicU8::new(1);
+
+/// The messages made so far, by language and id. They live as long as the program, which is
+/// what lets a label stay a `&'static str`; there are at most one per message and language.
+static INTERNED: LazyLock<RwLock<HashMap<(Language, &'static str), &'static str>>> = LazyLock::new(Default::default);
+
+/// The message `id` in the language in use, made with `make` the first time.
+pub fn intern(id: &'static str, make: impl FnOnce() -> String) -> &'static str {
+    let key = (current(), id);
+    if let Some(text) = INTERNED.read().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return text;
+    }
+    let text: &'static str = Box::leak(make().into_boxed_str());
+    INTERNED.write().unwrap_or_else(|e| e.into_inner()).entry(key).or_insert(text)
 }
 
 /// The catalogs embedded, each by its tag, as text: for the tests that hold them to English.
@@ -152,12 +180,27 @@ mod tests {
 
     /// Each message of a catalog, with the arguments it takes.
     fn messages(text: &str) -> BTreeMap<String, BTreeSet<String>> {
-        let arg = regex::Regex::new(r"\{ *\$([a-z_-]+)").unwrap();
-        text.lines()
-            .filter(|l| !l.starts_with('#') && !l.starts_with(' '))
-            .filter_map(|l| l.split_once(" = "))
-            .map(|(id, value)| (id.to_owned(), arg.captures_iter(value).map(|c| c[1].to_owned()).collect()))
-            .collect()
+        let arg = regex::Regex::new(r"\{ *\$([a-z_0-9-]+)").unwrap();
+        let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut current = None;
+        for line in text.lines().filter(|l| !l.starts_with('#')) {
+            let value = match line.split_once(" = ") {
+                Some((id, value)) if !line.starts_with(' ') => {
+                    current = Some(id.to_owned());
+                    out.entry(id.to_owned()).or_default();
+                    value
+                }
+                _ if line.starts_with(' ') => line,
+                _ => {
+                    current = None;
+                    continue;
+                }
+            };
+            if let Some(id) = &current {
+                out.get_mut(id).unwrap().extend(arg.captures_iter(value).map(|c| c[1].to_owned()));
+            }
+        }
+        out
     }
 
     fn catalog(tag: &str) -> String {

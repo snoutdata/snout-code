@@ -369,9 +369,9 @@ impl ProjectModel {
     /// when the project has both.
     pub fn scripts_label(&self) -> &'static str {
         match (self.scripts.iter().any(|s| s.maven), self.scripts.iter().any(|s| !s.maven)) {
-            (true, true) => "Build Files",
-            (true, false) => "Maven Files",
-            _ => "Gradle Scripts",
+            (true, true) => ts!("model-build-files"),
+            (true, false) => ts!("model-maven-files"),
+            _ => ts!("model-gradle-scripts"),
         }
     }
 

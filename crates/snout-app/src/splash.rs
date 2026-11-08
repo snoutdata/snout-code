@@ -33,10 +33,13 @@ impl Render for Splash {
             .child(crate::art::drawing(snout_core::art::building(), 300., 200., None))
             .child(div().text_size(px(26.)).font_weight(FontWeight::SEMIBOLD).child("SnoutCode"))
             .child(
-                div().text_size(px(12.)).text_color(p.fg_dim).child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                div()
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(t!("dialogs-version", cargo_pkg_version = (env!("CARGO_PKG_VERSION")).to_string())),
             )
             .child(div().h(px(10.)))
-            .child(div().text_size(px(12.5)).text_color(p.fg_dim).child("Starting SnoutCode"))
+            .child(div().text_size(px(12.5)).text_color(p.fg_dim).child(ts!("splash-starting-snoutcode")))
             .child(crate::status::progress_bar(None, 180., &p))
     }
 }

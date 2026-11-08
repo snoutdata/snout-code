@@ -79,8 +79,8 @@ impl ExternalTerminal {
             Self::Foot => "foot",
             Self::XTerm => "xterm",
             Self::PowerShell => "PowerShell",
-            Self::CommandPrompt => "Command Prompt",
-            Self::Custom => "Custom command",
+            Self::CommandPrompt => ts!("terminal-command-prompt"),
+            Self::Custom => ts!("terminal-custom-command"),
         }
     }
 
@@ -121,9 +121,7 @@ pub fn command(term: ExternalTerminal, custom: &str, at: &Where, scripts: &Path)
     if term == ExternalTerminal::Custom {
         let template = custom.trim();
         if template.is_empty() {
-            return Err(std::io::Error::other(
-                "The custom external terminal has no command: set one in Settings ▸ Tools ▸ Terminal.",
-            ));
+            return Err(std::io::Error::other(ts!("terminal-the-custom-external-terminal-has-no-command-set")));
         }
         let (dir, ssh) = match at {
             Where::Local(dir) => (dir, String::new()),
@@ -167,13 +165,19 @@ pub fn run(argv: &[String]) -> Result<(), String> {
         // The terminal outlives the app: a process group of its own keeps it from the app's
         // signals.
         c.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).process_group(0);
-        return c.spawn().map(drop).map_err(|e| format!("Could not run the external terminal command: {e}"));
+        return c
+            .spawn()
+            .map(drop)
+            .map_err(|e| t!("terminal-could-not-run-the-external-terminal-command", e = e.to_string()));
     }
-    let out = c.output().map_err(|e| format!("Could not open the external terminal: {e}"))?;
+    let out = c.output().map_err(|e| t!("terminal-could-not-open-the-external-terminal", e = e.to_string()))?;
     if out.status.success() {
         Ok(())
     } else {
-        Err(format!("Could not open the external terminal: {}", String::from_utf8_lossy(&out.stderr).trim()))
+        Err(t!(
+            "terminal-could-not-open-the-external-terminal-2",
+            trim = (String::from_utf8_lossy(&out.stderr).trim()).to_string()
+        ))
     }
 }
 

@@ -267,7 +267,7 @@ impl SettingsView {
             ProfileMode::Chosen(names) => names.join(", "),
             _ => String::new(),
         };
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("settings-search-settings")));
         cx.subscribe(&search, |this, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 let query = this.search.read(cx).value().to_string();
@@ -282,7 +282,9 @@ impl SettingsView {
         .detach();
         let path = draft.claude_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let claude = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Found on PATH and the usual places").default_value(path)
+            InputState::new(window, cx)
+                .placeholder(ts!("settings-found-on-path-and-the-usual-places"))
+                .default_value(path)
         });
         cx.subscribe(&claude, |this, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -309,21 +311,21 @@ impl SettingsView {
             input
         };
         let codex = text_field(
-            "Found on PATH and the usual places",
+            ts!("settings-found-on-path-and-the-usual-places"),
             draft.codex_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
             window,
             cx,
             |s, t| s.codex_path = (!t.is_empty()).then(|| PathBuf::from(t)),
         );
         let opencode = text_field(
-            "Found on PATH and the usual places",
+            ts!("settings-found-on-path-and-the-usual-places"),
             draft.opencode_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
             window,
             cx,
             |s, t| s.opencode_path = (!t.is_empty()).then(|| PathBuf::from(t)),
         );
         let amp = text_field(
-            "Found on PATH and the usual places",
+            ts!("settings-found-on-path-and-the-usual-places"),
             draft.amp_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
             window,
             cx,
@@ -333,9 +335,10 @@ impl SettingsView {
             text_field("aider --model sonnet", draft.custom_agent_command.clone(), window, cx, |s, t| {
                 s.custom_agent_command = t
             });
-        let agent_name = text_field("Its program's name", draft.custom_agent_name.clone(), window, cx, |s, t| {
-            s.custom_agent_name = t
-        });
+        let agent_name =
+            text_field(ts!("settings-its-programs-name"), draft.custom_agent_name.clone(), window, cx, |s, t| {
+                s.custom_agent_name = t
+            });
         let profiles = cx.new(|cx| InputState::new(window, cx).placeholder("dev, local").default_value(chosen));
         cx.subscribe(&profiles, |this, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -349,7 +352,7 @@ impl SettingsView {
         let shown = draft.clone();
         let shell = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Your login shell ($SHELL)")
+                .placeholder(ts!("settings-your-login-shell-shell"))
                 .default_value(shown.terminal_shell.clone())
         });
         cx.subscribe(&shell, |this, input, e: &InputEvent, cx| {
@@ -360,7 +363,9 @@ impl SettingsView {
         })
         .detach();
         let shell_args = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("No arguments").default_value(shown.terminal_shell_args.join(" "))
+            InputState::new(window, cx)
+                .placeholder(ts!("settings-no-arguments"))
+                .default_value(shown.terminal_shell_args.join(" "))
         });
         cx.subscribe(&shell_args, |this, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
@@ -369,7 +374,7 @@ impl SettingsView {
             }
         })
         .detach();
-        let new_var = cx.new(|cx| InputState::new(window, cx).placeholder("NAME=value, then Return"));
+        let new_var = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("settings-name-value-then-return")));
         cx.subscribe_in(&new_var, window, |this, _, e: &InputEvent, window, cx| {
             if matches!(e, InputEvent::PressEnter { .. }) {
                 this.add_var(window, cx);
@@ -388,7 +393,8 @@ impl SettingsView {
             }
         })
         .detach();
-        let key_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search commands or shortcuts"));
+        let key_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(ts!("settings-search-commands-or-shortcuts")));
         cx.subscribe(&key_search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 cx.notify();
@@ -612,7 +618,7 @@ impl SettingsView {
         let model = self.model.read(cx);
         match self.scope {
             Scope::User => key.is_set(&model.project_settings).then(|| {
-                badge_with_icon("Overridden by this project", IconName::FolderCog, Tone::Warning, &p)
+                badge_with_icon(ts!("settings-overridden-by-this-project"), IconName::FolderCog, Tone::Warning, &p)
                     .debug_selector(move || format!("settings-overridden-{}", key.name()))
                     .into_any_element()
             }),
@@ -622,14 +628,14 @@ impl SettingsView {
                     .items_center()
                     .gap(px(4.))
                     .child(
-                        badge_with_icon("Set for this project", IconName::FolderCog, Tone::Accent, &p)
+                        badge_with_icon(ts!("settings-set-for-this-project"), IconName::FolderCog, Tone::Accent, &p)
                             .debug_selector(move || format!("settings-project-set-{}", key.name())),
                     )
                     .child(
                         IconButton::new(
                             SharedString::from(format!("settings-reset-{}", key.name())),
                             IconName::RotateCcw,
-                            "Reset to your setting",
+                            ts!("settings-reset-to-your-setting"),
                         )
                         .size(22.)
                         .on_click(cx.listener(move |this, _, w, cx| this.reset(key, w, cx))),
@@ -637,7 +643,7 @@ impl SettingsView {
                     .into_any_element(),
             ),
             Scope::Project => Some(
-                badge_with_icon("Your setting", IconName::User, Tone::Neutral, &p)
+                badge_with_icon(ts!("settings-your-setting"), IconName::User, Tone::Neutral, &p)
                     .debug_selector(move || format!("settings-inherited-{}", key.name()))
                     .into_any_element(),
             ),
@@ -687,8 +693,8 @@ impl SettingsView {
             .border_1()
             .border_color(p.border)
             .bg(p.ground)
-            .child(segment(Scope::User, "settings-scope-user", IconName::User, "User", cx))
-            .child(segment(Scope::Project, "settings-scope-project", IconName::FolderCog, "Project", cx))
+            .child(segment(Scope::User, "settings-scope-user", IconName::User, ts!("settings-user"), cx))
+            .child(segment(Scope::Project, "settings-scope-project", IconName::FolderCog, ts!("cmd-project"), cx))
             .into_any_element()
     }
 
@@ -699,18 +705,18 @@ impl SettingsView {
         let m = self.model.read(cx);
         let (error, file) = match self.scope {
             Scope::Project => (m.project_settings_error.clone(), ps::FILE),
-            Scope::User => (m.user_settings_error.clone(), "Your settings.json"),
+            Scope::User => (m.user_settings_error.clone(), ts!("settings-your-settings-json")),
         };
         let (ico, text) = match (self.scope, &self.root) {
             (Scope::Project, Some(root)) => (
                 IconName::FolderCog,
-                format!(
-                    "For {} only, kept in {} in the project. What it sets overrides your settings.",
-                    Model::dir_name(root),
-                    ps::FILE
+                t!(
+                    "settings-for-only-kept-in-in-the-project-what",
+                    root = (Model::dir_name(root)).to_string(),
+                    file = (ps::FILE).to_string()
                 ),
             ),
-            _ => (IconName::User, "Your settings, for every project. A project can override some of them.".to_owned()),
+            _ => (IconName::User, ts!("settings-your-settings-for-every-project-a-project-can").to_owned()),
         };
         div()
             .px(px(20.))
@@ -733,8 +739,8 @@ impl SettingsView {
                 d.child(
                     crate::components::callout_with(
                         crate::components::Tone::Warning,
-                        Some(format!("{file} cannot be read").into()),
-                        format!("The values it had before stay in use until it is fixed. {e}"),
+                        Some(t!("settings-cannot-be-read", file = file.to_string()).into()),
+                        t!("settings-the-values-it-had-before-stay-in-use", e = e.to_string()),
                         &p,
                     )
                     .debug_selector(|| "settings-project-error".into()),
@@ -921,8 +927,8 @@ fn engine_card(engine: EngineKind, on: bool, p: &Palette) -> gpui::Stateful<gpui
     let id = format!("settings-engine-{name}");
     let available = engine.unavailable().is_none();
     let (ico, blurb) = match engine {
-        EngineKind::Builtin => (IconName::SquareTerminal, "In every build"),
-        EngineKind::Ghostty => (IconName::Ghost, "Reflow, kitty keys, links"),
+        EngineKind::Builtin => (IconName::SquareTerminal, ts!("settings-in-every-build")),
+        EngineKind::Ghostty => (IconName::Ghost, ts!("settings-reflow-kitty-keys-links")),
     };
     let hover = p.button_hover;
     let term_bg = if p.dark { gpui::black().opacity(0.35) } else { p.panel };
@@ -993,7 +999,11 @@ fn engine_card(engine: EngineKind, on: bool, p: &Palette) -> gpui::Stateful<gpui
                 .child(crate::components::icon(ico, 12., if on { p.accent } else { p.fg_dim }))
                 .child(engine.label()),
         )
-        .child(div().text_size(px(11.)).text_color(p.fg_dim).child(if available { blurb } else { "Unavailable" }))
+        .child(div().text_size(px(11.)).text_color(p.fg_dim).child(if available {
+            blurb
+        } else {
+            ts!("settings-unavailable")
+        }))
 }
 
 /// A terminal as the chosen engine draws it, in the theme's colours: its title bar with the
@@ -1022,10 +1032,16 @@ fn terminal_preview(engine: EngineKind, look: crate::console::TermLook, shell: &
                 .border_b_1()
                 .border_color(p.border)
                 .children([hues[3], hues[6], hues[1]].map(|c| div().size(px(8.)).rounded_full().bg(c)))
-                .child(div().ml(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(format!("{shell} in shop")))
+                .child(
+                    div()
+                        .ml(px(6.))
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child(t!("settings-in-shop", shell = shell.to_string())),
+                )
                 .child(div().flex_1())
                 .child(crate::components::badge_with_icon(
-                    format!("{} engine", shown.label()),
+                    t!("settings-engine", shown = (shown.label()).to_string()),
                     ico,
                     crate::components::Tone::Accent,
                     p,
@@ -1172,13 +1188,13 @@ impl SettingsView {
             let title = self.page.title();
             return crate::components::EmptyState::new(
                 snout_core::art::spots::shared_settings(),
-                "The same in every project",
+                ts!("settings-the-same-in-every-project"),
             )
-            .hint(format!("{title} settings are yours: a project cannot set them for itself."))
+            .hint(t!("settings-settings-are-yours-a-project-cannot-set-them", title = title.to_string()))
             .action(
                 crate::components::Button::new("settings-show-user", IconName::User)
                     .debug_selector("settings-show-user")
-                    .label("Show Your Settings")
+                    .label(ts!("settings-show-your-settings"))
                     .on_click(cx.listener(|this, _, w, cx| this.set_scope(Scope::User, w, cx))),
             )
             .on(p.card)
@@ -1356,10 +1372,10 @@ impl SettingsView {
                 .map(|k| self.mark(k, cx));
                 let [tab_mark, wrap_mark, space_mark, hints_mark, hover_mark, delay_mark] = marks;
                 let delay_view = cx.entity();
-                body.child(section("Indentation", &p))
+                body.child(section(ts!("settings-indentation"), &p))
                     .child(marked(
                         row(
-                            "Tab size",
+                            ts!("settings-tab-size"),
                             stepper(
                                 "settings-tab-size",
                                 d.tab_size.to_string(),
@@ -1379,17 +1395,17 @@ impl SettingsView {
                             .pl(px(162.))
                             .text_size(px(12.))
                             .text_color(p.fg_dim)
-                            .child("For a file whose own indentation cannot be told."),
+                            .child(ts!("settings-for-a-file-whose-own-indentation-cannot-be")),
                     )
-                    .child(section("Display", &p))
+                    .child(section(ts!("settings-display"), &p))
                     .child(check_line(
-                        look::checkbox("settings-soft-wrap", "Soft wrap long lines", d.soft_wrap, true, &p)
+                        look::checkbox("settings-soft-wrap", ts!("settings-soft-wrap-long-lines"), d.soft_wrap, true, &p)
                             .debug_selector(|| "settings-soft-wrap".into())
                             .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.soft_wrap = !s.soft_wrap))),
                         wrap_mark,
                     ))
                     .child(check_line(
-                        look::checkbox("settings-whitespace", "Show whitespace", d.show_whitespace, true, &p)
+                        look::checkbox("settings-whitespace", ts!("settings-show-whitespace"), d.show_whitespace, true, &p)
                             .debug_selector(|| "settings-whitespace".into())
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.set(cx, |s| s.show_whitespace = !s.show_whitespace)),
@@ -1399,7 +1415,7 @@ impl SettingsView {
                     .child(check_line(
                         look::checkbox(
                             "settings-param-hints",
-                            "Show parameter names of literal arguments (Java)",
+                            ts!("settings-show-parameter-names-of-literal-arguments-java"),
                             d.param_hints,
                             true,
                             &p,
@@ -1408,10 +1424,10 @@ impl SettingsView {
                         .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.param_hints = !s.param_hints))),
                         hints_mark,
                     ))
-                    .child(section("Hover", &p))
+                    .child(section(ts!("settings-hover"), &p))
                     .child(marked(
                         row(
-                            "Show hover",
+                            ts!("settings-show-hover"),
                             div().flex().items_center().gap(px(6.)).children(crate::settings::ShowHover::ALL.map(
                                 |h| {
                                     let (id, ico) = match h {
@@ -1433,7 +1449,7 @@ impl SettingsView {
                     ))
                     .child(marked(
                         row(
-                            "Delay",
+                            ts!("settings-delay"),
                             div()
                                 .flex()
                                 .items_center()
@@ -1457,9 +1473,9 @@ impl SettingsView {
                         "For problems and their fixes, and what a symbol is. \u{2318} always shows it at once, \
                          with the link to the declaration.",
                     ))
-                    .child(section("Navigation", &p))
+                    .child(section(ts!("settings-navigation"), &p))
                     .child(row(
-                        "Click with",
+                        ts!("settings-click-with"),
                         div().flex().items_center().gap(px(6.)).children(crate::settings::NavModifier::ALL.map(|m| {
                             let (id, ico) = match m {
                                 crate::settings::NavModifier::Primary => ("settings-nav-primary", IconName::Command),
@@ -1475,17 +1491,17 @@ impl SettingsView {
                         "Hold it to underline a name as a link, and click to go to its declaration (on the declaration, \
                          its usages). \u{2325}\u{2318}-click goes to the implementations.",
                     ))
-                    .child(section("Preview", &p))
+                    .child(section(ts!("settings-preview"), &p))
                     .child(editor_preview(&d, &p))
                     .into_any_element()
             }
             Page::VersionControl => {
                 let view = cx.entity();
                 let fetch_mark = self.mark(Key::FetchMinutes, cx);
-                body.child(section("Git", &p))
+                body.child(section(ts!("menu-git"), &p))
                     .child(marked(
                         row(
-                            "Fetch every",
+                            ts!("settings-fetch-every"),
                             div()
                                 .flex()
                                 .items_center()
@@ -1513,13 +1529,13 @@ impl SettingsView {
                             .pl(px(162.))
                             .text_size(px(12.))
                             .text_color(p.fg_dim)
-                            .child("The projects are fetched in the background, to count what there is to pull."),
+                            .child(ts!("settings-the-projects-are-fetched-in-the-background-to")),
                     )
-                    .child(section("Annotations", &p))
+                    .child(section(ts!("settings-annotations"), &p))
                     .child(check_line(
                         look::checkbox(
                             "settings-author-hints",
-                            "Show who wrote each class and method (\u{201c}Ada Lovelace +2\u{201d})",
+                            ts!("settings-show-who-wrote-each-class-and-method-ada"),
                             d.blame_author_hints,
                             true,
                             &p,
@@ -1533,7 +1549,7 @@ impl SettingsView {
                     .child(check_line(
                         look::checkbox(
                             "settings-line-blame",
-                            "Show the current line\u{2019}s author and commit after its end",
+                            ts!("settings-show-the-current-lines-author-and-commit-after"),
                             d.blame_current_line,
                             true,
                             &p,
@@ -1550,17 +1566,17 @@ impl SettingsView {
                          right-click menu and the Git menu.",
                     ))
                     .child(crate::components::tips(
-                        "Good to know",
+                        ts!("settings-good-to-know"),
                         &[
                             (
                                 IconName::CloudDownload,
-                                "A background fetch leaves your branches as they are: it only counts the commits there are to pull.",
+                                ts!("settings-a-background-fetch-leaves-your-branches-as-they"),
                             ),
                             (
                                 IconName::GitBranch,
-                                "Click the branch in the title bar for New Branch, Fetch, Pull and Push, and every branch to check out.",
+                                ts!("settings-click-the-branch-in-the-title-bar-for"),
                             ),
-                            (IconName::Keyboard, "\u{2318}2 shows the Git view. In the message field, \u{2318}\u{21a9} commits."),
+                            (IconName::Keyboard, ts!("settings-2-shows-the-git-view-in-the-message")),
                         ],
                         &p,
                     ))
@@ -1571,7 +1587,7 @@ impl SettingsView {
                 if self.scope == Scope::Project {
                     body = body.child(section("JDK", &p));
                     let current = self.project.jdk.as_ref().map(|h| h.display().to_string()).unwrap_or_default();
-                    let mut choices = vec![(String::new(), "Each build's own (your settings)".to_owned())];
+                    let mut choices = vec![(String::new(), ts!("settings-each-builds-own-your-settings").to_owned())];
                     choices.extend(
                         self.jdks
                             .iter()
@@ -1581,7 +1597,7 @@ impl SettingsView {
                     let mark = self.mark(Key::Jdk, cx);
                     body = body.child(marked(
                         row(
-                            "Every build",
+                            ts!("settings-every-build"),
                             choice(
                                 "settings-project-jdk",
                                 &current,
@@ -1599,9 +1615,9 @@ impl SettingsView {
                         mark,
                     ));
                 } else {
-                    body = body.child(section("JDK per project", &p));
+                    body = body.child(section(ts!("settings-jdk-per-project"), &p));
                     if self.builds.is_empty() {
-                        body = body.child(div().text_color(p.fg_dim).child("No Gradle build is open."));
+                        body = body.child(div().text_color(p.fg_dim).child(ts!("settings-no-gradle-build-is-open")));
                     }
                 }
                 let project_jdk = self.model.read(cx).project_settings.jdk.is_some();
@@ -1610,7 +1626,7 @@ impl SettingsView {
                     let ids = ["settings-jdk-0", "settings-jdk-1", "settings-jdk-2", "settings-jdk-3"];
                     let Some(id) = ids.get(i).copied() else { break };
                     let current = d.project_jdks.get(&root).map(|h| h.display().to_string()).unwrap_or_default();
-                    let mut choices = vec![(String::new(), "Automatic (the build's Java level)".to_owned())];
+                    let mut choices = vec![(String::new(), ts!("settings-automatic-the-builds-java-level").to_owned())];
                     choices.extend(
                         self.jdks
                             .iter()
@@ -1622,7 +1638,7 @@ impl SettingsView {
                     let mark = if overridden { self.mark(Key::Jdk, cx) } else { None };
                     body = body.child(marked(
                         row(
-                            "Project",
+                            ts!("cmd-project"),
                             div()
                                 .flex()
                                 .flex_col()
@@ -1654,7 +1670,7 @@ impl SettingsView {
                         div()
                             .pt(px(8.))
                             .text_color(p.fg_dim)
-                            .child(format!("No JDK was found on {}.", crate::platform::THIS_MACHINE)),
+                            .child(t!("settings-no-jdk", machine = crate::platform::this_machine())),
                     );
                 }
                 let idle_mark = self.mark(Key::DaemonIdleMinutes, cx);
@@ -1664,12 +1680,12 @@ impl SettingsView {
                         .pt(px(10.))
                         .text_size(px(12.))
                         .text_color(p.fg_dim)
-                        .child("The Java server restarts on the chosen JDK the next time it starts."),
+                        .child(ts!("settings-the-java-server-restarts-on-the-chosen-jdk")),
                 )
-                .child(section("Gradle daemons", &p))
+                .child(section(ts!("settings-gradle-daemons"), &p))
                 .child(marked(
                     row(
-                        "Stop idle daemons after",
+                        ts!("settings-stop-idle-daemons-after"),
                         div()
                             .flex()
                             .items_center()
@@ -1694,11 +1710,11 @@ impl SettingsView {
                              holds for the daemons started after the Java engine starts again.",
                 ))
                 .child(crate::components::tips(
-                    "Good to know",
+                    ts!("settings-good-to-know"),
                     &[
-                        (IconName::Hammer, "Double click a task in the Gradle tool window to run it. Its output shows in the Build window."),
-                        (IconName::Activity, "The Processes window lists the Gradle daemons running, and stops the idle ones on request."),
-                        (IconName::LayoutGrid, "Project Structure (\u{2318};) downloads JDKs and sets the project's own."),
+                        (IconName::Hammer, ts!("settings-double-click-a-task-in-the-gradle-tool")),
+                        (IconName::Activity, ts!("settings-the-processes-window-lists-the-gradle-daemons-running")),
+                        (IconName::LayoutGrid, ts!("settings-project-structure-downloads-jdks-and-sets-the-projects")),
                     ],
                     &p,
                 ))
@@ -1706,27 +1722,18 @@ impl SettingsView {
             }
             Page::Spring => {
                 let tips = crate::components::tips(
-                    "Good to know",
+                    ts!("settings-good-to-know"),
                     &[
-                        (
-                            IconName::Leaf,
-                            "The leaf on the right stripe opens the Spring window: the beans and the endpoints SnoutCode found.",
-                        ),
-                        (
-                            IconName::Keyboard,
-                            "Spring Active Profiles (\u{2303}\u{2325}P) changes the profiles from anywhere.",
-                        ),
-                        (
-                            IconName::EyeOff,
-                            "A bean the active profiles leave out is dimmed, and no injection takes it.",
-                        ),
+                        (IconName::Leaf, ts!("settings-the-leaf-on-the-right-stripe-opens-the")),
+                        (IconName::Keyboard, ts!("settings-spring-active-profiles-p-changes-the-profiles-from")),
+                        (IconName::EyeOff, ts!("settings-a-bean-the-active-profiles-leave-out-is")),
                     ],
                     &p,
                 );
                 if self.root.is_none() {
                     return body
-                        .child(section("Active profiles", &p))
-                        .child(div().text_color(p.fg_dim).child("Open a project to choose its profiles."))
+                        .child(section(ts!("settings-active-profiles"), &p))
+                        .child(div().text_color(p.fg_dim).child(ts!("settings-open-a-project-to-choose-its-profiles")))
                         .child(tips)
                         .into_any_element();
                 }
@@ -1737,17 +1744,17 @@ impl SettingsView {
                     ProfileMode::Chosen(_) => "chosen",
                 };
                 let choices = vec![
-                    ("any".to_owned(), "Any (no profile chosen)".to_owned()),
-                    ("config".to_owned(), "Those the application files make active".to_owned()),
-                    ("chosen".to_owned(), "These profiles".to_owned()),
+                    ("any".to_owned(), ts!("settings-any-no-profile-chosen").to_owned()),
+                    ("config".to_owned(), ts!("settings-those-the-application-files-make-active").to_owned()),
+                    ("chosen".to_owned(), ts!("settings-these-profiles").to_owned()),
                 ];
                 let view = cx.entity();
                 let mark = self.mark(Key::SpringProfiles, cx);
                 let names = profile_names(&self.profiles.read(cx).value());
-                body.child(section("Active profiles", &p))
+                body.child(section(ts!("settings-active-profiles"), &p))
                     .child(marked(
                         row(
-                            "Evaluate beans under",
+                            ts!("settings-evaluate-beans-under"),
                             choice(
                                 "settings-spring-mode",
                                 current,
@@ -1768,7 +1775,7 @@ impl SettingsView {
                     ))
                     .when(matches!(mode, ProfileMode::Chosen(_)), |d| {
                         d.child(row(
-                            "Profiles",
+                            ts!("settings-profiles"),
                             div().w(px(260.)).child(look::field(&self.profiles, false, None, &p)),
                             &p,
                         ))
@@ -1827,7 +1834,7 @@ impl SettingsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose".into()),
+            prompt: Some(ts!("settings-choose").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await
@@ -1867,10 +1874,10 @@ impl SettingsView {
         let configured = Self::agent_path(d, id);
         self.look_for_agent(id, configured.clone(), cx);
         let status = match self.agents_found.get(id).and_then(|(_, found)| found.as_ref()) {
-            None => "Looking for it…".to_owned(),
-            Some(Some(path)) => format!("Found: {}", path.display()),
-            Some(None) if configured.is_some() => "That file is not there.".to_owned(),
-            Some(None) => "Not found. Install it from the console, or choose the program.".to_owned(),
+            None => ts!("settings-looking-for-it").to_owned(),
+            Some(Some(path)) => t!("settings-found", path = (path.display()).to_string()),
+            Some(None) if configured.is_some() => ts!("settings-that-file-is-not-there").to_owned(),
+            Some(None) => ts!("settings-not-found-install-it-from-the-console-or").to_owned(),
         };
         let field = match id {
             crate::agents::CODEX => &self.codex,
@@ -1893,7 +1900,7 @@ impl SettingsView {
                         d.child(
                             crate::components::Button::new(browse, IconName::FolderOpen)
                                 .compact()
-                                .label("Browse…")
+                                .label(ts!("settings-browse"))
                                 .debug_selector(browse)
                                 .on_click(cx.listener(move |this, _, window, cx| this.browse_agent(id, window, cx))),
                         )
@@ -1911,10 +1918,10 @@ impl SettingsView {
             let on = chosen == which;
             let color = agent.color(&p);
             let how = match agent.channel {
-                Channel::ClaudeIde => "Sees the editor; its hooks report each edit and prompt",
-                Channel::Hooks => "Its hooks report each edit and prompt",
-                Channel::Plugin => "A plugin of SnoutCode's reports each edit and prompt",
-                Channel::Watcher => "Files seen on disk while it works in the console",
+                Channel::ClaudeIde => ts!("settings-sees-the-editor-its-hooks-report-each-edit"),
+                Channel::Hooks => ts!("settings-its-hooks-report-each-edit-and-prompt"),
+                Channel::Plugin => ts!("settings-a-plugin-of-snoutcodes-reports-each-edit-and"),
+                Channel::Watcher => ts!("settings-files-seen-on-disk-while-it-works-in"),
             };
             let hover = p.button_hover;
             let id = format!("settings-agent-{}", agent.id);
@@ -1960,7 +1967,7 @@ impl SettingsView {
                         .text_size(px(11.5))
                         .text_color(p.fg_dim)
                         .child(div().flex_none().size(px(9.)).rounded_full().bg(color))
-                        .child("Its colour, caret and marks"),
+                        .child(ts!("settings-its-colour-caret-and-marks")),
                 )
                 .child(div().text_size(px(11.5)).line_height(px(15.)).text_color(p.fg_dim).child(how))
         });
@@ -1968,13 +1975,13 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .child(section("The console runs", &p))
+            .child(section(ts!("settings-the-console-runs"), &p))
             .child(div().flex().flex_wrap().gap(px(8.)).children(cards))
             .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
                 "Each agent writes in its own colour: a caret with its name while it types, a mark in the gutter \
                  beside the lines it changed, and a dot on the tabs and files it changed until you review them.",
             ))
-            .child(section("Programs", &p))
+            .child(section(ts!("settings-programs"), &p))
             .child(self.program_row("Claude Code", crate::agents::CLAUDE, "settings-browse-claude", d, &p, cx))
             .child(self.program_row("Codex", crate::agents::CODEX, "settings-browse-codex", d, &p, cx))
             .child(self.program_row("opencode", crate::agents::OPENCODE, "settings-browse-opencode", d, &p, cx))
@@ -1983,25 +1990,24 @@ impl SettingsView {
                 "Leave them empty and SnoutCode finds each program, on your PATH and where installers put it. \
                  Browse to choose one yourself.",
             ))
-            .child(row("Your agent", div().w(px(360.)).child(look::field(&self.agent_command, false, None, &p)), &p))
-            .child(row("Its name", div().w(px(200.)).child(look::field(&self.agent_name, false, None, &p)), &p))
-            .child(note("Any command line agent: the console runs it in the project with /bin/sh -c."))
+            .child(row(
+                ts!("settings-your-agent"),
+                div().w(px(360.)).child(look::field(&self.agent_command, false, None, &p)),
+                &p,
+            ))
+            .child(row(
+                ts!("settings-its-name"),
+                div().w(px(200.)).child(look::field(&self.agent_name, false, None, &p)),
+                &p,
+            ))
+            .child(note(ts!("settings-any-command-line-agent-the-console-runs-it")))
             .child(crate::components::tips(
-                "Good to know",
+                ts!("settings-good-to-know"),
                 &[
-                    (
-                        IconName::SquareTerminal,
-                        "\u{2318}J shows or hides the console. The session keeps running while it is hidden.",
-                    ),
-                    (
-                        IconName::TextCursorInput,
-                        "\u{2325}\u{2318}K sends the selection, or the whole file, to the agent.",
-                    ),
-                    (IconName::Check, "In a proposed change's tab, \u{2318}\u{21a9} accepts it and Esc rejects it."),
-                    (
-                        IconName::ListChecks,
-                        "The Agent Changes window keeps every edit an agent made, by prompt, to accept or revert.",
-                    ),
+                    (IconName::SquareTerminal, ts!("settings-j-shows-or-hides-the-console-the-session")),
+                    (IconName::TextCursorInput, ts!("settings-k-sends-the-selection-or-the-whole-file")),
+                    (IconName::Check, ts!("settings-in-a-proposed-changes-tab-accepts-it-and")),
+                    (IconName::ListChecks, ts!("settings-the-agent-changes-window-keeps-every-edit-an")),
                 ],
                 &p,
             ))
@@ -2062,14 +2068,14 @@ impl SettingsView {
             ))
             .when_some(EngineKind::Ghostty.unavailable(), |d, why| {
                 d.child(
-                    callout_with(Tone::Info, Some("Ghostty is unavailable".into()), why, &p)
+                    callout_with(Tone::Info, Some(ts!("settings-ghostty-is-unavailable").into()), why, &p)
                         .debug_selector(|| "settings-ghostty-unavailable".into()),
                 )
             });
         div()
             .flex()
             .flex_col()
-            .child(section("Terminal engine", &p))
+            .child(section(ts!("settings-terminal-engine"), &p))
             .child(div().flex().items_start().gap(px(16.)).child(cards).child(about))
             .into_any_element()
     }
@@ -2079,7 +2085,7 @@ impl SettingsView {
         use crate::settings::{TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, TerminalCursor};
         let p = palette(cx);
         let view = cx.entity();
-        let mut fonts = vec![(String::new(), format!("Editor's ({})", d.editor_font))];
+        let mut fonts = vec![(String::new(), t!("settings-editors", editor_font = (d.editor_font).to_string()))];
         fonts.extend(EDITOR_FONTS.iter().map(|(v, l)| ((*v).to_owned(), (*l).to_owned())));
         let font_now = d.terminal_font.clone().unwrap_or_default();
         let pick_font = {
@@ -2112,11 +2118,11 @@ impl SettingsView {
                     .debug_selector("settings-terminal-size-editor")
                     .compact()
                     .ghost()
-                    .label("Use the editor's")
+                    .label(ts!("settings-use-the-editors"))
                     .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.terminal_font_size = None)))
                     .into_any_element()
             } else {
-                div().text_size(px(12.)).text_color(p.fg_dim).child("The editor's size").into_any_element()
+                div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-the-editors-size")).into_any_element()
             });
         let height_view = view.clone();
         let cursor = |c: TerminalCursor, cx: &mut Context<Self>| {
@@ -2137,7 +2143,7 @@ impl SettingsView {
             .children(TerminalCursor::ALL.map(|c| cursor(c, cx)))
             .child(div().w(px(12.)))
             .child(
-                look::checkbox("settings-terminal-blink", "Blink", d.terminal_cursor_blink, true, &p)
+                look::checkbox("settings-terminal-blink", ts!("settings-blink"), d.terminal_cursor_blink, true, &p)
                     .debug_selector(|| "settings-terminal-blink".into())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.set(cx, |s| s.terminal_cursor_blink = !s.terminal_cursor_blink)
@@ -2146,11 +2152,11 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .child(section("Look", &p))
-            .child(row("Font", choice("settings-terminal-font", &font_now, fonts, pick_font, &p), &p))
-            .child(row("Size", size_row, &p))
+            .child(section(ts!("settings-look"), &p))
+            .child(row(ts!("settings-font"), choice("settings-terminal-font", &font_now, fonts, pick_font, &p), &p))
+            .child(row(ts!("settings-size"), size_row, &p))
             .child(row(
-                "Line height",
+                ts!("settings-line-height"),
                 stepper(
                     "settings-terminal-line-height",
                     format!("{:.1}", d.terminal_line_height),
@@ -2166,8 +2172,8 @@ impl SettingsView {
                 ),
                 &p,
             ))
-            .child(row("Cursor", cursors, &p))
-            .child(section("Preview", &p))
+            .child(row(ts!("settings-cursor"), cursors, &p))
+            .child(section(ts!("settings-preview"), &p))
             .child(terminal_preview(d.terminal_engine, crate::console::TermLook::of(d), &d.terminal_shell, &p))
             .when(d.terminal_engine.or_available() == EngineKind::Builtin, |b| {
                 b.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
@@ -2196,14 +2202,18 @@ impl SettingsView {
                 .child(crate::components::icon(IconName::Variable, 13., p.fg_dim))
                 .child(div().font_family(look::MONO).text_size(px(12.5)).child(format!("{name}={value}")))
                 .child(
-                    crate::components::IconButton::new(SharedString::from(id), IconName::X, "Remove this variable")
-                        .size(20.)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let name = name2.clone();
-                            this.set(cx, move |s| {
-                                s.terminal_env.remove(&name);
-                            })
-                        })),
+                    crate::components::IconButton::new(
+                        SharedString::from(id),
+                        IconName::X,
+                        ts!("settings-remove-this-variable"),
+                    )
+                    .size(20.)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let name = name2.clone();
+                        this.set(cx, move |s| {
+                            s.terminal_env.remove(&name);
+                        })
+                    })),
                 )
                 .into_any_element()
         });
@@ -2211,18 +2221,22 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .child(section("Shell", &p))
+            .child(section(ts!("settings-shell"), &p))
             .child(marked(
-                row("Program", div().w(px(300.)).child(look::field(&self.shell, false, None, &p)), &p),
+                row(ts!("settings-program"), div().w(px(300.)).child(look::field(&self.shell, false, None, &p)), &p),
                 shell_mark,
             ))
             .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(if remote {
-                "Empty: the login shell of your account on the remote machine."
+                ts!("settings-empty-the-login-shell-of-your-account-on")
             } else {
-                "Empty: your login shell. On a remote machine, your shell there."
+                ts!("settings-empty-your-login-shell-on-a-remote-machine")
             }))
             .child(marked(
-                row("Arguments", div().w(px(300.)).child(look::field(&self.shell_args, false, None, &p)), &p),
+                row(
+                    ts!("settings-arguments"),
+                    div().w(px(300.)).child(look::field(&self.shell_args, false, None, &p)),
+                    &p,
+                ),
                 args_mark,
             ))
             .child(
@@ -2230,11 +2244,11 @@ impl SettingsView {
                     .pl(px(162.))
                     .text_size(px(12.))
                     .text_color(p.fg_dim)
-                    .child("Separated by spaces. -l starts a login shell."),
+                    .child(ts!("settings-separated-by-spaces-l-starts-a-login-shell")),
             )
             .child(marked(
                 row(
-                    "Environment",
+                    ts!("settings-environment"),
                     div()
                         .flex()
                         .items_center()
@@ -2244,7 +2258,7 @@ impl SettingsView {
                             crate::components::Button::new("settings-terminal-add-var", IconName::Plus)
                                 .debug_selector("settings-terminal-add-var")
                                 .compact()
-                                .label("Add")
+                                .label(ts!("settings-add"))
                                 .on_click(cx.listener(|this, _, w, cx| this.add_var(w, cx))),
                         ),
                     &p,
@@ -2256,7 +2270,7 @@ impl SettingsView {
                     div()
                         .text_size(px(12.))
                         .text_color(p.fg_dim)
-                        .child("Added to the terminals and the Claude Code console you start after a change."),
+                        .child(ts!("settings-added-to-the-terminals-and-the-claude-code")),
                 )
             }))
             .into_any_element()
@@ -2269,9 +2283,9 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .child(section("Behaviour", &p))
+            .child(section(ts!("settings-behaviour"), &p))
             .child(row(
-                "Scrollback",
+                ts!("settings-scrollback"),
                 div()
                     .flex()
                     .items_center()
@@ -2290,14 +2304,14 @@ impl SettingsView {
                         div()
                             .text_size(px(12.))
                             .text_color(p.fg_dim)
-                            .child("lines, for terminals started after a change"),
+                            .child(ts!("settings-lines-for-terminals-started-after-a-change")),
                     ),
                 &p,
             ))
             .child(check_line(
                 look::checkbox(
                     "settings-terminal-copy-on-select",
-                    "Copy text as soon as it is selected",
+                    ts!("settings-copy-text-as-soon-as-it-is-selected"),
                     d.terminal_copy_on_select,
                     true,
                     &p,
@@ -2311,7 +2325,7 @@ impl SettingsView {
             .child(check_line(
                 look::checkbox(
                     "settings-terminal-option-meta",
-                    "Use Option as Meta (\u{2325}F moves a word, not \u{192})",
+                    ts!("settings-use-option-as-meta-f-moves-a-word"),
                     d.terminal_option_as_meta,
                     true,
                     &p,
@@ -2334,7 +2348,7 @@ impl SettingsView {
         let mut apps: Vec<(String, String)> =
             self.installed_terminals.iter().map(|t| (name(*t), t.label().to_owned())).collect();
         if chosen != ExternalTerminal::Custom && !self.installed_terminals.contains(&chosen) {
-            apps.push((name(chosen), format!("{} (not installed)", chosen.label())));
+            apps.push((name(chosen), t!("settings-not-installed", chosen = (chosen.label()).to_string())));
         }
         apps.push((name(ExternalTerminal::Custom), ExternalTerminal::Custom.label().to_owned()));
         let view = cx.entity();
@@ -2348,9 +2362,9 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .child(section("External terminal", &p))
+            .child(section(ts!("settings-external-terminal"), &p))
             .child(row(
-                "Open in",
+                ts!("settings-open-in"),
                 div()
                     .flex()
                     .items_center()
@@ -2361,7 +2375,7 @@ impl SettingsView {
             ))
             .when(custom, |b| {
                 b.child(row(
-                    "Command",
+                    ts!("settings-command"),
                     div().w(px(360.)).child(look::field(&self.external_command, false, None, &p)),
                     &p,
                 ))
@@ -2383,12 +2397,18 @@ impl SettingsView {
         let chosen = d.terminal_engine;
         let open: Vec<(String, EngineKind)> = cx
             .try_global::<crate::console::OpenTerminals>()
-            .map(|o| o.0.iter().map(|((kind, root), e)| (format!("{kind} in {}", Model::dir_name(root)), *e)).collect())
+            .map(|o| {
+                o.0.iter()
+                    .map(|((kind, root), e)| {
+                        (t!("settings-in", kind = kind.to_string(), root = (Model::dir_name(root)).to_string()), *e)
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         let others = open.iter().filter(|(_, e)| *e != chosen).count();
         let mut body = div().flex().flex_col();
         if !open.is_empty() {
-            body = body.child(section("Running now", &p)).children(open.into_iter().map(|(what, e)| {
+            body = body.child(section(ts!("settings-running-now"), &p)).children(open.into_iter().map(|(what, e)| {
                 let ico = if e == EngineKind::Ghostty { IconName::Ghost } else { IconName::SquareTerminal };
                 div()
                     .pl(px(12.))
@@ -2401,10 +2421,14 @@ impl SettingsView {
                     .child(div().text_color(p.fg_dim).child(e.label()))
             }));
             if others > 0 {
-                body =
-                    body.child(div().pl(px(12.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                        "A terminal running another engine keeps it until it starts again (New, in its header).",
-                    ));
+                body = body.child(
+                    div()
+                        .pl(px(12.))
+                        .pt(px(4.))
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child(ts!("settings-a-terminal-running-another-engine-keeps-it-until")),
+                );
             }
         }
         body.into_any_element()
@@ -2540,21 +2564,23 @@ impl SettingsView {
                         .border_color(p.accent)
                         .text_size(px(12.))
                         .text_color(p.accent)
-                        .child("Press the keys, or Esc"),
+                        .child(ts!("settings-press-the-keys-or-esc")),
                 );
             } else if entry.keys.is_empty() {
-                keys = keys.child(div().text_size(px(12.)).text_color(p.fg_dim).child("None"));
+                keys = keys.child(div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-none")));
             }
             let action = entry.action.clone();
             let add = small(format!("keymap-add-{ix}").into(), "+")
                 .on_click(cx.listener(move |this, _, _, cx| this.record(action.clone(), cx)));
             let reset = entry.changed().then(|| {
                 let action = entry.action.clone();
-                small(format!("keymap-reset-{ix}").into(), "Reset").on_click(cx.listener(move |this, _, _, cx| {
-                    this.draft.keymap.remove(&action);
-                    this.taken = None;
-                    cx.notify();
-                }))
+                small(format!("keymap-reset-{ix}").into(), ts!("settings-reset")).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.draft.keymap.remove(&action);
+                        this.taken = None;
+                        cx.notify();
+                    },
+                ))
             });
             let mut row = div()
                 .id(("keymap-row", ix))
@@ -2585,7 +2611,10 @@ impl SettingsView {
                 );
             if !clash.is_empty() {
                 row = row.child(
-                    div().text_size(px(12.)).text_color(p.warn).child(format!("Also bound to {}", clash.join(", "))),
+                    div()
+                        .text_size(px(12.))
+                        .text_color(p.warn)
+                        .child(t!("settings-also-bound-to", join = (clash.join(", ")).to_string())),
                 );
             }
             if let Some((taken_for, keys, others)) = &self.taken
@@ -2599,13 +2628,13 @@ impl SettingsView {
                         .gap(px(8.))
                         .text_size(px(12.))
                         .text_color(p.fg_dim)
-                        .child(format!(
-                            "{} was the shortcut of {}. Here it now runs this command.",
-                            crate::keymap::display(keys, cx),
-                            names.join(", ")
+                        .child(t!(
+                            "settings-was-the-shortcut-of-here-it-now-runs",
+                            keys = (crate::keymap::display(keys, cx)).to_string(),
+                            join = (names.join(", ")).to_string()
                         ))
                         .child(
-                            look::small_button("keymap-take", IconName::Unlink, "Remove It There", &p)
+                            look::small_button("keymap-take", IconName::Unlink, ts!("settings-remove-it-there"), &p)
                                 .on_click(cx.listener(|this, _, _, cx| this.take_from_others(cx))),
                         ),
                 );
@@ -2613,7 +2642,9 @@ impl SettingsView {
             rows.push(row.into_any_element());
         }
         if rows.is_empty() {
-            rows.push(div().py(px(12.)).text_color(p.fg_dim).child("No command matches.").into_any_element());
+            rows.push(
+                div().py(px(12.)).text_color(p.fg_dim).child(ts!("settings-no-command-matches")).into_any_element(),
+            );
         }
         let any_changed = !self.draft.keymap.is_empty();
         div()
@@ -2628,13 +2659,14 @@ impl SettingsView {
                     .gap(px(8.))
                     .child(div().flex_1().child(look::field(&self.key_search, true, None, &p)))
                     .when(any_changed, |d| {
-                        d.child(look::small_button("keymap-reset-all", IconName::RotateCcw, "Reset All", &p).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.draft.keymap.clear();
-                                this.taken = None;
-                                cx.notify();
-                            }),
-                        ))
+                        d.child(
+                            look::small_button("keymap-reset-all", IconName::RotateCcw, ts!("settings-reset-all"), &p)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.draft.keymap.clear();
+                                    this.taken = None;
+                                    cx.notify();
+                                })),
+                        )
                     }),
             )
             .child(
@@ -2642,7 +2674,7 @@ impl SettingsView {
                     .pb(px(6.))
                     .text_size(px(12.))
                     .text_color(p.fg_dim)
-                    .child("+ adds a shortcut: press its keys. Changes apply with Apply or OK."),
+                    .child(ts!("settings-adds-a-shortcut-press-its-keys-changes-apply")),
             )
             .children(rows)
             .into_any_element()
@@ -2750,7 +2782,7 @@ impl Render for SettingsView {
                 crate::components::dialog_header_icon(
                     crate::components::Tone::Accent,
                     crate::components::IconName::Settings,
-                    "Settings",
+                    ts!("settings-settings"),
                     None,
                     &p,
                 )
@@ -2775,8 +2807,8 @@ impl Render for SettingsView {
                                     .debug_selector("settings-edit-json")
                                     .compact()
                                     .ghost()
-                                    .label("Edit as JSON")
-                                    .tooltip("Open these settings' file in a tab, with completion and checks")
+                                    .label(ts!("settings-edit-as-json"))
+                                    .tooltip(ts!("settings-open-these-settings-file-in-a-tab-with"))
                                     .on_click(cx.listener(|this, _, _, cx| this.edit_as_json(cx))),
                             ),
                             &p,
@@ -2808,11 +2840,11 @@ impl Render for SettingsView {
                     .border_color(p.border)
                     .bg(p.dialog_footer())
                     .child(
-                        button("settings-cancel", crate::components::CANCEL_ICON, "Cancel", false, true)
+                        button("settings-cancel", crate::components::CANCEL_ICON, ts!("settings-cancel"), false, true)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Cancel))),
                     )
                     .child(
-                        button("settings-apply", crate::components::APPLY_ICON, "Apply", false, changed)
+                        button("settings-apply", crate::components::APPLY_ICON, ts!("settings-apply"), false, changed)
                             .when(changed, |d| d.on_click(cx.listener(|this, _, _, cx| this.apply(false, cx)))),
                     )
                     .child(

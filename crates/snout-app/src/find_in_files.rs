@@ -69,12 +69,12 @@ impl Query {
         RegexBuilder::new(&pattern).case_insensitive(!self.case).multi_line(true).size_limit(1 << 22).build().map_err(
             |e| match e {
                 regex::Error::Syntax(s) => {
-                    format!(
-                        "Not a regular expression: {}",
-                        s.lines().last().unwrap_or("").trim().trim_start_matches("error: ")
+                    t!(
+                        "find-not-a-regular-expression",
+                        error = (s.lines().last().unwrap_or("").trim().trim_start_matches("error: ")).to_string()
                     )
                 }
-                _ => "The regular expression is too large".to_owned(),
+                _ => ts!("find-the-regular-expression-is-too-large").to_owned(),
             },
         )
     }
@@ -170,7 +170,7 @@ impl Mask {
             let glob = globset::GlobBuilder::new(pattern)
                 .literal_separator(pattern.contains('/'))
                 .build()
-                .map_err(|e| format!("Not a file mask: {}", e.kind()))?
+                .map_err(|e| t!("find-not-a-file-mask", kind = (e.kind()).to_string()))?
                 .compile_matcher();
             if leave { mask.leave.push(glob) } else { mask.take.push(glob) }
         }
@@ -200,10 +200,10 @@ impl Scope {
 
     pub fn label(self) -> &'static str {
         match self {
-            Scope::Project => "Project",
-            Scope::Module => "Module",
-            Scope::Directory => "Directory",
-            Scope::OpenFiles => "Open Files",
+            Scope::Project => ts!("cmd-project"),
+            Scope::Module => ts!("find-module"),
+            Scope::Directory => ts!("find-directory"),
+            Scope::OpenFiles => ts!("find-open-files"),
         }
     }
 }
@@ -487,10 +487,10 @@ impl FindInFiles {
         let field = |hint: &'static str, window: &mut Window, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(window, cx).placeholder(hint))
         };
-        let find = field("Text to find", window, cx);
-        let replace = field("Replace with", window, cx);
-        let mask = field("File mask: *.java, !*Test.java", window, cx);
-        let dir = field("Folder, from the project's", window, cx);
+        let find = field(ts!("find-text-to-find"), window, cx);
+        let replace = field(ts!("find-replace-with"), window, cx);
+        let mask = field(ts!("find-file-mask-java-test-java"), window, cx);
+        let dir = field(ts!("find-folder-from-the-projects"), window, cx);
         if let Some(text) = initial.filter(|t| !t.is_empty() && !t.contains('\n')) {
             find.update(cx, |s, cx| s.set_value(text, window, cx));
         }
@@ -939,12 +939,26 @@ impl Render for FindInFiles {
         let toggles = div()
             .flex()
             .gap(px(2.))
-            .child(query_toggle("fif-case", IconName::CaseSensitive, "Match Case", self.case, view.clone(), "case"))
-            .child(query_toggle("fif-word", IconName::WholeWord, "Whole Words", self.word, view.clone(), "word"))
+            .child(query_toggle(
+                "fif-case",
+                IconName::CaseSensitive,
+                ts!("find-match-case"),
+                self.case,
+                view.clone(),
+                "case",
+            ))
+            .child(query_toggle(
+                "fif-word",
+                IconName::WholeWord,
+                ts!("find-whole-words"),
+                self.word,
+                view.clone(),
+                "word",
+            ))
             .child(query_toggle(
                 "fif-regex",
                 IconName::Regex,
-                "Regular Expression ($1 in the replacement names a group)",
+                ts!("find-regular-expression-1-in-the-replacement-names-a"),
                 self.regex,
                 view.clone(),
                 "regex",
@@ -960,9 +974,9 @@ impl Render for FindInFiles {
                     "fif-replace-mode",
                     IconName::Replace,
                     if replacing {
-                        "Hide Replace".to_owned()
+                        ts!("find-hide-replace").to_owned()
                     } else {
-                        crate::keymap::shown("Replace in Files (⇧⌘R)")
+                        crate::keymap::shown(ts!("find-replace-in-files-r"))
                     },
                 )
                 .size(26.)
@@ -985,7 +999,9 @@ impl Render for FindInFiles {
         for s in Scope::ALL {
             let view = view.clone();
             let label: SharedString = match (s, &module_name) {
-                (Scope::Module, Some(name)) if self.scope == Scope::Module => format!("Module: {name}").into(),
+                (Scope::Module, Some(name)) if self.scope == Scope::Module => {
+                    t!("find-module-2", name = name.to_string()).into()
+                }
                 _ => s.label().into(),
             };
             scope_row = scope_row.child(
@@ -1014,7 +1030,7 @@ impl Render for FindInFiles {
                 gpui_component::button::Button::new("fif-module")
                     .outline()
                     .icon(crate::components::menu_icon(crate::components::IconName::Package))
-                    .label("Choose…")
+                    .label(ts!("find-choose"))
                     .dropdown_menu(move |mut menu, _, _| {
                         for (i, (name, _)) in modules.iter().enumerate() {
                             let view = view.clone();
@@ -1095,7 +1111,11 @@ impl Render for FindInFiles {
                                 .child(components::path_text(("fif-dir", i), dir, p.fg_dim))
                                 .child(components::badge(
                                     if replacing && !all {
-                                        format!("{} of {}", f.ticked(), f.hits.len())
+                                        t!(
+                                            "find-of",
+                                            ticked = (f.ticked()).to_string(),
+                                            count = (f.hits.len()).to_string()
+                                        )
                                     } else {
                                         f.hits.len().to_string()
                                     },
@@ -1203,18 +1223,21 @@ impl Render for FindInFiles {
             div()
                 .flex_1()
                 .child(
-                    components::EmptyState::new(snout_core::art::spots::find_files(), "Find in the project's files")
-                        .hint("Type a word, a phrase or a regular expression above.")
-                        .on(p.card)
-                        .compact(),
+                    components::EmptyState::new(
+                        snout_core::art::spots::find_files(),
+                        ts!("find-find-in-the-projects-files"),
+                    )
+                    .hint(ts!("find-type-a-word-a-phrase-or-a-regular"))
+                    .on(p.card)
+                    .compact(),
                 )
                 .into_any_element()
         } else if self.rows.is_empty() && !self.searching && self.listed {
             div()
                 .flex_1()
                 .child(
-                    components::EmptyState::new(snout_core::art::spots::no_results(), "Nothing found")
-                        .hint("Try fewer letters, another scope, or a wider file mask.")
+                    components::EmptyState::new(snout_core::art::spots::no_results(), ts!("find-nothing-found"))
+                        .hint(ts!("find-try-fewer-letters-another-scope-or-a-wider"))
                         .on(p.card)
                         .compact(),
                 )
@@ -1224,37 +1247,37 @@ impl Render for FindInFiles {
         };
 
         let status = if self.searching || !self.listed {
-            "Searching…".to_owned()
+            ts!("find-searching").to_owned()
         } else if matches == 0 {
             self.note.clone().unwrap_or_default()
         } else {
-            let mut s = format!(
-                "{matches} {} in {files} {}",
-                if matches == 1 { "match" } else { "matches" },
-                if files == 1 { "file" } else { "files" }
+            let mut s = t!(
+                "find-matches-in-files",
+                matches = t!("find-matches", count = matches),
+                files = t!("find-files", count = files)
             );
             if self.found.truncated {
-                s.push_str(" (the first ones only)");
+                s.push_str(ts!("find-first-only"));
             }
             if replacing && ticked < matches {
-                s.push_str(&format!(", {ticked} to replace"));
+                s.push_str(&t!("find-to-replace", ticked = ticked));
             }
             s
         };
         let buttons: Vec<AnyElement> = if replacing {
             vec![
                 Button::new("fif-cancel", crate::components::CANCEL_ICON)
-                    .label("Cancel")
+                    .label(ts!("settings-cancel"))
                     .kbd("Esc")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(FindEvent::Close)))
                     .into_any_element(),
                 Button::new("fif-replace-selected", IconName::Replace)
-                    .label("Replace Selected")
+                    .label(ts!("find-replace-selected"))
                     .disabled(self.selected_changes().is_empty())
                     .on_click(cx.listener(|this, _, _, cx| this.replace_selected(cx)))
                     .into_any_element(),
                 Button::new("fif-replace-all", IconName::ReplaceAll)
-                    .label("Replace All")
+                    .label(ts!("find-replace-all"))
                     .kbd(crate::keymap::shown("⌘⏎"))
                     .primary()
                     .disabled(ticked == 0)
@@ -1264,12 +1287,12 @@ impl Render for FindInFiles {
         } else {
             vec![
                 Button::new("fif-close", crate::components::CLOSE_ICON)
-                    .label("Close")
+                    .label(ts!("dialogs-close"))
                     .kbd("Esc")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(FindEvent::Close)))
                     .into_any_element(),
                 Button::new("fif-open", IconName::FileInput)
-                    .label("Open")
+                    .label(ts!("find-open"))
                     .kbd("⏎")
                     .primary()
                     .disabled(self.rows.is_empty())
@@ -1304,7 +1327,7 @@ impl Render for FindInFiles {
                 components::dialog_header_icon(
                     Tone::Info,
                     if replacing { IconName::Replace } else { IconName::FileSearch },
-                    if replacing { "Replace in Files" } else { "Find in Files" },
+                    if replacing { ts!("find-replace-in-files") } else { ts!("welcome-find-in-files") },
                     None,
                     &p,
                 )
@@ -1416,22 +1439,19 @@ pub fn apply(
             let count: usize = done.iter().map(|c| c.count).sum();
             let files = done.len();
             let mut note = if undoing {
-                format!("Put back {files} {}", if files == 1 { "file" } else { "files" })
+                t!("find-put-back", files = t!("find-files", count = files))
             } else {
-                format!(
-                    "Replaced {count} {} in {files} {}",
-                    if count == 1 { "match" } else { "matches" },
-                    if files == 1 { "file" } else { "files" }
+                t!(
+                    "find-replaced",
+                    matches = t!("find-matches", count = count),
+                    files = t!("find-files", count = files)
                 )
             };
             if !skipped.is_empty() {
-                note.push_str(&format!(
-                    "; {} changed since and left alone",
-                    if skipped.len() == 1 { "1 file".to_owned() } else { format!("{} files", skipped.len()) }
-                ));
+                note.push_str(&t!("find-skipped", files = t!("find-files", count = skipped.len())));
             }
             if !undoing && !done.is_empty() {
-                note.push_str(". Edit ▸ Undo Replace in Files puts it back.");
+                note.push_str(ts!("find-undo-hint"));
             }
             ws.replace_undo = if undoing || done.is_empty() { None } else { Some(ReplaceUndo(done)) };
             ws.model.update(cx, |m, cx| {
@@ -1452,7 +1472,7 @@ pub fn apply(
 pub fn undo(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     let Some(ReplaceUndo(changes)) = ws.replace_undo.take() else {
         ws.model.update(cx, |m, cx| {
-            m.message = "No replacement to undo".into();
+            m.message = ts!("find-no-replacement-to-undo").into();
             cx.notify();
         });
         return;

@@ -14,7 +14,9 @@ pub fn reveal() -> String {
 }
 
 /// The machine the app runs on, as messages name it.
-pub const THIS_MACHINE: &str = "this computer";
+pub fn this_machine() -> &'static str {
+    ts!("machine-linux")
+}
 
 /// The app draws the title bar, its buttons and the window's edges (a compositor that
 /// decorates windows itself still may: the title bar then leaves the buttons out).

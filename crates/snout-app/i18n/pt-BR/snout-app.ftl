@@ -269,7 +269,918 @@ cmd-open-recent-project = Abrir recente: { $name }
 
 ## The platform's file manager
 
+machine-mac = este Mac
+machine-windows = este PC
+machine-linux = este computador
 reveal-mac = Mostrar no Finder
 reveal-windows = Mostrar no Explorador
 reveal-linux = Mostrar em Arquivos
 
+## settings
+
+settings-search-settings = Pesquisar nas configurações
+settings-found-on-path-and-the-usual-places = Procurado no PATH e nos locais de costume
+settings-its-programs-name = O nome do programa
+settings-your-login-shell-shell = Seu shell de login ($SHELL)
+settings-no-arguments = Sem argumentos
+settings-name-value-then-return = NOME=valor e depois Enter
+settings-search-commands-or-shortcuts = Pesquisar comandos ou atalhos
+settings-overridden-by-this-project = Substituído por este projeto
+settings-set-for-this-project = Definido para este projeto
+settings-reset-to-your-setting = Voltar ao seu ajuste
+settings-your-setting = Seu ajuste
+settings-user = Usuário
+settings-your-settings-json = Seu settings.json
+settings-for-only-kept-in-in-the-project-what = Somente para { $root }, salvo em { $file } no projeto. O que ele define substitui suas configurações.
+settings-your-settings-for-every-project-a-project-can = Suas configurações, para todos os projetos. Um projeto pode substituir algumas delas.
+settings-in-every-build = Em todas as versões
+settings-reflow-kitty-keys-links = Refluxo, teclas kitty, links
+settings-unavailable = Indisponível
+settings-the-same-in-every-project = Igual em todos os projetos
+settings-settings-are-yours-a-project-cannot-set-them = Os ajustes de { $title } são seus: um projeto não pode defini-los por conta própria.
+settings-show-your-settings = Mostrar suas configurações
+settings-indentation = Indentação
+settings-tab-size = Tamanho da tabulação
+settings-for-a-file-whose-own-indentation-cannot-be = Para um arquivo cuja indentação não pode ser determinada.
+settings-display = Exibição
+settings-soft-wrap-long-lines = Quebrar linhas longas
+settings-show-whitespace = Mostrar espaços em branco
+settings-show-parameter-names-of-literal-arguments-java = Mostrar os nomes dos parâmetros dos argumentos literais (Java)
+settings-hover = Informação ao passar o mouse
+settings-show-hover = Mostrar
+settings-delay = Atraso
+settings-navigation = Navegação
+settings-click-with = Clicar com
+settings-preview = Prévia
+settings-fetch-every = Fetch a cada
+settings-the-projects-are-fetched-in-the-background-to = O fetch dos projetos é feito em segundo plano, para contar o que há para trazer.
+settings-annotations = Anotações
+settings-show-who-wrote-each-class-and-method-ada = Mostrar quem escreveu cada classe e método (“Ada Lovelace +2”)
+settings-show-the-current-lines-author-and-commit-after = Mostrar o autor e o commit da linha atual depois do fim dela
+settings-good-to-know = Bom saber
+settings-a-background-fetch-leaves-your-branches-as-they = Um fetch em segundo plano não mexe nas suas branches: só conta os commits a trazer.
+settings-click-the-branch-in-the-title-bar-for = Clique na branch da barra de título para Nova branch, Fetch, Pull e Push, e para mudar para qualquer branch.
+settings-2-shows-the-git-view-in-the-message = ⌘2 mostra a visão do Git. No campo da mensagem, ⌘↩ faz o commit.
+settings-each-builds-own-your-settings = O de cada build (suas configurações)
+settings-every-build = Todos os builds
+settings-jdk-per-project = JDK por projeto
+settings-no-gradle-build-is-open = Nenhum build Gradle está aberto.
+settings-automatic-the-builds-java-level = Automático (o nível de Java do build)
+settings-the-java-server-restarts-on-the-chosen-jdk = O servidor Java usará o JDK escolhido na próxima vez que iniciar.
+settings-gradle-daemons = Daemons Gradle
+settings-stop-idle-daemons-after = Parar daemons inativos após
+settings-double-click-a-task-in-the-gradle-tool = Clique duas vezes em uma tarefa na janela Gradle para executá-la. A saída aparece na janela de build.
+settings-the-processes-window-lists-the-gradle-daemons-running = A janela Processos lista os daemons Gradle em execução e para os inativos quando você pede.
+settings-project-structure-downloads-jdks-and-sets-the-projects = Estrutura do projeto (⌘;) baixa JDKs e define o do projeto.
+settings-the-leaf-on-the-right-stripe-opens-the = A folha na barra direita abre a janela Spring: os beans e os endpoints que o SnoutCode encontrou.
+settings-spring-active-profiles-p-changes-the-profiles-from = Perfis ativos do Spring (⌃⌥P) muda os perfis de qualquer lugar.
+settings-a-bean-the-active-profiles-leave-out-is = Um bean deixado de fora pelos perfis ativos fica esmaecido, e nenhuma injeção o usa.
+settings-active-profiles = Perfis ativos
+settings-open-a-project-to-choose-its-profiles = Abra um projeto para escolher os perfis dele.
+settings-any-no-profile-chosen = Qualquer um (nenhum perfil escolhido)
+settings-those-the-application-files-make-active = Os ativados pelos arquivos da aplicação
+settings-these-profiles = Estes perfis
+settings-evaluate-beans-under = Avaliar os beans com
+settings-profiles = Perfis
+settings-choose = Escolher
+settings-looking-for-it = Procurando…
+settings-that-file-is-not-there = Esse arquivo não existe.
+settings-not-found-install-it-from-the-console-or = Não encontrado. Instale pelo console ou escolha o programa.
+settings-browse = Procurar…
+settings-sees-the-editor-its-hooks-report-each-edit = Vê o editor; os hooks dele informam cada edição e prompt
+settings-its-hooks-report-each-edit-and-prompt = Os hooks dele informam cada edição e prompt
+settings-a-plugin-of-snoutcodes-reports-each-edit-and = Um plugin do SnoutCode informa cada edição e prompt
+settings-files-seen-on-disk-while-it-works-in = Arquivos vistos no disco enquanto ele trabalha no console
+settings-its-colour-caret-and-marks = A cor, o cursor e as marcas dele
+settings-the-console-runs = O console executa
+settings-programs = Programas
+settings-your-agent = Seu agente
+settings-its-name = Nome dele
+settings-any-command-line-agent-the-console-runs-it = Qualquer agente de linha de comando: o console o executa no projeto com /bin/sh -c.
+settings-j-shows-or-hides-the-console-the-session = ⌘J mostra ou oculta o console. A sessão continua enquanto ele está oculto.
+settings-k-sends-the-selection-or-the-whole-file = ⌥⌘K envia a seleção, ou o arquivo inteiro, ao agente.
+settings-in-a-proposed-changes-tab-accepts-it-and = Na aba de uma alteração proposta, ⌘↩ aceita e Esc rejeita.
+settings-the-agent-changes-window-keeps-every-edit-an = A janela Alterações dos agentes guarda cada edição de um agente, por prompt, para aceitar ou reverter.
+settings-ghostty-is-unavailable = O Ghostty está indisponível
+settings-terminal-engine = Mecanismo do terminal
+settings-use-the-editors = Usar a do editor
+settings-the-editors-size = O tamanho do editor
+settings-blink = Piscar
+settings-look = Aparência
+settings-line-height = Altura da linha
+settings-cursor = Cursor
+settings-remove-this-variable = Remover esta variável
+settings-shell = Shell
+settings-program = Programa
+settings-empty-the-login-shell-of-your-account-on = Vazio: o shell de login da sua conta na máquina remota.
+settings-empty-your-login-shell-on-a-remote-machine = Vazio: seu shell de login. Em uma máquina remota, seu shell de lá.
+settings-arguments = Argumentos
+settings-separated-by-spaces-l-starts-a-login-shell = Separados por espaços. -l inicia um shell de login.
+settings-environment = Ambiente
+settings-add = Adicionar
+settings-added-to-the-terminals-and-the-claude-code = Adicionado aos terminais e ao console do Claude Code que você iniciar depois de uma alteração.
+settings-behaviour = Comportamento
+settings-scrollback = Histórico de rolagem
+settings-lines-for-terminals-started-after-a-change = linhas, para terminais iniciados depois de uma alteração
+settings-copy-text-as-soon-as-it-is-selected = Copiar o texto assim que for selecionado
+settings-use-option-as-meta-f-moves-a-word = Usar Option como Meta (⌥F avança uma palavra, não digita ƒ)
+settings-external-terminal = Terminal externo
+settings-open-in = Abrir em
+settings-command = Comando
+settings-running-now = Em execução
+settings-a-terminal-running-another-engine-keeps-it-until = Um terminal com outro mecanismo o mantém até iniciar de novo (Novo, no cabeçalho dele).
+settings-press-the-keys-or-esc = Pressione as teclas, ou Esc
+settings-none = Nenhum
+settings-was-the-shortcut-of-here-it-now-runs = { $keys } era o atalho de { $join }. Aqui agora ele executa este comando.
+settings-remove-it-there = Removê-lo de lá
+settings-no-command-matches = Nenhum comando corresponde.
+settings-reset-all = Redefinir tudo
+settings-adds-a-shortcut-press-its-keys-changes-apply = + adiciona um atalho: pressione as teclas. As alterações valem com Aplicar ou OK.
+settings-settings = Configurações
+settings-edit-as-json = Editar como JSON
+settings-open-these-settings-file-in-a-tab-with = Abrir o arquivo destas configurações em uma aba, com autocompletar e verificações
+settings-cancel = Cancelar
+settings-apply = Aplicar
+settings-cannot-be-read = Não é possível ler { $file }
+settings-the-values-it-had-before-stay-in-use = Os valores anteriores continuam em uso até que seja corrigido. { $e }
+settings-in-shop = { $shell } em shop
+settings-engine = Mecanismo { $shown }
+settings-found = Encontrado: { $path }
+settings-editors = A do editor ({ $editor_font })
+settings-not-installed = { $chosen } (não instalado)
+settings-in = { $kind } em { $root }
+settings-reset = Redefinir
+settings-also-bound-to = Também atribuído a { $join }
+settings-no-jdk = Nenhum JDK encontrado em { $machine }.
+settings-after-a-delay = Depois de um atraso
+settings-only-while-is-held = Só com ⌘ pressionado
+settings-block = Bloco
+settings-bar = Barra
+settings-underline = Sublinhado
+
+## dialogs
+
+dialogs-discard-body = { $count ->
+    [one] Este arquivo volta a ser como está no HEAD. Arquivos não rastreados são excluídos.
+   *[other] Estes { $count } arquivos voltam a ser como estão no HEAD. Arquivos não rastreados são excluídos.
+    }
+dialogs-trash-body = { $count ->
+    [one] Este arquivo vai para a lixeira. Arquivos rastreados aparecem então como excluídos, prontos para o commit.
+   *[other] Estes { $count } arquivos vão para a lixeira. Arquivos rastreados aparecem então como excluídos, prontos para o commit.
+    }
+dialogs-delete-body = { $count ->
+    [one] Este arquivo é excluído do disco. Arquivos rastreados aparecem então como excluídos, prontos para o commit.
+   *[other] Estes { $count } arquivos são excluídos do disco. Arquivos rastreados aparecem então como excluídos, prontos para o commit.
+    }
+dialogs-unsaved-files = { $count ->
+    [one] Você tem alterações não salvas em um arquivo.
+   *[other] Você tem alterações não salvas em { $count } arquivos.
+    }
+dialogs-version = Versão { $cargo_pkg_version }
+dialogs-git-stopped-and-said-why = O Git parou e disse por quê.
+dialogs-you-have-uncommitted-changes-what-should-happen-to = Você tem alterações sem commit. O que deve acontecer com elas?
+dialogs-a-line-of-work-of-its-own-from = Uma linha de trabalho própria, a partir de onde você escolher.
+dialogs-its-commits-stay-wherever-else-they-are-reachable = Os commits dela continuam onde ainda forem acessíveis.
+dialogs-it-goes-for-everyone-who-uses-the-remote = Ela some para todos que usam o remoto. As branches locais não mudam.
+dialogs-copy-a-remote-repository-to-this-computer-and = Copie um repositório remoto para este computador e abra-o.
+dialogs-is-waiting-in-the-console-for-your-answer = { $agent } aguarda sua resposta no console.
+dialogs-the-window-closes-and-the-java-engine-stops = A janela fecha, e o mecanismo Java para junto.
+dialogs-what-runs-now-stops-when-snoutcode-quits = O que está em execução vai parar quando o SnoutCode encerrar.
+dialogs-clone-repository = Clonar repositório
+dialogs-local-branches = Branches locais
+dialogs-remote-branches = Branches remotas
+dialogs-tags = Tags
+dialogs-unsaved = Não salvo
+dialogs-these-stop = Isto vai parar:
+dialogs-dont-ask-again-settings-appearance-confirm-before-quitti = Não perguntar de novo (Configurações, Aparência: Confirmar antes de encerrar)
+dialogs-discard-and-quit = Descartar e encerrar
+dialogs-save-all-and-quit = Salvar tudo e encerrar
+dialogs-an-ide-for-java-gradle-and-spring-boot = Um IDE para Java, Gradle e Spring Boot, com Git e Claude Code integrados.
+dialogs-made-by-snoutdata-mit-license = Feito pela SnoutData. Licença MIT.
+dialogs-this-cannot-be-undone = Isto não pode ser desfeito.
+dialogs-discard = Descartar
+dialogs-you-can-still-get-them-back-from-the = Você ainda poderá recuperá-los da lixeira.
+dialogs-move-to-trash = Mover para a lixeira
+dialogs-delete = Excluir
+dialogs-stash-check-out-re-apply = Stash, mudar e reaplicar
+dialogs-put-the-changes-aside-switch-then-bring-them = Deixa as alterações de lado, muda e depois as traz de volta. Funciona mesmo se tocarem arquivos diferentes no destino.
+dialogs-check-out-keep-changes = Mudar e manter as alterações
+dialogs-carry-the-changes-across-as-they-are-git = Leva as alterações como estão. O Git recusa se elas fossem sobrescritas.
+dialogs-this-leaves-head-detached-create-a-branch-if = Isto deixa o HEAD desanexado. Crie uma branch se quiser manter commits novos.
+dialogs-and-have-each-moved-on-and-this-repositorys = { $branch } e { $upstream } avançaram cada uma por si, e as configurações deste repositório não dizem como combiná-las.
+dialogs-merge = Merge
+dialogs-join-both-histories-with-a-merge-commit-nothing = Une os dois históricos com um commit de merge. Nada é reescrito.
+dialogs-rebase = Rebase
+dialogs-replay-your-commits-on-top-of-the-remote = Reaplica seus commits sobre os remotos, para um histórico linear.
+dialogs-and-have-no-commit-in-common-so-they = { $branch } e { $upstream } não têm nenhum commit em comum, então não podem ser unidas. Isso costuma indicar que o repositório remoto foi recriado ou que o histórico dele foi reescrito.
+dialogs-resetting-makes-match-exactly-your-current-commits-stay = Redefinir faz { $branch } ficar exatamente igual a { $upstream }. Seus commits atuais ficam em uma branch de backup, então nada se perde.
+dialogs-commit-or-stash-your-uncommitted-changes-first-resetting = Faça commit ou stash das suas alterações antes; redefinir as descartaria.
+dialogs-reset-to = Redefinir para { $upstream }
+dialogs-name = Nome
+dialogs-starting-at = A partir de
+dialogs-check-out-the-new-branch = Mudar para a nova branch
+dialogs-create = Criar
+dialogs-renaming = Renomeando { $old }
+dialogs-goes-into-the-new-group = { $repo } entra no novo grupo.
+dialogs-groups-keep-related-repositories-together-drag-repositor = Os grupos reúnem repositórios relacionados. Arraste repositórios para um deles.
+dialogs-rename = Renomear
+dialogs-goes-away = será excluída.
+dialogs-delete-even-if-it-is-not-fully-merged = Excluir mesmo que não esteja totalmente unida
+dialogs-also-delete-on-the-remote = Excluir também { $up } no remoto
+dialogs-removing-it-from-the-remote-affects-everyone-who = Removê-la do remoto afeta todos que a usam.
+dialogs-delete-branch = Excluir branch
+dialogs-repository-url = URL do repositório
+dialogs-into-folder = Na pasta
+dialogs-lands-in = Destino:
+dialogs-clone = Clonar
+dialogs-no-matching-branch-tag-or-commit = Nenhuma branch, tag ou commit corresponde
+dialogs-uncommitted-changes = Alterações sem commit:
+dialogs-keep-them = Mantê-las
+dialogs-stash-and-re-apply = Stash e reaplicar
+dialogs-check-out = Mudar
+dialogs-dont-allow = Não permitir
+dialogs-allow-for-this-session = Permitir nesta sessão
+dialogs-allow = Permitir
+dialogs-close = Fechar
+dialogs-a-branch-a-tag-or-any-commit = Uma branch, uma tag ou qualquer commit.
+dialogs-something-went-wrong = Algo deu errado
+dialogs-discard-changes = Descartar as alterações?
+dialogs-check-out-2 = Mudar para { $t }?
+dialogs-check-out-3 = Mudar de branch
+dialogs-new-branch = Nova branch
+dialogs-delete-branch-2 = Excluir a branch?
+dialogs-delete-branch-from = Excluir a branch de { $remote }?
+dialogs-move-to-the-trash = Mover para a lixeira?
+dialogs-delete-files = Excluir os arquivos?
+dialogs-both-sides-have-new-commits = Os dois lados têm commits novos
+dialogs-no-shared-history = Sem histórico em comum
+dialogs-rename-group = Renomear grupo
+dialogs-new-group = Novo grupo
+dialogs-quit-snoutcode = Encerrar o SnoutCode?
+dialogs-allow-to = Permitir que { $agent } { $what }?
+dialogs-its-upstream = a branch upstream dela
+dialogs-delete-from = Excluir de { $remote }
+dialogs-allow-for-this-session-lets-it-use-again = Permitir nesta sessão deixa ele usar { $tool } de novo sem perguntar.
+
+## welcome
+
+welcome-minutes-ago = { $count ->
+    [one] há { $count } minuto
+   *[other] há { $count } minutos
+    }
+welcome-hours-ago = { $count ->
+    [one] há { $count } hora
+   *[other] há { $count } horas
+    }
+welcome-days-ago = { $count ->
+    [one] há { $count } dia
+   *[other] há { $count } dias
+    }
+welcome-weeks-ago = { $count ->
+    [one] há { $count } semana
+   *[other] há { $count } semanas
+    }
+welcome-months-ago = { $count ->
+    [one] há { $count } mês
+   *[other] há { $count } meses
+    }
+welcome-just-now = agora mesmo
+welcome-yesterday = ontem
+welcome-search-recent-projects = Pesquisar projetos recentes
+welcome-welcome = Boas-vindas
+welcome-go-to-file = Ir para arquivo
+welcome-recent-files = Arquivos recentes
+welcome-search-everywhere = Pesquisar em todo lugar
+welcome-find-in-files = Localizar nos arquivos
+welcome-new-file = Novo arquivo
+welcome-no-files-open = Nenhum arquivo aberto
+welcome-open-one-from-the-project-tree-or = Abra um na árvore do projeto, ou:
+welcome-recent-files-2 = Arquivos recentes
+welcome-clone-repository = Clonar repositório…
+welcome-from-a-git-url = De uma URL do Git
+welcome-java-or-spring-boot-app = Aplicativo Java ou Spring Boot
+welcome-no-recent-project-matches = Nenhum projeto recente corresponde.
+welcome-no-recent-projects-yet-open-a-folder-to = Ainda não há projetos recentes. Abra uma pasta para começar.
+welcome-recent-projects = Projetos recentes
+welcome-a-folder-on = Uma pasta em { $host }
+welcome-folder-on-machine = Uma pasta em { $machine }
+
+## tabs
+
+tabs-unpin-tab = Desafixar aba
+tabs-pin-tab = Fixar aba
+tabs-close-others = Fechar as outras
+tabs-close-tabs-to-the-left = Fechar abas à esquerda
+tabs-close-tabs-to-the-right = Fechar abas à direita
+tabs-close-all = Fechar todas
+tabs-close-all-but-pinned = Fechar todas menos as fixadas
+tabs-keep-open = Manter aberta
+tabs-reload-from-disk = Recarregar do disco
+tabs-copy-path = Copiar caminho
+tabs-clear = Limpar
+tabs-sync-the-gradle-project = Sincronizar o projeto Gradle
+tabs-read-the-tasks-again = Ler as tarefas novamente
+tabs-collapse-all = Recolher tudo
+tabs-reload-the-maven-project = Recarregar o projeto Maven
+tabs-read-the-goals-again = Ler os goals novamente
+tabs-stop-idle-processes-idle-gradle-daemons-leftovers-and = Parar os processos inativos: daemons Gradle inativos, sobras e mecanismos de projetos fechados
+tabs-options = Opções
+tabs-hide = Ocultar
+
+## projects
+
+projects-filter = Filtrar
+projects-open-local-repository = Abrir repositório local…
+projects-find-repositories-in-folder = Localizar repositórios em uma pasta…
+projects-no-matches = Nenhum resultado
+projects-rename = Renomear…
+projects-delete-group = Excluir grupo
+projects-new-group = Novo grupo…
+projects-drag-repositories-here = Arraste repositórios para cá
+projects-add-a-repository-or-a-group = Adicionar um repositório ou um grupo
+projects-repositories = Repositórios
+projects-no-repositories-yet-use-or-o = Ainda não há repositórios. Use + ou ⌘O.
+projects-copy-path = Copiar caminho
+projects-open-as-project = Abrir como projeto
+projects-move-to-group = Mover para um grupo
+projects-no-group = Sem grupo
+projects-remove-from-list = Remover da lista
+
+## status
+
+status-snoutcodes-processes-running-of-memory-click-to-show = Processos do SnoutCode: { $count } em execução, { $memory } de memória. Clique para vê-los.
+status-in-the-background = Em segundo plano
+status-the-editor-works-meanwhile = O editor continua funcionando enquanto isso.
+status-reconnect = Reconectar
+status-changes-the-agents-made-that-wait-for-your = Alterações dos agentes aguardando sua revisão
+status-review = Revisar
+status-restart = Reiniciar
+status-read-only = Somente leitura
+status-java-support-unavailable = Suporte a Java indisponível
+status-chars-lines = { $chars } caracteres, { $lines } linhas
+status-selected = { $chars } selecionados
+status-and-more = e mais { $count }
+
+## search
+
+search-go-to-file = Ir para arquivo
+search-line-or-line-column = Linha, ou linha:coluna
+search-type-a-command = Digite um comando
+search-run-a-gradle-task-or-maven-goal-its = Executar uma tarefa Gradle ou um goal Maven: nome ou caminho
+search-spring-profiles-pick-one-to-turn-it-on = Perfis Spring: escolha um para ativar ou desativar
+search-go-to-symbol = Ir para símbolo
+search-filter-the-files-symbols = Filtrar os símbolos do arquivo
+search-go-to-class-in-the-project-its-libraries = Ir para classe, no projeto, nas bibliotecas e no JDK
+search-new-file-its-path-in-the-project-like = Novo arquivo: caminho no projeto, como src/main/java/App.java
+search-no-file-matches = Nenhum arquivo corresponde
+search-no-command-matches = Nenhum comando corresponde
+search-no-task-matches = Nenhuma tarefa corresponde
+search-no-profile-matches = Nenhum perfil corresponde
+search-type-a-name = Digite um nome
+search-no-symbol-matches = Nenhum símbolo corresponde
+search-type-a-class-name-or-its-capitals = Digite um nome de classe, ou as maiúsculas dele
+search-no-class-matches = Nenhuma classe corresponde
+search-no-recent-file-matches = Nenhum arquivo recente corresponde
+search-return-makes-the-file-and-opens-it = Enter cria o arquivo e o abre
+search-type-a-line-number-or-line-column = Digite um número de linha, ou linha:coluna
+search-go-to-line-column = Ir para a linha { $line }, coluna { $column }
+search-try-fewer-letters-or-another-word = Tente menos letras ou outra palavra.
+
+## find
+
+find-matches = { $count ->
+    [one] { $count } ocorrência
+   *[other] { $count } ocorrências
+    }
+find-files = { $count ->
+    [one] { $count } arquivo
+   *[other] { $count } arquivos
+    }
+find-matches-in-files = { $matches } em { $files }
+find-replaced = Substituídas { $matches } em { $files }
+find-put-back = Restaurados: { $files }
+find-to-replace = , { $ticked } a substituir
+find-first-only = {" "}(somente as primeiras)
+find-skipped = ; { $files } alterados nesse meio-tempo e deixados como estão
+find-undo-hint = . Editar ▸ Desfazer substituição nos arquivos restaura.
+find-not-a-regular-expression = Não é uma expressão regular: { $error }
+find-the-regular-expression-is-too-large = A expressão regular é grande demais
+find-module = Módulo
+find-directory = Diretório
+find-open-files = Arquivos abertos
+find-text-to-find = Texto a localizar
+find-replace-with = Substituir por
+find-file-mask-java-test-java = Máscara de arquivo: *.java, !*Test.java
+find-folder-from-the-projects = Pasta, a partir da do projeto
+find-match-case = Diferenciar maiúsculas
+find-whole-words = Palavras inteiras
+find-regular-expression-1-in-the-replacement-names-a = Expressão regular ($1 na substituição indica um grupo)
+find-hide-replace = Ocultar Substituir
+find-replace-in-files-r = Substituir nos arquivos (⇧⌘R)
+find-choose = Escolher…
+find-find-in-the-projects-files = Localizar nos arquivos do projeto
+find-type-a-word-a-phrase-or-a-regular = Digite acima uma palavra, uma frase ou uma expressão regular.
+find-nothing-found = Nada encontrado
+find-try-fewer-letters-another-scope-or-a-wider = Tente menos letras, outro escopo ou uma máscara mais ampla.
+find-searching = Pesquisando…
+find-replace-selected = Substituir selecionados
+find-replace-all = Substituir tudo
+find-open = Abrir
+find-replace-in-files = Substituir nos arquivos
+find-no-replacement-to-undo = Nenhuma substituição para desfazer
+find-not-a-file-mask = Não é uma máscara de arquivo: { $kind }
+find-module-2 = Módulo: { $name }
+find-of = { $ticked } de { $count }
+
+## files
+
+files-no-project-open = Nenhum projeto aberto
+files-open-a-project-to-see-its-files = Abra um projeto para ver os arquivos.
+files-the-connection-is-lost = A conexão foi perdida
+files-node-package = Pacote Node: { $path }
+files-the-files-on-come-back-when-it-reconnects = Os arquivos de { $host } voltam quando ele reconectar.
+
+## project
+
+project-no-classes-to-show = Nenhuma classe para mostrar
+project-reading-the-build-model = Lendo o modelo de build
+project-external-libraries = Bibliotecas externas
+project-the-build-model-could-not-be-read = Não foi possível ler o modelo de build: { $e }
+project-uses = usa { $join }
+project-showing-the-last-model-that-synced = { $reason }{"\u000A"}Exibindo o último modelo sincronizado.
+project-compiled-by = Compilado por { $join }
+project-did-not-sync = Não sincronizou: { $reason }{"\u000A"}{"\u000A"}{ $note }
+project-did-not-sync-2 = Não sincronizou: { $reason }
+project-excluded = Excluído: { $path }
+project-and-more = { $builds } e mais { $n }
+
+## model
+
+model-build-files = Arquivos de build
+model-maven-files = Arquivos Maven
+model-gradle-scripts = Scripts Gradle
+model-detached-at = desanexado em { $count }
+model-detached-head = HEAD desanexado
+model-does-not-exist = { $path } não existe
+model-ready = Pronto
+model-no-upstream = {"  "}(sem upstream)
+model-opened = { $asked } aberto
+model-snoutcode-could-not-connect-to = O SnoutCode não conseguiu se conectar a { $connection }. { $why }
+model-showing-in-git = Mostrando { $root } no Git
+model-closed = { $closed } fechado
+model-could-not-save-settings = Não foi possível salvar as configurações: { $e }
+model-your-settings-json-has-an-error-so-the = Seu settings.json tem um erro, então as configurações em uso continuam: { $e }
+model-your-settings-are-read-again = Suas configurações foram lidas novamente
+model-could-not-save-the-projects-settings = Não foi possível salvar as configurações do projeto: { $e }
+model-finished = { $label } concluído
+model-cloned-into = Clonado em { $root }
+model-failed = { $label } falhou
+model-failed-2 = { $label } falhou:{"\u000A"}{ $e }
+model-no-git-repositories-within-levels-of = Nenhum repositório Git a até { $SCAN_DEPTH } níveis de{"\u000A"}{ $root }
+model-found-repositories-in-new = { $count } repositórios encontrados em { $root } ({ $added } novos)
+model-asking-the-agent-to-draft-the-commit-message = Pedindo ao agente para redigir a mensagem de commit…
+model-the-agent-has-not-sent-a-commit-message = O agente ainda não enviou uma mensagem de commit. A resposta dele está no console.
+model-asks-you-something-in-the-console-answer-it = { $name } pergunta algo no console. Responda lá e a redação continua.
+model-is-writing-the-commit-message = { $name } está escrevendo a mensagem de commit…
+model-the-agent-finished-without-writing-a-commit-message = O agente terminou sem escrever uma mensagem de commit. A resposta dele está no console.
+model-no-commit-message-yet = Ainda não há mensagem de commit
+model-drafted-the-commit-message = { $name } redigiu a mensagem de commit
+model-refreshed = Atualizado
+model-open-project = Abrir projeto
+model-initialized-repository-in = Repositório inicializado em { $root }
+model-find-repositories-in-folder = Localizar repositórios em uma pasta
+model-searching-for-repositories = Procurando repositórios
+model-staged = { $count ->
+    [one] 1 arquivo preparado
+   *[other] { $count } arquivos preparados
+    }
+model-discarded = { $count ->
+    [one] 1 arquivo descartado
+   *[other] { $count } arquivos descartados
+    }
+model-trashed = { $count ->
+    [one] 1 arquivo movido para a lixeira
+   *[other] { $count } arquivos movidos para a lixeira
+    }
+model-deleted = { $count ->
+    [one] 1 arquivo excluído
+   *[other] { $count } arquivos excluídos
+    }
+model-unstaged = Removido da preparação
+model-added-to-gitignore = { $pattern } adicionado ao .gitignore
+model-added-rules-to-gitignore = { $n } regras adicionadas ao .gitignore
+model-committed = Commit feito: { $summary }
+model-stopped-drafting = Redação interrompida
+model-checked-out = Mudou para { $target }
+model-local-changes-conflicted = As alterações locais entraram em conflito
+model-created-branch = Branch { $name } criada
+model-deleted-branch = Branch { $name } excluída
+model-delete = Excluir { $r }
+model-pull-merge = Pull (merge)
+model-pull-rebase = Pull (rebase)
+model-reset-to = { $head } redefinida para { $upstream }
+model-your-previous-commits-are-kept-on-the-branch = Seus commits anteriores ficam na branch { $backup }. Exclua-a quando não precisar mais deles.
+model-now-matches = { $head } agora corresponde a { $upstream }
+model-commit = Commit { $short_id } { $summary }
+
+## branch
+
+branch-search-branches = Pesquisar branches
+branch-local = Local
+branch-remote = Remoto
+
+## panels
+
+panels-files = Arquivos
+panels-no-output-yet = Ainda não há saída
+panels-what-git-and-the-tools-say-shows-here = O que o Git e as ferramentas dizem aparece aqui enquanto trabalham.
+panels-open-git = Abrir Git
+
+## title
+
+title-no-project = Sem projeto
+title-current-file = Arquivo atual
+title-yours = As suas
+title-reading-the-configurations = Lendo as configurações…
+title-configurations-appear-once-the-tests-are-listed = As configurações aparecem depois que os testes forem listados
+title-configurations-appear-once-the-java-engine-is-ready = As configurações aparecem quando o mecanismo Java estiver pronto
+title-stop-f2 = Parar (⌘F2)
+title-search-everywhere-a = Pesquisar em todo lugar (⇧⌘A)
+title-settings = Configurações (⌘,)
+title-the-current-file = o arquivo atual
+title-rerun-r = Executar { $what } novamente (⌃R)
+title-run-r = Executar { $what } (⌃R)
+title-debug-d = Depurar { $what } (⌃D)
+
+## stripes
+
+stripes-left = Esquerda
+stripes-right = Direita
+stripes-bottom = Inferior
+stripes-move-to = Mover para
+stripes-build = Build
+stripes-problems-m = Problemas (⇧⌘M)
+stripes-agent-console-j = Console do agente (⌘J)
+stripes-spring = Spring
+stripes-notifications = Notificações
+stripes-structure-7 = Estrutura (⌘7)
+stripes-hierarchy-h-h = Hierarquia (⌃H, ⌃⌥H)
+stripes-agent-view = Visão do agente
+stripes-tests = Testes
+stripes-project-1 = Projeto (⌘1)
+stripes-git-2 = Git (⌘2)
+
+## git
+
+git-state = Estado
+git-relative-directory = Diretório relativo
+git-file-filter = Filtrar arquivos
+git-message-author-sha-or-ref = Mensagem, autor, SHA ou ref.
+git-commit-message = Mensagem de commit
+git-message = Mensagem
+git-author = Autor
+git-date = Data
+git-push = Push ({ $n })
+git-hide = Ocultar { $short }
+git-console-in-this-repository-j = Console do { $agent } neste repositório (⌘J)
+git-no-github-remote = Sem remoto do GitHub
+git-open-local-repository-o = Abrir repositório local (⌘O)
+git-git-push-sets-upstream-on-first-push = git push (define o upstream no primeiro push)
+git-move-to-the-trash = Mover para a lixeira (⌘⌫)
+git-branch-tag-or-commit-o = Branch, tag ou commit (⇧⌘O)
+git-new-branch = Nova branch
+git-no-repository-open = Nenhum repositório aberto
+git-local-branches = Branches locais
+git-tags = Tags ({ $count })
+git-branches = Branches
+git-check-out-o = Mudar… (⇧⌘O)
+git-double-click-to-check-out = { $b }{ $u }{"\u000A"}{ $target } { $subject }{"\u000A"}{"\u000A"}Clique duas vezes para mudar
+git-double-click-to-check-out-detached = { $target } { $subject }{"\u000A"}{ $date }{"\u000A"}{"\u000A"}Clique duas vezes para mudar (HEAD desanexado)
+git-delete = Excluir…
+git-delete-from = Excluir de { $remote }…
+git-check-out-as-local = Mudar para a branch local “{ $local_name }”
+git-delete-branch = Excluir branch…
+git-delete-from-the-remote = Excluir do remoto…
+git-create-branch-from-here = Criar branch a partir daqui…
+git-copy-name = Copiar nome
+git-check-out-detached = Mudar (HEAD desanexado)
+git-create-branch-from-tag = Criar branch a partir da tag…
+git-tag = tag { $name }
+git-changed-staged = { $count } alterados, { $staged_count } preparados
+git-nothing-to-commit-on = Nada para commitar em { $head }
+git-nothing-to-commit = Nada para commitar
+git-show-all-files = Mostrar todos os arquivos
+git-in = em { $dir }/
+git-the-working-tree-is-clean = A árvore de trabalho está limpa
+git-discard = Descartar…
+git-add-to-gitignore = Adicionar ao .gitignore
+git-see-console = Ver o console
+git-writing = Escrevendo…
+git-writes-the-message-from-building-on-anything-you = { $agent } escreve a mensagem a partir de { $what }, aproveitando o que você digitou. Se não estiver em execução, ele inicia no console.
+git-draft = Redigir
+git-amend = Emendar
+git-amend-last-commit = Emendar o último commit
+git-commits = Faz commit de { $what }  ⌘↩
+git-files-selected = { $count } arquivos selecionados
+git-select-a-file-to-see-its-changes = Selecione um arquivo para ver as alterações
+git-changes = Alterações
+git-nothing-staged = Nada preparado
+git-stage-files-to-see-what-the-next-commit = Prepare arquivos para ver o que o próximo commit contém.
+git-journal = Histórico
+git-click-a-commit-to-see-what-it-changed = Clique em um commit para ver o que ele alterou
+git-no-commits-yet = Ainda não há commits
+git-stage-some-files-and-make-the-first-one = Prepare alguns arquivos e faça o primeiro
+git-show-changes = Mostrar alterações
+git-check-out-this-commit-detached = Mudar para este commit (HEAD desanexado)
+git-create-branch-here = Criar branch aqui…
+git-copy-sha = Copiar SHA
+git-copy-message = Copiar mensagem
+git-working-tree = Árvore de trabalho
+git-back-esc = Voltar (Esc)
+git-the-commit-could-not-be-read = Não foi possível ler o commit
+git-from = { $directory }  (de { $orig })
+git-this-commit-changes-no-files = Este commit não altera nenhum arquivo
+git-changed = { $count } alterados
+git-committer = Committer
+git-committed = Commit em
+git-parents = Pais
+git-parent = Pai
+git-none-this-is-the-first-commit = nenhum, este é o primeiro commit
+git-select-a-file = Selecione um arquivo
+git-nothing = (nada)
+git-this-commit = Este commit
+git-git-could-not-read-this-folder = O Git não conseguiu ler esta pasta
+git-the-project-works-without-it-but-its-changes = O projeto funciona sem ele, mas as alterações e o histórico não podem ser exibidos.
+git-this-folder-has-no-git-repository = Esta pasta não tem repositório Git
+git-the-project-works-without-git-start-a-repository = O projeto funciona sem Git. Crie um repositório para acompanhar alterações e histórico.
+git-try-again = Tentar novamente
+git-initialize-a-repository-here = Inicializar um repositório aqui
+git-find-repositories-inside = Localizar repositórios aqui dentro
+git-open-a-project-to-see-its-changes-branches = Abra um projeto para ver as alterações, branches e histórico.
+git-open-project-o = Abrir projeto…   ⌘O
+git-unified = Unificado
+git-side-by-side = Lado a lado
+git-compact-hide-unchanged-lines-away-from-changes = Compacto: ocultar linhas inalteradas longe das alterações
+git-compact = Compacto
+git-hide-unchanged-lines-away-from-changes = Ocultar linhas inalteradas longe das alterações
+git-no-diff = Sem diff
+git-binary-file = Arquivo binário
+git-its-versions-differ-as-bytes = As versões diferem em bytes.
+git-too-large-to-show = Grande demais para exibir
+git-the-file-is-too-large-to-diff-here = O arquivo é grande demais para diff aqui.
+git-no-differences = Sem diferenças
+git-and-are-the-same = { $left } e { $right } são iguais.
+
+## console
+
+console-console = Console
+console-the-installer-is-still-at-work-end-stops = O instalador ainda está trabalhando; Encerrar o interrompe
+console-ended = { $name } terminou
+console-ended-resume = { $name } terminou; Continuar o retoma
+console-your-own-agent-has-no-command-yet-give = Seu agente ainda não tem comando. Defina um em Configurações, Agentes, e clique em Redigir de novo.
+console-find-in-terminal = Localizar no terminal
+console-of = { $i } de { $n }
+console-previous-match-return = Ocorrência anterior (Enter)
+console-next-match-shift-return = Próxima ocorrência (Shift+Enter)
+console-close-esc = Fechar (Esc)
+console-open-a-project-to-run-a-shell-in = Abra um projeto para executar um shell nele.
+console-not-running = Parado
+console-starting = Iniciando
+console-connected = Conectado
+console-not-connected = Não conectado
+console-running = Em execução
+console-working = Trabalhando
+console-installing = Instalando
+console-ended-2 = Encerrado
+console-is-not-running = { $agent } não está em execução
+console-is-starting = { $agent } está iniciando
+console-sees-the-editor-its-selection-open-files-and = { $agent } vê o editor: seleção, arquivos abertos e problemas; propõe alterações ali para você aceitar ou rejeitar, e as edições aparecem à medida que ele as faz
+console-runs-but-has-not-connected-to-the-editor = { $agent } está em execução, mas ainda não se conectou ao editor
+console-runs-the-files-it-changes-show-as-it = { $agent } está em execução; os arquivos que ele altera aparecem enquanto trabalha
+console-is-at-work-on-your-prompt = { $agent } está trabalhando no seu prompt
+console-is-being-installed = { $agent } está sendo instalado
+console-has-ended = { $agent } terminou
+console-the-shell = O shell
+console-follow = Seguir
+console-following-the-editor-goes-to-the-files-the = Seguindo: o editor vai para os arquivos que o agente altera, enquanto ele digita
+console-not-following-the-editor-stays-where-you-are = Sem seguir: o editor fica onde você está; pontos marcam o que o agente alterou
+console-start-again-with-a-new-conversation = Recomeçar com uma nova conversa
+console-start-a-new-shell = Iniciar um novo shell
+console-new = Novo
+console-continue = Continuar
+console-start-again-on-the-most-recent-conversation-in = Retomar a conversa mais recente desta pasta
+console-end = Encerrar
+console-end-this-session = Encerrar esta sessão
+console-hide-j-the-session-keeps-running = Ocultar (⌘J); a sessão continua
+console-starting-the-shell = Iniciando o shell…
+console-starting-2 = Iniciando { $agent }…
+console-the-shell-is-not-running = O shell não está em execução
+console-start-a-shell-in-the-project = Inicie um shell no projeto.
+console-start-shell = Iniciar shell
+console-start-claude = Iniciar o Claude
+console-start-codex = Iniciar o Codex
+console-start-opencode = Iniciar o opencode
+console-start-amp = Iniciar o Amp
+console-start-agent = Iniciar agente
+console-it-sees-the-editor-and-its-edits-type = Ele vê o editor, e as edições se digitam sozinhas, na cor dele, para você revisar.
+console-the-files-it-changes-type-themselves-in-in = Os arquivos que ele altera se digitam sozinhos, na cor dele, para você revisar.
+console-continue-last-session = Continuar a última sessão
+console-install-here = Instalar executa o instalador aqui no console. Se estiver instalado em outro lugar, defina o caminho em Configurações, Agentes.
+console-install-here-node = Instalar executa o instalador aqui no console. Ele precisa do Node.js. Se estiver instalado em outro lugar, defina o caminho em Configurações, Agentes.
+console-is-not-installed = { $agent } não está instalado
+console-set-its-path-in-settings-agents = Defina o caminho em Configurações, Agentes.
+console-your-own-agent-has-no-command-yet = Seu agente ainda não tem comando
+console-name-the-command-line-agent-to-run-here = Informe o agente de linha de comando a executar aqui e o nome a exibir, em Configurações, Agentes.
+console-agent-settings = Configurações do agente
+console-set-its-path = Definir o caminho
+console-s-developers-recommend-running-it-in-wsl = Os desenvolvedores do { $name } recomendam executá-lo no WSL.
+console-looking-for-in-wsl = Procurando { $name } no WSL…
+console-open-a-folder-in = Abrir uma pasta em { $d }
+console-is-installed-in = { $name } está instalado em { $and_value }
+console-open-a-folder-in-and-the-console-runs = { $makers } Abra uma pasta em { $has } e o console executará o { $name } lá.
+console-this-pc-has-no-wsl-distribution-yet-wsl = { $makers } Este PC ainda não tem distribuição WSL: `wsl --install` no PowerShell instala uma. Para executar o { $name } no próprio Windows, instale com a linha abaixo ou defina o caminho.
+console-on-windows-itself = No próprio Windows
+console-install-runs-its-installer-in-then-open-a = { $makers } Instalar executa o instalador em { $first }; depois abra uma pasta lá e o console executará o { $name } nela. No próprio Windows, ele é instalado com a segunda linha.
+console-install-in = Instalar em { $d }
+console-in-wsl = No WSL
+console-the-installer = O instalador
+console-try-again = Tentar novamente
+console-start-a-new-session = Iniciar uma nova sessão
+console-open-link = Abrir link
+console-copy-link = Copiar link
+console-install-claude-code = Instalar o Claude Code
+console-install-codex = Instalar o Codex
+console-install-opencode = Instalar o opencode
+console-install-amp = Instalar o Amp
+console-install = Instalar
+console-starts-with-the-next-session = { $agent } iniciará na próxima sessão
+console-draft-stopped-the-console-started-a-new-session = Redação interrompida: o console iniciou uma nova sessão. Clique em Redigir para pedir ao { $name }.
+console-could-not-start = Não foi possível iniciar { $program }: { $e }
+console-is-not-installed-yet-install-it-in-the = { $agent } ainda não está instalado. Instale no console e clique em Redigir de novo.
+console-is-not-running-2 = { $agent } não está em execução.
+console-set-up = { $a } (configurar)
+console-install-2 = { $a } (instalar)
+
+## workspace
+
+workspace-could-not-make = Não foi possível criar { $path }: { $e }
+workspace-do-you-want-to-save-the-changes-you = Deseja salvar as alterações feitas em { $one }?
+workspace-do-you-want-to-save-the-changes-you-2 = Deseja salvar as alterações feitas em { $count } arquivos?
+workspace-your-changes-are-lost-if-you-dont-save = Suas alterações serão perdidas se você não as salvar.
+workspace-dont-save = Não salvar
+workspace-open-a-project-to-see-its-structure = Abra um projeto para ver a estrutura
+workspace-settings-on-machine = Seu settings.json está em { $machine }: abra-o em uma janela em { $machine }
+workspace-these-settings-are-not-kept-in-a-file = Estas configurações não ficam em um arquivo
+workspace-open-a-project-to-edit-its-settings = Abra um projeto para editar as configurações
+workspace-the-projects-settings-are-read-again = As configurações do projeto foram lidas novamente
+workspace-has-an-error-so-its-last-good-values = { $file } tem um erro, então os últimos valores válidos continuam: { $e }
+workspace-reading-the-projects-folders = Lendo as pastas do projeto
+workspace-reading-the-open-file-and-the-projects-folders = Lendo o arquivo aberto e as pastas do projeto
+workspace-reading-of-open-files-and-the-projects-folders = Lendo { $n } de { $total } arquivos abertos e as pastas do projeto
+workspace-nothing-changed-on-disk = Nada mudou no disco
+workspace-1-file-changed-on-disk = 1 arquivo mudou no disco
+workspace-files-changed-on-disk = { $n } arquivos mudaram no disco
+workspace-drop-a-folder-to-open-it = Solte uma pasta para abri-la
+
+## tools
+
+tools-problems = Problemas
+tools-references = Referências
+tools-show-output = Mostrar a saída
+tools-no-notifications = Nenhuma notificação
+tools-errors-from-git-and-the-tools-show-here = Os erros do Git e das ferramentas aparecem aqui.
+
+## state
+
+state-modified = Modificado
+state-added = Adicionado
+state-deleted = Excluído
+state-renamed = Renomeado
+state-copied = Copiado
+state-type-changed = Tipo alterado
+state-untracked = Não rastreado
+state-conflicted = Em conflito
+state-staged = Preparado
+state-partly-staged = Parcialmente preparado
+
+## splash
+
+splash-starting-snoutcode = Iniciando o SnoutCode
+
+## updates
+
+updates-snoutcode-update = Atualização do SnoutCode
+updates-updated-to-v = Atualizado para v{ $version }
+updates-dismiss = Dispensar
+updates-later = Mais tarde
+updates-download = Baixar
+updates-restart-to-install-the-update = Reiniciar para instalar a atualização
+updates-restart-to-update = Reiniciar para atualizar
+
+## background
+
+background-reading-the-gradle-model = Lendo o modelo Gradle
+background-compiling-scala = Compilando Scala
+background-starting-java = Iniciando Java
+background-indexing = Indexando
+background-restarting-java = Reiniciando Java
+background-waiting-for-snout-engine = Aguardando o snout-engine
+background-attempt-of-5 = {" "}(tentativa { $n } de 5)
+background-the-java-engine-stopped-unexpectedly-and-is-starting = O mecanismo Java parou inesperadamente e está reiniciando{ $again }: { $doing }
+background-java-stopped-starting-again = Java parou, reiniciando
+
+## quit
+
+quit-debugging = Depuração
+quit-gradle-build = Build Gradle
+quit-compiling-the-scala-classes = Compilando as classes Scala
+quit-claude-code-editing = Claude Code, editando { $name }
+quit-the-connection-to-and-what-the-project-runs = A conexão com { $host } e o que o projeto executa lá
+quit-a-file-could-not-be-saved-so-snoutcode = Um arquivo não pôde ser salvo, então o SnoutCode não encerrou
+
+## terminal
+
+terminal-custom-command = Comando personalizado
+terminal-command-prompt = Prompt de Comando
+terminal-the-custom-external-terminal-has-no-command-set = O terminal externo personalizado não tem comando: defina um em Configurações ▸ Ferramentas ▸ Terminal.
+terminal-could-not-run-the-external-terminal-command = Não foi possível executar o comando do terminal externo: { $e }
+terminal-could-not-open-the-external-terminal = Não foi possível abrir o terminal externo: { $e }
+terminal-could-not-open-the-external-terminal-2 = Não foi possível abrir o terminal externo: { $trim }
+
+## debug
+
+debug-breakpoints-go-in-a-java-kotlin-scala-typescript = Pontos de interrupção ficam em um arquivo Java, Kotlin, Scala, TypeScript ou JavaScript
+debug-there-is-no-breakpoint-on-this-line-f8 = Não há ponto de interrupção nesta linha: ⌘F8 define um
+debug-no-spring-bean-injection-or-endpoint-on-this = Nenhum bean, injeção ou endpoint Spring nesta linha
+debug-run-to-cursor-works-while-the-debugger-is = Executar até o cursor funciona com o depurador parado
+debug-put-the-caret-on-a-line-of-code = Coloque o cursor em uma linha de código
+debug-nothing-to-pause-no-program-is-running-in = Nada para pausar: nenhum programa está em execução no depurador
+debug-nothing-ran-yet-to-run-again = Nada foi executado ainda para repetir
+debug-no-failed-tests-to-run-again = Nenhum teste com falha para repetir
+debug-the-maven-goals-are-being-read-try-again = Os goals Maven estão sendo lidos; tente de novo em instantes
+debug-no-maven-goals-the-project-has-no-maven = Nenhum goal Maven: o projeto não tem build Maven ou ele está sendo lido
+debug-the-gradle-tasks-are-being-read-try-again = As tarefas Gradle estão sendo lidas; tente de novo em instantes
+debug-no-gradle-tasks-yet-the-projects-build-is = Ainda não há tarefas Gradle: o build do projeto está sendo lido
+debug-on = Ativado
+debug-any-profile-every-bean-may-be-there = Qualquer perfil: qualquer bean pode estar presente
+debug-as-the-application-files-say = Conforme os arquivos da aplicação ({ $join })
+debug-the-maven-build-is-being-read-try-again = O build Maven está sendo lido; tente de novo em instantes
+
+## lang
+
+lang-symbols-come-from-the-java-server-which-starts = Os símbolos vêm do servidor Java, que inicia com um arquivo Java
+lang-file-structure-shows-the-symbols-of-a-java = Estrutura do arquivo mostra os símbolos de um arquivo Java
+lang-classes-come-from-the-java-engine-which-starts = As classes vêm do mecanismo Java, que inicia com um projeto Gradle
+lang-hierarchies-come-from-the-java-engine-in-a = As hierarquias vêm do mecanismo Java, em um arquivo Java
+lang-downloading-jdk = Baixando JDK { $major }… { $pct }%
+lang-downloading-jdk-2 = Baixando JDK { $major }…
+lang-jdk-could-not-be-downloaded = Não foi possível baixar o JDK { $major }: { $error }
+lang-this-project-needs-jdk-download-it = Este projeto precisa do JDK { $major }. Baixar?
+lang-not-now = Agora não
+lang-downloading-node = Baixando Node { $prompt }… { $pct }%
+lang-downloading-node-2 = Baixando Node { $prompt }…
+lang-node-could-not-be-downloaded = Não foi possível baixar o Node { $prompt }: { $error }
+lang-this-project-needs-node-which-is-not-on = Este projeto precisa do Node { $prompt }, que não está nesta máquina. Baixar para o SnoutCode?
+lang-installing-the-packages-of-the-build-window-shows = Instalando os pacotes de { $dir }… A janela de build mostra o andamento.
+lang-installing-the-projects-packages-the-build-window-shows = Instalando os pacotes do projeto… A janela de build mostra o andamento.
+lang-installing-playwrights-browsers-the-build-window-shows-h = Instalando os navegadores do Playwright… A janela de build mostra o andamento.
+lang-the-packages-of-are-not-installed-so-it = Os pacotes de { $dir } não estão instalados, então ainda não pode ser executado.
+lang-this-playwright-projects-packages-are-not-installed-so = Os pacotes deste projeto Playwright não estão instalados, então os testes ainda não podem ser executados.
+lang-this-projects-packages-are-not-installed-so-it = Os pacotes deste projeto não estão instalados, então ainda não pode ser executado.
+lang-install-packages = Instalar pacotes ({ $command })
+lang-playwright-needs-browsers-that-are-not-downloaded = O Playwright { $version } precisa de navegadores que não foram baixados: { $join }.
+lang-install-browsers = Instalar navegadores
+lang-pom-changed = Um pom.xml mudou. Recarregar o projeto Maven?
+lang-build-files-changed = Arquivos de build mudaram. Sincronizar?
+lang-gradle-files-changed = Arquivos Gradle mudaram. Sincronizar?
+lang-the-sync-failed = A sincronização falhou: { $e }
+lang-reload = Recarregar
+lang-sync = Sincronizar
+lang-library-classes-open-once-the-java-engine-is = As classes de biblioteca abrem quando o mecanismo Java estiver pronto
+lang-the-java-engine-does-not-know = O mecanismo Java não conhece { $qualified }
+
+## record
+
+record-works-in-a-playwright-project = { $what } funciona em um projeto Playwright
+record-open-a-spec-file-and-put-the-caret = { $what }: abra um arquivo de spec e coloque o cursor onde deve ficar
+record-a-recording-is-going-stop-it-first = Há uma gravação em andamento: pare-a primeiro
+record-it-did-not-start = Não iniciou
+record-the-recorder-stopped-the-build-window-says-why = O gravador parou: a janela de build diz por quê
+record-the-recording-ended-with-no-steps = A gravação terminou sem passos
+record-recorded-1-step-into = 1 passo gravado em { $unwrap_or_default }
+record-recorded-steps-into = { $n } passos gravados em { $unwrap_or_default }
+record-picking-is-on-click-an-element-in-the = Seleção ativa: clique em um elemento no navegador
+record-pick-locator-stopped = Escolher localizador parou
+record-picked = { $locator } escolhido
+record-ui-mode-works-in-a-playwright-project = O modo UI funciona em um projeto Playwright
+record-ui-mode-opens-in-your-browser = O modo UI abre no seu navegador
+
+## remote
+
+remote-could-not-connect-to = Não foi possível conectar a { $name }: { $why }
+
+## run
+
+run-is-not-among-the-projects-sources = { $class } não está entre os fontes do projeto
+run-the-file-in-front-has-no-tests-main = O arquivo em primeiro plano não tem testes, classe principal nem script para executar
+run-nothing-to-run-here-put-the-caret-in = Nada para executar aqui: coloque o cursor em uma classe principal, um teste ou um script

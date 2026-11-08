@@ -105,8 +105,8 @@ panel!(
     SidePanel,
     "Side",
     |s, _| match s.activity {
-        Activity::Project => "Project".into(),
-        Activity::Git => "Git".into(),
+        Activity::Project => ts!("cmd-project").into(),
+        Activity::Git => ts!("menu-git").into(),
     },
     false
 );
@@ -118,7 +118,7 @@ impl Render for SidePanel {
         use crate::tabs::tool_button;
         let p = palette(cx);
         let plain = self.plain_files(cx);
-        let view_name = if plain { "Files" } else { "Project" };
+        let view_name = if plain { ts!("panels-files") } else { ts!("cmd-project") };
         let side = cx.entity();
         // The view switcher: Project (the Gradle model's view) or Files (the plain tree).
         let switcher = Button::new("side-view")
@@ -134,8 +134,10 @@ impl Render for SidePanel {
                         side.update(cx, |s, cx| s.set_plain_files(plain, cx))
                     }
                 };
-                menu.item(gpui_component::menu::PopupMenuItem::new("Project").checked(!plain).on_click(pick(false)))
-                    .item(gpui_component::menu::PopupMenuItem::new("Files").checked(plain).on_click(pick(true)))
+                menu.item(
+                    gpui_component::menu::PopupMenuItem::new(ts!("cmd-project")).checked(!plain).on_click(pick(false)),
+                )
+                .item(gpui_component::menu::PopupMenuItem::new(ts!("panels-files")).checked(plain).on_click(pick(true)))
             });
         // The tool window's header: its title, the view switcher and the toolbar, then the
         // view.
@@ -145,15 +147,15 @@ impl Render for SidePanel {
             .child(div().ml(px(-8.)).font_weight(FontWeight::SEMIBOLD).child(switcher))
             .child(div().flex_1())
             .child(
-                tool_button("side-locate", Icon::Locate, "Select Opened File", &p)
+                tool_button("side-locate", Icon::Locate, ts!("cmd-select-opened-file"), &p)
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(LocateFile), cx)),
             )
             .child(
-                tool_button("side-collapse", Icon::CollapseAll, "Collapse All", &p)
+                tool_button("side-collapse", Icon::CollapseAll, ts!("tabs-collapse-all"), &p)
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(CollapseAll), cx)),
             )
             .child(
-                tool_button("side-hide", Icon::Minus, "Hide", &p)
+                tool_button("side-hide", Icon::Minus, ts!("tabs-hide"), &p)
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(HideSide), cx)),
             );
         div().size_full().bg(p.ground).flex().flex_col().child(header).child(div().flex_1().min_h_0().px(px(4.)).map(
@@ -179,7 +181,7 @@ impl OutputPanel {
     }
 }
 
-panel!(OutputPanel, "Output", |_, _| "Output".into(), true);
+panel!(OutputPanel, "Output", |_, _| ts!("cmd-output").into(), true);
 
 impl Render for OutputPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -187,10 +189,15 @@ impl Render for OutputPanel {
         let m = self.model.read(cx);
         if m.output.is_empty() {
             return div().size_full().bg(p.ground).flex().flex_col().child(
-                crate::components::EmptyState::new(snout_core::art::spots::no_output(), "No output yet")
-                    .hint("What Git and the tools say shows here as they work.")
+                crate::components::EmptyState::new(snout_core::art::spots::no_output(), ts!("panels-no-output-yet"))
+                    .hint(ts!("panels-what-git-and-the-tools-say-shows-here"))
                     .compact()
-                    .primary_action("output-empty-git", crate::components::IconName::GitBranch, "Open Git", ShowGit),
+                    .primary_action(
+                        "output-empty-git",
+                        crate::components::IconName::GitBranch,
+                        ts!("panels-open-git"),
+                        ShowGit,
+                    ),
             );
         }
         div().size_full().bg(p.ground).flex().flex_col().child(

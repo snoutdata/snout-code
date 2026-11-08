@@ -28,7 +28,7 @@ impl Workspace {
     pub fn toggle_breakpoint_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.breakpoint_target(window, cx) {
             Some((path, line)) => self.runs.update(cx, |r, cx| r.toggle_breakpoint(&path, line, cx)),
-            None => self.say("Breakpoints go in a Java, Kotlin, Scala, TypeScript or JavaScript file", cx),
+            None => self.say(ts!("debug-breakpoints-go-in-a-java-kotlin-scala-typescript"), cx),
         }
     }
 
@@ -36,10 +36,10 @@ impl Workspace {
     /// there, or let it stop again.
     pub fn toggle_breakpoint_enabled_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((path, line)) = self.breakpoint_target(window, cx) else {
-            return self.say("Breakpoints go in a Java, Kotlin, Scala, TypeScript or JavaScript file", cx);
+            return self.say(ts!("debug-breakpoints-go-in-a-java-kotlin-scala-typescript"), cx);
         };
         if !self.runs.update(cx, |r, cx| r.toggle_breakpoint_enabled(&path, line, cx)) {
-            self.say(&crate::keymap::shown("There is no breakpoint on this line: ⌘F8 sets one"), cx);
+            self.say(&crate::keymap::shown(ts!("debug-there-is-no-breakpoint-on-this-line-f8")), cx);
         }
     }
 
@@ -47,7 +47,7 @@ impl Workspace {
     pub fn edit_breakpoint_condition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = self.active_editor(window, cx) else { return };
         if !editor.update(cx, |e, cx| e.edit_condition_at_caret(window, cx)) {
-            self.say("Breakpoints go in a Java, Kotlin, Scala, TypeScript or JavaScript file", cx);
+            self.say(ts!("debug-breakpoints-go-in-a-java-kotlin-scala-typescript"), cx);
         }
     }
 
@@ -55,7 +55,7 @@ impl Workspace {
     pub fn spring_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = self.active_editor(window, cx) else { return };
         if !editor.update(cx, |e, cx| e.spring_menu_at_caret(window, cx)) {
-            self.say("No Spring bean, injection or endpoint on this line", cx);
+            self.say(ts!("debug-no-spring-bean-injection-or-endpoint-on-this"), cx);
         }
     }
 
@@ -117,10 +117,10 @@ impl Workspace {
     /// Run to Cursor (⌥F9): the stopped program goes on to the caret's line.
     pub fn run_to_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.runs.read(cx).paused_debug() else {
-            return self.say("Run to Cursor works while the debugger is stopped", cx);
+            return self.say(ts!("debug-run-to-cursor-works-while-the-debugger-is"), cx);
         };
         let Some((path, line)) = self.breakpoint_target(window, cx) else {
-            return self.say("Put the caret on a line of code", cx);
+            return self.say(ts!("debug-put-the-caret-on-a-line-of-code"), cx);
         };
         self.runs.update(cx, |r, cx| r.run_to_cursor(id, &path, line, cx));
     }
@@ -131,7 +131,7 @@ impl Workspace {
         match runs.live_debug().filter(|id| !runs.session(*id).and_then(|s| s.debug.as_ref()).is_some_and(|d| d.paused))
         {
             Some(id) => self.runs.update(cx, |r, cx| r.step(id, "pause", cx)),
-            None => self.say("Nothing to pause: no program is running in the debugger", cx),
+            None => self.say(ts!("debug-nothing-to-pause-no-program-is-running-in"), cx),
         }
     }
 
@@ -139,7 +139,7 @@ impl Workspace {
     pub fn rerun_last(&mut self, cx: &mut Context<Self>) {
         match self.runs.read(cx).last_session() {
             Some(id) => self.runs.update(cx, |r, cx| r.rerun(id, cx)),
-            None => self.say("Nothing ran yet to run again", cx),
+            None => self.say(ts!("debug-nothing-ran-yet-to-run-again"), cx),
         }
     }
 
@@ -151,7 +151,7 @@ impl Workspace {
         });
         match found {
             Some(id) => self.runs.update(cx, |r, cx| r.rerun_failed(id, cx)),
-            None => self.say("No failed tests to run again", cx),
+            None => self.say(ts!("debug-no-failed-tests-to-run-again"), cx),
         }
     }
 
@@ -216,9 +216,9 @@ impl Workspace {
             self.runs.update(cx, |r, cx| r.load_maven_goals(false, cx));
             return self.say(
                 if loading {
-                    "The Maven goals are being read; try again in a moment"
+                    ts!("debug-the-maven-goals-are-being-read-try-again")
                 } else {
-                    "No Maven goals: the project has no Maven build, or it is being read"
+                    ts!("debug-no-maven-goals-the-project-has-no-maven")
                 },
                 cx,
             );
@@ -228,9 +228,9 @@ impl Workspace {
             self.runs.update(cx, |r, cx| r.load_gradle_tasks(false, cx));
             return self.say(
                 if loading {
-                    "The Gradle tasks are being read; try again in a moment"
+                    ts!("debug-the-gradle-tasks-are-being-read-try-again")
                 } else {
-                    "No Gradle tasks yet: the project's build is being read"
+                    ts!("debug-no-gradle-tasks-yet-the-projects-build-is")
                 },
                 cx,
             );
@@ -265,18 +265,18 @@ impl Workspace {
             ProfileMode::Config => info.active().unwrap_or_default().iter().any(|x| x == name),
             ProfileMode::Any => false,
         };
-        let mark = |b: bool| b.then(|| "On".to_owned());
+        let mark = |b: bool| b.then(|| ts!("debug-on").to_owned());
         let files = info.config_active();
         let mut commands = vec![
             crate::search::Command {
-                name: "Any profile: every bean may be there".into(),
+                name: ts!("debug-any-profile-every-bean-may-be-there").into(),
                 action: Box::new(SetSpringProfiles(ProfileMode::Any)),
                 keys: mark(mode == ProfileMode::Any),
             },
             crate::search::Command {
-                name: format!(
-                    "As the application files say ({})",
-                    if files.is_empty() { "default".to_owned() } else { files.join(", ") }
+                name: t!(
+                    "debug-as-the-application-files-say",
+                    join = (if files.is_empty() { "default".to_owned() } else { files.join(", ") }).to_string()
                 )
                 .into(),
                 action: Box::new(SetSpringProfiles(ProfileMode::Config)),
@@ -322,7 +322,7 @@ impl Workspace {
             });
             let Some((build, project, module)) = root else {
                 self.runs.update(cx, |r, cx| r.load_maven_goals(false, cx));
-                return self.say("The Maven build is being read; try again in a moment", cx);
+                return self.say(ts!("debug-the-maven-build-is-being-read-try-again"), cx);
             };
             let goals = if rebuild { "clean test-compile" } else { "test-compile" }.to_owned();
             Launch::Maven { build, project, module, goals }

@@ -15,7 +15,9 @@ pub fn reveal() -> String {
 }
 
 /// The machine the app runs on, as messages name it.
-pub const THIS_MACHINE: &str = "this PC";
+pub fn this_machine() -> &'static str {
+    ts!("machine-windows")
+}
 
 /// The app draws the title bar and its buttons; Windows draws the frame and its shadow.
 pub fn window_decorations() -> Option<gpui::WindowDecorations> {

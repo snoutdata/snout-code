@@ -735,7 +735,7 @@ impl Workspace {
                     ws.model.update(cx, |m, cx| m.refresh(cx));
                 }
                 Err(e) => ws.model.update(cx, |m, cx| {
-                    m.message = format!("Could not make {}: {e}", path.display());
+                    m.message = t!("workspace-could-not-make", path = (path.display()).to_string(), e = e.to_string());
                     cx.notify();
                 }),
             });
@@ -758,14 +758,14 @@ impl Workspace {
             return true;
         }
         let message = match dirty.as_slice() {
-            [one] => format!("Do you want to save the changes you made to {}?", one.read(cx).name()),
-            many => format!("Do you want to save the changes you made to {} files?", many.len()),
+            [one] => t!("workspace-do-you-want-to-save-the-changes-you", one = (one.read(cx).name()).to_string()),
+            many => t!("workspace-do-you-want-to-save-the-changes-you-2", count = (many.len()).to_string()),
         };
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
             &message,
-            Some("Your changes are lost if you don't save them."),
-            &["Save", "Don't Save", "Cancel"],
+            Some(ts!("workspace-your-changes-are-lost-if-you-dont-save")),
+            &[ts!("cmd-save"), ts!("workspace-dont-save"), ts!("settings-cancel")],
             cx,
         );
         let this = cx.weak_entity();
@@ -1525,7 +1525,7 @@ impl Workspace {
         }
         if self.model.read(cx).project_root().is_none() {
             self.model.update(cx, |m, cx| {
-                m.message = "Open a project to see its structure".into();
+                m.message = ts!("workspace-open-a-project-to-see-its-structure").into();
                 cx.notify();
             });
             return;
@@ -1716,28 +1716,21 @@ impl Workspace {
         match which {
             Which::User => {
                 if crate::remote::is_remote(cx) {
-                    say(
-                        self,
-                        &format!(
-                            "Your settings.json is on {0}: open it from a window on {0}",
-                            crate::platform::THIS_MACHINE
-                        ),
-                        cx,
-                    );
+                    say(self, &t!("workspace-settings-on-machine", machine = crate::platform::this_machine()), cx);
                     return;
                 }
                 let Some(file) = self.model.update(cx, |m, _| {
                     m.ensure_store_file();
                     m.store_file()
                 }) else {
-                    say(self, "These settings are not kept in a file", cx);
+                    say(self, ts!("workspace-these-settings-are-not-kept-in-a-file"), cx);
                     return;
                 };
                 self.open_file(file, None, false, window, cx);
             }
             Which::Project => {
                 let Some(root) = self.model.read(cx).project_root() else {
-                    say(self, "Open a project to edit its settings", cx);
+                    say(self, ts!("workspace-open-a-project-to-edit-its-settings"), cx);
                     return;
                 };
                 let host = self.model.read(cx).host.clone();
@@ -1758,7 +1751,15 @@ impl Workspace {
                     let made: std::io::Result<()> = make.await;
                     let _ = this.update_in(cx, |this, window, cx| match made {
                         Ok(()) => this.open_file(file, Some((1, 0)), false, window, cx),
-                        Err(e) => say(this, &format!("Could not make {}: {e}", crate::project_settings::FILE), cx),
+                        Err(e) => say(
+                            this,
+                            &t!(
+                                "workspace-could-not-make",
+                                path = (crate::project_settings::FILE).to_string(),
+                                e = e.to_string()
+                            ),
+                            cx,
+                        ),
                     });
                 })
                 .detach();
@@ -1842,7 +1843,7 @@ impl Workspace {
             match parsed {
                 Ok(values) => {
                     if m.project_settings_error.take().is_some() {
-                        m.message = "The project's settings are read again".into();
+                        m.message = ts!("workspace-the-projects-settings-are-read-again").into();
                     }
                     if values != m.project_settings {
                         m.set_project_settings(values);
@@ -1852,7 +1853,11 @@ impl Workspace {
                     if moved {
                         m.set_project_settings(Default::default());
                     }
-                    m.message = format!("{} has an error, so its last good values stay: {e}", ps::FILE);
+                    m.message = t!(
+                        "workspace-has-an-error-so-its-last-good-values",
+                        file = (ps::FILE).to_string(),
+                        e = e.to_string()
+                    );
                     m.project_settings_error = Some(e);
                 }
             }
@@ -1905,9 +1910,13 @@ impl Workspace {
             editors.iter().filter_map(|e| e.update(cx, |e, cx| e.reload_from_disk(window, cx))).collect();
         let total = editors.len();
         let stage = move |n: usize| match total {
-            0 => "Reading the project's folders".to_owned(),
-            1 => "Reading the open file and the project's folders".to_owned(),
-            _ => format!("Reading {n} of {total} open files and the project's folders"),
+            0 => ts!("workspace-reading-the-projects-folders").to_owned(),
+            1 => ts!("workspace-reading-the-open-file-and-the-projects-folders").to_owned(),
+            _ => t!(
+                "workspace-reading-of-open-files-and-the-projects-folders",
+                n = n.to_string(),
+                total = total.to_string()
+            ),
         };
         let model = self.model.clone();
         model.update(cx, |m, cx| {
@@ -1932,9 +1941,9 @@ impl Workspace {
             let elapsed = cx.background_executor().now().saturating_duration_since(started);
             cx.background_executor().timer(SHOWN.saturating_sub(elapsed)).await;
             let outcome = match changed {
-                0 => "Nothing changed on disk".to_owned(),
-                1 => "1 file changed on disk".to_owned(),
-                n => format!("{n} files changed on disk"),
+                0 => ts!("workspace-nothing-changed-on-disk").to_owned(),
+                1 => ts!("workspace-1-file-changed-on-disk").to_owned(),
+                n => t!("workspace-files-changed-on-disk", n = n.to_string()),
             };
             model.update(cx, |m, cx| {
                 m.reload = Some((outcome, Some(100)));
@@ -2438,7 +2447,7 @@ impl Render for Workspace {
             .text_size(px(24.))
             .text_color(gpui::transparent_black())
             .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(veil).text_color(on_veil))
-            .child("Drop a folder to open it");
+            .child(ts!("workspace-drop-a-folder-to-open-it"));
 
         let git = self.side.read(cx).activity == Activity::Git;
         if self.status.read(cx).git != git {

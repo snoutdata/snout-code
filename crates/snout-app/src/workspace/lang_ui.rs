@@ -281,7 +281,7 @@ impl Workspace {
         });
         let Some(root) = root else {
             self.model.update(cx, |m, cx| {
-                m.message = "Symbols come from the Java server, which starts with a Java file".into();
+                m.message = ts!("lang-symbols-come-from-the-java-server-which-starts").into();
                 cx.notify();
             });
             return;
@@ -329,7 +329,7 @@ impl Workspace {
         let Some(editor) = self.active_editor(window, cx) else { return };
         let Some(link) = editor.read(cx).lang.clone().filter(|l| !l.config) else {
             self.model.update(cx, |m, cx| {
-                m.message = "File Structure shows the symbols of a Java file".into();
+                m.message = ts!("lang-file-structure-shows-the-symbols-of-a-java").into();
                 cx.notify();
             });
             return;
@@ -391,7 +391,7 @@ impl Workspace {
         });
         let Some(root) = root else {
             self.model.update(cx, |m, cx| {
-                m.message = "Classes come from the Java engine, which starts with a Gradle project".into();
+                m.message = ts!("lang-classes-come-from-the-java-engine-which-starts").into();
                 cx.notify();
             });
             return;
@@ -423,7 +423,7 @@ impl Workspace {
         let Some(editor) = self.active_editor(window, cx) else { return };
         let Some(link) = editor.read(cx).lang.clone().filter(|l| !l.config) else {
             self.model.update(cx, |m, cx| {
-                m.message = "Hierarchies come from the Java engine, in a Java file".into();
+                m.message = ts!("lang-hierarchies-come-from-the-java-engine-in-a").into();
                 cx.notify();
             });
             return;
@@ -449,11 +449,13 @@ impl Workspace {
         let p = palette(cx);
         let text = match (&prompt.progress, &prompt.error) {
             (Some(progress), _) => match progress.percent() {
-                Some(pct) => format!("Downloading JDK {}… {pct}%", prompt.major),
-                None => format!("Downloading JDK {}…", prompt.major),
+                Some(pct) => t!("lang-downloading-jdk", major = (prompt.major).to_string(), pct = pct.to_string()),
+                None => t!("lang-downloading-jdk-2", major = (prompt.major).to_string()),
             },
-            (None, Some(error)) => format!("JDK {} could not be downloaded: {error}", prompt.major),
-            (None, None) => format!("This project needs JDK {}. Download it?", prompt.major),
+            (None, Some(error)) => {
+                t!("lang-jdk-could-not-be-downloaded", major = (prompt.major).to_string(), error = error.to_string())
+            }
+            (None, None) => t!("lang-this-project-needs-jdk-download-it", major = (prompt.major).to_string()),
         };
         let busy = prompt.progress.is_some();
         let hub = self.hub.clone();
@@ -496,14 +498,14 @@ impl Workspace {
                     )
                 })
                 .when(!busy, |d| {
-                    let label = if prompt.error.is_some() { "Try again" } else { "Download" };
+                    let label = if prompt.error.is_some() { ts!("console-try-again") } else { ts!("updates-download") };
                     d.child(
                         look::small_button("jdk-download", crate::components::IconName::Download, label, &p)
                             .debug_selector(|| "jdk-download".into())
                             .on_click(move |_, _, cx| hub.update(cx, |h, cx| h.download_jdk(cx))),
                     )
                     .child(
-                        look::small_button("jdk-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
+                        look::small_button("jdk-dismiss", crate::components::CLOSE_ICON, ts!("lang-not-now"), &p)
                             .debug_selector(|| "jdk-dismiss".into())
                             .on_click(move |_, _, cx| hub2.update(cx, |h, cx| h.dismiss_jdk(cx))),
                     )
@@ -519,14 +521,13 @@ impl Workspace {
         let p = palette(cx);
         let text = match (&prompt.progress, &prompt.error) {
             (Some(progress), _) => match progress.percent() {
-                Some(pct) => format!("Downloading Node {}… {pct}%", prompt.label),
-                None => format!("Downloading Node {}…", prompt.label),
+                Some(pct) => t!("lang-downloading-node", prompt = (prompt.label).to_string(), pct = pct.to_string()),
+                None => t!("lang-downloading-node-2", prompt = (prompt.label).to_string()),
             },
-            (None, Some(error)) => format!("Node {} could not be downloaded: {error}", prompt.label),
-            (None, None) => format!(
-                "This project needs Node {}, which is not on this machine. Download it for SnoutCode?",
-                prompt.label
-            ),
+            (None, Some(error)) => {
+                t!("lang-node-could-not-be-downloaded", prompt = (prompt.label).to_string(), error = error.to_string())
+            }
+            (None, None) => t!("lang-this-project-needs-node-which-is-not-on", prompt = (prompt.label).to_string()),
         };
         let busy = prompt.progress.is_some();
         let hub = self.hub.clone();
@@ -561,14 +562,14 @@ impl Workspace {
                     d.child(gpui_component::spinner::Spinner::new().xsmall())
                 })
                 .when(!busy, |d| {
-                    let label = if prompt.error.is_some() { "Try again" } else { "Download" };
+                    let label = if prompt.error.is_some() { ts!("console-try-again") } else { ts!("updates-download") };
                     d.child(
                         look::small_button("node-download", crate::components::IconName::Download, label, &p)
                             .debug_selector(|| "node-download".into())
                             .on_click(move |_, _, cx| hub.update(cx, |h, cx| h.download_node(cx))),
                     )
                     .child(
-                        look::small_button("node-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
+                        look::small_button("node-dismiss", crate::components::CLOSE_ICON, ts!("lang-not-now"), &p)
                             .debug_selector(|| "node-dismiss".into())
                             .on_click(move |_, _, cx| hub2.update(cx, |h, cx| h.dismiss_node(cx))),
                     )
@@ -601,27 +602,34 @@ impl Workspace {
         let p = palette(cx);
         let (text, button) = match (&need, installing) {
             (Need::Packages { dir: Some(dir), .. }, true) => {
-                (format!("Installing the packages of {}… The Build window shows how it goes.", folder(dir)), None)
+                (t!("lang-installing-the-packages-of-the-build-window-shows", dir = (folder(dir)).to_string()), None)
             }
             (Need::Packages { .. }, true) => {
-                ("Installing the project's packages… The Build window shows how it goes.".to_owned(), None)
+                (ts!("lang-installing-the-projects-packages-the-build-window-shows").to_owned(), None)
             }
             (Need::Browsers { .. }, true) => {
-                ("Installing Playwright's browsers… The Build window shows how it goes.".to_owned(), None)
+                (ts!("lang-installing-playwrights-browsers-the-build-window-shows-h").to_owned(), None)
             }
             (Need::Packages { manager, dir }, false) => (
                 match dir {
-                    Some(dir) => format!("The packages of {} are not installed, so it cannot run yet.", folder(dir)),
+                    Some(dir) => t!("lang-the-packages-of-are-not-installed-so-it", dir = (folder(dir)).to_string()),
                     None if setup.playwright => {
-                        "This Playwright project's packages are not installed, so its tests cannot run yet.".to_owned()
+                        ts!("lang-this-playwright-projects-packages-are-not-installed-so").to_owned()
                     }
-                    None => "This project's packages are not installed, so it cannot run yet.".to_owned(),
+                    None => ts!("lang-this-projects-packages-are-not-installed-so-it").to_owned(),
                 },
-                Some(format!("Install packages ({} {})", manager.name(), if setup.ci { "ci" } else { "install" })),
+                Some(t!(
+                    "lang-install-packages",
+                    command = format!("{} {}", manager.name(), if setup.ci { "ci" } else { "install" })
+                )),
             ),
             (Need::Browsers { version, missing }, false) => (
-                format!("Playwright {version} needs browsers that are not downloaded: {}.", missing.join(", ")),
-                Some("Install browsers".to_owned()),
+                t!(
+                    "lang-playwright-needs-browsers-that-are-not-downloaded",
+                    version = version.to_string(),
+                    join = (missing.join(", ")).to_string()
+                ),
+                Some(ts!("lang-install-browsers").to_owned()),
             ),
         };
         let text = match error {
@@ -659,9 +667,14 @@ impl Workspace {
                             .on_click(move |_, _, cx| install.update(cx, |s, cx| s.install(cx))),
                     )
                     .child(
-                        look::small_button("playwright-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
-                            .debug_selector(|| "playwright-dismiss".into())
-                            .on_click(move |_, _, cx| dismiss.update(cx, |s, cx| s.dismiss(cx))),
+                        look::small_button(
+                            "playwright-dismiss",
+                            crate::components::CLOSE_ICON,
+                            ts!("lang-not-now"),
+                            &p,
+                        )
+                        .debug_selector(|| "playwright-dismiss".into())
+                        .on_click(move |_, _, cx| dismiss.update(cx, |s, cx| s.dismiss(cx))),
                     )
                 })
                 .into_any_element(),
@@ -673,17 +686,15 @@ impl Workspace {
     pub(super) fn gradle_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let store = crate::project_model::store(cx)?;
         let s = store.read(cx);
-        let label = s.current.as_ref().map(|m| m.scripts_label()).unwrap_or("Gradle Scripts");
+        let label = s.current.as_ref().map(|m| m.scripts_label()).unwrap_or(ts!("model-gradle-scripts"));
         let text = match (&s.sync_error, s.scripts_changed) {
-            (_, true) => match label {
-                "Maven Files" => "A pom.xml changed. Reload the Maven project?".to_owned(),
-                "Build Files" => "Build files changed. Sync?".to_owned(),
-                _ => "Gradle files changed. Sync?".to_owned(),
-            },
-            (Some(e), false) if s.current.is_some() => format!("The sync failed: {e}"),
+            (_, true) if label == ts!("model-maven-files") => ts!("lang-pom-changed").to_owned(),
+            (_, true) if label == ts!("model-build-files") => ts!("lang-build-files-changed").to_owned(),
+            (_, true) => ts!("lang-gradle-files-changed").to_owned(),
+            (Some(e), false) if s.current.is_some() => t!("lang-the-sync-failed", e = e.to_string()),
             _ => return None,
         };
-        let maven = label == "Maven Files";
+        let maven = label == ts!("model-maven-files");
         let changed = s.scripts_changed;
         let p = palette(cx);
         let (sync, dismiss) = (store.clone(), store.clone());
@@ -720,9 +731,9 @@ impl Workspace {
                         "gradle-sync",
                         crate::components::IconName::RefreshCw,
                         match (changed, maven) {
-                            (true, true) => "Reload",
-                            (true, false) => "Sync",
-                            _ => "Try again",
+                            (true, true) => ts!("lang-reload"),
+                            (true, false) => ts!("lang-sync"),
+                            _ => ts!("console-try-again"),
                         },
                         &p,
                     )
@@ -730,7 +741,7 @@ impl Workspace {
                     .on_click(move |_, _, cx| sync.update(cx, |s, cx| s.sync(cx))),
                 )
                 .child(
-                    look::small_button("gradle-dismiss", crate::components::CLOSE_ICON, "Not now", &p)
+                    look::small_button("gradle-dismiss", crate::components::CLOSE_ICON, ts!("lang-not-now"), &p)
                         .debug_selector(|| "gradle-dismiss".into())
                         .on_click(move |_, _, cx| {
                             dismiss.update(cx, |s, cx| {
@@ -751,7 +762,7 @@ impl Workspace {
         let root = project.as_ref().and_then(|project| hub.engine_root(project));
         let Some(root) = root.filter(|r| hub.client(r).is_some()) else {
             self.model.update(cx, |m, cx| {
-                m.message = "Library classes open once the Java engine is ready".into();
+                m.message = ts!("lang-library-classes-open-once-the-java-engine-is").into();
                 cx.notify();
             });
             return;
@@ -767,7 +778,7 @@ impl Workspace {
             let _ = this.update_in(cx, |this, window, cx| match hit {
                 Some(s) => this.open_location(root, s.location.uri, s.location.range.start, window, cx),
                 None => this.model.update(cx, |m, cx| {
-                    m.message = format!("The Java engine does not know {qualified}");
+                    m.message = t!("lang-the-java-engine-does-not-know", qualified = qualified.to_string());
                     cx.notify();
                 }),
             });

@@ -243,30 +243,32 @@ fn tab_menu(
     let mut menu = crate::components::styled(menu);
     if editor_of(panel).is_some() {
         let pinned = is_pinned(panel, cx);
-        let (label, icon) = if pinned { ("Unpin Tab", I::PinOff) } else { ("Pin Tab", I::Pin) };
+        let (label, icon) = if pinned { (ts!("tabs-unpin-tab"), I::PinOff) } else { (ts!("tabs-pin-tab"), I::Pin) };
         let group = group.clone();
         menu = menu
             .item(menu_item(label, icon, move |_, window, cx| set_pinned(&group, ix, !pinned, window, cx)))
             .separator();
     }
     menu = menu
-        .item(menu_item("Close", I::X, close_all(vec![panel.clone()])))
-        .item(menu_item("Close Others", I::ListX, close_all(others.clone())).disabled(others.is_empty()))
+        .item(menu_item(ts!("dialogs-close"), I::X, close_all(vec![panel.clone()])))
+        .item(menu_item(ts!("tabs-close-others"), I::ListX, close_all(others.clone())).disabled(others.is_empty()))
         .item(
-            menu_item("Close Tabs to the Left", I::ArrowLeftToLine, close_all(left.clone())).disabled(left.is_empty()),
+            menu_item(ts!("tabs-close-tabs-to-the-left"), I::ArrowLeftToLine, close_all(left.clone()))
+                .disabled(left.is_empty()),
         )
         .item(
-            menu_item("Close Tabs to the Right", I::ArrowRightToLine, close_all(right.clone()))
+            menu_item(ts!("tabs-close-tabs-to-the-right"), I::ArrowRightToLine, close_all(right.clone()))
                 .disabled(right.is_empty()),
         )
-        .item(menu_item("Close All", I::CircleX, close_all(panels)));
+        .item(menu_item(ts!("tabs-close-all"), I::CircleX, close_all(panels)));
     if any_pinned {
         menu = menu.item(
-            menu_item("Close All but Pinned", I::CircleX, close_all(unpinned.clone())).disabled(unpinned.is_empty()),
+            menu_item(ts!("tabs-close-all-but-pinned"), I::CircleX, close_all(unpinned.clone()))
+                .disabled(unpinned.is_empty()),
         );
     }
     if let Some(editor) = editor_of(panel).filter(|_| preview) {
-        menu = menu.separator().item(menu_item("Keep Open", I::Pin, move |_, _, cx| {
+        menu = menu.separator().item(menu_item(ts!("tabs-keep-open"), I::Pin, move |_, _, cx| {
             editor.update(cx, |e, cx| e.pin(cx));
         }));
     }
@@ -274,14 +276,14 @@ fn tab_menu(
         let (copy, reveal, terminal) = (path.to_owned(), path.to_owned(), path.to_owned());
         menu = menu
             .separator()
-            .item(menu_item("Reload from Disk", I::RefreshCw, |_, window, cx| {
+            .item(menu_item(ts!("tabs-reload-from-disk"), I::RefreshCw, |_, window, cx| {
                 window.dispatch_action(Box::new(crate::menus::ReloadFromDisk), cx)
             }))
-            .item(menu_item("Copy Path", I::Copy, move |_, _, cx| {
+            .item(menu_item(ts!("tabs-copy-path"), I::Copy, move |_, _, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.display().to_string()));
             }))
             .item(menu_item(crate::platform::reveal(), I::FolderOpen, move |_, _, cx| cx.reveal_path(&reveal)))
-            .item(menu_item("Open in External Terminal", I::SquareTerminal, move |_, window, cx| {
+            .item(menu_item(ts!("cmd-open-in-external-terminal"), I::SquareTerminal, move |_, window, cx| {
                 window.dispatch_action(Box::new(crate::menus::OpenInTerminalAt(terminal.clone())), cx)
             }));
     }
@@ -401,7 +403,7 @@ fn tab(
         .rounded(px(4.))
         .cursor_pointer()
         .hover(move |s| s.bg(hover_bg))
-        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Unpin Tab").build(w, cx))
+        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(ts!("tabs-unpin-tab")).build(w, cx))
         .child(crate::components::icon(crate::components::IconName::Pin, 12., p.fg_dim))
         .on_click({
             let group = group.clone();
@@ -656,37 +658,37 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
     match active {
         "Output" => {
             row = row.child(
-                tool_button("tool-clear-output", Icon::Close, "Clear", &p)
+                tool_button("tool-clear-output", Icon::Close, ts!("tabs-clear"), &p)
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::ClearOutput), cx)),
             )
         }
         "Gradle" => {
             row = row
                 .child(
-                    tool_button("tool-sync-gradle", Icon::Refresh, "Sync the Gradle Project", &p)
+                    tool_button("tool-sync-gradle", Icon::Refresh, ts!("tabs-sync-the-gradle-project"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
                 )
                 .child(
-                    tool_button("tool-refresh-gradle", Icon::Fetch, "Read the Tasks Again", &p)
+                    tool_button("tool-refresh-gradle", Icon::Fetch, ts!("tabs-read-the-tasks-again"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RefreshGradle), cx)),
                 )
                 .child(
-                    tool_button("tool-collapse-gradle", Icon::CollapseAll, "Collapse All", &p)
+                    tool_button("tool-collapse-gradle", Icon::CollapseAll, ts!("tabs-collapse-all"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseGradle), cx)),
                 )
         }
         "Maven" => {
             row = row
                 .child(
-                    tool_button("tool-sync-maven", Icon::Refresh, "Reload the Maven Project", &p)
+                    tool_button("tool-sync-maven", Icon::Refresh, ts!("tabs-reload-the-maven-project"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::SyncGradle), cx)),
                 )
                 .child(
-                    tool_button("tool-refresh-maven", Icon::Fetch, "Read the Goals Again", &p)
+                    tool_button("tool-refresh-maven", Icon::Fetch, ts!("tabs-read-the-goals-again"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RefreshMaven), cx)),
                 )
                 .child(
-                    tool_button("tool-collapse-maven", Icon::CollapseAll, "Collapse All", &p)
+                    tool_button("tool-collapse-maven", Icon::CollapseAll, ts!("tabs-collapse-all"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseMaven), cx)),
                 )
         }
@@ -695,7 +697,7 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
                 tool_button(
                     "tool-stop-idle",
                     Icon::Stop,
-                    "Stop Idle Processes: idle Gradle daemons, leftovers, and the engines of projects not open",
+                    ts!("tabs-stop-idle-processes-idle-gradle-daemons-leftovers-and"),
                     &p,
                 )
                 .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::StopIdleProcesses), cx)),
@@ -704,11 +706,11 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
         "Spring" => {
             row = row
                 .child(
-                    tool_button("tool-refresh-spring", Icon::Refresh, "Read the Spring Model Again", &p)
+                    tool_button("tool-refresh-spring", Icon::Refresh, ts!("cmd-read-the-spring-model-again"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RefreshSpring), cx)),
                 )
                 .child(
-                    tool_button("tool-collapse-spring", Icon::CollapseAll, "Collapse All", &p)
+                    tool_button("tool-collapse-spring", Icon::CollapseAll, ts!("tabs-collapse-all"), &p)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseSpring), cx)),
                 )
         }
@@ -726,12 +728,12 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
                     .ghost()
                     .xsmall()
                     .icon(crate::components::menu_icon(crate::components::IconName::Ellipsis))
-                    .tooltip("Options")
+                    .tooltip(ts!("tabs-options"))
                     .dropdown_menu(move |menu, _, cx| crate::workspace::move_menu(menu, tool, cx)),
             )
         })
         .child(
-            tool_button("tool-hide", Icon::Minus, "Hide", &p)
+            tool_button("tool-hide", Icon::Minus, ts!("tabs-hide"), &p)
                 .on_click(move |_, w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow(active)), cx)),
         )
         .into_any_element()

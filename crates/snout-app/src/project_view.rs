@@ -199,7 +199,7 @@ impl Walk<'_> {
                 continue;
             }
             let Some(index) = lib.file.as_deref().and_then(|f| self.source.jar(f)) else {
-                self.push(RowKind::Note("No classes to show".into()), depth + 2, None);
+                self.push(RowKind::Note(ts!("project-no-classes-to-show").into()), depth + 2, None);
                 continue;
             };
             for (package, classes) in index.iter() {
@@ -476,9 +476,9 @@ impl Render for ProjectView {
             let tests_icon = setup.is_some_and(|s| s.playwright);
             let playwright = setup.and_then(|s| s.summary.clone()).filter(|_| !failed);
             let note = match (&store.sync_error, root.is_some()) {
-                (Some(e), true) => Some(format!("The build model could not be read: {e}")),
+                (Some(e), true) => Some(t!("project-the-build-model-could-not-be-read", e = e.to_string())),
                 (None, true) if root.as_deref().is_some_and(|r| crate::project_model::project_has_gradle(r, cx)) => {
-                    Some("Reading the build model".to_owned())
+                    Some(ts!("project-reading-the-build-model").to_owned())
                 }
                 (None, true) if playwright.is_some() => playwright.clone(),
                 _ => None,
@@ -579,7 +579,7 @@ fn row_look(
             look.path = Some(model.root.clone());
             if let Some(m) = module.map(|i| &model.modules[i]) {
                 if !m.uses.is_empty() {
-                    look.note = Some(format!("uses {}", m.uses.join(", ")));
+                    look.note = Some(t!("project-uses", join = (m.uses.join(", ")).to_string()));
                 }
                 look.tip = Some(format!("{}  {}", m.gradle_path, model.root.display()));
             }
@@ -591,11 +591,11 @@ fn row_look(
             look.glyph = folder(Icon::Module, blue);
             let mut notes: Vec<String> = m.build_note().map(str::to_owned).into_iter().collect();
             if !m.uses.is_empty() {
-                notes.push(format!("uses {}", m.uses.join(", ")));
+                notes.push(t!("project-uses", join = (m.uses.join(", ")).to_string()));
             }
             look.note = (!notes.is_empty()).then(|| notes.join("  ·  "));
             look.tip = Some(match &m.stale {
-                Some(reason) => format!("{reason}\nShowing the last model that synced."),
+                Some(reason) => t!("project-showing-the-last-model-that-synced", reason = reason.to_string()),
                 None => format!("{} {}\n{}", m.build, m.gradle_path, m.content_root.display()),
             });
             if m.stale.is_some() {
@@ -615,7 +615,7 @@ fn row_look(
             look.bold = true;
             look.glyph = folder(Icon::Module, violet);
             look.chip = Some(("shared".into(), violet));
-            look.tip = Some(format!("Compiled by {}", s.modules.join(", ")));
+            look.tip = Some(t!("project-compiled-by", join = (s.modules.join(", ")).to_string()));
             look.path = Some(s.content_root.clone());
             look.mark = marks.get(&s.content_root).copied();
         }
@@ -631,8 +631,8 @@ fn row_look(
             });
             look.badge = Some((Icon::Problems, p.error));
             look.tip = Some(match model.unsupported_at(&f.root_dir) {
-                Some(u) => format!("Did not sync: {}\n\n{}", f.reason, u.note),
-                None => format!("Did not sync: {}", f.reason),
+                Some(u) => t!("project-did-not-sync", reason = (f.reason).to_string(), note = (u.note).to_string()),
+                None => t!("project-did-not-sync-2", reason = (f.reason).to_string()),
             });
             look.path = Some(f.root_dir.clone());
         }
@@ -656,7 +656,7 @@ fn row_look(
                 None => p.fg,
             };
             look.tip = Some(match (root, excluded) {
-                (_, true) => format!("Excluded: {}", path.display()),
+                (_, true) => t!("project-excluded", path = (path.display()).to_string()),
                 (Some(k), _) => format!("{}: {}", k.label(), path.display()),
                 _ => path.display().to_string(),
             });
@@ -681,9 +681,12 @@ fn row_look(
         }
         RowKind::Scripts => {
             look.label = model.scripts_label().into();
-            look.glyph =
-                icon(if model.scripts_label() == "Maven Files" { Icon::Feather } else { Icon::Build }, 14., green)
-                    .into_any_element();
+            look.glyph = icon(
+                if model.scripts_label() == ts!("model-maven-files") { Icon::Feather } else { Icon::Build },
+                14.,
+                green,
+            )
+            .into_any_element();
         }
         RowKind::Script(i) => {
             let s = &model.scripts[*i];
@@ -700,7 +703,7 @@ fn row_look(
                 (_, 0, _) => String::new(),
                 (_, 1, _) => s.builds[0].clone(),
                 (ScriptKind::Applied, n, _) => format!("{n} builds"),
-                (_, n, _) => format!("{} and {} more", s.builds[0], n - 1),
+                (_, n, _) => t!("project-and-more", builds = (s.builds[0]).to_string(), n = (n - 1).to_string()),
             });
             look.glyph = crate::icons::file_icon(&s.path, 14., p);
             look.tip = Some(s.path.display().to_string());
@@ -712,7 +715,7 @@ fn row_look(
             }
         }
         RowKind::Libraries => {
-            look.label = "External Libraries".into();
+            look.label = ts!("project-external-libraries").into();
             look.glyph = icon(Icon::Library, 14., warm).into_any_element();
         }
         RowKind::Jdk(i) => {
@@ -913,7 +916,7 @@ impl ProjectView {
                 };
                 let menu = if menu_file {
                     menu.item(
-                        PopupMenuItem::new("Open")
+                        PopupMenuItem::new(ts!("find-open"))
                             .icon(crate::components::menu_icon(crate::components::IconName::File))
                             .on_click(send(Action::OpenFile(path.clone(), None))),
                     )
@@ -927,18 +930,18 @@ impl ProjectView {
                         .on_click(send(Action::Reveal(path.clone()))),
                 )
                 .item(
-                    PopupMenuItem::new("Open in External Terminal")
+                    PopupMenuItem::new(ts!("cmd-open-in-external-terminal"))
                         .icon(crate::components::menu_icon(crate::components::IconName::SquareTerminal))
                         .on_click(send(Action::OpenInTerminal(path.clone()))),
                 )
                 .item(
-                    PopupMenuItem::new("Copy path")
+                    PopupMenuItem::new(ts!("projects-copy-path"))
                         .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                         .on_click(send(Action::Copy(path.display().to_string()))),
                 )
                 .separator()
                 .item(
-                    PopupMenuItem::new("Reload from Disk")
+                    PopupMenuItem::new(ts!("tabs-reload-from-disk"))
                         .icon(crate::components::menu_icon(crate::components::IconName::RefreshCw))
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ReloadFromDisk), cx)),
                 )

@@ -37,8 +37,8 @@ pub fn split_line_suffix(arg: &str) -> Option<(PathBuf, (u32, u32))> {
 fn branch_label(b: &snout_core::BranchInfo) -> String {
     match (&b.head, &b.oid) {
         (Some(head), _) => head.clone(),
-        (None, Some(oid)) => format!("detached at {}", &oid[..oid.len().min(7)]),
-        (None, None) => "detached HEAD".into(),
+        (None, Some(oid)) => t!("model-detached-at", count = oid[..oid.len().min(7)].to_string()),
+        (None, None) => ts!("model-detached-head").into(),
     }
 }
 
@@ -388,7 +388,7 @@ impl Opened {
     /// there is one. A project is a folder: Git is only what it may also have.
     fn load(host: &snout_core::HostRef, path: &Path) -> snout_core::Result<Self> {
         if !host.is_dir(path) {
-            return Err(snout_core::Error::Invalid(format!("{} does not exist", path.display())));
+            return Err(snout_core::Error::Invalid(t!("model-does-not-exist", path = (path.display()).to_string())));
         }
         let project = host.canonicalize(path).unwrap_or_else(|_| path.to_owned());
         let git = Repo::find(host, path).map(|repo| {
@@ -647,7 +647,7 @@ impl Model {
             journal_filter: String::new(),
             commit_view: None,
             output: Vec::new(),
-            message: "Ready".into(),
+            message: ts!("model-ready").into(),
             job: None,
             reload: None,
             _job_task: None,
@@ -798,7 +798,7 @@ impl Model {
                 s += &format!("  ↓{}", b.behind);
             }
         } else if b.head.is_some() {
-            s += "  (no upstream)";
+            s += ts!("model-no-upstream");
         }
         Some(s)
     }
@@ -1031,7 +1031,7 @@ impl Model {
                 self.show_no_repo(cx);
             }
         }
-        self.message = format!("Opened {}", o.asked.display());
+        self.message = t!("model-opened", asked = (o.asked.display()).to_string());
         cx.emit(ModelEvent::Message);
         // Whatever follows the project (its engine, runs, models) sees the change now.
         cx.notify();
@@ -1055,7 +1055,8 @@ impl Model {
 
     /// The window could not go to a folder inside WSL.
     pub fn wsl_failed(&mut self, connection: &str, why: String, cx: &mut Context<Self>) {
-        let text = format!("SnoutCode could not connect to {connection}. {why}");
+        let text =
+            t!("model-snoutcode-could-not-connect-to", connection = connection.to_string(), why = why.to_string());
         self.ask(
             Dialog::Info { title: format!("Could not open the project in {connection}"), text, mood: Mood::Warning },
             cx,
@@ -1106,7 +1107,7 @@ impl Model {
                             m.settings.repos.push(root.clone());
                         }
                         m.show_in_panel(repo, github_url, snapshot, cx);
-                        m.message = format!("Showing {} in Git", dir_name(&root));
+                        m.message = t!("model-showing-in-git", root = (dir_name(&root)).to_string());
                         cx.emit(ModelEvent::Message);
                     }
                     Err(e) => m.fail(e, cx),
@@ -1225,7 +1226,7 @@ impl Model {
                     }
                     m.open_repo(&project, cx);
                 } else {
-                    m.fail(format!("{} does not exist", dir.display()), cx);
+                    m.fail(t!("model-does-not-exist", path = (dir.display()).to_string()), cx);
                 }
                 cx.notify();
             });
@@ -1283,7 +1284,7 @@ impl Model {
         self.git_jobs.clear();
         self.refresh_queued = false;
         self.refresh(cx);
-        self.message = format!("Closed {}", closed.display());
+        self.message = t!("model-closed", closed = (closed.display()).to_string());
         cx.emit(ModelEvent::Closed);
         cx.notify();
     }
@@ -1554,7 +1555,7 @@ impl Model {
         if let Some(store) = &self.store {
             match store.save(&user) {
                 Ok(()) => self.user_file_stamp = store.stamp(),
-                Err(e) => self.log_output(format!("Could not save settings: {e}"), true),
+                Err(e) => self.log_output(t!("model-could-not-save-settings", e = e.to_string()), true),
             }
         }
         self.saved = user;
@@ -1601,13 +1602,13 @@ impl Model {
         match store.read_strict() {
             None => false,
             Some(Err(e)) => {
-                self.message = format!("Your settings.json has an error, so the settings in use stay: {e}");
+                self.message = t!("model-your-settings-json-has-an-error-so-the", e = e.to_string());
                 self.user_settings_error = Some(e);
                 false
             }
             Some(Ok(read)) => {
                 if self.user_settings_error.take().is_some() {
-                    self.message = "Your settings are read again".into();
+                    self.message = ts!("model-your-settings-are-read-again").into();
                 }
                 self.saved = read.clone();
                 if read == self.user_settings() {
@@ -1666,7 +1667,7 @@ impl Model {
                 match done {
                     Ok(()) if m.project_settings_root.as_ref() == Some(&root) => m.project_settings_stamp = stamp,
                     Ok(()) => {}
-                    Err(e) => m.log_output(format!("Could not save the project's settings: {e}"), true),
+                    Err(e) => m.log_output(t!("model-could-not-save-the-projects-settings", e = e.to_string()), true),
                 }
                 cx.notify();
             });
@@ -1748,22 +1749,22 @@ impl Model {
         match result {
             Ok(Outcome::Done(text)) => {
                 self.log_output(text, false);
-                self.message = format!("{label} finished");
+                self.message = t!("model-finished", label = label.to_string());
             }
             Ok(Outcome::Cloned(repo, text)) => {
                 self.log_output(text, false);
                 let root = repo.root().to_owned();
                 self.open_repo(&root, cx);
-                self.message = format!("Cloned into {}", root.display());
+                self.message = t!("model-cloned-into", root = (root.display()).to_string());
             }
             Ok(Outcome::Found { root, repos }) => self.add_found(&root, repos, cx),
             Err(e) => match PullProblem::from_error(&e).filter(|_| label.starts_with("Pull")) {
                 Some(problem) => {
-                    self.message = format!("{label} failed");
+                    self.message = t!("model-failed", label = label.to_string());
                     self.log_output(e.clone(), true);
                     self.ask(Dialog::PullProblem { problem, details: e }, cx);
                 }
-                None => self.fail(format!("{label} failed:\n{e}"), cx),
+                None => self.fail(t!("model-failed-2", label = label.to_string(), e = e.to_string()), cx),
             },
         }
         self.refresh(cx);
@@ -1772,7 +1773,11 @@ impl Model {
 
     fn add_found(&mut self, root: &Path, repos: Vec<PathBuf>, cx: &mut Context<Self>) {
         if repos.is_empty() {
-            let text = format!("No Git repositories within {SCAN_DEPTH} levels of\n{}", root.display());
+            let text = t!(
+                "model-no-git-repositories-within-levels-of",
+                SCAN_DEPTH = (SCAN_DEPTH).to_string(),
+                root = (root.display()).to_string()
+            );
             self.ask(Dialog::Info { title: "No repositories found".into(), text, mood: Mood::Empty }, cx);
             return;
         }
@@ -1785,7 +1790,12 @@ impl Model {
         if self.repo.is_none() && !self.project_open() {
             self.open_repo(&repos[0], cx);
         }
-        self.done(format!("Found {} repositories in {} ({added} new)", repos.len(), root.display()));
+        self.done(t!(
+            "model-found-repositories-in-new",
+            count = (repos.len()).to_string(),
+            root = (root.display()).to_string(),
+            added = added.to_string()
+        ));
     }
 
     /// Ask the console's agent for the commit message: the change is read off the UI thread,
@@ -1815,7 +1825,7 @@ impl Model {
                 match brief {
                     Ok(brief) => {
                         m.draft = Some(DraftAsk { root, brief, sent: false, asking: false });
-                        m.message = "Asking the agent to draft the commit message\u{2026}".into();
+                        m.message = ts!("model-asking-the-agent-to-draft-the-commit-message").into();
                         m.watch_draft(cx);
                         cx.emit(ModelEvent::DraftAsked);
                     }
@@ -1831,9 +1841,8 @@ impl Model {
     fn watch_draft(&mut self, cx: &mut Context<Self>) {
         self._draft_watch = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(DRAFT_WAIT).await;
-            let _ = this.update(cx, |m, cx| {
-                m.draft_stuck("The agent has not sent a commit message yet. Its answer is in the console.".into(), cx)
-            });
+            let _ =
+                this.update(cx, |m, cx| m.draft_stuck(ts!("model-the-agent-has-not-sent-a-commit-message").into(), cx));
         }));
     }
 
@@ -1850,9 +1859,9 @@ impl Model {
         let Some(ask) = self.draft.as_mut().filter(|a| a.asking != asking) else { return };
         ask.asking = asking;
         self.message = if asking {
-            format!("{name} asks you something in the console. Answer it there, and the draft goes on.")
+            t!("model-asks-you-something-in-the-console-answer-it", name = name.to_string())
         } else {
-            format!("{name} is writing the commit message\u{2026}")
+            t!("model-is-writing-the-commit-message", name = name.to_string())
         };
         cx.notify();
     }
@@ -1865,10 +1874,7 @@ impl Model {
         self._draft_watch = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(grace).await;
             let _ = this.update(cx, |m, cx| {
-                m.draft_stuck(
-                    "The agent finished without writing a commit message. Its answer is in the console.".into(),
-                    cx,
-                )
+                m.draft_stuck(ts!("model-the-agent-finished-without-writing-a-commit-message").into(), cx)
             });
         }));
     }
@@ -1879,7 +1885,7 @@ impl Model {
             self._draft_watch = None;
             self.message = why.clone();
             // The agent's, not Git's: the error dialog would say Git stopped.
-            let title = "No commit message yet".to_owned();
+            let title = ts!("model-no-commit-message-yet").to_owned();
             self.ask(Dialog::Info { title, text: why, mood: Mood::Warning }, cx);
             cx.notify();
         }
@@ -1906,7 +1912,7 @@ impl Model {
         }
         self._draft_watch = None;
         self.commit_msg = message;
-        self.done(format!("{name} drafted the commit message"));
+        self.done(t!("model-drafted-the-commit-message", name = name.to_string()));
         cx.emit(ModelEvent::Message);
         cx.notify();
         Ok(())
@@ -1998,7 +2004,7 @@ impl Model {
         match action {
             Action::Refresh => {
                 self.refresh(cx);
-                self.message = "Refreshed".into();
+                self.message = ts!("model-refreshed").into();
                 self.survey(true, cx);
             }
             Action::OpenRepo(path) => {
@@ -2017,7 +2023,7 @@ impl Model {
             Action::ClearRecent => self.settings.recent = Some(Vec::new()),
             Action::ShowNewProject => cx.emit(ModelEvent::NewProject),
             Action::AgentAnswer(how) => cx.emit(ModelEvent::AgentAnswer(how)),
-            Action::PickFolder => self.pick_folder("Open project", Action::OpenPath, cx),
+            Action::PickFolder => self.pick_folder(ts!("model-open-project"), Action::OpenPath, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
             Action::InitRepo(path) => {
                 let init = cx.background_executor().spawn(async move {
@@ -2029,7 +2035,7 @@ impl Model {
                         match root {
                             Ok(root) => {
                                 m.open_repo(&root, cx);
-                                m.done(format!("Initialized repository in {}", root.display()));
+                                m.done(t!("model-initialized-repository-in", root = (root.display()).to_string()));
                             }
                             Err(e) => m.fail(e, cx),
                         }
@@ -2038,8 +2044,8 @@ impl Model {
                 })
                 .detach();
             }
-            Action::PickScanFolder => self.pick_folder("Find repositories in folder", Action::Scan, cx),
-            Action::Scan(root) => self.spawn("Searching for repositories", cx, move || {
+            Action::PickScanFolder => self.pick_folder(ts!("model-find-repositories-in-folder"), Action::Scan, cx),
+            Action::Scan(root) => self.spawn(ts!("model-searching-for-repositories"), cx, move || {
                 let repos = snout_core::find_repos(&*host, &root, SCAN_DEPTH);
                 Ok(Outcome::Found { root, repos })
             }),
@@ -2073,7 +2079,7 @@ impl Model {
                     .unwrap_or_default();
                 self.ask(Dialog::Clone { parent }, cx);
             }
-            Action::Clone { url, dest } => self.spawn("Clone", cx, move || {
+            Action::Clone { url, dest } => self.spawn(ts!("dialogs-clone"), cx, move || {
                 Repo::clone_from(&host, &url, &dest).map(|(repo, text)| Outcome::Cloned(repo, text))
             }),
             Action::SetTheme(choice) => {
@@ -2110,13 +2116,15 @@ impl Model {
             _ if repo.is_none() => {}
             Action::Stage(paths) => {
                 let n = paths.len();
-                local(self, format!("Staged {n} file(s)"), Box::new(move |r| r.stage(&paths)), cx);
+                local(self, t!("model-staged", count = n), Box::new(move |r| r.stage(&paths)), cx);
             }
-            Action::Unstage(paths) => local(self, "Unstaged".into(), Box::new(move |r| r.unstage(&paths)), cx),
+            Action::Unstage(paths) => {
+                local(self, ts!("model-unstaged").into(), Box::new(move |r| r.unstage(&paths)), cx)
+            }
             Action::AskDiscard(entries) => self.ask(Dialog::ConfirmDiscard(entries), cx),
             Action::Discard(entries) => {
                 let n = entries.len();
-                local(self, format!("Discarded {n} file(s)"), Box::new(move |r| r.discard(&entries)), cx);
+                local(self, t!("model-discarded", count = n), Box::new(move |r| r.discard(&entries)), cx);
             }
             Action::AskDeleteFiles(entries) => {
                 let entries: Vec<FileEntry> = entries.into_iter().filter(on_disk).collect();
@@ -2127,18 +2135,18 @@ impl Model {
             Action::DeleteFiles(entries) => {
                 let n = entries.len();
                 let label = if snout_core::can_trash(&*self.host) {
-                    format!("Moved {n} file(s) to the Trash")
+                    t!("model-trashed", count = n)
                 } else {
-                    format!("Deleted {n} file(s)")
+                    t!("model-deleted", count = n)
                 };
                 local(self, label, Box::new(move |r| r.delete_files(&entries, true)), cx);
             }
             Action::AddToGitignore(pattern) => {
                 let n = pattern.lines().count();
                 let label = if n == 1 {
-                    format!("Added {pattern} to .gitignore")
+                    t!("model-added-to-gitignore", pattern = pattern.to_string())
                 } else {
-                    format!("Added {n} rules to .gitignore")
+                    t!("model-added-rules-to-gitignore", n = n.to_string())
                 };
                 local(self, label, Box::new(move |r| r.add_to_gitignore(&pattern).map(|_| ())), cx);
             }
@@ -2151,7 +2159,7 @@ impl Model {
                     let r = repo.commit(&message, amend, &paths).map_err(|e| e.to_string());
                     Box::new(move |m, cx| match r {
                         Ok(summary) => {
-                            m.done(format!("Committed {summary}"));
+                            m.done(t!("model-committed", summary = summary.to_string()));
                             m.commit_msg.clear();
                             m.amend = false;
                             cx.emit(ModelEvent::Message);
@@ -2170,7 +2178,7 @@ impl Model {
                 self.starting_draft = false;
                 if let Some(ask) = self.draft.take() {
                     self._draft_watch = None;
-                    self.message = "Stopped drafting".into();
+                    self.message = ts!("model-stopped-drafting").into();
                     cx.emit(ModelEvent::DraftStopped(ask.root));
                 }
             }
@@ -2188,10 +2196,10 @@ impl Model {
                     Box::new(move |m, cx| match r {
                         Ok(outcome) => {
                             m.log_output(outcome.output, false);
-                            m.done(format!("Checked out {}", target.label()));
+                            m.done(t!("model-checked-out", target = (target.label()).to_string()));
                             if let Some(warning) = outcome.warning {
                                 m.log_output(warning.clone(), true);
-                                let title = "Local changes conflicted".into();
+                                let title = ts!("model-local-changes-conflicted").into();
                                 m.ask(Dialog::Info { title, text: warning, mood: Mood::Warning }, cx);
                             }
                         }
@@ -2202,7 +2210,7 @@ impl Model {
             }
             Action::ShowNewBranch(start) => self.ask(Dialog::NewBranch(start), cx),
             Action::CreateBranch { name, start, checkout } => {
-                let label = format!("Created branch {name}");
+                let label = t!("model-created-branch", name = name.to_string());
                 local(self, label, Box::new(move |r| r.create_branch(&name, start.as_deref(), checkout)), cx);
             }
             Action::AskDeleteBranch(b) => {
@@ -2229,7 +2237,7 @@ impl Model {
                     let r = repo.delete_branch(&name, force).map_err(|e| e.to_string());
                     Box::new(move |m, cx| match r {
                         Ok(()) => {
-                            m.done(format!("Deleted branch {name}"));
+                            m.done(t!("model-deleted-branch", name = name.to_string()));
                             if let Some(upstream) = upstream {
                                 m.run(Action::DeleteRemoteBranch(upstream), cx);
                             }
@@ -2241,20 +2249,20 @@ impl Model {
             }
             Action::DeleteRemoteBranch(r) => {
                 let repo = repo.unwrap();
-                self.spawn(&format!("Delete {}", r.label()), cx, move || {
+                self.spawn(&t!("model-delete", r = (r.label()).to_string()), cx, move || {
                     repo.delete_remote_branch(&r.remote, &r.branch).map(Outcome::Done)
                 });
             }
             Action::Fetch => {
                 let repo = repo.unwrap();
-                self.spawn("Fetch", cx, move || repo.fetch().map(Outcome::Done));
+                self.spawn(ts!("cmd-fetch"), cx, move || repo.fetch().map(Outcome::Done));
             }
             Action::Pull(mode) => {
                 let repo = repo.unwrap();
                 let label = match mode {
-                    PullMode::Default => "Pull",
-                    PullMode::Merge => "Pull (merge)",
-                    PullMode::Rebase => "Pull (rebase)",
+                    PullMode::Default => ts!("cmd-pull"),
+                    PullMode::Merge => ts!("model-pull-merge"),
+                    PullMode::Rebase => ts!("model-pull-rebase"),
                 };
                 self.spawn(label, cx, move || repo.pull_with(mode).map(Outcome::Done));
             }
@@ -2265,11 +2273,11 @@ impl Model {
                     let r = repo.reset_to_upstream().map_err(|e| e.to_string());
                     Box::new(move |m, cx| match r {
                         Ok(backup) => {
-                            m.done(format!("Reset {head} to {upstream}"));
-                            let text = format!(
-                                "Your previous commits are kept on the branch {backup}. Delete it once you no longer need them."
-                            );
-                            let title = format!("{head} now matches {upstream}");
+                            m.done(t!("model-reset-to", head = head.to_string(), upstream = upstream.to_string()));
+                            let text =
+                                t!("model-your-previous-commits-are-kept-on-the-branch", backup = backup.to_string());
+                            let title =
+                                t!("model-now-matches", head = head.to_string(), upstream = upstream.to_string());
                             m.ask(Dialog::Info { title, text, mood: Mood::Done }, cx);
                         }
                         Err(e) => m.fail(e, cx),
@@ -2279,7 +2287,7 @@ impl Model {
             }
             Action::Push => {
                 let repo = repo.unwrap();
-                self.spawn("Push", cx, move || repo.push().map(Outcome::Done));
+                self.spawn(ts!("cmd-push"), cx, move || repo.push().map(Outcome::Done));
             }
             Action::OpenGithub => {
                 if let Some(url) = &self.github_url {
@@ -2299,7 +2307,7 @@ impl Model {
             }
             Action::CloseCommit => {
                 self.commit_view = None;
-                self.message = "Working tree".into();
+                self.message = ts!("git-working-tree").into();
             }
         }
     }
@@ -2316,7 +2324,8 @@ impl Model {
                     .filter(|f| files.iter().any(|c| &c.path == f))
                     .or_else(|| files.first().map(|f| f.path.clone()));
                 if let Ok(d) = &details {
-                    m.message = format!("Commit {} {}", d.short_id, d.summary());
+                    m.message =
+                        t!("model-commit", short_id = (d.short_id).to_string(), summary = (d.summary()).to_string());
                 }
                 m.commit_view = Some(CommitView { details, selected, diff: None });
                 m.update_commit_diff(cx);

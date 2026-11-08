@@ -87,9 +87,9 @@ impl Side {
 
     fn label(self) -> &'static str {
         match self {
-            Side::Left => "Left",
-            Side::Right => "Right",
-            Side::Bottom => "Bottom",
+            Side::Left => ts!("stripes-left"),
+            Side::Right => ts!("stripes-right"),
+            Side::Bottom => ts!("stripes-bottom"),
         }
     }
 
@@ -113,7 +113,7 @@ impl gpui::Global for ToolPlaces {}
 pub fn move_menu(mut menu: PopupMenu, tool: Tool, cx: &gpui::App) -> PopupMenu {
     let now = cx.try_global::<ToolPlaces>().and_then(|p| p.0.iter().find(|(t, _)| *t == tool).map(|(_, s)| *s));
     let now = now.or_else(|| Side::of(tool.placement()));
-    menu = menu.label("Move to");
+    menu = menu.label(ts!("stripes-move-to"));
     for side in Side::ALL {
         menu = menu.item(
             PopupMenuItem::new(side.label())
@@ -241,24 +241,24 @@ impl Tool {
 
     fn tip(self) -> &'static str {
         match self {
-            Tool::Run => "Run",
-            Tool::Debug => "Debug",
-            Tool::Build => "Build",
-            Tool::Output => "Output",
-            Tool::Terminal => "Terminal",
-            Tool::Problems => "Problems (⇧⌘M)",
-            Tool::Claude => "Agent Console (⌘J)",
-            Tool::Gradle => "Gradle",
-            Tool::Maven => "Maven",
-            Tool::Spring => "Spring",
-            Tool::Notifications => "Notifications",
-            Tool::ClaudeChanges => "Agent Changes",
-            Tool::Structure => "Structure (⌘7)",
-            Tool::Hierarchy => "Hierarchy (⌃H, ⌃⌥H)",
-            Tool::Processes => "Processes",
-            Tool::AgentLog => "Agent Log",
-            Tool::AgentView => "Agent View",
-            Tool::Tests => "Tests",
+            Tool::Run => ts!("menu-run"),
+            Tool::Debug => ts!("cmd-debug"),
+            Tool::Build => ts!("stripes-build"),
+            Tool::Output => ts!("cmd-output"),
+            Tool::Terminal => ts!("settings-page-terminal"),
+            Tool::Problems => ts!("stripes-problems-m"),
+            Tool::Claude => ts!("stripes-agent-console-j"),
+            Tool::Gradle => ts!("cmd-gradle"),
+            Tool::Maven => ts!("cmd-maven"),
+            Tool::Spring => ts!("stripes-spring"),
+            Tool::Notifications => ts!("stripes-notifications"),
+            Tool::ClaudeChanges => ts!("cmd-agent-changes"),
+            Tool::Structure => ts!("stripes-structure-7"),
+            Tool::Hierarchy => ts!("stripes-hierarchy-h-h"),
+            Tool::Processes => ts!("cmd-processes"),
+            Tool::AgentLog => ts!("cmd-agent-log"),
+            Tool::AgentView => ts!("stripes-agent-view"),
+            Tool::Tests => ts!("stripes-tests"),
         }
     }
 
@@ -652,14 +652,22 @@ impl Workspace {
             .border_r_1()
             .border_color(p.border)
             .child(
-                item("act-project", Icon::Folder, "Project (⌘1)", open && current == Activity::Project, None, 0, &p)
-                    .on_click(pick(Activity::Project)),
+                item(
+                    "act-project",
+                    Icon::Folder,
+                    ts!("stripes-project-1"),
+                    open && current == Activity::Project,
+                    None,
+                    0,
+                    &p,
+                )
+                .on_click(pick(Activity::Project)),
             )
             .child(
                 item(
                     "act-git",
                     Icon::Branch,
-                    "Git (⌘2)",
+                    ts!("stripes-git-2"),
                     open && current == Activity::Git,
                     Some((changed, p.accent)),
                     2,

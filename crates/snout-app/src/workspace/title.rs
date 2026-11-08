@@ -146,7 +146,7 @@ impl Workspace {
 
         // The project: its badge, its name, and a menu to open or close projects.
         let project = {
-            let label = name.clone().unwrap_or_else(|| "No Project".into());
+            let label = name.clone().unwrap_or_else(|| ts!("title-no-project").into());
             let badge = div()
                 .flex_none()
                 .size(px(20.))
@@ -181,12 +181,12 @@ impl Workspace {
                     }
                 };
                 menu = menu.item(
-                    PopupMenuItem::new("Open Project…")
+                    PopupMenuItem::new(ts!("cmd-open-project"))
                         .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
                         .on_click(send(Action::PickFolder)),
                 );
                 if !recent.is_empty() {
-                    menu = menu.separator().label("Recent Projects");
+                    menu = menu.separator().label(ts!("welcome-recent-projects"));
                     for path in recent.iter().take(10) {
                         let path = path.clone();
                         menu = menu.item(
@@ -197,7 +197,7 @@ impl Workspace {
                     }
                 }
                 menu.separator().item(
-                    PopupMenuItem::new("Close Project")
+                    PopupMenuItem::new(ts!("cmd-close-project"))
                         .icon(crate::components::menu_icon(crate::components::IconName::X))
                         .disabled(!has_project)
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(CloseProject), cx)),
@@ -222,7 +222,7 @@ impl Workspace {
                 let menu = menu.item(PopupMenuItem::new(text.clone()).disabled(true)).separator();
                 let menu = if lost {
                     menu.item(
-                        PopupMenuItem::new("Reconnect")
+                        PopupMenuItem::new(ts!("status-reconnect"))
                             .icon(crate::components::menu_icon(crate::components::IconName::RefreshCw))
                             .on_click(|_, _, cx| crate::remote::reconnect(cx)),
                     )
@@ -230,7 +230,7 @@ impl Workspace {
                     menu
                 };
                 menu.item(
-                    PopupMenuItem::new("Close Remote Connection")
+                    PopupMenuItem::new(ts!("cmd-close-remote-connection"))
                         .icon(crate::components::menu_icon(crate::components::IconName::Unplug))
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::CloseRemote), cx)),
                 )
@@ -281,7 +281,7 @@ impl Workspace {
         let rerun = selected.as_ref().and_then(|c| runs.running_config(&c.id)).is_some_and(|s| !s.launch.debug());
         let runs_entity = self.runs.clone();
         let run_config = {
-            let label = selected.as_ref().map_or_else(|| "Current File".to_owned(), |c| c.name.clone());
+            let label = selected.as_ref().map_or_else(|| ts!("title-current-file").to_owned(), |c| c.name.clone());
             let selected_id = selected.as_ref().map(|c| c.id.clone());
             let kind_icon = selected.as_ref().map(|c| match c.kind {
                 crate::run::config::Kind::Main if c.spring_boot => Icon::Leaf,
@@ -306,11 +306,12 @@ impl Workspace {
                         runs.update(cx, |r, cx| r.select_config(id.clone(), cx))
                     }
                 };
-                menu =
-                    menu.item(PopupMenuItem::new("Current File").checked(selected_id.is_none()).on_click(pick(None)));
+                menu = menu.item(
+                    PopupMenuItem::new(ts!("title-current-file")).checked(selected_id.is_none()).on_click(pick(None)),
+                );
                 let mut group = "";
                 for c in &configs {
-                    let g = if c.user && c.id.starts_with("user:") { "Yours" } else { c.group() };
+                    let g = if c.user && c.id.starts_with("user:") { ts!("title-yours") } else { c.group() };
                     if g != group {
                         group = g;
                         menu = menu.separator().label(g);
@@ -320,16 +321,16 @@ impl Workspace {
                 }
                 if configs.is_empty() {
                     let note = if loading {
-                        "Reading the configurations…"
+                        ts!("title-reading-the-configurations")
                     } else if playwright {
-                        "Configurations appear once the tests are listed"
+                        ts!("title-configurations-appear-once-the-tests-are-listed")
                     } else {
-                        "Configurations appear once the Java engine is ready"
+                        ts!("title-configurations-appear-once-the-java-engine-is-ready")
                     };
                     menu = menu.separator().item(PopupMenuItem::new(note).disabled(true));
                 }
                 menu.separator().item(
-                    PopupMenuItem::new("Edit Configurations…")
+                    PopupMenuItem::new(ts!("cmd-edit-configurations"))
                         .icon(crate::components::menu_icon(crate::components::IconName::Settings))
                         .icon(crate::components::menu_icon(crate::components::IconName::Settings))
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::EditConfigurations), cx)),
@@ -337,10 +338,15 @@ impl Workspace {
             })
             .into_any_element()
         };
-        let what = selected.as_ref().map_or_else(|| "the Current File".to_owned(), |c| format!("'{}'", c.name));
-        let run_tip: gpui::SharedString =
-            if rerun { format!("Rerun {what} (⌃R)") } else { format!("Run {what} (⌃R)") }.into();
-        let debug_tip: gpui::SharedString = format!("Debug {what} (⌃D)").into();
+        let what =
+            selected.as_ref().map_or_else(|| ts!("title-the-current-file").to_owned(), |c| format!("'{}'", c.name));
+        let run_tip: gpui::SharedString = if rerun {
+            t!("title-rerun-r", what = what.to_string())
+        } else {
+            t!("title-run-r", what = what.to_string())
+        }
+        .into();
+        let debug_tip: gpui::SharedString = t!("title-debug-d", what = what.to_string()).into();
         let run_icon = if rerun { Icon::Rerun } else { Icon::Play };
         let run_button = tip_button("title-run", run_icon, run_tip, ready, p.ok, &p)
             .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::RunSelected), cx)));
@@ -348,7 +354,7 @@ impl Workspace {
             tip_button("title-debug", Icon::Bug, debug_tip, ready, if p.tinted { p.hues[3] } else { p.ok }, &p)
                 .when(ready, |d| d.on_click(|_, w, cx| w.dispatch_action(Box::new(menus::DebugSelected), cx)));
         let stop_button = running.then(|| {
-            tip_button("title-stop", Icon::Stop, "Stop (⌘F2)".into(), true, p.error, &p)
+            tip_button("title-stop", Icon::Stop, ts!("title-stop-f2").into(), true, p.error, &p)
                 .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::StopRuns), cx))
         });
 
@@ -373,11 +379,11 @@ impl Workspace {
             .children(stop_button)
             .child(div().w(px(6.)))
             .child(
-                icon_button("title-search", Icon::Search, "Search Everywhere (⇧⌘A)", true, &p)
+                icon_button("title-search", Icon::Search, ts!("title-search-everywhere-a"), true, &p)
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::SearchEverywhere), cx)),
             )
             .child(
-                icon_button("title-settings", Icon::Gear, "Settings (⌘,)", true, &p)
+                icon_button("title-settings", Icon::Gear, ts!("title-settings"), true, &p)
                     .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::OpenSettings), cx)),
             );
 

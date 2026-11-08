@@ -14,9 +14,23 @@ use crate::theme::palette;
 pub fn title(panel_name: &str) -> &str {
     match panel_name {
         // The console's header row names the agent it runs.
-        "Claude" => "Console",
-        "Claude Changes" => "Agent Changes",
-        "Side" => "Project",
+        "Claude" => ts!("console-console"),
+        "Claude Changes" => ts!("cmd-agent-changes"),
+        "Side" => ts!("cmd-project"),
+        "Run" => ts!("cmd-run"),
+        "Debug" => ts!("cmd-debug"),
+        "Build" => ts!("stripes-build"),
+        "Output" => ts!("cmd-output"),
+        "Terminal" => ts!("cmd-terminal"),
+        "Problems" => ts!("tools-problems"),
+        "References" => ts!("tools-references"),
+        "Notifications" => ts!("stripes-notifications"),
+        "Processes" => ts!("cmd-processes"),
+        "Agent Log" => ts!("cmd-agent-log"),
+        "Agent View" => ts!("stripes-agent-view"),
+        "Structure" => ts!("cmd-structure"),
+        "Hierarchy" => ts!("cmd-hierarchy"),
+        "Tests" => ts!("stripes-tests"),
         other => other,
     }
 }
@@ -26,7 +40,7 @@ fn empty(title: &'static str, text: &'static str, _: &App) -> crate::components:
     crate::components::EmptyState::new(snout_core::art::spots::quiet_bell(), title).hint(text).compact().primary_action(
         "notifications-empty-output",
         crate::components::IconName::ScrollText,
-        "Show Output",
+        ts!("tools-show-output"),
         crate::menus::ShowOutput,
     )
 }
@@ -48,7 +62,7 @@ impl NotificationsPanel {
     }
 }
 
-crate::panels::panel!(NotificationsPanel, "Notifications", |_, _| "Notifications".into(), true);
+crate::panels::panel!(NotificationsPanel, "Notifications", |_, _| ts!("stripes-notifications").into(), true);
 
 impl Render for NotificationsPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -56,7 +70,11 @@ impl Render for NotificationsPanel {
         let items = self.items(cx);
         let base = div().size_full().bg(p.ground).text_size(px(crate::look::BODY)).text_color(p.fg);
         if items.is_empty() {
-            return base.child(empty("No notifications", "Errors from Git and the tools show here.", cx));
+            return base.child(empty(
+                ts!("tools-no-notifications"),
+                ts!("tools-errors-from-git-and-the-tools-show-here"),
+                cx,
+            ));
         }
         base.child(div().id("notifications").size_full().p(px(10.)).overflow_y_scrollbar().children(
             items.into_iter().map(|text| {

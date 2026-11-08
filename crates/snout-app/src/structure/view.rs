@@ -1025,7 +1025,7 @@ impl ProjectStructureView {
         let warm = p.lanes()[1];
         let machine = match &self.host_name {
             Some(h) => format!("on {h}"),
-            None => format!("on {}", crate::platform::THIS_MACHINE),
+            None => format!("on {}", crate::platform::this_machine()),
         };
         let downloading = self.download.clone();
         let view = cx.entity();

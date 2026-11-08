@@ -223,16 +223,16 @@ impl StatePill {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Modified => "Modified",
-            Self::Added => "Added",
-            Self::Deleted => "Deleted",
-            Self::Renamed => "Renamed",
-            Self::Copied => "Copied",
-            Self::TypeChanged => "Type changed",
-            Self::Untracked => "Untracked",
-            Self::Conflicted => "Conflicted",
-            Self::Staged => "Staged",
-            Self::PartlyStaged => "Partly staged",
+            Self::Modified => ts!("state-modified"),
+            Self::Added => ts!("state-added"),
+            Self::Deleted => ts!("state-deleted"),
+            Self::Renamed => ts!("state-renamed"),
+            Self::Copied => ts!("state-copied"),
+            Self::TypeChanged => ts!("state-type-changed"),
+            Self::Untracked => ts!("state-untracked"),
+            Self::Conflicted => ts!("state-conflicted"),
+            Self::Staged => ts!("state-staged"),
+            Self::PartlyStaged => ts!("state-partly-staged"),
         }
     }
 

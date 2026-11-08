@@ -74,12 +74,11 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
 
 /// What a dialog looks like: its tone, its drawing, and the line under its title.
 fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<SharedString>) {
-    let files = |n: usize| if n == 1 { "this file".to_owned() } else { format!("these {n} files") };
     match d {
         Dialog::About => (
             Tone::Neutral,
             Some(snout_core::art::mark()),
-            Some(format!("Version {}", env!("CARGO_PKG_VERSION")).into()),
+            Some(t!("dialogs-version", cargo_pkg_version = (env!("CARGO_PKG_VERSION")).to_string()).into()),
         ),
         Dialog::Error(msg) => {
             let art = if msg.contains("[rejected]") || msg.contains("failed to push") {
@@ -89,47 +88,40 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
             } else {
                 spots::warning()
             };
-            (Tone::Danger, Some(art), Some("Git stopped and said why.".into()))
+            (Tone::Danger, Some(art), Some(ts!("dialogs-git-stopped-and-said-why").into()))
         }
         Dialog::Info { mood: Mood::Warning, .. } => (Tone::Warning, Some(spots::warning()), None),
         Dialog::Info { mood: Mood::Done, .. } => (Tone::Success, Some(spots::success()), None),
         Dialog::Info { .. } => (Tone::Info, Some(spots::no_results()), None),
         Dialog::ConfirmDiscard(entries) => {
-            let it = if entries.len() == 1 { "it is" } else { "they are" };
-            let text = format!("This puts {} back as {it} in HEAD. Untracked files are deleted.", files(entries.len()));
+            let text = t!("dialogs-discard-body", count = entries.len());
             (Tone::Danger, Some(spots::discard()), Some(text.into()))
         }
         Dialog::ConfirmDeleteFiles(entries) => {
-            let one = entries.len() == 1;
-            let what = capital(&files(entries.len()));
             let text = if snout_core::can_trash(&*m.host) {
-                format!(
-                    "{what} {} to the Trash. Tracked files then show as deleted, ready to commit.",
-                    if one { "goes" } else { "go" }
-                )
+                t!("dialogs-trash-body", count = entries.len())
             } else {
-                format!(
-                    "{what} {} deleted from disk. Tracked files then show as deleted, ready to commit.",
-                    if one { "is" } else { "are" }
-                )
+                t!("dialogs-delete-body", count = entries.len())
             };
             (Tone::Danger, Some(spots::discard()), Some(text.into()))
         }
-        Dialog::ConfirmCheckout(_) => {
-            (Tone::Git, Some(spots::stash()), Some("You have uncommitted changes. What should happen to them?".into()))
-        }
-        Dialog::Checkout => (Tone::Git, None, Some("A branch, a tag, or any commit.".into())),
+        Dialog::ConfirmCheckout(_) => (
+            Tone::Git,
+            Some(spots::stash()),
+            Some(ts!("dialogs-you-have-uncommitted-changes-what-should-happen-to").into()),
+        ),
+        Dialog::Checkout => (Tone::Git, None, Some(ts!("dialogs-a-branch-a-tag-or-any-commit").into())),
         Dialog::NewBranch(_) => {
-            (Tone::Git, Some(spots::new_branch()), Some("A line of work of its own, from where you choose.".into()))
+            (Tone::Git, Some(spots::new_branch()), Some(ts!("dialogs-a-line-of-work-of-its-own-from").into()))
         }
-        Dialog::DeleteBranch { .. } => {
-            (Tone::Danger, Some(spots::discard()), Some("Its commits stay wherever else they are reachable.".into()))
-        }
-        Dialog::DeleteRemoteBranch(_) => (
+        Dialog::DeleteBranch { .. } => (
             Tone::Danger,
             Some(spots::discard()),
-            Some("It goes for everyone who uses the remote. Local branches stay as they are.".into()),
+            Some(ts!("dialogs-its-commits-stay-wherever-else-they-are-reachable").into()),
         ),
+        Dialog::DeleteRemoteBranch(_) => {
+            (Tone::Danger, Some(spots::discard()), Some(ts!("dialogs-it-goes-for-everyone-who-uses-the-remote").into()))
+        }
         Dialog::PullProblem { problem: PullProblem::Divergent, .. } => {
             (Tone::Warning, Some(spots::merge_conflict()), None)
         }
@@ -138,55 +130,57 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
         Dialog::Clone { .. } => (
             Tone::Git,
             Some(spots::clone_repo()),
-            Some("Copy a remote repository to this computer and open it.".into()),
+            Some(ts!("dialogs-copy-a-remote-repository-to-this-computer-and").into()),
         ),
         Dialog::AgentAsks { agent, .. } => (
             Tone::Warning,
             Some(spots::agent_console()),
-            Some(format!("{agent} is waiting in the console for your answer.").into()),
+            Some(t!("dialogs-is-waiting-in-the-console-for-your-answer", agent = agent.to_string()).into()),
         ),
-        Dialog::Quit(info) if info.is_empty() => {
-            (Tone::Neutral, Some(spots::info()), Some("The window closes, and the Java engine stops with it.".into()))
-        }
-        Dialog::Quit(info) if info.unsaved.is_empty() => {
-            (Tone::Warning, Some(spots::warning()), Some("What runs now stops when SnoutCode quits.".into()))
-        }
+        Dialog::Quit(info) if info.is_empty() => (
+            Tone::Neutral,
+            Some(spots::info()),
+            Some(ts!("dialogs-the-window-closes-and-the-java-engine-stops").into()),
+        ),
+        Dialog::Quit(info) if info.unsaved.is_empty() => (
+            Tone::Warning,
+            Some(spots::warning()),
+            Some(ts!("dialogs-what-runs-now-stops-when-snoutcode-quits").into()),
+        ),
         Dialog::Quit(info) => {
-            let files =
-                if info.unsaved.len() == 1 { "a file".to_owned() } else { format!("{} files", info.unsaved.len()) };
-            (Tone::Warning, Some(spots::warning()), Some(format!("You have unsaved changes in {files}.").into()))
+            let text = t!("dialogs-unsaved-files", count = info.unsaved.len());
+            (Tone::Warning, Some(spots::warning()), Some(text.into()))
         }
     }
 }
 
-fn capital(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
-}
-
 fn title(d: &Dialog, m: &Model) -> SharedString {
     match d {
-        Dialog::About => "About SnoutCode".into(),
-        Dialog::Error(_) => "Something went wrong".into(),
+        Dialog::About => ts!("cmd-about-snoutcode").into(),
+        Dialog::Error(_) => ts!("dialogs-something-went-wrong").into(),
         Dialog::Info { title, .. } => title.clone().into(),
-        Dialog::ConfirmDiscard(_) => "Discard changes?".into(),
-        Dialog::ConfirmCheckout(t) => format!("Check out {}?", t.label()).into(),
-        Dialog::Checkout => "Check out".into(),
-        Dialog::NewBranch(_) => "New branch".into(),
-        Dialog::DeleteBranch { .. } => "Delete branch?".into(),
-        Dialog::DeleteRemoteBranch(r) => format!("Delete branch from {}?", r.remote).into(),
-        Dialog::ConfirmDeleteFiles(_) if snout_core::can_trash(&*m.host) => "Move to the Trash?".into(),
-        Dialog::ConfirmDeleteFiles(_) => "Delete files?".into(),
-        Dialog::PullProblem { problem: PullProblem::Divergent, .. } => "Both sides have new commits".into(),
-        Dialog::PullProblem { .. } => "No shared history".into(),
-        Dialog::GroupName { rename: Some(_), .. } => "Rename group".into(),
-        Dialog::GroupName { .. } => "New group".into(),
+        Dialog::ConfirmDiscard(_) => ts!("dialogs-discard-changes").into(),
+        Dialog::ConfirmCheckout(t) => t!("dialogs-check-out-2", t = (t.label()).to_string()).into(),
+        Dialog::Checkout => ts!("dialogs-check-out-3").into(),
+        Dialog::NewBranch(_) => ts!("dialogs-new-branch").into(),
+        Dialog::DeleteBranch { .. } => ts!("dialogs-delete-branch-2").into(),
+        Dialog::DeleteRemoteBranch(r) => t!("dialogs-delete-branch-from", remote = (r.remote).to_string()).into(),
+        Dialog::ConfirmDeleteFiles(_) if snout_core::can_trash(&*m.host) => ts!("dialogs-move-to-the-trash").into(),
+        Dialog::ConfirmDeleteFiles(_) => ts!("dialogs-delete-files").into(),
+        Dialog::PullProblem { problem: PullProblem::Divergent, .. } => {
+            ts!("dialogs-both-sides-have-new-commits").into()
+        }
+        Dialog::PullProblem { .. } => ts!("dialogs-no-shared-history").into(),
+        Dialog::GroupName { rename: Some(_), .. } => ts!("dialogs-rename-group").into(),
+        Dialog::GroupName { .. } => ts!("dialogs-new-group").into(),
         Dialog::Clone { .. } => {
             let _ = m;
-            "Clone repository".into()
+            ts!("dialogs-clone-repository").into()
         }
-        Dialog::Quit(_) => "Quit SnoutCode?".into(),
-        Dialog::AgentAsks { agent, what, .. } => format!("Allow {agent} to {what}?").into(),
+        Dialog::Quit(_) => ts!("dialogs-quit-snoutcode").into(),
+        Dialog::AgentAsks { agent, what, .. } => {
+            t!("dialogs-allow-to", agent = agent.to_string(), what = what.to_string()).into()
+        }
     }
 }
 
@@ -381,22 +375,22 @@ fn pick_items(m: &Model, query: &str) -> Vec<PickItem> {
     let mut items = Vec::new();
     for b in m.branches.iter().filter(|b| matches(&b.name)) {
         let (section, include) = match b.kind {
-            BranchKind::Local => ("Local branches", !b.is_head),
-            BranchKind::Remote => ("Remote branches", !locals.contains(&b.local_name())),
+            BranchKind::Local => (ts!("dialogs-local-branches"), !b.is_head),
+            BranchKind::Remote => (ts!("dialogs-remote-branches"), !locals.contains(&b.local_name())),
         };
         if include {
             let detail = format!("{} {}", b.target, b.subject);
             items.push(PickItem { target: b.into(), label: b.name.clone(), detail, section });
         }
     }
-    items.sort_by_key(|i| i.section != "Local branches");
+    items.sort_by_key(|i| i.section != ts!("dialogs-local-branches"));
     for t in m.tags.iter().filter(|t| matches(&t.name)) {
         let detail = format!("{} {}", t.target, t.subject);
         items.push(PickItem {
             target: CheckoutTarget::Tag(t.name.clone()),
             label: t.name.clone(),
             detail,
-            section: "Tags",
+            section: ts!("dialogs-tags"),
         });
     }
     // A query that names a commit but nothing above exactly: offer the commit itself.
@@ -405,7 +399,7 @@ fn pick_items(m: &Model, query: &str) -> Vec<PickItem> {
         && let Some(described) = m.repo.as_ref().and_then(|r| r.describe_commit(query).ok())
     {
         let target = CheckoutTarget::Commit(query.to_owned());
-        items.push(PickItem { target, label: query.to_owned(), detail: described, section: "Commit" });
+        items.push(PickItem { target, label: query.to_owned(), detail: described, section: ts!("cmd-commit") });
     }
     items
 }
@@ -415,7 +409,7 @@ fn cancel_button(cx: &mut Context<DialogBody>) -> AnyElement {
     Button::new("cancel", CANCEL_ICON)
         .debug_selector("dialog-cancel")
         .focusable()
-        .label("Cancel")
+        .label(ts!("settings-cancel"))
         .kbd("Esc")
         .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
         .into_any_element()
@@ -443,7 +437,9 @@ impl DialogBody {
                     .flex_col()
                     .gap(px(6.))
                     .children(info.unsaved.iter().enumerate().map(|(i, name)| {
-                        FileChip::new(("quit-file", i), name.clone()).status("Unsaved", p.warn).max_chars(46)
+                        FileChip::new(("quit-file", i), name.clone())
+                            .status(ts!("dialogs-unsaved"), p.warn)
+                            .max_chars(46)
                     }))
                     .into_any_element(),
             );
@@ -451,7 +447,7 @@ impl DialogBody {
         if !info.stops.is_empty() {
             let lines = info.stops.iter().map(|s| format!("• {s}")).collect::<Vec<_>>().join("\n");
             body.push(
-                crate::components::callout_with(Tone::Warning, Some("These stop:".into()), lines, &p)
+                crate::components::callout_with(Tone::Warning, Some(ts!("dialogs-these-stop").into()), lines, &p)
                     .debug_selector(|| "quit-stops".into())
                     .into_any_element(),
             );
@@ -461,7 +457,7 @@ impl DialogBody {
             body.push(
                 Checkbox::new("quit-dont-ask")
                     .debug_selector(|| "quit-dont-ask".into())
-                    .label("Don't ask again (Settings, Appearance: Confirm before quitting)")
+                    .label(ts!("dialogs-dont-ask-again-settings-appearance-confirm-before-quitti"))
                     .checked(on)
                     .on_click(cx.listener(|this, v: &bool, _, cx| {
                         this.dont_ask = *v;
@@ -478,7 +474,7 @@ impl DialogBody {
                     .debug_selector("quit-ok")
                     .primary()
                     .focusable()
-                    .label("Quit")
+                    .label(ts!("cmd-quit"))
                     .kbd("⏎")
                     .on_click(cx.listener(move |this, _, w, cx| {
                         let dont_ask = this.dont_ask;
@@ -492,7 +488,7 @@ impl DialogBody {
                     .debug_selector("quit-discard")
                     .danger()
                     .focusable()
-                    .label("Discard and Quit")
+                    .label(ts!("dialogs-discard-and-quit"))
                     .kbd(crate::keymap::shown_keys("⌘⌫"))
                     .on_click(cx.listener(move |this, _, w, cx| this.act(quit(Some(false), false), w, cx)))
                     .into_any_element(),
@@ -502,7 +498,7 @@ impl DialogBody {
                     .debug_selector("quit-save-all")
                     .primary()
                     .focusable()
-                    .label("Save All and Quit")
+                    .label(ts!("dialogs-save-all-and-quit"))
                     .kbd("⏎")
                     .on_click(cx.listener(move |this, _, w, cx| this.act(quit(Some(true), false), w, cx)))
                     .into_any_element(),
@@ -545,7 +541,7 @@ impl Render for DialogBody {
         let primary_enabled = self.primary(cx).is_some();
         let status = m.dialog_status();
         let branch = status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
-        let upstream = status.branch.upstream.clone().unwrap_or_else(|| "its upstream".into());
+        let upstream = status.branch.upstream.clone().unwrap_or_else(|| ts!("dialogs-its-upstream").into());
         let has_tracked = status.files.iter().any(|f| !f.is_untracked());
         let has_changes = !status.files.is_empty();
 
@@ -561,7 +557,7 @@ impl Render for DialogBody {
         };
         let cancel = Button::new("cancel", CANCEL_ICON)
             .focusable()
-            .label("Cancel")
+            .label(ts!("settings-cancel"))
             .kbd("Esc")
             .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
             .into_any_element();
@@ -578,7 +574,7 @@ impl Render for DialogBody {
                 body.push(
                     div()
                         .line_height(px(19.))
-                        .child("An IDE for Java, Gradle and Spring Boot, with Git and Claude Code built in.")
+                        .child(ts!("dialogs-an-ide-for-java-gradle-and-spring-boot"))
                         .into_any_element(),
                 );
                 body.push(
@@ -599,7 +595,9 @@ impl Render for DialogBody {
                         )
                         .into_any_element(),
                 );
-                body.push(dim("Made by SnoutData. MIT License.".into()).text_size(px(12.)).into_any_element());
+                body.push(
+                    dim(ts!("dialogs-made-by-snoutdata-mit-license").into()).text_size(px(12.)).into_any_element(),
+                );
                 buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
             }
             Dialog::Error(msg) => {
@@ -608,7 +606,7 @@ impl Render for DialogBody {
                 buttons.push(
                     Button::new("copy", IconName::Copy)
                         .ghost()
-                        .label("Copy")
+                        .label(ts!("cmd-copy"))
                         .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone())))
                         .into_any_element(),
                 );
@@ -620,20 +618,23 @@ impl Render for DialogBody {
             }
             Dialog::ConfirmDiscard(entries) => {
                 body.push(files(&entries).into_any_element());
-                body.push(callout(Tone::Danger, "This cannot be undone.", &p).into_any_element());
+                body.push(callout(Tone::Danger, ts!("dialogs-this-cannot-be-undone"), &p).into_any_element());
                 buttons.push(cancel);
-                buttons.push(on!(danger("Discard"), Action::Discard(entries)));
+                buttons.push(on!(danger(ts!("dialogs-discard")), Action::Discard(entries)));
             }
             Dialog::ConfirmDeleteFiles(entries) => {
                 let trash = snout_core::can_trash(&*crate::host::host(cx));
                 body.push(files(&entries).into_any_element());
                 body.push(if trash {
-                    callout(Tone::Info, "You can still get them back from the Trash.", &p).into_any_element()
+                    callout(Tone::Info, ts!("dialogs-you-can-still-get-them-back-from-the"), &p).into_any_element()
                 } else {
-                    callout(Tone::Danger, "This cannot be undone.", &p).into_any_element()
+                    callout(Tone::Danger, ts!("dialogs-this-cannot-be-undone"), &p).into_any_element()
                 });
                 buttons.push(cancel);
-                buttons.push(on!(danger(if trash { "Move to Trash" } else { "Delete" }), Action::DeleteFiles(entries)));
+                buttons.push(on!(
+                    danger(if trash { ts!("dialogs-move-to-trash") } else { ts!("dialogs-delete") }),
+                    Action::DeleteFiles(entries)
+                ));
             }
             Dialog::ConfirmCheckout(target) => {
                 let (t1, t2) = (target.clone(), target.clone());
@@ -641,8 +642,8 @@ impl Render for DialogBody {
                     choice_card(
                         "stash",
                         IconName::Archive,
-                        "Stash, check out, re-apply",
-                        "Put the changes aside, switch, then bring them back. Works even if they touch files that differ on the target.",
+                        ts!("dialogs-stash-check-out-re-apply"),
+                        ts!("dialogs-put-the-changes-aside-switch-then-bring-them"),
                         &p,
                     )
                     .on_click(cx.listener(move |this, _, w, cx| {
@@ -654,8 +655,8 @@ impl Render for DialogBody {
                     choice_card(
                         "keep",
                         IconName::ArrowRightLeft,
-                        "Check out, keep changes",
-                        "Carry the changes across as they are. Git refuses if they would be overwritten.",
+                        ts!("dialogs-check-out-keep-changes"),
+                        ts!("dialogs-carry-the-changes-across-as-they-are-git"),
                         &p,
                     )
                     .on_click(cx.listener(move |this, _, w, cx| {
@@ -665,24 +666,27 @@ impl Render for DialogBody {
                 );
                 if target.detaches() {
                     body.push(
-                        callout(
-                            Tone::Warning,
-                            "This leaves HEAD detached. Create a branch if you want to keep new commits.",
-                            &p,
-                        )
-                        .into_any_element(),
+                        callout(Tone::Warning, ts!("dialogs-this-leaves-head-detached-create-a-branch-if"), &p)
+                            .into_any_element(),
                     );
                 }
                 buttons.push(cancel);
             }
             Dialog::PullProblem { problem: PullProblem::Divergent, details } => {
-                body.push(dim(format!("{branch} and {upstream} have each moved on, and this repository's settings do not say how to combine them.")).into_any_element());
+                body.push(
+                    dim(t!(
+                        "dialogs-and-have-each-moved-on-and-this-repositorys",
+                        branch = branch.to_string(),
+                        upstream = upstream.to_string()
+                    ))
+                    .into_any_element(),
+                );
                 body.push(
                     choice_card(
                         "merge",
                         IconName::GitMerge,
-                        "Merge",
-                        "Join both histories with a merge commit. Nothing is rewritten.",
+                        ts!("dialogs-merge"),
+                        ts!("dialogs-join-both-histories-with-a-merge-commit-nothing"),
                         &p,
                     )
                     .on_click(cx.listener(|this, _, w, cx| this.act(Action::Pull(PullMode::Merge), w, cx)))
@@ -692,8 +696,8 @@ impl Render for DialogBody {
                     choice_card(
                         "rebase",
                         IconName::GitBranch,
-                        "Rebase",
-                        "Replay your commits on top of the remote ones, for a straight history.",
+                        ts!("dialogs-rebase"),
+                        ts!("dialogs-replay-your-commits-on-top-of-the-remote"),
                         &p,
                     )
                     .on_click(cx.listener(|this, _, w, cx| this.act(Action::Pull(PullMode::Rebase), w, cx)))
@@ -703,11 +707,22 @@ impl Render for DialogBody {
                 buttons.push(cancel);
             }
             Dialog::PullProblem { details, .. } => {
-                body.push(dim(format!("{branch} and {upstream} have no commit in common, so they cannot be merged. This usually means the remote repository was recreated or its history was rewritten.")).into_any_element());
+                body.push(
+                    dim(t!(
+                        "dialogs-and-have-no-commit-in-common-so-they",
+                        branch = branch.to_string(),
+                        upstream = upstream.to_string()
+                    ))
+                    .into_any_element(),
+                );
                 body.push(
                     callout(
                         Tone::Info,
-                        format!("Resetting makes {branch} match {upstream} exactly. Your current commits stay on a backup branch, so nothing is lost."),
+                        t!(
+                            "dialogs-resetting-makes-match-exactly-your-current-commits-stay",
+                            branch = branch.to_string(),
+                            upstream = upstream.to_string()
+                        ),
                         &p,
                     )
                     .into_any_element(),
@@ -716,7 +731,7 @@ impl Render for DialogBody {
                     body.push(
                         callout(
                             Tone::Danger,
-                            "Commit or stash your uncommitted changes first; resetting would discard them.",
+                            ts!("dialogs-commit-or-stash-your-uncommitted-changes-first-resetting"),
                             &p,
                         )
                         .into_any_element(),
@@ -728,14 +743,14 @@ impl Render for DialogBody {
                     Button::new("ok", IconName::RotateCcw)
                         .primary()
                         .focusable()
-                        .label(format!("Reset to {upstream}"))
+                        .label(t!("dialogs-reset-to", upstream = upstream.to_string()))
                         .disabled(has_tracked),
                     Action::ResetToUpstream
                 ));
             }
             Dialog::NewBranch(start) => {
                 let from = start.as_ref().map_or("HEAD".to_owned(), |s| s.label.clone());
-                body.push(field_label("Name", &p).into_any_element());
+                body.push(field_label(ts!("dialogs-name"), &p).into_any_element());
                 body.push(Input::new(&self.name).into_any_element());
                 if let Some(problem) = branch_name_problem(&Self::value(&self.name, cx)) {
                     body.push(callout(Tone::Warning, problem, &p).into_any_element());
@@ -745,13 +760,13 @@ impl Render for DialogBody {
                         .flex()
                         .gap(px(8.))
                         .items_center()
-                        .child(dim("Starting at".into()))
+                        .child(dim(ts!("dialogs-starting-at").into()))
                         .child(badge(from, Tone::Git, &p))
                         .into_any_element(),
                 );
                 body.push(
                     Checkbox::new("checkout")
-                        .label("Check out the new branch")
+                        .label(ts!("dialogs-check-out-the-new-branch"))
                         .checked(self.checkout)
                         .on_click(cx.listener(|this, v: &bool, _, cx| {
                             this.checkout = *v;
@@ -761,7 +776,7 @@ impl Render for DialogBody {
                 );
                 buttons.push(cancel);
                 buttons.push(
-                    ok("Create")
+                    ok(ts!("dialogs-create"))
                         .icon(IconName::GitBranch)
                         .disabled(!primary_enabled)
                         .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
@@ -770,9 +785,9 @@ impl Render for DialogBody {
             }
             Dialog::GroupName { rename, repo } => {
                 let text = match (&rename, &repo) {
-                    (Some(old), _) => format!("Renaming {old}"),
-                    (None, Some(repo)) => format!("{} goes into the new group.", dir_name(repo)),
-                    (None, None) => "Groups keep related repositories together. Drag repositories onto one.".into(),
+                    (Some(old), _) => t!("dialogs-renaming", old = old.to_string()),
+                    (None, Some(repo)) => t!("dialogs-goes-into-the-new-group", repo = (dir_name(repo)).to_string()),
+                    (None, None) => ts!("dialogs-groups-keep-related-repositories-together-drag-repositor").into(),
                 };
                 body.push(dim(text).into_any_element());
                 body.push(Input::new(&self.name).into_any_element());
@@ -782,8 +797,11 @@ impl Render for DialogBody {
                     body.push(callout(Tone::Warning, problem, &p).into_any_element());
                 }
                 buttons.push(cancel);
-                let (verb, icon) =
-                    if rename.is_some() { ("Rename", IconName::Pencil) } else { ("Create", IconName::FolderPlus) };
+                let (verb, icon) = if rename.is_some() {
+                    (ts!("dialogs-rename"), IconName::Pencil)
+                } else {
+                    (ts!("dialogs-create"), IconName::FolderPlus)
+                };
                 buttons.push(
                     ok(verb)
                         .icon(icon)
@@ -799,12 +817,12 @@ impl Render for DialogBody {
                         .gap(px(8.))
                         .items_center()
                         .child(badge(name.clone(), Tone::Git, &p))
-                        .child(dim("goes away.".into()))
+                        .child(dim(ts!("dialogs-goes-away").into()))
                         .into_any_element(),
                 );
                 body.push(
                     Checkbox::new("force")
-                        .label("Delete even if it is not fully merged")
+                        .label(ts!("dialogs-delete-even-if-it-is-not-fully-merged"))
                         .checked(self.force)
                         .on_click(cx.listener(|this, v: &bool, _, cx| {
                             this.force = *v;
@@ -815,7 +833,7 @@ impl Render for DialogBody {
                 if let Some(up) = &upstream {
                     body.push(
                         Checkbox::new("upstream")
-                            .label(format!("Also delete {} on the remote", up.label()))
+                            .label(t!("dialogs-also-delete-on-the-remote", up = (up.label()).to_string()))
                             .checked(self.with_upstream)
                             .on_click(cx.listener(|this, v: &bool, _, cx| {
                                 this.with_upstream = *v;
@@ -825,7 +843,7 @@ impl Render for DialogBody {
                     );
                     if self.with_upstream {
                         body.push(
-                            callout(Tone::Danger, "Removing it from the remote affects everyone who uses it.", &p)
+                            callout(Tone::Danger, ts!("dialogs-removing-it-from-the-remote-affects-everyone-who"), &p)
                                 .into_any_element(),
                         );
                     }
@@ -833,17 +851,20 @@ impl Render for DialogBody {
                 buttons.push(cancel);
                 let action =
                     Action::DeleteBranch { name, force: self.force, upstream: upstream.filter(|_| self.with_upstream) };
-                buttons.push(on!(danger("Delete branch"), action));
+                buttons.push(on!(danger(ts!("dialogs-delete-branch")), action));
             }
             Dialog::DeleteRemoteBranch(r) => {
                 body.push(badge(r.label(), Tone::Git, &p).into_any_element());
                 buttons.push(cancel);
-                buttons.push(on!(danger(&format!("Delete from {}", r.remote)), Action::DeleteRemoteBranch(r.clone())));
+                buttons.push(on!(
+                    danger(&t!("dialogs-delete-from", remote = (r.remote).to_string())),
+                    Action::DeleteRemoteBranch(r.clone())
+                ));
             }
             Dialog::Clone { .. } => {
-                body.push(field_label("Repository URL", &p).into_any_element());
+                body.push(field_label(ts!("dialogs-repository-url"), &p).into_any_element());
                 body.push(Input::new(&self.url).into_any_element());
-                body.push(field_label("Into folder", &p).into_any_element());
+                body.push(field_label(ts!("dialogs-into-folder"), &p).into_any_element());
                 body.push(Input::new(&self.parent).into_any_element());
                 if let Some(Action::Clone { dest, .. }) = self.primary(cx) {
                     body.push(
@@ -851,7 +872,7 @@ impl Render for DialogBody {
                             .flex()
                             .gap(px(8.))
                             .items_center()
-                            .child(dim("Lands in".into()))
+                            .child(dim(ts!("dialogs-lands-in").into()))
                             .child(
                                 div()
                                     .flex_1()
@@ -863,7 +884,7 @@ impl Render for DialogBody {
                 }
                 buttons.push(cancel);
                 buttons.push(
-                    ok("Clone")
+                    ok(ts!("dialogs-clone"))
                         .icon(IconName::Download)
                         .disabled(!primary_enabled)
                         .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
@@ -930,8 +951,11 @@ impl Render for DialogBody {
                 }
                 if items.is_empty() {
                     list = list.child(
-                        crate::components::EmptyState::new(spots::no_results(), "No matching branch, tag, or commit")
-                            .compact(),
+                        crate::components::EmptyState::new(
+                            spots::no_results(),
+                            ts!("dialogs-no-matching-branch-tag-or-commit"),
+                        )
+                        .compact(),
                     );
                 }
                 body.push(list.into_any_element());
@@ -953,12 +977,18 @@ impl Render for DialogBody {
                             .flex()
                             .gap(px(6.))
                             .items_center()
-                            .child(dim("Uncommitted changes:".into()))
-                            .child(seg("keep", IconName::ArrowRightLeft, "Keep them", LocalChanges::Keep, self.local))
+                            .child(dim(ts!("dialogs-uncommitted-changes").into()))
+                            .child(seg(
+                                "keep",
+                                IconName::ArrowRightLeft,
+                                ts!("dialogs-keep-them"),
+                                LocalChanges::Keep,
+                                self.local,
+                            ))
                             .child(seg(
                                 "stash",
                                 IconName::Archive,
-                                "Stash and re-apply",
+                                ts!("dialogs-stash-and-re-apply"),
                                 LocalChanges::Stash,
                                 self.local,
                             ))
@@ -967,17 +997,13 @@ impl Render for DialogBody {
                 }
                 if items.get(self.cursor).is_some_and(|i| i.target.detaches()) {
                     body.push(
-                        callout(
-                            Tone::Warning,
-                            "This leaves HEAD detached. Create a branch if you want to keep new commits.",
-                            &p,
-                        )
-                        .into_any_element(),
+                        callout(Tone::Warning, ts!("dialogs-this-leaves-head-detached-create-a-branch-if"), &p)
+                            .into_any_element(),
                     );
                 }
                 buttons.push(cancel);
                 buttons.push(
-                    ok("Check Out")
+                    ok(ts!("dialogs-check-out"))
                         .icon(IconName::ArrowRightLeft)
                         .disabled(items.is_empty())
                         .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
@@ -988,13 +1014,14 @@ impl Render for DialogBody {
             Dialog::Quit(_) => {}
             Dialog::AgentAsks { ref tool, .. } => {
                 body.push(
-                    dim(format!("Allow for This Session lets it use {tool} again without asking.")).into_any_element(),
+                    dim(t!("dialogs-allow-for-this-session-lets-it-use-again", tool = tool.to_string()))
+                        .into_any_element(),
                 );
                 buttons.push(
                     Button::new("agent-refuse", CANCEL_ICON)
                         .debug_selector("agent-refuse")
                         .focusable()
-                        .label("Don't Allow")
+                        .label(ts!("dialogs-dont-allow"))
                         .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
                         .into_any_element(),
                 );
@@ -1002,7 +1029,7 @@ impl Render for DialogBody {
                     Button::new("agent-session", OK_ICON)
                         .debug_selector("agent-session")
                         .focusable()
-                        .label("Allow for This Session"),
+                        .label(ts!("dialogs-allow-for-this-session")),
                     Action::AgentAnswer(AskAnswer::Session)
                 ));
                 buttons.push(on!(
@@ -1010,7 +1037,7 @@ impl Render for DialogBody {
                         .debug_selector("agent-once")
                         .primary()
                         .focusable()
-                        .label("Allow"),
+                        .label(ts!("dialogs-allow")),
                     Action::AgentAnswer(AskAnswer::Once)
                 ));
             }
@@ -1036,7 +1063,7 @@ impl Render for DialogBody {
             .child(dialog_footer(None, buttons, &p))
             .child(
                 div().absolute().top(px(10.)).right(px(10.)).child(
-                    IconButton::new("dialog-close", IconName::X, "Close")
+                    IconButton::new("dialog-close", IconName::X, ts!("dialogs-close"))
                         .on_click(cx.listener(|this, _, w, cx| this.close(w, cx))),
                 ),
             )

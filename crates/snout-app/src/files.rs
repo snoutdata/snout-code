@@ -445,7 +445,7 @@ impl Render for FileTree {
                 let model = model.clone();
                 let package = is_dir && self.packages.contains(&e.path);
                 let tip: SharedString = if package {
-                    format!("Node package: {}", e.path.display()).into()
+                    t!("files-node-package", path = (e.path.display()).to_string()).into()
                 } else {
                     e.path.display().to_string().into()
                 };
@@ -551,7 +551,7 @@ impl Render for FileTree {
                         };
                         let menu = if !dir {
                             menu.item(
-                                PopupMenuItem::new("Open")
+                                PopupMenuItem::new(ts!("find-open"))
                                     .icon(crate::components::menu_icon(crate::components::IconName::File))
                                     .on_click(send(Action::OpenFile(path.clone(), None))),
                             )
@@ -565,18 +565,18 @@ impl Render for FileTree {
                                 .on_click(send(Action::Reveal(path.clone()))),
                         )
                         .item(
-                            PopupMenuItem::new("Open in External Terminal")
+                            PopupMenuItem::new(ts!("cmd-open-in-external-terminal"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::SquareTerminal))
                                 .on_click(send(Action::OpenInTerminal(path.clone()))),
                         )
                         .item(
-                            PopupMenuItem::new("Copy path")
+                            PopupMenuItem::new(ts!("projects-copy-path"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::Copy))
                                 .on_click(send(Action::Copy(path.display().to_string()))),
                         )
                         .separator()
                         .item(
-                            PopupMenuItem::new("Reload from Disk")
+                            PopupMenuItem::new(ts!("tabs-reload-from-disk"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::RefreshCw))
                                 .on_click(|_, window, cx| {
                                     window.dispatch_action(Box::new(crate::menus::ReloadFromDisk), cx)
@@ -593,9 +593,9 @@ impl Render for FileTree {
             .when(name.is_none(), |d| {
                 use crate::components::{EmptyState, IconName};
                 d.child(
-                    EmptyState::new(snout_core::art::spots::no_project(), "No project open")
-                        .hint("Open a project to see its files.")
-                        .primary_action("files-open", IconName::FolderOpen, "Open Project…", crate::menus::Open)
+                    EmptyState::new(snout_core::art::spots::no_project(), ts!("files-no-project-open"))
+                        .hint(ts!("files-open-a-project-to-see-its-files"))
+                        .primary_action("files-open", IconName::FolderOpen, ts!("cmd-open-project"), crate::menus::Open)
                         .compact(),
                 )
             })
@@ -603,9 +603,9 @@ impl Render for FileTree {
                 Some((host, snout_remote::Status::Lost(_))) => {
                     use crate::components::{EmptyState, IconName};
                     d.child(
-                        EmptyState::new(snout_core::art::spots::remote_lost(), "The connection is lost")
-                            .hint(format!("The files on {host} come back when it reconnects."))
-                            .primary("files-reconnect", IconName::RefreshCw, "Reconnect", |_, _, cx| {
+                        EmptyState::new(snout_core::art::spots::remote_lost(), ts!("files-the-connection-is-lost"))
+                            .hint(t!("files-the-files-on-come-back-when-it-reconnects", host = host.to_string()))
+                            .primary("files-reconnect", IconName::RefreshCw, ts!("status-reconnect"), |_, _, cx| {
                                 crate::remote::reconnect(cx)
                             })
                             .compact(),

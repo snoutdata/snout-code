@@ -62,7 +62,7 @@ pub struct ProjectsView {
 
 impl ProjectsView {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("projects-filter")));
         cx.subscribe(&filter, |this, input, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 let text = input.read(cx).value().to_string();
@@ -100,17 +100,17 @@ fn send(model: &Entity<Model>, action: Action) -> impl Fn(&ClickEvent, &mut Wind
 /// The items to open or find repositories, in the + menu and on the welcome page.
 pub fn open_items(menu: PopupMenu, model: &Entity<Model>) -> PopupMenu {
     menu.item(
-        PopupMenuItem::new("Open local repository…")
+        PopupMenuItem::new(ts!("projects-open-local-repository"))
             .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
             .on_click(send(model, Action::PickFolder)),
     )
     .item(
-        PopupMenuItem::new("Find repositories in folder…")
+        PopupMenuItem::new(ts!("projects-find-repositories-in-folder"))
             .icon(crate::components::menu_icon(crate::components::IconName::FolderSearch))
             .on_click(send(model, Action::PickScanFolder)),
     )
     .item(
-        PopupMenuItem::new("Clone from GitHub…")
+        PopupMenuItem::new(ts!("cmd-clone-from-github"))
             .icon(crate::components::menu_icon(crate::components::IconName::Download))
             .on_click(send(model, Action::ShowClone)),
     )
@@ -140,7 +140,7 @@ impl Render for ProjectsView {
                 })
                 .collect::<Vec<_>>();
             if hits.is_empty() {
-                rows.push(div().text_color(p.fg_dim).child("No matches").into_any_element());
+                rows.push(div().text_color(p.fg_dim).child(ts!("projects-no-matches")).into_any_element());
             }
             for (path, group) in hits {
                 self.repo_entry(&mut rows, &path, group.as_deref(), 0, &names, window, cx);
@@ -184,18 +184,18 @@ impl Render for ProjectsView {
                     let model = model.clone();
                     move |menu, _, _| {
                         menu.item(
-                            PopupMenuItem::new("Rename…")
+                            PopupMenuItem::new(ts!("projects-rename"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::Pencil))
                                 .on_click(send(&model, Action::ShowRenameGroup(name.clone()))),
                         )
                         .item(
-                            PopupMenuItem::new("Delete group")
+                            PopupMenuItem::new(ts!("projects-delete-group"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::Trash))
                                 .on_click(send(&model, Action::DeleteGroup(name.clone()))),
                         )
                         .separator()
                         .item(
-                            PopupMenuItem::new("New group…")
+                            PopupMenuItem::new(ts!("projects-new-group"))
                                 .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
                                 .on_click(send(&model, Action::ShowNewGroup(None))),
                         )
@@ -208,7 +208,7 @@ impl Render for ProjectsView {
                             div()
                                 .pl(px(INDENT + 30.))
                                 .text_color(p.fg_dim)
-                                .child("Drag repositories here")
+                                .child(ts!("projects-drag-repositories-here"))
                                 .into_any_element(),
                         );
                     }
@@ -225,17 +225,18 @@ impl Render for ProjectsView {
             }
         }
 
-        let add = Trigger(look::icon_button("add-repo", Glyph::Plus, "Add a repository or a group", true, &p))
-            .dropdown_menu({
-                let model = model.clone();
-                move |menu, _, _| {
-                    open_items(menu, &model).separator().item(
-                        PopupMenuItem::new("New group…")
-                            .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
-                            .on_click(send(&model, Action::ShowNewGroup(None))),
-                    )
-                }
-            });
+        let add =
+            Trigger(look::icon_button("add-repo", Glyph::Plus, ts!("projects-add-a-repository-or-a-group"), true, &p))
+                .dropdown_menu({
+                    let model = model.clone();
+                    move |menu, _, _| {
+                        open_items(menu, &model).separator().item(
+                            PopupMenuItem::new(ts!("projects-new-group"))
+                                .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
+                                .on_click(send(&model, Action::ShowNewGroup(None))),
+                        )
+                    }
+                });
         div()
             .id("projects")
             .debug_selector(|| "repo-list".into())
@@ -249,7 +250,7 @@ impl Render for ProjectsView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(title("Repositories"))
+                    .child(title(ts!("projects-repositories")))
                     .child(add),
             )
             .child(separator(&p))
@@ -264,7 +265,9 @@ impl Render for ProjectsView {
                     .overflow_y_scrollbar()
                     .when(empty, |d| {
                         d.child(
-                            div().text_color(p.fg_dim).child(crate::keymap::shown("No repositories yet. Use + or ⌘O.")),
+                            div()
+                                .text_color(p.fg_dim)
+                                .child(crate::keymap::shown(ts!("projects-no-repositories-yet-use-or-o"))),
                         )
                     })
                     .children(rows)
@@ -453,12 +456,12 @@ pub fn reveal_items(menu: PopupMenu, model: &Entity<Model>, path: &Path) -> Popu
             .on_click(send(model, Action::Reveal(path.to_owned()))),
     )
     .item(
-        PopupMenuItem::new("Open in External Terminal")
+        PopupMenuItem::new(ts!("cmd-open-in-external-terminal"))
             .icon(crate::components::menu_icon(crate::components::IconName::SquareTerminal))
             .on_click(send(model, Action::OpenInTerminal(path.to_owned()))),
     )
     .item(
-        PopupMenuItem::new("Copy path")
+        PopupMenuItem::new(ts!("projects-copy-path"))
             .icon(crate::components::menu_icon(crate::components::IconName::Copy))
             .on_click(send(model, Action::Copy(path.display().to_string()))),
     )
@@ -477,7 +480,7 @@ fn repo_menu(
 ) -> PopupMenu {
     let menu = if openable {
         menu.item(
-            PopupMenuItem::new("Open as Project")
+            PopupMenuItem::new(ts!("projects-open-as-project"))
                 .icon(crate::components::menu_icon(crate::components::IconName::File))
                 .on_click(send(model, Action::OpenRepo(path.to_owned()))),
         )
@@ -489,7 +492,7 @@ fn repo_menu(
         .separator()
         .submenu_with_icon(
             Some(crate::components::menu_icon(crate::components::IconName::FolderInput)),
-            "Move to group",
+            ts!("projects-move-to-group"),
             window,
             cx,
             move |mut menu, _, _| {
@@ -502,7 +505,7 @@ fn repo_menu(
                 }
                 if group2.is_some() {
                     menu = menu.item(
-                        PopupMenuItem::new("No group")
+                        PopupMenuItem::new(ts!("projects-no-group"))
                             .icon(crate::components::menu_icon(crate::components::IconName::FolderMinus))
                             .on_click(send(&m2, Action::MoveToGroup(path2.clone(), None))),
                     );
@@ -511,7 +514,7 @@ fn repo_menu(
                     menu = menu.separator();
                 }
                 menu.item(
-                    PopupMenuItem::new("New group…")
+                    PopupMenuItem::new(ts!("projects-new-group"))
                         .icon(crate::components::menu_icon(crate::components::IconName::FolderPlus))
                         .on_click(send(&m2, Action::ShowNewGroup(Some(path2.clone())))),
                 )
@@ -519,7 +522,7 @@ fn repo_menu(
         )
         .separator()
         .item(
-            PopupMenuItem::new("Remove from list")
+            PopupMenuItem::new(ts!("projects-remove-from-list"))
                 .icon(crate::components::menu_icon(crate::components::IconName::X))
                 .on_click(send(model, Action::RemoveRepo(path.to_owned()))),
         )

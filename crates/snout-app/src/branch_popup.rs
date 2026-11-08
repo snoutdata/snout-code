@@ -35,7 +35,7 @@ impl Focusable for BranchPopup {
 
 impl BranchPopup {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches"));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("branch-search-branches")));
         cx.subscribe(&input, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 cx.notify();
@@ -121,15 +121,15 @@ impl Render for BranchPopup {
                 .on_click(cx.listener(move |this, _, _, cx| this.run(action.clone(), cx)))
                 .into_any_element()
         };
-        rows.push(action_row("branch-new", Icon::Plus, "New Branch…", Action::ShowNewBranch(None), cx));
+        rows.push(action_row("branch-new", Icon::Plus, ts!("cmd-new-branch"), Action::ShowNewBranch(None), cx));
         if idle {
-            rows.push(action_row("branch-fetch", Icon::Fetch, "Fetch", Action::Fetch, cx));
-            rows.push(action_row("branch-pull", Icon::Pull, "Pull", Action::Pull(PullMode::Default), cx));
-            let push = if ahead > 0 { format!("Push ({ahead})") } else { "Push".to_owned() };
+            rows.push(action_row("branch-fetch", Icon::Fetch, ts!("cmd-fetch"), Action::Fetch, cx));
+            rows.push(action_row("branch-pull", Icon::Pull, ts!("cmd-pull"), Action::Pull(PullMode::Default), cx));
+            let push = if ahead > 0 { t!("git-push", n = ahead.to_string()) } else { ts!("cmd-push").to_owned() };
             rows.push(action_row("branch-push", Icon::Push, &push, Action::Push, cx));
         }
         if !local.is_empty() {
-            rows.push(heading("Local", cx));
+            rows.push(heading(ts!("branch-local"), cx));
         }
         for (i, (name, head)) in local.into_iter().enumerate() {
             let target = CheckoutTarget::Branch(name.clone());
@@ -144,7 +144,7 @@ impl Render for BranchPopup {
             );
         }
         if !remote.is_empty() {
-            rows.push(heading("Remote", cx));
+            rows.push(heading(ts!("branch-remote"), cx));
         }
         for (i, name) in remote.into_iter().enumerate() {
             let target = CheckoutTarget::RemoteBranch(name.clone());

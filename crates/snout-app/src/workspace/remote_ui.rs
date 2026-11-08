@@ -179,7 +179,8 @@ impl Workspace {
                     let _ = ws.update(cx, |this, cx| match result {
                         Ok(host) => this.open_remote(name, host, path, window, cx),
                         Err(why) => this.model.update(cx, |m, cx| {
-                            m.message = format!("Could not connect to {name}: {why}");
+                            m.message =
+                                t!("remote-could-not-connect-to", name = name.to_string(), why = why.to_string());
                             cx.notify();
                         }),
                     });
@@ -199,7 +200,8 @@ impl Workspace {
                     let _ = ws.update(cx, |this, cx| match result {
                         Ok(host) => this.pick_remote(Purpose::Connect(name, host), window, cx),
                         Err(why) => this.model.update(cx, |m, cx| {
-                            m.message = format!("Could not connect to {name}: {why}");
+                            m.message =
+                                t!("remote-could-not-connect-to", name = name.to_string(), why = why.to_string());
                             cx.notify();
                         }),
                     });

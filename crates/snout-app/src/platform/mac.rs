@@ -12,7 +12,9 @@ pub fn reveal() -> String {
 }
 
 /// The machine the app runs on, as messages name it.
-pub const THIS_MACHINE: &str = "this Mac";
+pub fn this_machine() -> &'static str {
+    ts!("machine-mac")
+}
 
 /// The window keeps macOS's own decorations (the app draws in its title bar).
 pub fn window_decorations() -> Option<gpui::WindowDecorations> {

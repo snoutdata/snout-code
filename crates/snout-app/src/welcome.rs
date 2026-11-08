@@ -50,7 +50,7 @@ impl WelcomePanel {
             cx.notify()
         })
         .detach();
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search recent projects"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("welcome-search-recent-projects")));
         cx.subscribe(&search, |_, _, e: &InputEvent, cx| {
             if matches!(e, InputEvent::Change) {
                 cx.notify();
@@ -73,7 +73,7 @@ impl WelcomePanel {
     }
 }
 
-crate::panels::panel!(WelcomePanel, "Welcome", |_, _| "Welcome".into(), true);
+crate::panels::panel!(WelcomePanel, "Welcome", |_, _| ts!("welcome-welcome").into(), true);
 
 /// The branch checked out in the repository holding `dir` on `host`, read from its `HEAD`.
 pub fn branch_of(host: &dyn snout_host::Host, dir: &Path) -> Option<String> {
@@ -97,15 +97,15 @@ pub fn branch_of(host: &dyn snout_host::Host, dir: &Path) -> Option<String> {
 /// "just now", "5 minutes ago", "yesterday", "3 weeks ago".
 pub fn ago(secs: u64, now: u64) -> String {
     let d = now.saturating_sub(secs);
-    let plural = |n: u64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
+    let per = |unit: u64| d / unit;
     match d {
-        0..60 => "just now".into(),
-        60..3600 => plural(d / 60, "minute"),
-        3600..86_400 => plural(d / 3600, "hour"),
-        86_400..172_800 => "yesterday".into(),
-        172_800..1_209_600 => plural(d / 86_400, "day"),
-        1_209_600..5_184_000 => plural(d / 604_800, "week"),
-        _ => plural(d / 2_592_000, "month"),
+        0..60 => ts!("welcome-just-now").into(),
+        60..3600 => t!("welcome-minutes-ago", count = per(60)),
+        3600..86_400 => t!("welcome-hours-ago", count = per(3600)),
+        86_400..172_800 => ts!("welcome-yesterday").into(),
+        172_800..1_209_600 => t!("welcome-days-ago", count = per(86_400)),
+        1_209_600..5_184_000 => t!("welcome-weeks-ago", count = per(604_800)),
+        _ => t!("welcome-months-ago", count = per(2_592_000)),
     }
 }
 
@@ -128,16 +128,26 @@ impl WelcomePanel {
         let keys =
             |a: &dyn gpui::Action| window.bindings_for_action(a).last().map(|b| crate::keymap::binding_label(b, cx));
         let ways: [(&'static str, IconName, &'static str, Box<dyn gpui::Action>); 5] = [
-            ("empty-go-to-file", IconName::FileSearch, "Go to File", Box::new(crate::menus::GoToFile)),
-            ("empty-recent-files", IconName::FileClock, "Recent Files", Box::new(crate::menus::RecentFiles)),
+            ("empty-go-to-file", IconName::FileSearch, ts!("welcome-go-to-file"), Box::new(crate::menus::GoToFile)),
+            (
+                "empty-recent-files",
+                IconName::FileClock,
+                ts!("welcome-recent-files"),
+                Box::new(crate::menus::RecentFiles),
+            ),
             (
                 "empty-search-everywhere",
                 IconName::Search,
-                "Search Everywhere",
+                ts!("welcome-search-everywhere"),
                 Box::new(crate::menus::SearchEverywhere),
             ),
-            ("empty-find-in-files", IconName::TextSearch, "Find in Files", Box::new(crate::menus::FindInFiles)),
-            ("empty-new-file", IconName::FilePlus, "New File", Box::new(crate::menus::NewFile)),
+            (
+                "empty-find-in-files",
+                IconName::TextSearch,
+                ts!("welcome-find-in-files"),
+                Box::new(crate::menus::FindInFiles),
+            ),
+            ("empty-new-file", IconName::FilePlus, ts!("welcome-new-file"), Box::new(crate::menus::NewFile)),
         ];
         let rows = ways.into_iter().map(|(id, ico, label, action)| {
             let k = keys(action.as_ref()).unwrap_or_default();
@@ -227,9 +237,19 @@ impl WelcomePanel {
             .py(px(24.))
             .gap(px(4.))
             .child(crate::art::drawing_on(snout_core::art::spots::editor(), 176., 176. / 1.5, p.panel))
-            .child(div().mt(px(4.)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("No files open"))
             .child(
-                div().mb(px(10.)).text_size(px(12.5)).text_color(p.fg_dim).child("Open one from the Project tree, or:"),
+                div()
+                    .mt(px(4.))
+                    .text_size(px(15.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(ts!("welcome-no-files-open")),
+            )
+            .child(
+                div()
+                    .mb(px(10.))
+                    .text_size(px(12.5))
+                    .text_color(p.fg_dim)
+                    .child(ts!("welcome-open-one-from-the-project-tree-or")),
             )
             .children(rows)
             .when(!files.is_empty(), |d| {
@@ -242,7 +262,7 @@ impl WelcomePanel {
                         .text_size(px(11.5))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(p.fg_dim)
-                        .child("Recent files"),
+                        .child(ts!("welcome-recent-files-2")),
                 )
                 .children(files)
             })
@@ -343,7 +363,7 @@ impl Render for WelcomePanel {
                         .pl(px(62.))
                         .text_size(px(12.5))
                         .text_color(p.fg_dim)
-                        .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                        .child(t!("dialogs-version", cargo_pkg_version = (env!("CARGO_PKG_VERSION")).to_string())),
                 ),
             );
 
@@ -354,25 +374,25 @@ impl Render for WelcomePanel {
             .child(action(
                 "welcome-open",
                 Icon::Folder,
-                "Open Project…",
+                ts!("cmd-open-project"),
                 match crate::remote::connection(cx) {
-                    Some((host, _)) => format!("A folder on {host}"),
-                    None => format!("A folder on {}", crate::platform::THIS_MACHINE),
+                    Some((host, _)) => t!("welcome-a-folder-on", host = host.to_string()),
+                    None => t!("welcome-folder-on-machine", machine = crate::platform::this_machine()),
                 },
                 Some(Action::PickFolder),
             ))
             .child(action(
                 "welcome-clone",
                 Icon::Fetch,
-                "Clone Repository…",
-                "From a Git URL".into(),
+                ts!("welcome-clone-repository"),
+                ts!("welcome-from-a-git-url").into(),
                 Some(Action::ShowClone),
             ))
             .child(action(
                 "welcome-new",
                 Icon::Plus,
-                "New Project…",
-                "Java or Spring Boot app".into(),
+                ts!("cmd-new-project"),
+                ts!("welcome-java-or-spring-boot-app").into(),
                 Some(Action::ShowNewProject),
             ));
 
@@ -455,9 +475,9 @@ impl Render for WelcomePanel {
 
         let list = if rows.is_empty() {
             let text = if any_recent {
-                "No recent project matches."
+                ts!("welcome-no-recent-project-matches")
             } else {
-                "No recent projects yet. Open a folder to start."
+                ts!("welcome-no-recent-projects-yet-open-a-folder-to")
             };
             div().py(px(18.)).text_color(p.fg_dim).text_center().child(text).into_any_element()
         } else {
@@ -523,7 +543,7 @@ impl Render for WelcomePanel {
                                                     .flex_none()
                                                     .whitespace_nowrap()
                                                     .font_weight(FontWeight::MEDIUM)
-                                                    .child("Recent Projects"),
+                                                    .child(ts!("welcome-recent-projects")),
                                             )
                                             .child(div().flex_1())
                                             .child(

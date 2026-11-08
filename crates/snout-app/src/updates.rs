@@ -373,7 +373,12 @@ pub fn skip_install(cx: &mut App) {
 /// A background task for the status bar, while an update is on its way.
 pub fn task(cx: &App) -> Option<crate::background::BgTask> {
     let (stage, percent) = read_updater(cx)?.status.as_ref()?.task()?;
-    Some(crate::background::BgTask { title: "SnoutCode update".into(), stage, percent, ..Default::default() })
+    Some(crate::background::BgTask {
+        title: ts!("updates-snoutcode-update").into(),
+        stage,
+        percent,
+        ..Default::default()
+    })
 }
 
 /// The page of a version's release notes.
@@ -509,7 +514,9 @@ impl Render for UpdateToast {
                 };
                 (icon_of(s), s.text(), tip)
             }
-            (None, Some(version)) => (IconName::CircleCheck, format!("Updated to v{version}"), None),
+            (None, Some(version)) => {
+                (IconName::CircleCheck, t!("updates-updated-to-v", version = version.to_string()), None)
+            }
             (None, None) => return div().into_any_element(),
         };
         let updater = self.updater.clone();
@@ -521,14 +528,14 @@ impl Render for UpdateToast {
             Button::new("update-notes", IconName::BookOpen)
                 .compact()
                 .ghost()
-                .label("Release Notes")
+                .label(ts!("cmd-release-notes"))
                 .debug_selector("update-notes")
                 .on_click(move |_, _, cx| cx.open_url(&notes_url(&version)))
         };
         let close = Button::new("update-close", IconName::X)
             .compact()
             .ghost()
-            .tooltip("Dismiss")
+            .tooltip(ts!("updates-dismiss"))
             .debug_selector("update-close")
             .on_click(dismiss.clone());
         let actions = match &status {
@@ -538,7 +545,7 @@ impl Render for UpdateToast {
                     Button::new("update-later", IconName::X)
                         .compact()
                         .ghost()
-                        .label("Later")
+                        .label(ts!("updates-later"))
                         .debug_selector("update-later")
                         .on_click(dismiss),
                 )
@@ -546,7 +553,7 @@ impl Render for UpdateToast {
                     Button::new("update-restart", IconName::RotateCw)
                         .compact()
                         .primary()
-                        .label("Restart")
+                        .label(ts!("status-restart"))
                         .debug_selector("update-restart")
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(RestartToUpdate), cx)),
                 ),
@@ -558,7 +565,7 @@ impl Render for UpdateToast {
                         Button::new("update-download", IconName::Download)
                             .compact()
                             .primary()
-                            .label("Download")
+                            .label(ts!("updates-download"))
                             .debug_selector("update-download")
                             .on_click(|_, _, cx| cx.open_url(DOWNLOAD_URL)),
                     )
@@ -626,9 +633,11 @@ pub fn status_item(cx: &App) -> Option<gpui::AnyElement> {
             .cursor_pointer()
             .text_color(p.accent)
             .hover(move |s| s.bg(hover))
-            .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Restart to install the update").build(w, cx))
+            .tooltip(|w, cx| {
+                gpui_component::tooltip::Tooltip::new(ts!("updates-restart-to-install-the-update")).build(w, cx)
+            })
             .child(crate::components::icon(IconName::RotateCw, 12., p.accent))
-            .child("Restart to update")
+            .child(ts!("updates-restart-to-update"))
             .on_click(|_, window, cx| window.dispatch_action(Box::new(RestartToUpdate), cx))
             .into_any_element(),
     )

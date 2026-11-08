@@ -62,7 +62,11 @@ impl EditorStatus {
             let text = state.text();
             let chars = text.offset_to_char_index(range.end) - text.offset_to_char_index(range.start);
             let lines = text.offset_to_point(range.end).row - text.offset_to_point(range.start).row;
-            if lines > 0 { format!("{chars} chars, {} lines", lines + 1) } else { format!("{chars} selected") }
+            if lines > 0 {
+                t!("status-chars-lines", chars = chars.to_string(), lines = (lines + 1).to_string())
+            } else {
+                t!("status-selected", chars = chars.to_string())
+            }
         });
         Self {
             position: format!("{}:{}", pos.line + 1, pos.character + 1),
@@ -151,9 +155,10 @@ impl StatusBar {
         }
         let p = palette(cx);
         let hover_bg = p.button_hover;
-        let tip: SharedString = format!(
-            "SnoutCode's processes: {count} running, {} of memory. Click to show them.",
-            crate::processes::bytes(memory)
+        let tip: SharedString = t!(
+            "status-snoutcodes-processes-running-of-memory-click-to-show",
+            count = count.to_string(),
+            memory = (crate::processes::bytes(memory)).to_string()
         )
         .into();
         Some(
@@ -317,7 +322,7 @@ pub fn progress_bar(percent: Option<u32>, width: f32, p: &crate::theme::Palette)
 fn task_parts(parts: &[(String, String, Option<u32>)], p: &crate::theme::Palette) -> gpui::AnyElement {
     const SHOWN: usize = 12;
     let rows = parts.iter().take(SHOWN).enumerate().map(|(i, (name, stage, percent))| {
-        let ready = stage == "Ready";
+        let ready = stage == ts!("model-ready");
         div()
             .debug_selector(move || format!("task-part-{i}"))
             .flex()
@@ -340,7 +345,12 @@ fn task_parts(parts: &[(String, String, Option<u32>)], p: &crate::theme::Palette
         .gap(px(3.))
         .children(rows)
         .when(parts.len() > SHOWN, |d| {
-            d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(format!("and {} more", parts.len() - SHOWN)))
+            d.child(
+                div()
+                    .text_size(px(11.5))
+                    .text_color(p.fg_dim)
+                    .child(t!("status-and-more", count = (parts.len() - SHOWN).to_string())),
+            )
         })
         .into_any_element()
 }
@@ -427,10 +437,12 @@ impl StatusBar {
                                                     .child(
                                                         div()
                                                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                                                            .child("In the background"),
+                                                            .child(ts!("status-in-the-background")),
                                                     )
                                                     .child(
-                                                        div().text_color(p.fg_dim).child("The editor works meanwhile."),
+                                                        div()
+                                                            .text_color(p.fg_dim)
+                                                            .child(ts!("status-the-editor-works-meanwhile")),
                                                     ),
                                             ),
                                     )
@@ -501,7 +513,7 @@ fn remote_item(cx: &mut Context<StatusBar>) -> Option<gpui::AnyElement> {
                         .text_color(p.accent)
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover))
-                        .child("Reconnect")
+                        .child(ts!("status-reconnect"))
                         .on_click(|_, _, cx| crate::remote::reconnect(cx)),
                 )
             })
@@ -543,12 +555,13 @@ fn agent_item(cx: &gpui::App) -> Option<gpui::AnyElement> {
             .cursor_pointer()
             .hover(move |s| s.bg(hover_bg))
             .tooltip(|w, cx| {
-                gpui_component::tooltip::Tooltip::new("Changes the agents made that wait for your review").build(w, cx)
+                gpui_component::tooltip::Tooltip::new(ts!("status-changes-the-agents-made-that-wait-for-your"))
+                    .build(w, cx)
             })
             .child(crate::components::icon(icon, 12., color))
             .child(div().text_color(p.fg).child(what))
             .child(div().child("\u{00b7}"))
-            .child(div().text_color(color).font_weight(gpui::FontWeight::MEDIUM).child("Review"))
+            .child(div().text_color(color).font_weight(gpui::FontWeight::MEDIUM).child(ts!("status-review")))
             .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::claude_ide::ShowAgentChanges), cx))
             .into_any_element(),
     )
@@ -682,7 +695,7 @@ impl Render for StatusBar {
                             .text_color(p.accent)
                             .hover(move |s| s.bg(hover_bg))
                             .child(crate::components::icon(crate::components::IconName::RotateCw, 12., p.accent))
-                            .child("Restart")
+                            .child(ts!("status-restart"))
                             .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::RestartJava), cx)),
                     )
                 })
@@ -694,7 +707,7 @@ impl Render for StatusBar {
                         .id("status-lock")
                         .debug_selector(|| "status-lock".into())
                         .px(px(4.))
-                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Read only").build(w, cx))
+                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(ts!("status-read-only")).build(w, cx))
                         .child(icon(Icon::Lock, 13., p.fg_dim)),
                 )
             })
@@ -727,7 +740,7 @@ impl StatusBar {
                     .cursor_pointer()
                     .text_color(p.fg_dim)
                     .hover(move |s| s.bg(hover_bg))
-                    .child("Java support unavailable")
+                    .child(ts!("status-java-support-unavailable"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.java_note = !this.java_note;
                         cx.notify();
