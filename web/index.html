@@ -25,6 +25,34 @@
 				}
 			} catch (e) {}
 		</script>
+
+		<!-- The page is prerendered in English. For a visitor in another of the site's languages
+		     (a saved choice, else the browser's; the same rule as detectLocale() in src/i18n),
+		     hide it until React has switched it, so English never flashes. -->
+		<script>
+			try {
+				var supported = ['en', 'fr', 'es', 'pt']
+				var lang = null
+				try {
+					lang = localStorage.getItem('lang')
+				} catch (e) {}
+				if (supported.indexOf(lang) === -1) {
+					lang = 'en'
+					var tags = navigator.languages || [navigator.language]
+					for (var i = 0; i < tags.length; i++) {
+						var base = (tags[i] || '').toLowerCase().split('-')[0]
+						if (supported.indexOf(base) !== -1) {
+							lang = base
+							break
+						}
+					}
+				}
+				if (lang !== 'en') {
+					document.documentElement.lang = lang
+					document.documentElement.classList.add('i18n-wait')
+				}
+			} catch (e) {}
+		</script>
 	</head>
 	<body>
 		<div id="root"><!--app--></div>

@@ -27,7 +27,7 @@ export function Showcase({ title, body, points, link, shot, flip = false }: { ti
 				<h3>{title}</h3>
 				<p>{body}</p>
 				<ul className="check-list">
-					{points.map((p) => <li key={p}>{p}</li>)}
+					{points.map((p, i) => <li key={i}>{p}</li>)}
 				</ul>
 				{link && (
 					<a className="more-link" href={link.href}>

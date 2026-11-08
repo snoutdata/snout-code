@@ -212,6 +212,7 @@ code, pre {
 }
 .nav-links a {
 	position: relative;
+	white-space: nowrap;
 	font-size: 14px;
 	font-weight: 500;
 	color: var(--body);
@@ -271,6 +272,90 @@ code, pre {
 .icon-btn:hover {
 	border-color: var(--text);
 }
+/* The language switcher: the GitHub pill's look, with a list under it. */
+.lang-switcher {
+	position: relative;
+	display: inline-flex;
+	flex: none;
+}
+.lang-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 36px;
+	padding: 0 13px 0 11px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--panel);
+	color: var(--text);
+	font: inherit;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: border-color var(--dur-2);
+}
+.lang-trigger:hover,
+.lang-trigger[aria-expanded='true'] {
+	border-color: var(--text);
+}
+.lang-pop {
+	position: absolute;
+	top: calc(100% + 8px);
+	right: 0;
+	z-index: 40;
+	min-width: 168px;
+	padding: 6px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--panel);
+	box-shadow: var(--shadow);
+	transform-origin: top right;
+	animation: lang-in var(--dur-2) var(--ease-out-quart);
+}
+@keyframes lang-in { from { opacity: 0; scale: 0.97; } }
+.lang-option {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	width: 100%;
+	padding: 9px 10px;
+	border: 0;
+	border-radius: 7px;
+	background: none;
+	color: var(--text);
+	font: inherit;
+	font-size: 14px;
+	text-align: left;
+	cursor: pointer;
+}
+.lang-option:hover,
+.lang-option:focus-visible {
+	outline: none;
+	background: var(--panel-3);
+}
+.lang-option[aria-selected='true'] {
+	font-weight: 600;
+}
+.lang-check {
+	width: 15px;
+	height: 15px;
+	fill: none;
+	stroke: var(--accent-2);
+	stroke-width: 2.4;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+/* A visitor whose language is not English: the English prerender stays hidden until the page has
+   switched (index.html sets the class, the I18nProvider removes it). If the script never runs,
+   the page shows anyway after a moment. */
+.i18n-wait #root {
+	visibility: hidden;
+	animation: i18n-show 0s 1.5s forwards;
+}
+@keyframes i18n-show { to { visibility: visible; } }
+
 .theme-icon {
 	width: 18px;
 	height: 18px;
@@ -1636,8 +1721,17 @@ a.card:hover .card-art .ill {
 }
 
 /* ---------- responsive ---------- */
+/* The header fits its longest language (Spanish, about 1060px in full): the language switcher
+   drops its name first, then the GitHub pill its word, then the links go. */
+@media (max-width: 1100px) {
+	.lang-name { display: none; }
+	.lang-trigger { width: 36px; padding: 0; justify-content: center; }
+}
+
 @media (max-width: 980px) {
 	.nav-links { gap: 16px; }
+	.nav-github span { display: none; }
+	.nav-github { width: 36px; padding: 0; justify-content: center; }
 	.hero h1 { font-size: 48px; }
 	.section-head,
 	.section-head.flip {
@@ -1673,7 +1767,7 @@ a.card:hover .card-art .ill {
 	.ill.ill-perch { width: 180px; top: -88px; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
 	.nav-links { display: none; }
 	.nav { gap: 12px; }
 }
@@ -1681,8 +1775,6 @@ a.card:hover .card-art .ill {
 @media (max-width: 620px) {
 	:root { --sec-y: 52px; }
 	.nav { padding: 0 16px; }
-	.nav-github span { display: none; }
-	.nav-github { width: 36px; padding: 0; justify-content: center; }
 	.hero { padding: 44px 16px 0; }
 	.hero h1 { font-size: 36px; }
 	.hero-name { margin-bottom: 20px; }

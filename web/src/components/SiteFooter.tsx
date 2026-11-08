@@ -1,63 +1,65 @@
 import { Brand } from './Brand'
+import { useT, withSlots } from '../i18n'
 import { CONTRIBUTING_URL, DOCS_URL, GITHUB_URL, ISSUES_URL, LICENSE_URL, RELEASES_URL, SNOUTDATA_URL, docs } from '../site'
 
 const COLUMNS = [
 	{
-		title: 'Product',
+		key: 'product',
 		links: [
-			{ href: '/#features', label: 'Features' },
-			{ href: '/download', label: 'Download' },
-			{ href: RELEASES_URL, label: 'Releases' },
-			{ href: docs('keyboard-shortcuts.md'), label: 'Keyboard shortcuts' }
+			{ href: '/#features', key: 'features' },
+			{ href: '/download', key: 'download' },
+			{ href: RELEASES_URL, key: 'releases' },
+			{ href: docs('keyboard-shortcuts.md'), key: 'shortcuts' }
 		]
 	},
 	{
-		title: 'Docs',
+		key: 'docs',
 		links: [
-			{ href: DOCS_URL, label: 'User guide' },
-			{ href: docs('getting-started.md'), label: 'Getting started' },
-			{ href: docs('playwright.md'), label: 'Playwright projects' },
-			{ href: docs('node.md'), label: 'Node projects' },
-			{ href: docs('agents.md'), label: 'Coding agents' },
-			{ href: docs('remote-ssh.md'), label: 'Remote SSH' }
+			{ href: DOCS_URL, key: 'guide' },
+			{ href: docs('getting-started.md'), key: 'gettingStarted' },
+			{ href: docs('playwright.md'), key: 'playwright' },
+			{ href: docs('node.md'), key: 'node' },
+			{ href: docs('agents.md'), key: 'agents' },
+			{ href: docs('remote-ssh.md'), key: 'remote' }
 		]
 	},
 	{
-		title: 'Open source',
+		key: 'openSource',
 		links: [
-			{ href: GITHUB_URL, label: 'GitHub' },
-			{ href: ISSUES_URL, label: 'Issues' },
-			{ href: CONTRIBUTING_URL, label: 'Contributing' },
-			{ href: LICENSE_URL, label: 'MIT license' }
+			{ href: GITHUB_URL, key: 'github' },
+			{ href: ISSUES_URL, key: 'issues' },
+			{ href: CONTRIBUTING_URL, key: 'contributing' },
+			{ href: LICENSE_URL, key: 'license' }
 		]
 	}
 ]
 
 export function SiteFooter() {
+	const t = useT()
 	return (
 		<footer className="site-footer">
 			<div className="footer-inner">
 				<div className="footer-brand">
 					<Brand />
-					<p>The native IDE for Java, Gradle and Spring. Free and open source.</p>
+					<p>{t('footer.tagline')}</p>
 					<p className="footer-family">
-						A <a href={SNOUTDATA_URL}>SnoutData</a> project.
+						{withSlots(t('footer.family'), { link: <a href={SNOUTDATA_URL}>SnoutData</a> })}
 					</p>
 				</div>
 				{COLUMNS.map((c) => (
-					<div className="footer-col" key={c.title}>
-						<h3>{c.title}</h3>
+					<div className="footer-col" key={c.key}>
+						<h3>{t(`footer.${c.key}.title`)}</h3>
 						<ul>
 							{c.links.map((l) => (
-								<li key={l.label}><a href={l.href}>{l.label}</a></li>
+								<li key={l.key}><a href={l.href}>{t(`footer.${c.key}.${l.key}`)}</a></li>
 							))}
 						</ul>
 					</div>
 				))}
 			</div>
 			<div className="footer-bottom">
-				<span>Copyright © 2026 SNOUTDATA INC. Released under the MIT license.</span>
-				<span>No cookies, no tracking on this site.</span>
+				<span>{t('footer.copyright')}</span>
+				<span>{t('footer.privacy')}</span>
 			</div>
 		</footer>
 	)

@@ -1,0 +1,465 @@
+{
+	"lang": {
+		"label": "Idioma"
+	},
+	"common": {
+		"downloadSnoutCode": "Baixar o SnoutCode",
+		"gettingStarted": "Primeiros passos"
+	},
+	"nav": {
+		"main": "Navegação principal",
+		"home": "Início do SnoutCode",
+		"github": "SnoutCode no GitHub",
+		"features": "Recursos",
+		"playwright": "Playwright",
+		"node": "Node",
+		"agents": "Agentes",
+		"openSource": "Código aberto",
+		"docs": "Docs",
+		"download": "Baixar"
+	},
+	"theme": {
+		"toLight": "Mudar para o tema claro",
+		"toDark": "Mudar para o tema escuro"
+	},
+	"shot": {
+		"enlarge": "Ampliar: {alt}",
+		"close": "Fechar"
+	},
+	"footer": {
+		"tagline": "A IDE nativa para Java, Gradle e Spring. Gratuita e de código aberto.",
+		"family": "Um projeto da {link}.",
+		"copyright": "Copyright © 2026 SNOUTDATA INC. Publicado sob a licença MIT.",
+		"privacy": "Sem cookies e sem rastreamento neste site.",
+		"product": {
+			"title": "Produto",
+			"features": "Recursos",
+			"download": "Baixar",
+			"releases": "Versões",
+			"shortcuts": "Atalhos de teclado"
+		},
+		"docs": {
+			"title": "Docs",
+			"guide": "Guia do usuário",
+			"gettingStarted": "Primeiros passos",
+			"playwright": "Projetos Playwright",
+			"node": "Projetos Node",
+			"agents": "Agentes de código",
+			"remote": "Remote SSH"
+		},
+		"openSource": {
+			"title": "Código aberto",
+			"github": "GitHub",
+			"issues": "Issues",
+			"contributing": "Como contribuir",
+			"license": "Licença MIT"
+		}
+	},
+	"home": {
+		"hero": {
+			"eyebrow": "Gratuita e de código aberto",
+			"title": "A IDE nativa para Java, Gradle e Spring.",
+			"lede": "Escrita em Rust, com seu próprio motor Java, e TypeScript para projetos Node e testes Playwright. O Git vem integrado, Claude Code, Codex, opencode e Amp editam ao vivo no seu editor e podem comandar o app inteiro, e a janela pode ficar na sua mesa enquanto o projeto vive numa máquina Linux, via SSH.",
+			"github": "Ver no GitHub",
+			"proof": "macOS, Linux e Windows. Licença MIT. Sem conta, sem preço.",
+			"shotAlt": "O SnoutCode numa loja virtual em Spring Boot: a visão Project, o editor e a janela Spring listando os beans"
+		},
+		"madeFor": "Feita para",
+		"features": {
+			"eyebrow": "A camada da linguagem",
+			"title": "Uma IDE que conhece o seu build",
+			"sub": "O SnoutCode lê um build Gradle ou Maven do jeito que o build se enxerga, com módulos, source sets, dependências e tudo mais, e entrega ao editor tudo o que vem disso."
+		},
+		"playwright": {
+			"eyebrow": "Playwright para QA",
+			"title": "Testes de ponta a ponta, como um projeto próprio",
+			"sub": "Um repositório de testes Playwright abre como um tipo de projeto próprio e testa a aplicação de fora, pela URL. Ele ganha edição TypeScript e o Node, os pacotes e os navegadores de que precisa, e nunca inicia o Java.",
+			"trio": {
+				"ready": {
+					"title": "Pronto para rodar",
+					"body": "Uma barra instala os pacotes com npm, pnpm, Yarn ou Bun, conforme o lockfile, e os navegadores que a versão do Playwright usa. A saída aparece na janela Build."
+				},
+				"environments": {
+					"title": "Ambientes",
+					"body": "Sua máquina, staging, um review app: cada ambiente define o BASE_URL, suas variáveis e um arquivo .env. Eles ficam fora do repositório, então cada tester tem os seus."
+				},
+				"history": {
+					"title": "Histórico",
+					"body": "Toda execução fica guardada, as 200 mais recentes de cada projeto, com o ambiente, a branch e o commit, e os testes que quebraram desde a execução anterior."
+				}
+			}
+		},
+		"node": {
+			"eyebrow": "Node e TypeScript",
+			"title": "TypeScript, no Node que o seu projeto pede",
+			"sub": "Um projeto com package.json abre como projeto Node, sem Java. Os scripts rodam e são depurados como os de um projeto Java, e a edição vem do TypeScript do próprio projeto.",
+			"guide": "TypeScript e JavaScript no guia do usuário",
+			"trio": {
+				"editing": {
+					"title": "Edição TypeScript",
+					"body": "Autocompletar com imports automáticos, hover, ir para a definição, encontrar referências, renomear, quick fixes e problemas, a partir do TypeScript que o seu projeto instala."
+				},
+				"version": {
+					"title": "O Node certo, encontrado",
+					"body": "A partir de .nvmrc, .node-version, volta ou engines, entre os Nodes do nvm, Volta, fnm, asdf, mise e Homebrew. Se nenhum servir, ele baixa um e o verifica."
+				},
+				"beside": {
+					"title": "Ao lado de um build Java",
+					"body": "Uma aplicação Spring Boot com o seu front end, ou com uma pasta e2e de testes Playwright, ganha cada servidor de linguagem para os próprios arquivos."
+				}
+			}
+		},
+		"agents": {
+			"eyebrow": "Agentes de código",
+			"title": "Veja o seu agente digitar",
+			"sub": "Claude Code, Codex, opencode, Amp ou o seu próprio agente roda num console acoplado. Cada edição é digitada ao vivo, com o cursor e a cor do agente, e cada linha que ele escreveu continua marcada.",
+			"rosterLabel": "Os agentes que o SnoutCode acompanha",
+			"roster": {
+				"claude": { "how": "Conecta-se como a IDE dele, e os hooks dele avisam cada edição." },
+				"codex": { "how": "Hooks da sessão avisam cada edição." },
+				"opencode": { "how": "Um plugin carregado para a sessão avisa cada edição." },
+				"amp": { "how": "Um plugin do SnoutCode avisa cada edição, inclusive o que o shell escreve." },
+				"custom": { "name": "O seu", "how": "Qualquer agente de linha de comando: o que muda durante a vez dele é atribuído a ele." }
+			},
+			"trio": {
+				"setup": {
+					"title": "Pronto para a sessão",
+					"body": "Escolha um agente no console e ele inicia com o que precisa para avisar as edições; se ainda não estiver instalado, instala dali mesmo com um clique. O Codex pede uma única vez que você confie nos hooks dele. Suas configurações do Codex e do opencode nunca são alteradas."
+				},
+				"ask": {
+					"title": "Peça direto do editor",
+					"body": "Envie a seleção, ou peça ao agente para corrigir um problema, a partir do próprio código. O arquivo e as linhas chegam no prompt dele."
+				},
+				"drives": {
+					"title": "Ele comanda a janela também",
+					"body": "Além das edições, o agente pode abrir o projeto que criou, rodar os testes, ler o que falhou e mostrar para você, pela própria API do SnoutCode. {link}.",
+					"link": "Veja como"
+				}
+			}
+		},
+		"git": {
+			"eyebrow": "Integrado",
+			"title": "Git, bem onde você trabalha",
+			"sub": "Alterações, diffs, commits, branches e histórico, numa visão Git própria. Ele usa o git que você já tem, então hooks, credenciais e configurações se comportam como num terminal."
+		},
+		"remote": {
+			"eyebrow": "Remote SSH",
+			"title": "A sua janela, a máquina deles",
+			"sub": "Deixe a janela no seu Mac enquanto o projeto, o Git, o motor Java, os builds, as execuções, os terminais e o seu agente de código ficam numa máquina Linux que você acessa por ssh."
+		},
+		"showcase": {
+			"java": {
+				"title": "Java, de ponta a ponta",
+				"body": "Autocompletar, navegação e refatoração pelo motor Java do SnoutCode, sobre o classpath que o seu build realmente tem.",
+				"points": [
+					"Autocompletar que adiciona o import, e ir para a definição dentro das bibliotecas",
+					"Encontrar referências, renomear, quick fixes e organizar imports",
+					"Extrair método, variável e constante",
+					"Hierarquia de chamadas e de tipos, dicas de parâmetros, problemas enquanto você digita"
+				],
+				"link": "Java no guia do usuário",
+				"alt": "Autocompletar Java no SnoutCode, sugerindo membros com seus tipos"
+			},
+			"gradle": {
+				"title": "Gradle e Maven, como eles são",
+				"body": "Abra uma pasta com um build, ou vários lado a lado. A visão Project mostra os módulos como o build os vê.",
+				"points": [
+					"Builds multiprojeto e compostos, buildSrc, o DSL Kotlin, version catalogs",
+					"Reactors do Maven, POMs pai, imports de BOM e profiles, sem instalar o Maven",
+					"Um JDK adequado para cada build, oferecido para download quando não há nenhum instalado",
+					"Gradle 7.0 a 9.x, Maven 3.6 a 3.9, JDK 17, 21 e 25"
+				],
+				"link": "Gradle no guia do usuário",
+				"alt": "A janela Gradle listando os projetos de um build e suas tarefas"
+			},
+			"spring": {
+				"title": "Spring, do jeito que o Spring vê",
+				"body": "Os beans, onde cada um é injetado, e os endpoints de uma aplicação Spring Boot, tudo numa só janela.",
+				"points": [
+					"Cada bean, e um ícone na margem em cada lugar onde ele é injetado",
+					"Endpoints por caminho e método, a um clique do handler",
+					"Profiles ativos, avaliados pelo motor",
+					"Autocompletar e verificações em application.properties e application.yml"
+				],
+				"link": "Spring no guia do usuário",
+				"alt": "O SnoutCode mostrando onde um bean Spring é injetado"
+			},
+			"run": {
+				"title": "Rode, teste e depure",
+				"body": "Configurações de execução e ícones de rodar na margem, testes numa árvore com os resultados, e um depurador que mostra os valores no próprio código.",
+				"points": [
+					"Breakpoints, passo a passo, variáveis e watches",
+					"Avalie qualquer expressão enquanto está parado",
+					"Rode de novo os testes que falharam, pela margem ou pela janela Tests",
+					"O mesmo depurador para Java, TypeScript e specs Playwright"
+				],
+				"link": "Rodar e depurar no guia do usuário",
+				"alt": "O depurador parado num breakpoint com os valores no código"
+			},
+			"pwWrite": {
+				"title": "Escreva testes usando o app",
+				"body": "Aja no navegador e os passos são escritos na sua spec enquanto você avança, bem onde está o cursor.",
+				"points": [
+					"Record at Cursor: no teste onde está o cursor, como teste novo ou como spec inteira",
+					"Pick Locator: cada elemento clicado coloca o locator dele no cursor",
+					"Endereços de página relativos ao app, para que um teste rode em qualquer ambiente",
+					"O UI Mode e o Inspector do Playwright a um clique"
+				],
+				"link": "Escrever testes no guia do usuário",
+				"alt": "Record at Cursor escrevendo os passos do gravador num teste Playwright"
+			},
+			"pwRun": {
+				"title": "Acompanhe cada execução, teste a teste",
+				"body": "Rode tudo, um projeto, um arquivo ou o teste onde está o cursor, e veja a janela Tests se preencher durante a execução.",
+				"points": [
+					"Progresso, tempo restante, o passo de cada worker, uma grade de testes por navegador",
+					"Os dez últimos resultados de cada teste e a taxa de instabilidade dele",
+					"O erro de uma falha na linha dele, comparações de screenshots com Accept, passos e um filme do trace",
+					"Rodar de novo os que falharam, pela janela Tests, pela barra de título ou pela margem"
+				],
+				"link": "Rodar testes no guia do usuário",
+				"alt": "A janela Tests acompanhando uma execução do Playwright em três navegadores"
+			},
+			"pwDebug": {
+				"title": "Depure um teste onde ele para",
+				"body": "Coloque um breakpoint numa spec, num page object ou num helper. O teste para ali, com o navegador à vista.",
+				"points": [
+					"Breakpoints em TypeScript ou JavaScript",
+					"A pilha do worker, variáveis e watches na janela Debug",
+					"Passo a passo como no Java, com as mesmas teclas",
+					"O depurador é baixado na primeira vez, nada para instalar"
+				],
+				"link": "Depurar testes no guia do usuário",
+				"alt": "Um teste Playwright parado num breakpoint na spec, com a pilha e as variáveis"
+			},
+			"nodeScripts": {
+				"title": "Cada script, a um clique",
+				"body": "Os scripts do package.json são configurações de execução, com um ícone de rodar ao lado de cada um.",
+				"points": [
+					"Workspaces e pastas com o próprio package.json, os scripts de cada pacote nomeados pela pasta",
+					"npm, pnpm, Yarn ou Bun, conforme o lockfile",
+					"Qualquer arquivo TypeScript roda como Current File, via tsx, ts-node ou o type stripping do próprio Node",
+					"A depuração acompanha cada processo Node que uma execução inicia, e se conecta a um Node iniciado com --inspect"
+				],
+				"link": "Projetos Node no guia do usuário",
+				"alt": "Um package.json com um ícone de rodar ao lado de cada script, e npm run dev na janela Run"
+			},
+			"nodeTests": {
+				"title": "Vitest e Jest, ao vivo",
+				"body": "Testes unitários ganham ícones de rodar em cada teste, it e describe, e as execuções preenchem a janela Tests enquanto acontecem.",
+				"points": [
+					"Cada teste aprovado, falho ou ignorado, o tempo dele e a mensagem de uma falha na linha dela",
+					"Rerun failed, Run this test e Debug this test",
+					"Um seletor entre os pacotes que têm testes",
+					"A depuração para no teste e no código que ele chama"
+				],
+				"link": "Vitest e Jest no guia do usuário",
+				"alt": "Uma execução do Vitest na janela Tests, um teste falho selecionado, o arquivo de teste acima com ícones de rodar"
+			},
+			"agentsEdit": {
+				"title": "Cada edição, assim que chega",
+				"body": "Claude Code, Codex, opencode e Amp avisam o SnoutCode antes e depois de cada edição, para que o editor a reproduza com o cursor e a cor do agente.",
+				"points": [
+					"O cursor e a etiqueta com o nome avançam enquanto o texto se digita sozinho",
+					"Siga o agente de arquivo em arquivo, ou fique onde está",
+					"As linhas dele mantêm a marca na margem e em Annotate with Agents",
+					"Revert devolve exatamente o que o arquivo tinha"
+				],
+				"link": "Agentes de código no guia do usuário",
+				"alt": "O Codex editando um arquivo Java no SnoutCode, com o cursor e a etiqueta na linha que ele está digitando"
+			},
+			"agentsReview": {
+				"title": "Revisado por prompt",
+				"body": "Cada alteração que os agentes fizeram, agrupada pelo prompt que a originou e marcada com o agente que a fez, para manter ou desfazer.",
+				"points": [
+					"Mantenha ou desfaça um prompt, um arquivo ou uma alteração por vez",
+					"Accept All e Revert All para tudo de uma vez",
+					"Uma alteração que o Claude Code pede para fazer espera a sua resposta no topo"
+				],
+				"link": "A janela Agent Changes",
+				"alt": "A janela Agent Changes: um prompt do opencode com seus arquivos, e uma alteração que o Claude Code pede para fazer"
+			},
+			"git": {
+				"title": "Da alteração ao push",
+				"body": "Faça stage por arquivo, escreva a mensagem, faça commit e push, sem sair da janela onde você estava digitando.",
+				"points": [
+					"Diffs unificados, lado a lado e compactos do index e da working tree",
+					"Branches, tags e um histórico pesquisável",
+					"Pull, fetch e push com as suas credenciais de sempre",
+					"Blame na margem, incluindo as linhas dos agentes"
+				],
+				"link": "Git no guia do usuário",
+				"alt": "A visão Git: arquivos alterados, um diff lado a lado, as branches e o histórico de commits"
+			},
+			"remote": {
+				"title": "Trabalhe num servidor como se ele estivesse aqui",
+				"body": "O SnoutCode instala sozinho o seu pequeno servidor na máquina, pelo ssh que você já usa.",
+				"points": [
+					"Sua config de ssh, suas chaves e seu agent, nada novo para configurar",
+					"Quando a conexão cai, a janela se reconecta sozinha",
+					"Builds, testes e o depurador rodam onde o código está"
+				],
+				"link": "Remote SSH no guia do usuário",
+				"alt": "Um projeto aberto via Remote SSH, com o host na barra de título"
+			}
+		},
+		"more": {
+			"eyebrow": "E o resto",
+			"title": "Tudo o que um dia de trabalho pede",
+			"search": {
+				"title": "Encontre qualquer coisa",
+				"body": "Search Everywhere, Go to File e Go to Class, Find and Replace in Files e uma paleta de comandos com todas as ações."
+			},
+			"terminal": {
+				"title": "Um terminal de verdade",
+				"body": "O seu shell no painel de baixo, com histórico de rolagem, busca e links, no motor de terminal integrado ou no do Ghostty."
+			},
+			"processes": {
+				"title": "Saiba o que está rodando",
+				"body": "A janela Processes lista tudo o que o SnoutCode roda na sua máquina, motores, builds e servidores, e para qualquer um deles."
+			},
+			"settings": {
+				"title": "Configurações como texto",
+				"body": "Edite as configurações num formulário ou em JSON com schema e autocompletar, e sobrescreva qualquer uma por projeto."
+			},
+			"keymap": {
+				"title": "Os atalhos que você já conhece",
+				"body": "Um keymap editável em que cada ação tem nome, para que um botão da barra de ferramentas nunca seja o único caminho."
+			},
+			"native": {
+				"title": "Nativa, em Rust",
+				"body": "Nenhum motor de navegador por dentro. A janela é desenhada na GPU, então abre rápido e continua rápida num projeto grande."
+			}
+		},
+		"open": {
+			"eyebrow": "Código aberto",
+			"title": "Gratuita, aberta e sua para mudar",
+			"body": "O SnoutCode tem licença MIT, por inteiro: o app, o editor e o motor Java. Não há conta, nem preço, nem plano pago. Leia o código, relate o que quebrar, mande um pull request.",
+			"star": "Dê uma estrela no GitHub",
+			"issues": "Issues",
+			"contributing": "Como contribuir"
+		},
+		"platforms": {
+			"eyebrow": "Onde quer que você programe",
+			"title": "macOS, Linux e Windows",
+			"sub": "Cada um traz o motor Java e o próprio runtime Java, então não há mais nada para instalar antes.",
+			"mac": "Uma imagem de disco: abra e arraste o SnoutCode para Aplicativos.",
+			"linux": "Um .deb para Debian e Ubuntu e um pacote para Arch Linux, no X11 e no Wayland.",
+			"windows": "Um instalador para Windows 10 e 11 que não precisa de direitos de administrador."
+		},
+		"cta": {
+			"title": "Abra o seu projeto no SnoutCode",
+			"sub": "Gratuito para todos, em qualquer desktop."
+		}
+	},
+	"harness": {
+		"eyebrow": "A API para agentes",
+		"title": "O seu agente comanda a janela inteira",
+		"sub": "Um agente no SnoutCode pode fazer mais do que escrever arquivos. Peça algo que você faria clicando, e ele faz onde você pode ver: abre o projeto que criou, roda, lê o que falhou e mostra para você.",
+		"you": "Você",
+		"request": "Crie um projeto Spring para mim, abra, rode os testes e me mostre o que falhou.",
+		"flowCaption": "Como um pedido chega ao SnoutCode: o agente, uma Agent Skill, o snout-api e depois a janela.",
+		"flow": {
+			"agent": { "title": "O seu agente", "body": "Claude Code, Codex, opencode ou Amp, no console." },
+			"skill": { "title": "Uma Agent Skill", "body": "Uma linha no contexto dele. Ele só lê o resto quando precisa da janela." },
+			"api": { "title": "snout-api", "body": "Um manual UTCP e HTTP simples numa porta local, com um token." },
+			"window": { "title": "SnoutCode", "body": "Faz na sua frente, nas janelas que você já usa." }
+		},
+		"calls": {
+			"title": "Cada chamada, à vista",
+			"body": "O agente escreve o projeto com as próprias ferramentas e depois opera a janela pela API. Cada chamada aparece na janela na hora, e o Agent Log, no menu View, guarda a lista: o que ele pediu, com o quê, e como foi.",
+			"points": [
+				"Execuções, resultados de testes e traces do Playwright, lidos onde rodaram",
+				"O arquivo e a linha de cada falha, abertos no editor",
+				"Um relatório no Agent View, com Copy, Insert e Run in Terminal no código"
+			],
+			"link": "A API para agentes",
+			"logLabel": "As chamadas que um agente fez, como o Agent Log as lista"
+		},
+		"ask": {
+			"title": "Alterações perguntam antes",
+			"body": "Ler e mostrar nunca perguntam. Tudo o que muda o seu projeto, de uma renomeação a um push, espera a sua resposta num cartão, e o agente fica sabendo o que você escolheu.",
+			"points": [
+				"Permitir uma vez, ou pelo resto da sessão",
+				"Don't Allow avisa o agente, para ele mudar de rumo",
+				"Nada deixa um agente iniciar um programa escolhido por ele"
+			],
+			"cardLabel": "Uma alteração esperando a sua resposta"
+		},
+		"tools": {
+			"title": "57 ferramentas, pelo que elas tocam",
+			"sub": "As mesmas ferramentas para todo agente, só para a sessão dele. Nada é escrito no seu projeto nem nas suas configurações."
+		},
+		"domains": {
+			"projects": { "name": "Projetos", "body": "Abrir o projeto que ele acabou de criar, trocar, fechar, começar um novo." },
+			"runs": { "name": "Execuções e testes", "body": "Iniciar e parar execuções, ler a saída, ver quais testes falharam e o que o trace do Playwright viu." },
+			"code": { "name": "Código", "body": "Consultar os motores Java e TypeScript: símbolos, definições, referências, hierarquias, problemas, renomeações." },
+			"editor": { "name": "Editor", "body": "Abrir um arquivo numa linha, ler a sua seleção e as abas abertas, salvar." },
+			"git": { "name": "Git", "body": "Mostrar diffs e commits, fazer stage, commit, push, e escrever a mensagem do commit que você está preparando." },
+			"build": { "name": "Build", "body": "Tarefas do Gradle e goals do Maven, rodados na janela Build." },
+			"spring": { "name": "Spring", "body": "Os beans e os endpoints HTTP, a partir do motor Spring." },
+			"changes": { "name": "Alterações do agente", "body": "Revisar as próprias edições: mantê-las ou devolver o arquivo ao que era." },
+			"app": { "name": "O app", "body": "Janelas, notificações, configurações, atalhos, processos, e o Agent View para o que nenhuma ferramenta cobre." }
+		},
+		"tokens": {
+			"title": "Uma API, não uma conta de tokens",
+			"body": "O MCP lista cada ferramenta com o seu schema em cada requisição do agente, usada ou não. Uma skill mostra uma linha; o manual das 57 ferramentas, cerca de {manual} tokens, só é lido quando o agente quer mais do que abrir um arquivo. Só o Codex recebe uma ferramenta MCP, porque o sandbox dele mantém os comandos longe da porta.",
+			"caption": "Tokens em cada requisição de uma sessão",
+			"mcp": "As 57 ferramentas como definições MCP",
+			"mcpTitle": "As 57 ferramentas como definições MCP: cerca de {n} tokens",
+			"skill": "A skill do SnoutCode",
+			"skillTitle": "A skill do SnoutCode: cerca de {n} tokens",
+			"about": "cerca de {n}"
+		},
+		"places": {
+			"here": { "name": "Este computador", "body": "macOS, Windows ou Linux: o agente roda ao lado da janela." },
+			"ssh": { "name": "Remote SSH", "body": "O agente roda no servidor com o projeto, e chega à sua janela pela conexão." },
+			"wsl": { "name": "WSL", "body": "A janela fica no Windows; o agente, a skill e o snout-api rodam dentro da distribuição Linux." }
+		}
+	},
+	"download": {
+		"lede": "Gratuito para todos, no macOS, Linux e Windows. Cada build é publicado nas releases do projeto no GitHub, ao lado do código-fonte de onde saiu.",
+		"label": "Downloads",
+		"for": "Baixar para {os}",
+		"platforms": {
+			"mac": {
+				"file": "SnoutCode .dmg",
+				"points": ["Abra a imagem de disco e arraste o SnoutCode para Aplicativos", "Apple silicon"],
+				"guide": "Primeiros passos"
+			},
+			"linux": {
+				"file": "Pacote .deb e do Arch Linux",
+				"points": ["Debian, Ubuntu e Arch Linux", "x86_64 e aarch64, no X11 e no Wayland"],
+				"guide": "SnoutCode no Linux"
+			},
+			"windows": {
+				"file": "Instalador (.exe)",
+				"points": ["Windows 10 e 11, x64 e arm64", "Instala para você, sem direitos de administrador", "Ainda sem assinatura, então o SmartScreen pergunta na primeira vez"],
+				"guide": "SnoutCode no Windows"
+			}
+		},
+		"need": {
+			"eyebrow": "Do que você precisa",
+			"title": "De nada mais, para começar",
+			"points": [
+				"O app traz o motor Java com o próprio runtime Java, então não é preciso instalar o Java.",
+				"Um build sem um JDK adequado recebe a oferta de baixar um.",
+				"Builds Maven não precisam do Maven instalado.",
+				"O servidor TypeScript se instala sozinho no primeiro uso, com o Node que o projeto pede.",
+				"Git no seu PATH, para a visão Git. Um agente de código (Claude Code, Codex, opencode ou Amp) é opcional, para o console."
+			]
+		},
+		"source": {
+			"title": "Compile a partir do código-fonte",
+			"body": "Você precisa do Rust 1.95 ou mais novo, do Git e de um JDK 21 (o script baixa um se não encontrar nenhum).",
+			"repo": "O repositório",
+			"building": "Compilação"
+		}
+	},
+	"notFound": {
+		"title": "Página não encontrada",
+		"lede": "A borboleta procurou em todo lugar, e esta página não está aqui.",
+		"home": "A página inicial",
+		"guide": "O guia do usuário"
+	}
+}

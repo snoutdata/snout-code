@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useT } from '../i18n'
 
 type Theme = 'light' | 'dark'
 
@@ -6,6 +7,7 @@ type Theme = 'light' | 'dark'
 // before the first paint). The page renders the same on the server and the client, and the
 // button learns the theme after hydration.
 export function ThemeToggle() {
+	const t = useT()
 	const [theme, setTheme] = useState<Theme>('light')
 
 	useEffect(() => {
@@ -23,7 +25,7 @@ export function ThemeToggle() {
 		setTheme(next)
 	}
 
-	const label = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
+	const label = t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')
 	return (
 		<button className="icon-btn" type="button" onClick={toggle} aria-label={label} title={label}>
 			<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" className="theme-icon">

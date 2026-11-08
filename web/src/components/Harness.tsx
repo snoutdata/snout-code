@@ -5,16 +5,14 @@
 
 import { CardArt, FlowArt, type CardArtKind, type FlowArtKind } from './Illustrations'
 import { SectionHead } from './Sections'
+import { useI18n } from '../i18n'
 import { docs } from '../site'
 
-const FLOW: { art: FlowArtKind, title: string, body: string }[] = [
-	{ art: 'agent', title: 'Your agent', body: 'Claude Code, Codex, opencode or Amp, in the console.' },
-	{ art: 'skill', title: 'An Agent Skill', body: 'One line in its context. It reads the rest only when it needs the window.' },
-	{ art: 'api', title: 'snout-api', body: 'A UTCP manual and plain HTTP on a local port, with a token.' },
-	{ art: 'window', title: 'SnoutCode', body: 'Does it in front of you, in the windows you already use.' }
-]
+// The steps a request goes through; their words are in the catalogs, under harness.flow.<art>.
+const FLOW: FlowArtKind[] = ['agent', 'skill', 'api', 'window']
 
-// The calls behind the sentence above, as the Agent Log lists them.
+// The calls behind the sentence above, as the Agent Log lists them. The log is the app's, so it
+// stays in the app's English in every language.
 const CALLS: { tool: string, args: string, result: string, fail?: boolean }[] = [
 	{ tool: 'switchProject', args: '~/projects/shop', result: 'opened' },
 	{ tool: 'listRunConfigurations', args: '', result: 'Application, All tests' },
@@ -24,71 +22,66 @@ const CALLS: { tool: string, args: string, result: string, fail?: boolean }[] = 
 	{ tool: 'showInApp', args: 'What failed, and why', result: 'in Agent View' }
 ]
 
-const DOMAINS: { name: string, count: number, body: string, tools: string[] }[] = [
-	{ name: 'Projects', count: 4, body: 'Open the project it just made, switch, close, start a new one.', tools: ['switchProject', 'showNewProject'] },
-	{ name: 'Runs and tests', count: 10, body: 'Start and stop runs, read their output, see which tests failed and what the Playwright trace saw.', tools: ['startRun', 'getTestResults', 'getPlaywrightTrace'] },
-	{ name: 'Code', count: 7, body: 'Ask the Java and TypeScript engines: symbols, definitions, references, hierarchies, problems, renames.', tools: ['findReferences', 'renameSymbol'] },
-	{ name: 'Editor', count: 8, body: 'Open a file at a line, read your selection and the open tabs, save.', tools: ['openFile', 'getCurrentSelection'] },
-	{ name: 'Git', count: 11, body: 'Show diffs and commits, stage, commit, push, and write the message of the commit you draft.', tools: ['showDiff', 'commitChanges'] },
-	{ name: 'Build', count: 3, body: 'Gradle tasks and Maven goals, run in the Build window.', tools: ['runBuildTask'] },
-	{ name: 'Spring', count: 2, body: 'The beans and the HTTP endpoints, from the Spring engine.', tools: ['listBeans', 'listEndpoints'] },
-	{ name: 'Agent changes', count: 3, body: 'Review its own edits: keep them or put the file back.', tools: ['listAgentChanges'] },
-	{ name: 'The app', count: 9, body: 'Windows, notifications, settings, shortcuts, processes, and Agent View for what no tool covers.', tools: ['showToolWindow', 'showInApp'] }
+// The tools by domain; each domain's name and line are in the catalogs, under harness.domains.<id>.
+const DOMAINS: { id: string, count: number, tools: string[] }[] = [
+	{ id: 'projects', count: 4, tools: ['switchProject', 'showNewProject'] },
+	{ id: 'runs', count: 10, tools: ['startRun', 'getTestResults', 'getPlaywrightTrace'] },
+	{ id: 'code', count: 7, tools: ['findReferences', 'renameSymbol'] },
+	{ id: 'editor', count: 8, tools: ['openFile', 'getCurrentSelection'] },
+	{ id: 'git', count: 11, tools: ['showDiff', 'commitChanges'] },
+	{ id: 'build', count: 3, tools: ['runBuildTask'] },
+	{ id: 'spring', count: 2, tools: ['listBeans', 'listEndpoints'] },
+	{ id: 'changes', count: 3, tools: ['listAgentChanges'] },
+	{ id: 'app', count: 9, tools: ['showToolWindow', 'showInApp'] }
 ]
 
 // Measured on what SnoutCode sends (docs/editor-api.md, "Why not MCP: the tokens").
 const MCP_TOKENS = 5800
 const SKILL_TOKENS = 140
 
-const PLACES: { art: CardArtKind, name: string, body: string }[] = [
-	{ art: 'here', name: 'This computer', body: 'macOS, Windows or Linux: the agent runs beside the window.' },
-	{ art: 'ssh', name: 'Remote SSH', body: 'The agent runs on the server with the project, and reaches your window through the connection.' },
-	{ art: 'wsl', name: 'WSL', body: 'The window stays on Windows; the agent, the skill and snout-api run inside the Linux distribution.' }
-]
+// Where it works; the words are in the catalogs, under harness.places.<art>.
+const PLACES: CardArtKind[] = ['here', 'ssh', 'wsl']
 
 export function HarnessSection() {
+	const { t, tList, locale } = useI18n()
+	const mcp = MCP_TOKENS.toLocaleString(locale)
+	const skill = SKILL_TOKENS.toLocaleString(locale)
 	return (
 		<section className="section" id="harness" aria-labelledby="harness-title">
-			<SectionHead id="harness-title" art="harness" eyebrow="The API for agents" title="Your agent drives the whole window">
-				An agent in SnoutCode can do more than write files. Ask for something you would click through yourself, and it
-				does it where you can see it: it opens the project it made, runs it, reads what failed and shows you.
+			<SectionHead id="harness-title" art="harness" eyebrow={t('harness.eyebrow')} title={t('harness.title')}>
+				{t('harness.sub')}
 			</SectionHead>
 
 			<figure className="flow" data-reveal>
 				<blockquote className="flow-ask">
-					<span className="flow-ask-who">You</span>
-					Make me a Spring project, open it, run its tests and show me what failed.
+					<span className="flow-ask-who">{t('harness.you')}</span>
+					{t('harness.request')}
 				</blockquote>
 				<ol className="flow-steps">
-					{FLOW.map((s) => (
-						<li key={s.art} className="flow-step">
-							<FlowArt art={s.art} />
-							<h3>{s.title}</h3>
-							<p>{s.body}</p>
+					{FLOW.map((art) => (
+						<li key={art} className="flow-step">
+							<FlowArt art={art} />
+							<h3>{t(`harness.flow.${art}.title`)}</h3>
+							<p>{t(`harness.flow.${art}.body`)}</p>
 						</li>
 					))}
 				</ol>
-				<figcaption className="sr-only">How a request reaches SnoutCode: the agent, an Agent Skill, snout-api, then the window.</figcaption>
+				<figcaption className="sr-only">{t('harness.flowCaption')}</figcaption>
 			</figure>
 
 			<div className="showcase-list harness-list">
 				<article className="showcase" data-reveal>
 					<div className="showcase-copy">
-						<h3>Every call, where you can see it</h3>
-						<p>
-							The agent writes the project with its own tools, then works the window through the API. Each call lands
-							in the window as it happens, and the Agent Log, in the View menu, keeps the list: what it asked, with what, and how it went.
-						</p>
+						<h3>{t('harness.calls.title')}</h3>
+						<p>{t('harness.calls.body')}</p>
 						<ul className="check-list">
-							<li>Runs, test results and Playwright traces, read where they ran</li>
-							<li>The file and line of each failure, opened in the editor</li>
-							<li>A report in Agent View, with Copy, Insert and Run in Terminal on its code</li>
+							{tList('harness.calls.points').map((p, i) => <li key={i}>{p}</li>)}
 						</ul>
 						<a className="more-link" href={docs('editor-api.md')}>
-							The API for agents <span aria-hidden="true">&rarr;</span>
+							{t('harness.calls.link')} <span aria-hidden="true">&rarr;</span>
 						</a>
 					</div>
-					<div className="agent-log" role="table" aria-label="The calls an agent made, as the Agent Log lists them">
+					<div className="agent-log" role="table" aria-label={t('harness.calls.logLabel')}>
 						<div className="agent-log-bar" aria-hidden="true">
 							<span /><span /><span />
 							<strong>Agent Log</strong>
@@ -105,19 +98,15 @@ export function HarnessSection() {
 
 				<article className="showcase flip" data-reveal>
 					<div className="showcase-copy">
-						<h3>Changes ask first</h3>
-						<p>
-							Reading and showing never ask. Anything that changes your project, from a rename to a push, waits on a
-							card for your answer, and the agent hears what you chose.
-						</p>
+						<h3>{t('harness.ask.title')}</h3>
+						<p>{t('harness.ask.body')}</p>
 						<ul className="check-list">
-							<li>Allow once, or for the rest of the session</li>
-							<li>Don't Allow tells the agent, so it can change course</li>
-							<li>Nothing lets an agent start a program of its choosing</li>
+							{tList('harness.ask.points').map((p, i) => <li key={i}>{p}</li>)}
 						</ul>
 					</div>
 					<div className="ask-card-stage">
-						<div className="ask-card" aria-label="A change waiting for your answer">
+						{/* The app's card, in the app's English. */}
+						<div className="ask-card" aria-label={t('harness.ask.cardLabel')}>
 							<strong className="ask-card-title">Allow Amp to commit "Round order totals to the cent"?</strong>
 							<p className="ask-card-why">Amp is waiting in the console for your answer.</p>
 							<p className="ask-card-note">Allow for This Session lets it use <code>commitChanges</code> again without asking.</p>
@@ -132,17 +121,17 @@ export function HarnessSection() {
 			</div>
 
 			<div className="tools-head" data-reveal>
-				<h3>57 tools, by what they work on</h3>
-				<p>The same tools for every agent, for its session only. Nothing is written into your project or your settings.</p>
+				<h3>{t('harness.tools.title')}</h3>
+				<p>{t('harness.tools.sub')}</p>
 			</div>
 			<ul className="tool-grid">
 				{DOMAINS.map((d) => (
-					<li key={d.name} className="tool-card" data-reveal>
+					<li key={d.id} className="tool-card" data-reveal>
 						<div className="tool-card-head">
-							<h4>{d.name}</h4>
+							<h4>{t(`harness.domains.${d.id}.name`)}</h4>
 							<span className="tool-count">{d.count}</span>
 						</div>
-						<p>{d.body}</p>
+						<p>{t(`harness.domains.${d.id}.body`)}</p>
 						<div className="tool-names">
 							{d.tools.map((t) => <code key={t}>{t}</code>)}
 						</div>
@@ -152,34 +141,30 @@ export function HarnessSection() {
 
 			<div className="tokens" data-reveal>
 				<div className="tokens-copy">
-					<h3>An API, not a token bill</h3>
-					<p>
-						MCP lists every tool with its schema in each request the agent makes, used or not. A skill shows one line;
-						the manual of all 57 tools, about 2,300 tokens, is read only when the agent wants more than to open a file.
-						Codex alone gets one MCP tool, since its sandbox keeps commands off the port.
-					</p>
+					<h3>{t('harness.tokens.title')}</h3>
+					<p>{t('harness.tokens.body', { manual: (2300).toLocaleString(locale) })}</p>
 				</div>
 				<figure className="tokens-chart">
-					<figcaption>Tokens in every request of a session</figcaption>
-					<div className="token-bar" title={`The 57 tools as MCP definitions: about ${MCP_TOKENS.toLocaleString('en-US')} tokens`}>
-						<span className="token-label">The 57 tools as MCP definitions</span>
+					<figcaption>{t('harness.tokens.caption')}</figcaption>
+					<div className="token-bar" title={t('harness.tokens.mcpTitle', { n: mcp })}>
+						<span className="token-label">{t('harness.tokens.mcp')}</span>
 						<span className="token-track"><span className="token-fill mcp" style={{ width: '100%' }} /></span>
-						<span className="token-value">about {MCP_TOKENS.toLocaleString('en-US')}</span>
+						<span className="token-value">{t('harness.tokens.about', { n: mcp })}</span>
 					</div>
-					<div className="token-bar" title={`SnoutCode's skill: about ${SKILL_TOKENS} tokens`}>
-						<span className="token-label">SnoutCode's skill</span>
+					<div className="token-bar" title={t('harness.tokens.skillTitle', { n: skill })}>
+						<span className="token-label">{t('harness.tokens.skill')}</span>
 						<span className="token-track"><span className="token-fill skill" style={{ width: `${(SKILL_TOKENS / MCP_TOKENS) * 100}%` }} /></span>
-						<span className="token-value">about {SKILL_TOKENS}</span>
+						<span className="token-value">{t('harness.tokens.about', { n: skill })}</span>
 					</div>
 				</figure>
 			</div>
 
 			<ul className="places">
-				{PLACES.map((p) => (
-					<li key={p.name} className="place" data-reveal>
-						<div className="card-art"><CardArt art={p.art} /></div>
-						<h4>{p.name}</h4>
-						<p>{p.body}</p>
+				{PLACES.map((art) => (
+					<li key={art} className="place" data-reveal>
+						<div className="card-art"><CardArt art={art} /></div>
+						<h4>{t(`harness.places.${art}.name`)}</h4>
+						<p>{t(`harness.places.${art}.body`)}</p>
 					</li>
 				))}
 			</ul>
