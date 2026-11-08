@@ -1266,6 +1266,32 @@ fn the_stripes_open_and_close_the_tool_windows(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn apply_keeps_the_language_chosen_in_the_settings_sheet(cx: &mut TestAppContext) {
+    use crate::i18n::Language;
+    let repo = demo_repo("settings-language");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.dispatch_action(crate::menus::OpenSettings);
+    cx.run_until_parked();
+    let sheet = cx.update(|_, cx| ws.read(cx).settings_sheet.clone()).expect("the sheet is up");
+    // English: the tests share the language in use, and this one must leave it as it is.
+    cx.update(|_, cx| {
+        sheet.update(cx, |s, cx| {
+            s.draft.language = Language::English;
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    let at = cx.debug_bounds("settings-apply").expect("Apply is drawn").center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert_eq!(model.read(cx).settings.language, Language::English, "Apply puts it in place");
+        assert_eq!(sheet.read(cx).draft.language, Language::English, "and the sheet still shows it");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
 fn the_settings_sheet_edits_a_copy_until_apply_or_ok(cx: &mut TestAppContext) {
     use crate::settings::ThemeChoice;
     let repo = demo_repo("settings-sheet");

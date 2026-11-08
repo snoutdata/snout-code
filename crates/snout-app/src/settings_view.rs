@@ -480,6 +480,7 @@ impl SettingsView {
         let mut next = m.user_settings();
         let project = (self.project != m.project_settings).then(|| self.project.clone());
         let d = &self.draft;
+        next.language = d.language;
         next.theme = d.theme;
         next.colors = d.colors;
         next.ui_font = d.ui_font.clone();
