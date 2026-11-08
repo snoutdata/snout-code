@@ -999,6 +999,8 @@ fn header(
             .flex()
             .flex_col()
             .gap(px(3.))
+            // Clear of the close button, whatever the length of the title.
+            .pr(px(16.))
             .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).text_color(p.fg).child(title))
             .when_some(subtitle, |d, s| {
                 d.child(div().text_size(px(13.)).line_height(px(19.)).text_color(p.fg_dim).child(s))

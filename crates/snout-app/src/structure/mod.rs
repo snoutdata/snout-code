@@ -80,6 +80,17 @@ impl Page {
         }
     }
 
+    /// Its title in the language in use (`title` names it in the code).
+    pub fn shown(self) -> &'static str {
+        match self {
+            Page::Project => ts!("cmd-project"),
+            Page::Modules => ts!("structure-modules-row"),
+            Page::Dependencies => ts!("newproject-dependencies"),
+            Page::Facets => ts!("structure-facets"),
+            Page::Sdks => "SDKs",
+        }
+    }
+
     pub fn icon(self) -> crate::components::IconName {
         use crate::components::IconName;
         match self {
@@ -94,8 +105,8 @@ impl Page {
     /// The group it sits under in the tree.
     pub fn group(self) -> &'static str {
         match self {
-            Page::Sdks => "Platform Settings",
-            _ => "Project Settings",
+            Page::Sdks => ts!("structure-platform-settings"),
+            _ => ts!("structure-project-settings"),
         }
     }
 
@@ -117,7 +128,7 @@ impl Page {
     pub fn matches(self, query: &str) -> bool {
         let q = query.trim().to_lowercase();
         q.is_empty()
-            || self.title().to_lowercase().contains(&q)
+            || self.shown().to_lowercase().contains(&q)
             || self.group().to_lowercase().contains(&q)
             || self.keywords().contains(&q)
     }
@@ -281,8 +292,8 @@ impl ProjectStructureView {
         let project = m.project_settings.clone();
         let host_name = crate::remote::connection(cx).map(|(n, _)| n);
         let added = added_jdks(&m.user_settings(), host_name.as_deref());
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by group, name or version"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("structure-search")));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(ts!("structure-filter-dependencies")));
         let mut subscriptions = vec![
             cx.subscribe(&search, |this, input, e: &InputEvent, cx| {
                 if matches!(e, InputEvent::Change) {
@@ -499,23 +510,16 @@ impl ProjectStructureView {
                         let known = this.added.contains(&jdk.home)
                             || this.detected.as_ref().is_some_and(|d| d.iter().any(|j| j.home == jdk.home));
                         if known {
-                            this.note = Some((format!("JDK {} is listed already", jdk.version), false));
+                            this.note =
+                                Some((t!("structure-jdk-listed-already", version = jdk.version.to_string()), false));
                         } else {
-                            this.note = Some((format!("JDK {} added. Apply keeps it.", jdk.version), false));
+                            this.note = Some((t!("structure-jdk-added", version = jdk.version.to_string()), false));
                             this.added.push(jdk.home.clone());
                             this.added_read.push(Added { home: jdk.home.clone(), jdk: Some(jdk.clone()) });
                         }
                         this.selected_jdk = Some(jdk.home);
                     }
-                    Err(dir) => {
-                        this.note = Some((
-                            format!(
-                                "No JDK in {}: pick the folder holding the bin folder with Java in it",
-                                dir.display()
-                            ),
-                            true,
-                        ))
-                    }
+                    Err(dir) => this.note = Some((t!("structure-no-jdk-in", dir = dir.display().to_string()), true)),
                 }
                 cx.notify();
             });
@@ -533,7 +537,7 @@ impl ProjectStructureView {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Add JDK".into()),
+            prompt: Some(ts!("structure-add-jdk").into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await
@@ -555,7 +559,7 @@ impl ProjectStructureView {
         if self.selected_jdk.as_deref() == Some(home) {
             self.selected_jdk = None;
         }
-        self.note = Some(("Removed from the list. Apply keeps the change.".into(), false));
+        self.note = Some((t!("structure-jdk-removed"), false));
         cx.notify();
     }
 
@@ -589,11 +593,18 @@ impl ProjectStructureView {
                 this.download = None;
                 match result {
                     Ok(jdk) => {
-                        this.note = Some((format!("JDK {} downloaded to {}", jdk.version, jdk.home.display()), false));
+                        this.note = Some((
+                            t!(
+                                "structure-jdk-downloaded",
+                                version = jdk.version.to_string(),
+                                home = jdk.home.display().to_string()
+                            ),
+                            false,
+                        ));
                         this.selected_jdk = Some(jdk.home.clone());
                         this.look_for_jdks(cx);
                     }
-                    Err(e) => this.note = Some((format!("The download failed: {e:#}"), true)),
+                    Err(e) => this.note = Some((t!("structure-download-failed", e = format!("{e:#}")), true)),
                 }
                 cx.notify();
             });
@@ -637,7 +648,7 @@ impl ProjectStructureView {
                     cx.emit(StructureEvent::Open(place));
                 }
                 None => {
-                    this.note = Some(("The build file could not be found".into(), true));
+                    this.note = Some((t!("structure-build-file-not-found"), true));
                     cx.notify();
                 }
             });
@@ -683,7 +694,7 @@ impl ProjectStructureView {
         if let Some(store) = crate::project_model::store(cx) {
             store.update(cx, |s, cx| s.sync(cx));
         }
-        self.note = Some(("Syncing the Gradle model. The pages follow when it is done.".into(), false));
+        self.note = Some((t!("structure-syncing-note"), false));
         cx.notify();
     }
 }

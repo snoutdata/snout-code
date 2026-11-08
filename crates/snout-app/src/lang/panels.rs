@@ -189,7 +189,7 @@ impl ReferencesPanel {
     }
 }
 
-crate::panels::panel!(ReferencesPanel, "References", |_, _| "References".into(), true);
+crate::panels::panel!(ReferencesPanel, "References", |_, _| ts!("tools-references").into(), true);
 
 impl Render for ReferencesPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

@@ -88,15 +88,12 @@ impl AgentSummary {
     /// 4 files", "3 agents changed 5 files"; `short` names an agent as its caret does.
     pub fn text(&self, short: impl Fn(&'static str) -> String) -> String {
         let who = match self.agents.as_slice() {
-            [] => "Agents".to_owned(),
+            [] => t!("agents-all"),
             [a] => short(a),
-            [a, b] => format!("{} and {}", short(a), short(b)),
-            more => format!("{} agents", more.len()),
+            [a, b] => t!("agents-two", a = short(a), b = short(b)),
+            more => t!("agents-n", n = more.len().to_string()),
         };
-        match self.files {
-            1 => format!("{who} changed 1 file"),
-            n => format!("{who} changed {n} files"),
-        }
+        t!("agents-changed-files", who = who, count = self.files)
     }
 }
 

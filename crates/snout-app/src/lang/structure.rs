@@ -215,7 +215,7 @@ fn shown_note(note: &'static str) -> &'static str {
     }
 }
 
-crate::panels::panel!(StructureWindow, "Structure", |_, _| "Structure".into(), true);
+crate::panels::panel!(StructureWindow, "Structure", |_, _| ts!("cmd-structure").into(), true);
 
 /// A symbol's row: `lead` (a fold arrow), its badge, its visibility, its name and what the
 /// engine says of it.

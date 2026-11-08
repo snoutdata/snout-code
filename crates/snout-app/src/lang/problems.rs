@@ -559,7 +559,7 @@ impl ProblemsPanel {
     }
 }
 
-crate::panels::panel!(ProblemsPanel, "Problems", |_, _| "Problems".into(), true);
+crate::panels::panel!(ProblemsPanel, "Problems", |_, _| ts!("tools-problems").into(), true);
 
 fn severity_ink(rank: u8, p: &Palette) -> (IconName, gpui::Hsla) {
     match rank {

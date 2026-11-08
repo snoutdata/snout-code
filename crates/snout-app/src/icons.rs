@@ -62,7 +62,7 @@ impl FileKind {
             Self::Rust => "Rust",
             Self::Shell => "Shell",
             Self::Sql => "SQL",
-            Self::Other => "Plain Text",
+            Self::Other => ts!("icons-plain-text"),
         }
     }
 

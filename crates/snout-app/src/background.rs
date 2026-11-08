@@ -26,7 +26,7 @@ pub struct EngineBuild {
 
 impl EngineBuild {
     pub fn parse(text: &str) -> Self {
-        let mut b = EngineBuild { stage: "Building snout-engine".into(), ..Default::default() };
+        let mut b = EngineBuild { stage: ts!("background-building-snout-engine").into(), ..Default::default() };
         for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
             if let Some(stage) = line.strip_prefix("stage ") {
                 b.stage = stage.trim().to_owned();
@@ -82,7 +82,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
         let hub = hub.read(cx);
         if let Some(b) = hub.engine_build.as_ref().filter(|b| !b.finished()) {
             out.push(BgTask {
-                title: "Building snout-engine".into(),
+                title: ts!("background-building-snout-engine").into(),
                 stage: b.stage.clone(),
                 percent: None,
                 ..Default::default()
@@ -91,7 +91,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
         let mut servers: Vec<_> = hub.servers.values().filter(|s| s.busy()).collect();
         servers.sort_by(|a, b| a.root.cmp(&b.root));
         for s in servers {
-            let title = format!("Java: {}", crate::model::Model::dir_name(&s.root));
+            let title = t!("editor-java", summary = crate::model::Model::dir_name(&s.root));
             // Starting again by itself, after it stopped unexpectedly.
             if let Some(n) = s.recovering {
                 let work = s.progress.current();
@@ -134,7 +134,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
                         summary.clone()
                     },
                     percent: project.percent,
-                    compact: Some(format!("Java: {summary}")),
+                    compact: Some(t!("editor-java", summary = summary.to_string())),
                     parts,
                 });
                 continue;

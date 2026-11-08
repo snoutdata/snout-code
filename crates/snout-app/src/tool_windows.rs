@@ -20,6 +20,7 @@ pub fn title(panel_name: &str) -> &str {
         "Run" => ts!("cmd-run"),
         "Debug" => ts!("cmd-debug"),
         "Build" => ts!("stripes-build"),
+        "Welcome" => ts!("welcome-welcome"),
         "Output" => ts!("cmd-output"),
         "Terminal" => ts!("cmd-terminal"),
         "Problems" => ts!("tools-problems"),

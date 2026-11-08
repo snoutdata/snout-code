@@ -17,7 +17,9 @@ pub const APPS: &[ExternalTerminal] = &[
 ];
 
 /// What the system's own terminal is called.
-pub const DEFAULT_LABEL: &str = "Terminal";
+pub fn default_label() -> &'static str {
+    "Terminal"
+}
 
 /// `open` returns once the app has the request: it is waited for.
 pub const WAITS: bool = true;
@@ -53,7 +55,7 @@ pub fn command(term: ExternalTerminal, at: &Where, scripts: &Path) -> std::io::R
     let open_new =
         |id: &str, args: Vec<String>| [vec![s("open"), s("-n"), s("-b"), id.to_owned(), s("--args")], args].concat();
     let Some(id) = bundle_id(term) else {
-        return Err(std::io::Error::other(format!("{} is not a Mac app", term.label())));
+        return Err(std::io::Error::other(t!("terminal-not-mac-app", name = term.label().to_string())));
     };
     Ok(match (term, at) {
         (ExternalTerminal::Terminal | ExternalTerminal::ITerm | ExternalTerminal::Warp, Where::Local(dir)) => {

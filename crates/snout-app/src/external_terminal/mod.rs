@@ -66,7 +66,7 @@ impl ExternalTerminal {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Terminal => imp::DEFAULT_LABEL,
+            Self::Terminal => imp::default_label(),
             Self::ITerm => "iTerm",
             Self::Ghostty => "Ghostty",
             Self::WezTerm => "WezTerm",

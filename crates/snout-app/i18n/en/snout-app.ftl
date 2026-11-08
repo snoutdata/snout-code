@@ -422,6 +422,18 @@ settings-only-while-is-held = Only while ⌘ is held
 settings-block = Block
 settings-bar = Bar
 settings-underline = Underline
+settings-hover-hint = For problems and their fixes, and what a symbol is. ⌘ always shows it at once, with the link to the declaration.
+settings-click-hint = Hold it to underline a name as a link, and click to go to its declaration (on the declaration, its usages). ⌥⌘-click goes to the implementations.
+settings-blame-hint = From Git’s blame of the file. The line’s author shows once the caret rests for the hover’s delay (Editor ▸ Hover). Annotate with Git Blame is in the gutter’s right-click menu and the Git menu.
+settings-daemons-hint = SnoutCode’s own Gradle daemons stop after this long without a build. A new value holds for the daemons started after the Java engine starts again.
+settings-profiles-hint = The Spring window evaluates the beans under these profiles and dims those they leave out. Its profile menu changes the same setting.
+settings-agent-colours-hint = Each agent writes in its own colour: a caret with its name while it types, a mark in the gutter beside the lines it changed, and a dot on the tabs and files it changed until you review them.
+settings-programs-hint = Leave them empty and SnoutCode finds each program, on your PATH and where installers put it. Browse to choose one yourself.
+settings-terminal-scope-hint = The terminals’ look, engine and keys, and the external terminal, are yours: they are the same in every project.
+settings-engine-hint = The engine reads what runs in the terminals and the Claude Code console. A change applies to the terminals you start after it; open terminals keep the engine they started with.
+settings-ghostty-preview-hint = Ghostty also draws the deprecated call struck through, its curly warning line, and the test report’s link.
+settings-custom-terminal-hint = Run with /bin/sh. { "{dir}" } is the folder; on a remote machine, { "{ssh}" } is the ssh command that opens a shell there.
+settings-external-terminal-hint = Open in External Terminal, in the File menu and on a file’s or folder’s menu, opens it at the folder. On a remote project it opens an ssh session there.
 
 ## dialogs
 
@@ -787,6 +799,13 @@ model-reset-to = Reset { $head } to { $upstream }
 model-your-previous-commits-are-kept-on-the-branch = Your previous commits are kept on the branch { $backup }. Delete it once you no longer need them.
 model-now-matches = { $head } now matches { $upstream }
 model-commit = Commit { $short_id } { $summary }
+model-sources = Sources
+model-test-sources = Test sources
+model-test-resources = Test resources
+model-generated-sources = Generated sources
+model-the-build-did-not-sync = The build did not sync
+model-sync = Sync: { $root }
+model-the-gradle-sync-failed = The Gradle sync failed
 
 ## branch
 
@@ -871,7 +890,6 @@ git-copy-name = Copy name
 git-check-out-detached = Check out (detached)
 git-create-branch-from-tag = Create branch from tag…
 git-tag = tag { $name }
-git-changed-staged = { $count } changed, { $staged_count } staged
 git-nothing-to-commit-on = Nothing to commit on { $head }
 git-nothing-to-commit = Nothing to commit
 git-show-all-files = Show all files
@@ -905,7 +923,6 @@ git-back-esc = Back (Esc)
 git-the-commit-could-not-be-read = The commit could not be read
 git-from = { $directory }  (from { $orig })
 git-this-commit-changes-no-files = This commit changes no files
-git-changed = { $count } changed
 git-committer = Committer
 git-committed = Committed
 git-parents = Parents
@@ -935,6 +952,11 @@ git-too-large-to-show = Too large to show
 git-the-file-is-too-large-to-diff-here = The file is too large to diff here.
 git-no-differences = No differences
 git-and-are-the-same = { $left } and { $right } are the same.
+git-changed = { $count ->
+    [one] { $count } changed
+   *[other] { $count } changed
+    }
+git-changed-staged = { $count } changed, { $staged_count } staged
 
 ## console
 
@@ -1025,6 +1047,7 @@ console-is-not-installed-yet-install-it-in-the = { $agent } is not installed yet
 console-is-not-running-2 = { $agent } is not running.
 console-set-up = { $a } (set up)
 console-install-2 = { $a } (install)
+console-open-a-project-to-run-in-it = Open a project to run { $agent } in it.
 
 ## workspace
 
@@ -1093,6 +1116,7 @@ background-waiting-for-snout-engine = Waiting for snout-engine
 background-attempt-of-5 = {" "}(attempt { $n } of 5)
 background-the-java-engine-stopped-unexpectedly-and-is-starting = The Java engine stopped unexpectedly and is starting again{ $again }: { $doing }
 background-java-stopped-starting-again = Java stopped, starting again
+background-building-snout-engine = Building snout-engine
 
 ## quit
 
@@ -1290,9 +1314,6 @@ run-running = Running { $time }
 run-finished-in = Finished in { $time }
 run-failed-after = Failed after { $time }
 run-stopped-after = Stopped after { $time }
-run-failed-2 = { $failed } failed
-run-passed = { $passed } passed
-run-skipped = { $skipped } skipped
 run-tests-count = { $count ->
     [one] { $parts }, { $count } test
    *[other] { $parts }, { $count } tests
@@ -1341,6 +1362,10 @@ run-process-ended-by-a-signal = Process ended by a signal
 run-all-tests = All tests
 run-tests-in = Tests in { $p }
 run-open-a-playwright-project-first = Open a Playwright project first
+run-passed = { $passed } passed
+run-skipped = { $skipped } skipped
+run-failed-2 = { $failed } failed
+tests-watch-label = Watch
 
 ## structure
 
@@ -1479,6 +1504,20 @@ structure-reload-maven = Reload Maven
 structure-read-the-maven-builds-again = Read the Maven builds again
 structure-read-the-gradle-builds-again = Read the Gradle builds again
 structure-read-the-builds-again = Read the builds again
+structure-facets = Facets
+structure-project-settings = Project Settings
+structure-platform-settings = Platform Settings
+structure-search = Search
+structure-filter-dependencies = Filter by group, name or version
+structure-jdk-listed-already = JDK { $version } is listed already
+structure-jdk-added = JDK { $version } added. Apply keeps it.
+structure-no-jdk-in = No JDK in { $dir }: pick the folder holding the bin folder with Java in it
+structure-add-jdk = Add JDK
+structure-jdk-removed = Removed from the list. Apply keeps the change.
+structure-jdk-downloaded = JDK { $version } downloaded to { $home }
+structure-download-failed = The download failed: { $e }
+structure-build-file-not-found = The build file could not be found
+structure-syncing-note = Syncing the Gradle model. The pages follow when it is done.
 
 ## newproject
 
@@ -1609,6 +1648,7 @@ spring-beans-and-endpoints-appear-once-the-java-engine = Beans and endpoints app
 spring-beans-2 = Beans { $bean_count }
 spring-endpoints = Endpoints { $count }
 spring-reading = Reading…
+spring-data-repository = Data repository
 
 ## config
 
@@ -1721,13 +1761,25 @@ tests-playwright-listed-no-tests = Playwright listed no tests ({ $status })
 tests-recording = Recording
 tests-ui-mode = UI Mode
 tests-the-snoutcode-locator-picker-could-not-be-written = The SnoutCode locator picker could not be written: { $e }
-tests-count-passed = passed
-tests-count-failed = failed
-tests-count-flaky = flaky
-tests-count-skipped = skipped
-tests-flaky-3 = , { $flaky } flaky
 tests-new-since-the-last-run = {" "}({ $fresh } new since the last run)
 tests-passed-failed = { $title }: { $passed } passed, { $failed } failed{ $new }{ $new_2 }
+tests-count-passed = { $count ->
+    [one] { $count } passed
+   *[other] { $count } passed
+    }
+tests-count-failed = { $count ->
+    [one] { $count } failed
+   *[other] { $count } failed
+    }
+tests-count-flaky = { $count ->
+    [one] { $count } flaky
+   *[other] { $count } flaky
+    }
+tests-count-skipped = { $count ->
+    [one] { $count } skipped
+   *[other] { $count } skipped
+    }
+tests-flaky-3 = , { $flaky } flaky
 
 ## env
 
@@ -1983,6 +2035,11 @@ editor-the-typescript-language-server-failed = The TypeScript language server fa
 editor-the-typescript-language-server-keeps-stopping = The TypeScript language server keeps stopping
 editor-open-a-java-file = Open a Java file to see its structure.
 editor-java-engine-reading = The Java engine is reading the file.
+editor-problems-title = Problems
+editor-downloading-java-for-the-engine = Downloading Java { $ENGINE_JAVA } for the engine
+editor-copying-the-java-engine = Copying the Java engine
+editor-java-engine-install-failed = The Java engine could not be installed: { $why }
+editor-ts-install-failed = The TypeScript language server could not be installed: { $why }
 
 ## blame
 
@@ -2036,6 +2093,27 @@ agents-snoutcode-cannot-reach-the-agent-in-this-window = SnoutCode cannot reach 
 agents-asked-for-the-commit-message = Asked { $name } for the commit message
 agents-claude-is-waiting-for-your-review = Claude is waiting for your review
 agents-is-editing = { $short } is editing
+agents-waiting = Waiting
+agents-done = Done
+agents-no-calls-yet = No calls yet
+agents-what-an-agent-in-the-console-asks-of = What an agent in the console asks of SnoutCode shows here.
+agents-open-a-file-to-insert-into = Open a file to insert into
+agents-insert = Insert
+agents-run-in-terminal = Run in Terminal
+agents-nothing-shown-yet = Nothing shown yet
+agents-what-an-agent-in-the-console-chooses-to = What an agent in the console chooses to show you appears here, with buttons on its code.
+agents-from = { $title }, from { $agent }
+agents-from-2 = From { $agent }
+agents-all = Agents
+agents-two = { $a } and { $b }
+agents-n = { $n } agents
+agents-changed-files = { $count ->
+    [one] { $who } changed 1 file
+   *[other] { $who } changed { $count } files
+    }
+agents-seen = seen
+agents-new = new
+project-shared = shared
 
 ## keys
 
@@ -2078,9 +2156,6 @@ core-head-to-worktree = HEAD ↔ Working tree
 core-index-to-worktree = Index ↔ Working tree
 core-head-to-index = HEAD ↔ Index
 core-index = Index
-core-scope-staged = { $n } staged
-core-scope-all-changed = all { $n } changed
-core-scope-selected = { $n } selected
 core-scope-message-only = message only
 core-scope-nothing = nothing to commit
 core-what-staged = the staged changes
@@ -2102,3 +2177,70 @@ core-years-ago = { $count ->
     [one] { $count } year ago
    *[other] { $count } years ago
     }
+core-engine-built-in = Built-in
+core-ghostty-unavailable = This build was made without Ghostty. Release builds include it.
+core-gap-unchanged = { $count ->
+    [one] ⋯ { $count } unchanged line
+   *[other] ⋯ { $count } unchanged lines
+    }
+core-update-checking = Checking for updates…
+core-update-found = Update found (v{ $version }), downloading…
+core-update-preparing-now = Preparing update…
+core-update-downloading-now = Downloading update…
+core-update-ready = Update ready: v{ $version }
+core-update-from-source = This build was made from source and does not update itself. Build it again from the latest source to update.
+core-update-up-to-date = You’re up to date (v{ $version })
+core-update-available = SnoutCode v{ $version } is available.
+core-update-cannot-replace = SnoutCode v{ $version } is available, and cannot install itself from where it runs. Move it to your applications, or download it.
+core-update-did-not-land = SnoutCode v{ $version } did not install. Download it to install it by hand.
+core-update-preparing = Preparing update
+core-update-downloading = Downloading update
+core-update-offline = Updates could not be checked: this computer is offline. It will try again later.
+core-update-feed-down = Updates could not be checked: GitHub is not answering. Nothing is wrong with your installation, and it will try again later.
+core-update-rate-limited = Updates could not be checked: GitHub is rate limiting this network. It will try again later.
+core-update-no-release = Updates could not be checked: no published release was found to update to.
+core-update-signature = An update was downloaded and refused: it did not match the signature it should have. Nothing was installed.
+core-update-disk = The update could not be saved: there is not enough disk space.
+core-update-unknown = Updates could not be checked.
+core-scope-staged = { $n } staged
+core-scope-all-changed = all { $n } changed
+core-scope-selected = { $n } selected
+
+## icons
+
+icons-plain-text = Plain Text
+
+## menu
+
+menu-menu = Menu
+
+## misc
+
+newproject-location = Location
+newproject-offline-fallback = { $why } These are the dependencies SnoutCode knows; the project is made here, and Gradle downloads Spring Boot once there is a network.
+structure-modules-row = Modules
+structure-jdk-hint = Gradle and the Java engine run on it. Kept in .snout/settings.json; the engine restarts on it the next time it starts.
+structure-locked-maven-hint = Values with a lock are Maven’s: Edit in build file opens the pom.xml line that sets them. Once you save it, the bar over the editor offers to reload.
+structure-locked-gradle-hint = Values with a lock are the build’s: Edit in build file opens the line that sets them. Once you save it, the bar over the editor offers to sync.
+console-installer-not-on-path = The installer finished, but { $agent } is not on the PATH SnoutCode sees. Set its path in Settings, Agents, or restart SnoutCode.
+console-no-project-open = No project is open: { $agent } starts in your home folder, where it can make one. Open the project when it is there, to follow its edits.
+dialogs-group-example = Work
+dialogs-checkout-placeholder = Filter branches and tags, or enter a commit (SHA, HEAD~2, …)
+gutter-run-label = Run ‘{ $label }’
+gutter-debug-label = Debug ‘{ $label }’
+editor-settings-source = SnoutCode settings
+terminal-not-installed = { $name } is not installed
+terminal-is-mac-app = { $name } is a Mac app
+terminal-not-mac-app = { $name } is not a Mac app
+terminal-not-windows-app = { $name } is not a Windows app
+terminal-default-linux = Default Terminal
+model-could-not-open-in = Could not open the project in { $connection }
+model-no-repositories-found = No repositories found
+env-environments = Environments
+env-base-url-hint = Runs get the URL as BASE_URL, which the configuration’s baseURL reads. The file’s variables come first, then those above. Keep passwords in the .env file, which the repository should ignore.
+pwsetup-runner-missing = the Playwright test runner is not installed
+remote-password-title = Password
+run-needs-jdk-note = This build needs JDK { $v }, which isn’t installed. Download it from the bar above the editor, or pick a JDK in Settings.
+debug-js-download-failed = The JavaScript debugger could not be downloaded: { $e }
+debug-js-did-not-start = The JavaScript debugger did not start: { $e }
+run-ts-needs-tsx = Running a TypeScript file needs the tsx package in the project ({ $manager } add -D tsx) or Node 22.6 or later (this project runs on Node { $node }).

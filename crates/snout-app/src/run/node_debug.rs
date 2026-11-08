@@ -61,7 +61,7 @@ impl Runs {
                     cx.background_executor()
                         .spawn(async move { js_debug::download(&*host, &Default::default()) })
                         .await
-                        .map_err(|e| format!("The JavaScript debugger could not be downloaded: {e:#}"))
+                        .map_err(|e| t!("debug-js-download-failed", e = format!("{e:#}")))
                 }
             };
             let connected = match script {
@@ -70,7 +70,7 @@ impl Runs {
                     cx.background_executor()
                         .spawn(async move {
                             let server = js_debug::start(&*host, &node, &script)
-                                .map_err(|e| format!("The JavaScript debugger did not start: {e:#}"))?;
+                                .map_err(|e| t!("debug-js-did-not-start", e = format!("{e:#}")))?;
                             let (dap, events) = Dap::connect(&*host, server.port, WAIT)
                                 .map_err(|e| t!("debug-could-not-connect-the-debugger", e = e.to_string()))?;
                             Ok((Arc::new(server), dap, events))

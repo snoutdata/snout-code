@@ -405,7 +405,7 @@ impl LangHub {
             let script = match installed {
                 Some(s) => s,
                 None => install_server(&*host, &node, &dir)
-                    .map_err(|e| format!("The TypeScript language server could not be installed: {e:#}"))?,
+                    .map_err(|e| t!("editor-ts-install-failed", why = format!("{e:#}")))?,
             };
             let command = server_command(&*host, &node, &script, &root_buf);
             Client::spawn(&*host, &command)

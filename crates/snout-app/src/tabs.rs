@@ -357,7 +357,9 @@ fn tab(
             (e.name(), e.dirty, e.preview, Some(e.path.clone()), e.review_count(), e.agent_dot(cx), e.pinned)
         }
         None => (
-            PanelHandle::of(panel).and_then(|h| h.tab_name(cx)).unwrap_or_else(|| panel.panel_name(cx).into()),
+            PanelHandle::of(panel)
+                .and_then(|h| h.tab_name(cx))
+                .unwrap_or_else(|| crate::tool_windows::title(panel.panel_name(cx)).to_owned().into()),
             false,
             false,
             None,
@@ -643,7 +645,7 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
                     .cursor_pointer()
                     .when(on, |d| d.bg(p.button).font_weight(gpui::FontWeight::MEDIUM))
                     .when(!on, |d| d.text_color(p.fg_dim).hover(move |s| s.bg(hover)))
-                    .child(name)
+                    .child(crate::tool_windows::title(name).to_owned())
                     .on_click(move |_, window, cx| group.select_tab(ix, window, cx)),
             );
         }

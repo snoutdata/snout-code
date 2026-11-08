@@ -190,7 +190,7 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
             let cli = package_dir(host, root, super::TEST_PACKAGE)
                 .map(|d| d.join("cli.js"))
                 .filter(|c| host.is_file(c))
-                .ok_or("the Playwright test runner is not installed")?;
+                .ok_or(ts!("pwsetup-runner-missing"))?;
             Ok(ProcessLaunch {
                 title: ts!("pwsetup-install-playwright-browsers").into(),
                 program: node.bin.clone(),

@@ -52,9 +52,6 @@ macro_rules! ts {
     ($id:literal) => {{ $crate::i18n::intern($id, || i18n_embed_fl::fl!($crate::i18n::LOADER, $id)) }};
 }
 
-/// Whether `System` follows the system's languages yet.
-const FOLLOW_SYSTEM: bool = false;
-
 /// The language the interface speaks: the system's, or one chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum Language {
@@ -98,8 +95,6 @@ impl Language {
     /// The language this choice speaks: the system's way resolved to one of the catalogs.
     pub fn resolved(self) -> Self {
         match self {
-            // Not until the whole interface is translated: a half-translated window is worse.
-            Self::System if !FOLLOW_SYSTEM => Self::English,
             Self::System => from_requested(&DesktopLanguageRequester::requested_languages()),
             other => other,
         }
@@ -135,6 +130,8 @@ pub fn select(choice: Language) -> Language {
         }
         LOADER.set_use_isolating(false);
     }
+    // GPUI Kit's own few words (Portuguese it has; French and Spanish it does not, and stay English).
+    gpui_component::set_locale(language.tag().unwrap_or("en"));
     CURRENT.store(Language::ALL.iter().position(|l| *l == language).unwrap_or(1) as u8, Ordering::Relaxed);
     language
 }

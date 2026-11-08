@@ -80,7 +80,7 @@ impl RunWindow {
         match self.place {
             Place::Run => ts!("menu-run"),
             Place::Debug => ts!("cmd-debug"),
-            Place::Build => ts!("menu-build"),
+            Place::Build => ts!("stripes-build"),
         }
     }
 }

@@ -106,13 +106,13 @@ impl AgentLogPanel {
     }
 }
 
-crate::panels::panel!(AgentLogPanel, "Agent Log", |_, _| "Agent Log".into(), true);
+crate::panels::panel!(AgentLogPanel, "Agent Log", |_, _| ts!("cmd-agent-log").into(), true);
 
 fn row(e: &Entry, now: u64, cx: &App) -> gpui::AnyElement {
     let p = palette(cx);
     let (mark, tone) = match &e.outcome {
-        Outcome::Waiting => ("Waiting".to_owned(), p.fg_dim),
-        Outcome::Done => ("Done".to_owned(), p.fg_dim),
+        Outcome::Waiting => (ts!("agents-waiting").to_owned(), p.fg_dim),
+        Outcome::Done => (ts!("agents-done").to_owned(), p.fg_dim),
         Outcome::Failed(why) => (why.clone(), p.warn),
     };
     let effect = match e.effect {
@@ -170,8 +170,8 @@ impl Render for AgentLogPanel {
             .text_color(p.fg);
         if log.entries.is_empty() {
             return base.child(
-                crate::components::EmptyState::new(snout_core::art::spots::quiet_bell(), "No calls yet")
-                    .hint("What an agent in the console asks of SnoutCode shows here.")
+                crate::components::EmptyState::new(snout_core::art::spots::quiet_bell(), ts!("agents-no-calls-yet"))
+                    .hint(ts!("agents-what-an-agent-in-the-console-asks-of"))
                     .compact(),
             );
         }

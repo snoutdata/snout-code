@@ -111,7 +111,7 @@ impl GradleWindow {
     }
 }
 
-crate::panels::panel!(GradleWindow, "Gradle", |_, _| "Gradle".into(), true);
+crate::panels::panel!(GradleWindow, "Gradle", |_, _| ts!("cmd-gradle").into(), true);
 
 impl Render for GradleWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

@@ -278,7 +278,7 @@ reveal-linux = Mostrar em Arquivos
 
 ## settings
 
-settings-search-settings = Pesquisar nas configurações
+settings-search-settings = Buscar configurações
 settings-found-on-path-and-the-usual-places = Procurado no PATH e nos locais de costume
 settings-its-programs-name = O nome do programa
 settings-your-login-shell-shell = Seu shell de login ($SHELL)
@@ -328,7 +328,7 @@ settings-no-gradle-build-is-open = Nenhum build Gradle está aberto.
 settings-automatic-the-builds-java-level = Automático (o nível de Java do build)
 settings-the-java-server-restarts-on-the-chosen-jdk = O servidor Java usará o JDK escolhido na próxima vez que iniciar.
 settings-gradle-daemons = Daemons Gradle
-settings-stop-idle-daemons-after = Parar daemons inativos após
+settings-stop-idle-daemons-after = Parar se inativos
 settings-double-click-a-task-in-the-gradle-tool = Clique duas vezes em uma tarefa na janela Gradle para executá-la. A saída aparece na janela de build.
 settings-the-processes-window-lists-the-gradle-daemons-running = A janela Processos lista os daemons Gradle em execução e para os inativos quando você pede.
 settings-project-structure-downloads-jdks-and-sets-the-projects = Estrutura do projeto (⌘;) baixa JDKs e define o do projeto.
@@ -351,7 +351,7 @@ settings-sees-the-editor-its-hooks-report-each-edit = Vê o editor; os hooks del
 settings-its-hooks-report-each-edit-and-prompt = Os hooks dele informam cada edição e prompt
 settings-a-plugin-of-snoutcodes-reports-each-edit-and = Um plugin do SnoutCode informa cada edição e prompt
 settings-files-seen-on-disk-while-it-works-in = Arquivos vistos no disco enquanto ele trabalha no console
-settings-its-colour-caret-and-marks = A cor, o cursor e as marcas dele
+settings-its-colour-caret-and-marks = Cor, cursor e marcas
 settings-the-console-runs = O console executa
 settings-programs = Programas
 settings-your-agent = Seu agente
@@ -380,7 +380,7 @@ settings-environment = Ambiente
 settings-add = Adicionar
 settings-added-to-the-terminals-and-the-claude-code = Adicionado aos terminais e ao console do Claude Code que você iniciar depois de uma alteração.
 settings-behaviour = Comportamento
-settings-scrollback = Histórico de rolagem
+settings-scrollback = Histórico
 settings-lines-for-terminals-started-after-a-change = linhas, para terminais iniciados depois de uma alteração
 settings-copy-text-as-soon-as-it-is-selected = Copiar o texto assim que for selecionado
 settings-use-option-as-meta-f-moves-a-word = Usar Option como Meta (⌥F avança uma palavra, não digita ƒ)
@@ -417,6 +417,18 @@ settings-only-while-is-held = Só com ⌘ pressionado
 settings-block = Bloco
 settings-bar = Barra
 settings-underline = Sublinhado
+settings-hover-hint = Para problemas e suas correções, e o que é um símbolo. ⌘ sempre mostra na hora, com o link para a declaração.
+settings-click-hint = Segure para sublinhar um nome como link e clique para ir à declaração (na declaração, aos usos). ⌥⌘-clique leva às implementações.
+settings-blame-hint = Do blame do Git do arquivo. O autor da linha aparece quando o cursor fica parado pelo tempo de espera (Editor ▸ Informação ao passar o mouse). Anotar com Git Blame fica no menu de contexto da margem e no menu Git.
+settings-daemons-hint = Os daemons Gradle do SnoutCode param após esse tempo sem build. Um novo valor vale para os daemons iniciados depois que o mecanismo Java reiniciar.
+settings-profiles-hint = A janela Spring avalia os beans com esses perfis e esmaece os que ficam de fora. O menu de perfis dela muda esta mesma opção.
+settings-agent-colours-hint = Cada agente escreve na sua cor: um cursor com o nome dele enquanto digita, uma marca na margem ao lado das linhas alteradas e um ponto nas abas e arquivos alterados até você revisá-los.
+settings-programs-hint = Deixe em branco e o SnoutCode encontra cada programa, no seu PATH e onde os instaladores o colocam. Clique em Procurar para escolher um.
+settings-terminal-scope-hint = A aparência, o mecanismo e as teclas dos terminais, e o terminal externo, são seus: são os mesmos em todos os projetos.
+settings-engine-hint = O mecanismo lê o que roda nos terminais e no console do Claude Code. Uma mudança vale para os terminais abertos depois dela; os já abertos mantêm o mecanismo com que começaram.
+settings-ghostty-preview-hint = O Ghostty também desenha riscada a chamada obsoleta, a linha ondulada de aviso e o link do relatório de testes.
+settings-custom-terminal-hint = Executado com /bin/sh. { "{dir}" } é a pasta; em uma máquina remota, { "{ssh}" } é o comando ssh que abre um shell lá.
+settings-external-terminal-hint = Abrir em um terminal externo, no menu Arquivo e no menu de um arquivo ou pasta, abre nessa pasta. Em um projeto remoto, abre uma sessão ssh lá.
 
 ## dialogs
 
@@ -558,7 +570,7 @@ welcome-open-one-from-the-project-tree-or = Abra um na árvore do projeto, ou:
 welcome-recent-files-2 = Arquivos recentes
 welcome-clone-repository = Clonar repositório…
 welcome-from-a-git-url = De uma URL do Git
-welcome-java-or-spring-boot-app = Aplicativo Java ou Spring Boot
+welcome-java-or-spring-boot-app = App Java ou Spring Boot
 welcome-no-recent-project-matches = Nenhum projeto recente corresponde.
 welcome-no-recent-projects-yet-open-a-folder-to = Ainda não há projetos recentes. Abra uma pasta para começar.
 welcome-recent-projects = Projetos recentes
@@ -610,7 +622,7 @@ projects-remove-from-list = Remover da lista
 
 status-snoutcodes-processes-running-of-memory-click-to-show = Processos do SnoutCode: { $count } em execução, { $memory } de memória. Clique para vê-los.
 status-in-the-background = Em segundo plano
-status-the-editor-works-meanwhile = O editor continua funcionando enquanto isso.
+status-the-editor-works-meanwhile = O editor continua disponível.
 status-reconnect = Reconectar
 status-changes-the-agents-made-that-wait-for-your = Alterações dos agentes aguardando sua revisão
 status-review = Revisar
@@ -670,7 +682,7 @@ find-directory = Diretório
 find-open-files = Arquivos abertos
 find-text-to-find = Texto a localizar
 find-replace-with = Substituir por
-find-file-mask-java-test-java = Máscara de arquivo: *.java, !*Test.java
+find-file-mask-java-test-java = Máscara: *.java, !*Test.java
 find-folder-from-the-projects = Pasta, a partir da do projeto
 find-match-case = Diferenciar maiúsculas
 find-whole-words = Palavras inteiras
@@ -782,6 +794,13 @@ model-reset-to = { $head } redefinida para { $upstream }
 model-your-previous-commits-are-kept-on-the-branch = Seus commits anteriores ficam na branch { $backup }. Exclua-a quando não precisar mais deles.
 model-now-matches = { $head } agora corresponde a { $upstream }
 model-commit = Commit { $short_id } { $summary }
+model-sources = Fontes
+model-test-sources = Fontes de teste
+model-test-resources = Recursos de teste
+model-generated-sources = Fontes geradas
+model-the-build-did-not-sync = O build não sincronizou
+model-sync = Sincronização: { $root }
+model-the-gradle-sync-failed = A sincronização Gradle falhou
 
 ## branch
 
@@ -866,7 +885,6 @@ git-copy-name = Copiar nome
 git-check-out-detached = Mudar (HEAD desanexado)
 git-create-branch-from-tag = Criar branch a partir da tag…
 git-tag = tag { $name }
-git-changed-staged = { $count } alterados, { $staged_count } preparados
 git-nothing-to-commit-on = Nada para commitar em { $head }
 git-nothing-to-commit = Nada para commitar
 git-show-all-files = Mostrar todos os arquivos
@@ -900,7 +918,6 @@ git-back-esc = Voltar (Esc)
 git-the-commit-could-not-be-read = Não foi possível ler o commit
 git-from = { $directory }  (de { $orig })
 git-this-commit-changes-no-files = Este commit não altera nenhum arquivo
-git-changed = { $count } alterados
 git-committer = Committer
 git-committed = Commit em
 git-parents = Pais
@@ -930,6 +947,17 @@ git-too-large-to-show = Grande demais para exibir
 git-the-file-is-too-large-to-diff-here = O arquivo é grande demais para diff aqui.
 git-no-differences = Sem diferenças
 git-and-are-the-same = { $left } e { $right } são iguais.
+git-changed = { $count ->
+    [one] { $count } alterado
+   *[other] { $count } alterados
+    }
+git-changed-staged = { $count ->
+    [one] { $count } alterado
+   *[other] { $count } alterados
+    }, { $staged_count ->
+    [one] { $staged_count } preparado
+   *[other] { $staged_count } preparados
+    }
 
 ## console
 
@@ -1020,6 +1048,7 @@ console-is-not-installed-yet-install-it-in-the = { $agent } ainda não está ins
 console-is-not-running-2 = { $agent } não está em execução.
 console-set-up = { $a } (configurar)
 console-install-2 = { $a } (instalar)
+console-open-a-project-to-run-in-it = Abra um projeto para executar o { $agent } nele.
 
 ## workspace
 
@@ -1088,6 +1117,7 @@ background-waiting-for-snout-engine = Aguardando o snout-engine
 background-attempt-of-5 = {" "}(tentativa { $n } de 5)
 background-the-java-engine-stopped-unexpectedly-and-is-starting = O mecanismo Java parou inesperadamente e está reiniciando{ $again }: { $doing }
 background-java-stopped-starting-again = Java parou, reiniciando
+background-building-snout-engine = Compilando o snout-engine
 
 ## quit
 
@@ -1285,9 +1315,6 @@ run-running = Em execução há { $time }
 run-finished-in = Concluído em { $time }
 run-failed-after = Falhou após { $time }
 run-stopped-after = Parado após { $time }
-run-failed-2 = { $failed } com falha
-run-passed = { $passed } aprovados
-run-skipped = { $skipped } ignorados
 run-tests-count = { $count ->
     [one] { $parts }, { $count } teste
    *[other] { $parts }, { $count } testes
@@ -1336,6 +1363,16 @@ run-process-ended-by-a-signal = Processo encerrado por um sinal
 run-all-tests = Todos os testes
 run-tests-in = Testes em { $p }
 run-open-a-playwright-project-first = Abra um projeto Playwright primeiro
+run-passed = { $passed ->
+    [one] { $passed } aprovado
+   *[other] { $passed } aprovados
+    }
+run-skipped = { $skipped ->
+    [one] { $skipped } ignorado
+   *[other] { $skipped } ignorados
+    }
+run-failed-2 = { $failed } com falha
+tests-watch-label = Observar
 
 ## structure
 
@@ -1381,7 +1418,7 @@ structure-spring-boot = Spring Boot
 structure-build-file = Arquivo de build
 structure-not-set = Não definido
 structure-toolchain = toolchain { $t }
-structure-target-compatibility = Compatibilidade de destino
+structure-target-compatibility = Compat. de destino
 structure-this-project-compiles-no-java-it-has-no = Este projeto não compila Java: não tem source sets.
 structure-java-bytecode = Java { $a }, bytecode { $b }
 structure-content-roots = Raízes de conteúdo
@@ -1474,12 +1511,26 @@ structure-reload-maven = Recarregar Maven
 structure-read-the-maven-builds-again = Ler os builds Maven novamente
 structure-read-the-gradle-builds-again = Ler os builds Gradle novamente
 structure-read-the-builds-again = Ler os builds novamente
+structure-facets = Facetas
+structure-project-settings = Opções do projeto
+structure-platform-settings = Plataforma
+structure-search = Buscar
+structure-filter-dependencies = Filtrar por grupo, nome ou versão
+structure-jdk-listed-already = O JDK { $version } já está na lista
+structure-jdk-added = JDK { $version } adicionado. Aplicar o mantém.
+structure-no-jdk-in = Nenhum JDK em { $dir }: escolha a pasta que contém a pasta bin com o Java
+structure-add-jdk = Adicionar JDK
+structure-jdk-removed = Removido da lista. Aplicar mantém a alteração.
+structure-jdk-downloaded = JDK { $version } baixado em { $home }
+structure-download-failed = O download falhou: { $e }
+structure-build-file-not-found = O arquivo de build não foi encontrado
+structure-syncing-note = Sincronizando o modelo do Gradle. As páginas acompanham quando terminar.
 
 ## newproject
 
 newproject-gradle-or-maven = Gradle ou Maven
 newproject-from-start-spring-io = De start.spring.io
-newproject-end-to-end-tests-in-typescript = Testes de ponta a ponta em TypeScript
+newproject-end-to-end-tests-in-typescript = Testes E2E em TypeScript
 newproject-project-name = Nome do projeto
 newproject-folder = Pasta
 newproject-search-dependencies = Pesquisar dependências
@@ -1520,7 +1571,7 @@ runwin-copy-all = Copiar tudo
 runwin-save-output-to-file = Salvar a saída em um arquivo…
 runwin-rerun-r = Executar novamente (⌘R)
 runwin-rerun-failed-tests-r = Executar novamente os testes com falha (⌥⌘R)
-runwin-test-results = Resultados dos testes
+runwin-test-results = Resultados
 runwin-passed = Aprovado
 runwin-skipped = Ignorado
 runwin-nothing-printed = { $what }; nada impresso
@@ -1604,6 +1655,7 @@ spring-beans-and-endpoints-appear-once-the-java-engine = Beans e endpoints apare
 spring-beans-2 = Beans { $bean_count }
 spring-endpoints = Endpoints { $count }
 spring-reading = Lendo…
+spring-data-repository = Repositório de dados
 
 ## config
 
@@ -1651,7 +1703,7 @@ tests-about-left = { $elapsed } · faltam cerca de { $left }
 tests-live-run = Execução ao vivo
 tests-history = Histórico
 tests-run-with-the-browsers-showing-one-test-at = Executar com os navegadores visíveis, um teste por vez
-tests-rerun-failed = Executar falhas novamente
+tests-rerun-failed = Repetir falhas
 tests-run-all = Executar todos
 tests-no-environment = Sem ambiente
 tests-environment = Ambiente: { $label }, { $d }
@@ -1661,7 +1713,7 @@ tests-all = Todos { $total }
 tests-failed = Falhas { $failed }
 tests-flaky = Instáveis { $flaky }
 tests-slow-over-4-s = Lentos, mais de 4 s
-tests-last-10-runs = Últimas 10 execuções
+tests-last-10-runs = Últimas 10
 tests-flaky-2 = Instável
 tests-finding-the-tests = Procurando os testes…
 tests-no-test-matches-the-filter = Nenhum teste corresponde ao filtro.
@@ -1716,13 +1768,28 @@ tests-playwright-listed-no-tests = O Playwright não listou nenhum teste ({ $sta
 tests-recording = Gravação
 tests-ui-mode = Modo UI
 tests-the-snoutcode-locator-picker-could-not-be-written = Não foi possível gravar o seletor de localizadores do SnoutCode: { $e }
-tests-count-passed = aprovados
-tests-count-failed = com falha
-tests-count-flaky = instáveis
-tests-count-skipped = ignorados
-tests-flaky-3 = , { $flaky } instáveis
 tests-new-since-the-last-run = {" "}({ $fresh } novos desde a última execução)
 tests-passed-failed = { $title }: { $passed } aprovados, { $failed } com falha{ $new }{ $new_2 }
+tests-count-passed = { $count ->
+    [one] { $count } aprovado
+   *[other] { $count } aprovados
+    }
+tests-count-failed = { $count ->
+    [one] { $count } com falha
+   *[other] { $count } com falha
+    }
+tests-count-flaky = { $count ->
+    [one] { $count } instável
+   *[other] { $count } instáveis
+    }
+tests-count-skipped = { $count ->
+    [one] { $count } ignorado
+   *[other] { $count } ignorados
+    }
+tests-flaky-3 = , { $flaky ->
+    [one] { $flaky } instável
+   *[other] { $flaky } instáveis
+    }
 
 ## env
 
@@ -1978,6 +2045,11 @@ editor-the-typescript-language-server-failed = O servidor de linguagem TypeScrip
 editor-the-typescript-language-server-keeps-stopping = O servidor de linguagem TypeScript continua parando
 editor-open-a-java-file = Abra um arquivo Java para ver a estrutura.
 editor-java-engine-reading = O mecanismo Java está lendo o arquivo.
+editor-problems-title = Problemas
+editor-downloading-java-for-the-engine = Baixando Java { $ENGINE_JAVA } para o mecanismo
+editor-copying-the-java-engine = Copiando o mecanismo Java
+editor-java-engine-install-failed = Não foi possível instalar o mecanismo Java: { $why }
+editor-ts-install-failed = Não foi possível instalar o servidor de linguagem TypeScript: { $why }
 
 ## blame
 
@@ -2031,6 +2103,27 @@ agents-snoutcode-cannot-reach-the-agent-in-this-window = O SnoutCode não conseg
 agents-asked-for-the-commit-message = Pediu ao { $name } a mensagem de commit
 agents-claude-is-waiting-for-your-review = O Claude aguarda sua revisão
 agents-is-editing = { $short } está editando
+agents-waiting = Aguardando
+agents-done = Concluído
+agents-no-calls-yet = Ainda não há chamadas
+agents-what-an-agent-in-the-console-asks-of = O que um agente no console pede ao SnoutCode aparece aqui.
+agents-open-a-file-to-insert-into = Abra um arquivo para inserir
+agents-insert = Inserir
+agents-run-in-terminal = Executar no terminal
+agents-nothing-shown-yet = Nada exibido ainda
+agents-what-an-agent-in-the-console-chooses-to = O que um agente no console escolhe mostrar aparece aqui, com botões no código.
+agents-from = { $title }, de { $agent }
+agents-from-2 = De { $agent }
+agents-all = Os agentes
+agents-two = { $a } e { $b }
+agents-n = { $n } agentes
+agents-changed-files = { $count ->
+    [one] { $who }: 1 arquivo alterado
+   *[other] { $who }: { $count } arquivos alterados
+    }
+agents-seen = visto
+agents-new = novo
+project-shared = compartilhado
 
 ## keys
 
@@ -2073,9 +2166,6 @@ core-head-to-worktree = HEAD ↔ Árvore de trabalho
 core-index-to-worktree = Índice ↔ Árvore de trabalho
 core-head-to-index = HEAD ↔ Índice
 core-index = Índice
-core-scope-staged = { $n } preparados
-core-scope-all-changed = todos os { $n } alterados
-core-scope-selected = { $n } selecionados
 core-scope-message-only = somente a mensagem
 core-scope-nothing = nada para commitar
 core-what-staged = as alterações preparadas
@@ -2097,3 +2187,79 @@ core-years-ago = { $count ->
     [one] há { $count } ano
    *[other] há { $count } anos
     }
+core-engine-built-in = Integrado
+core-ghostty-unavailable = Esta versão foi compilada sem o Ghostty. As versões publicadas o incluem.
+core-gap-unchanged = { $count ->
+    [one] ⋯ { $count } linha inalterada
+   *[other] ⋯ { $count } linhas inalteradas
+    }
+core-update-checking = Procurando atualizações…
+core-update-found = Atualização encontrada (v{ $version }), baixando…
+core-update-preparing-now = Preparando a atualização…
+core-update-downloading-now = Baixando a atualização…
+core-update-ready = Atualização pronta: v{ $version }
+core-update-from-source = Esta versão foi compilada a partir do código-fonte e não se atualiza sozinha. Compile de novo a partir do código mais recente para atualizar.
+core-update-up-to-date = Você está em dia (v{ $version })
+core-update-available = O SnoutCode v{ $version } está disponível.
+core-update-cannot-replace = O SnoutCode v{ $version } está disponível, mas não consegue se instalar de onde está rodando. Mova-o para seus aplicativos ou baixe-o.
+core-update-did-not-land = O SnoutCode v{ $version } não foi instalado. Baixe-o para instalar manualmente.
+core-update-preparing = Preparando a atualização
+core-update-downloading = Baixando a atualização
+core-update-offline = Não foi possível procurar atualizações: este computador está sem conexão. Uma nova tentativa será feita mais tarde.
+core-update-feed-down = Não foi possível procurar atualizações: o GitHub não está respondendo. Sua instalação está bem, e uma nova tentativa será feita mais tarde.
+core-update-rate-limited = Não foi possível procurar atualizações: o GitHub está limitando as requisições desta rede. Uma nova tentativa será feita mais tarde.
+core-update-no-release = Não foi possível procurar atualizações: nenhuma versão publicada foi encontrada.
+core-update-signature = Uma atualização foi baixada e recusada: ela não corresponde à assinatura esperada. Nada foi instalado.
+core-update-disk = Não foi possível salvar a atualização: não há espaço suficiente em disco.
+core-update-unknown = Não foi possível procurar atualizações.
+core-scope-staged = { $n ->
+    [one] { $n } preparado
+   *[other] { $n } preparados
+    }
+core-scope-all-changed = { $n ->
+    [one] { $n } alterado
+   *[other] todos os { $n } alterados
+    }
+core-scope-selected = { $n ->
+    [one] { $n } selecionado
+   *[other] { $n } selecionados
+    }
+
+## icons
+
+icons-plain-text = Texto simples
+
+## menu
+
+menu-menu = Menu
+
+## misc
+
+newproject-location = Local
+newproject-offline-fallback = { $why } Estas são as dependências que o SnoutCode conhece; o projeto é criado aqui, e o Gradle baixa o Spring Boot quando houver rede.
+structure-modules-row = Módulos
+structure-jdk-hint = O Gradle e o mecanismo Java rodam com ele. Fica em .snout/settings.json; o mecanismo passa a usá-lo na próxima vez que iniciar.
+structure-locked-maven-hint = Os valores com cadeado são do Maven: Editar no arquivo de build abre a linha do pom.xml que os define. Depois de salvar, a barra sobre o editor oferece recarregar.
+structure-locked-gradle-hint = Os valores com cadeado são do build: Editar no arquivo de build abre a linha que os define. Depois de salvar, a barra sobre o editor oferece sincronizar.
+console-installer-not-on-path = O instalador terminou, mas o { $agent } não está no PATH que o SnoutCode vê. Indique o caminho em Configurações, Agentes, ou reinicie o SnoutCode.
+console-no-project-open = Nenhum projeto aberto: o { $agent } começa na sua pasta pessoal, onde pode criar um. Abra o projeto quando ele existir para acompanhar as alterações.
+dialogs-group-example = Trabalho
+dialogs-checkout-placeholder = Filtrar branches e tags, ou digitar um commit (SHA, HEAD~2, …)
+gutter-run-label = Executar ‘{ $label }’
+gutter-debug-label = Depurar ‘{ $label }’
+editor-settings-source = Configurações do SnoutCode
+terminal-not-installed = { $name } não está instalado
+terminal-is-mac-app = { $name } é um aplicativo de Mac
+terminal-not-mac-app = { $name } não é um aplicativo de Mac
+terminal-not-windows-app = { $name } não é um aplicativo do Windows
+terminal-default-linux = Terminal padrão
+model-could-not-open-in = Não foi possível abrir o projeto em { $connection }
+model-no-repositories-found = Nenhum repositório encontrado
+env-environments = Ambientes
+env-base-url-hint = As execuções recebem a URL como BASE_URL, lida pelo baseURL da configuração. As variáveis do arquivo vêm primeiro, depois as de cima. Guarde as senhas no arquivo .env, que o repositório deve ignorar.
+pwsetup-runner-missing = o executor de testes do Playwright não está instalado
+remote-password-title = Senha
+run-needs-jdk-note = Este build precisa do JDK { $v }, que não está instalado. Baixe-o pela barra acima do editor ou escolha um JDK em Configurações.
+debug-js-download-failed = Não foi possível baixar o depurador JavaScript: { $e }
+debug-js-did-not-start = O depurador JavaScript não iniciou: { $e }
+run-ts-needs-tsx = Executar um arquivo TypeScript requer o pacote tsx no projeto ({ $manager } add -D tsx) ou o Node 22.6 ou mais recente (este projeto usa o Node { $node }).

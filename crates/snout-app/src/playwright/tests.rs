@@ -484,12 +484,8 @@ impl PwTests {
             title = (s.title).to_string(),
             passed = (record.passed).to_string(),
             failed = (record.failed).to_string(),
-            new = (if record.flaky > 0 {
-                t!("tests-flaky-3", flaky = (record.flaky).to_string())
-            } else {
-                String::new()
-            })
-            .to_string(),
+            new = (if record.flaky > 0 { t!("tests-flaky-3", flaky = ((record.flaky) as u64)) } else { String::new() })
+                .to_string(),
             new_2 =
                 (if fresh > 0 { t!("tests-new-since-the-last-run", fresh = fresh.to_string()) } else { String::new() })
                     .to_string()

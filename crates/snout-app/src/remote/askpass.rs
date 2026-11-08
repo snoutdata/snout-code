@@ -29,7 +29,7 @@ pub fn title_of(prompt: &str) -> &'static str {
     } else if p.contains("passphrase") {
         ts!("remote-key-passphrase")
     } else if p.contains("password") {
-        "Password"
+        ts!("remote-password-title")
     } else {
         "SSH"
     }

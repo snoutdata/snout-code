@@ -1091,10 +1091,7 @@ impl ConsolePanel {
                         let id = agent_id.unwrap_or(crate::agents::CLAUDE);
                         this.found.insert(id, false);
                         if this.installed_here.contains(id) {
-                            let e = format!(
-                                "The installer finished, but {agent_name} is not on the PATH SnoutCode sees. \
-                                 Set its path in Settings, Agents, or restart SnoutCode."
-                            );
+                            let e = t!("console-installer-not-on-path", agent = agent_name.to_string());
                             this.error = Some((root.clone(), e));
                         } else {
                             this.missing = Some((root.clone(), Missing::Program(id)));
@@ -1557,7 +1554,7 @@ impl Render for ConsolePanel {
         let kind = self.kind;
         let Some(root) = root else {
             let hint = match kind {
-                Kind::Claude => format!("Open a project to run {} in it.", self.agent(cx).name),
+                Kind::Claude => t!("console-open-a-project-to-run-in-it", agent = (self.agent(cx).name).to_string()),
                 Kind::Shell => ts!("console-open-a-project-to-run-a-shell-in").to_owned(),
             };
             return div().size_full().bg(p.panel).flex().flex_col().child(self.header(None, &p, cx)).child(
@@ -2038,11 +2035,7 @@ impl ConsolePanel {
             }
         };
         let hint = if self.kind == Kind::Claude && self.model.read(cx).project_root().is_none() {
-            format!(
-                "No project is open: {} starts in your home folder, where it can make one. Open the project when it \
-                 is there, to follow its edits.",
-                agent.name
-            )
+            t!("console-no-project-open", agent = agent.name.to_string())
         } else {
             hint
         };
@@ -2250,7 +2243,7 @@ impl ConsolePanel {
             return (title, hint, Vec::new(), buttons);
         }
         let distros = cx.try_global::<crate::remote::Remote>().map(|r| r.wsl_distros.clone()).unwrap_or_default();
-        let title = format!("{name} is not installed");
+        let title = t!("console-is-not-installed", agent = name.to_string());
         let Some(first) = distros.first().cloned() else {
             let hint = t!(
                 "console-this-pc-has-no-wsl-distribution-yet-wsl",

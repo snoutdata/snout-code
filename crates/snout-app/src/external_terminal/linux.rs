@@ -21,7 +21,9 @@ pub const APPS: &[ExternalTerminal] = &[
 ];
 
 /// What the system's own terminal is called.
-pub const DEFAULT_LABEL: &str = "Default Terminal";
+pub fn default_label() -> &'static str {
+    ts!("terminal-default-linux")
+}
 
 /// The terminal is started and left running.
 pub const WAITS: bool = false;
@@ -69,14 +71,16 @@ pub fn installed(term: ExternalTerminal) -> Option<PathBuf> {
 
 /// The command line that opens `term` at `at`, program first.
 pub fn command(term: ExternalTerminal, at: &Where, _scripts: &Path) -> std::io::Result<Vec<String>> {
-    let missing = || std::io::Error::other(format!("{} is not installed", term.label()));
+    let missing = || std::io::Error::other(t!("terminal-not-installed", name = term.label().to_string()));
     let (exe, as_app) = match term {
         ExternalTerminal::Terminal => {
             let (exe, app) = default_terminal().ok_or_else(missing)?;
             (exe.display().to_string(), app)
         }
         _ => (
-            program(term).ok_or_else(|| std::io::Error::other(format!("{} is a Mac app", term.label())))?.to_owned(),
+            program(term)
+                .ok_or_else(|| std::io::Error::other(t!("terminal-is-mac-app", name = term.label().to_string())))?
+                .to_owned(),
             Some(term),
         ),
     };

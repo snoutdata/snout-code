@@ -205,8 +205,8 @@ impl DialogBody {
     fn new(model: Entity<Model>, dialog: Dialog, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (placeholder, value) = match &dialog {
             Dialog::NewBranch(_) => ("feature/my-idea", String::new()),
-            Dialog::GroupName { rename, .. } => ("Work", rename.clone().unwrap_or_default()),
-            Dialog::Checkout => ("Filter branches and tags, or enter a commit (SHA, HEAD~2, …)", String::new()),
+            Dialog::GroupName { rename, .. } => (ts!("dialogs-group-example"), rename.clone().unwrap_or_default()),
+            Dialog::Checkout => (ts!("dialogs-checkout-placeholder"), String::new()),
             _ => ("", String::new()),
         };
         let name = cx.new(|cx| {

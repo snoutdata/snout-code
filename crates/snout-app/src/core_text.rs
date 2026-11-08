@@ -24,9 +24,9 @@ pub fn diff_sides(base: DiffBase) -> (&'static str, &'static str) {
 /// Beside the Commit button.
 pub fn scope_label(scope: &Scope) -> String {
     match scope {
-        Scope::Staged(n) => t!("core-scope-staged", n = n.to_string()),
-        Scope::Files { paths, all: true } => t!("core-scope-all-changed", n = paths.len().to_string()),
-        Scope::Files { paths, all: false } => t!("core-scope-selected", n = paths.len().to_string()),
+        Scope::Staged(n) => t!("core-scope-staged", n = ((*n) as u64)),
+        Scope::Files { paths, all: true } => t!("core-scope-all-changed", n = ((paths.len()) as u64)),
+        Scope::Files { paths, all: false } => t!("core-scope-selected", n = ((paths.len()) as u64)),
         Scope::MessageOnly => t!("core-scope-message-only"),
         Scope::Nothing => t!("core-scope-nothing"),
     }
@@ -100,4 +100,71 @@ pub fn name_problem(problem: &'static str) -> &'static str {
         "There is already a group with this name" => ts!("core-group-taken"),
         other => other,
     }
+}
+
+/// A terminal engine's name.
+pub fn engine_label(engine: snout_core::term::EngineKind) -> &'static str {
+    match engine {
+        snout_core::term::EngineKind::Builtin => ts!("core-engine-built-in"),
+        other => other.label(),
+    }
+}
+
+/// Why this build cannot run a terminal engine.
+pub fn engine_unavailable(engine: snout_core::term::EngineKind) -> Option<&'static str> {
+    engine.unavailable().map(|_| ts!("core-ghostty-unavailable"))
+}
+
+/// The line that stands for unchanged lines left out of a diff.
+pub fn gap_label(n: usize) -> String {
+    t!("core-gap-unchanged", count = n)
+}
+
+/// The updater's sentence for the toast.
+pub fn update_text(status: &snout_update::status::UpdateStatus) -> String {
+    use snout_update::status::{ManualReason, UpdateStatus as S};
+    match status {
+        S::Checking => t!("core-update-checking"),
+        S::Available { version, .. } => t!("core-update-found", version = version.to_string()),
+        S::Downloading { preparing: true, .. } => t!("core-update-preparing-now"),
+        S::Downloading { .. } => t!("core-update-downloading-now"),
+        S::Downloaded { version, .. } => t!("core-update-ready", version = version.to_string()),
+        S::NotAvailable { from_source: true, .. } => t!("core-update-from-source"),
+        S::NotAvailable { version, .. } => t!("core-update-up-to-date", version = version.to_string()),
+        S::Manual { version, reason: ManualReason::PackageManager } => {
+            t!("core-update-available", version = version.to_string())
+        }
+        S::Manual { version, reason: ManualReason::CannotReplace } => {
+            t!("core-update-cannot-replace", version = version.to_string())
+        }
+        S::Manual { version, reason: ManualReason::DidNotLand } => {
+            t!("core-update-did-not-land", version = version.to_string())
+        }
+        S::Error(failure) => update_failure(failure.kind),
+    }
+}
+
+/// One sentence on what went wrong with an update, and whose problem it is.
+fn update_failure(kind: snout_update::failure::Kind) -> String {
+    use snout_update::failure::Kind as K;
+    match kind {
+        K::Offline => t!("core-update-offline"),
+        K::FeedUnavailable => t!("core-update-feed-down"),
+        K::RateLimited => t!("core-update-rate-limited"),
+        K::NoRelease => t!("core-update-no-release"),
+        K::Signature => t!("core-update-signature"),
+        K::Disk => t!("core-update-disk"),
+        K::Unknown => t!("core-update-unknown"),
+    }
+}
+
+/// An update on its way, for the status bar: its stage and how far it is.
+pub fn update_task(status: &snout_update::status::UpdateStatus) -> Option<(String, Option<u32>)> {
+    use snout_update::status::UpdateStatus as S;
+    let (_, percent) = status.task()?;
+    let stage = match status {
+        S::Downloading { preparing: true, .. } => t!("core-update-preparing"),
+        _ => t!("core-update-downloading"),
+    };
+    Some((stage, percent))
 }

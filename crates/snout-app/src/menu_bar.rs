@@ -252,7 +252,7 @@ impl MenuBar {
                     .cursor_pointer()
                     .when(open.is_some(), |d| d.bg(hover))
                     .when(open.is_none(), |d| d.hover(move |s| s.bg(hover)))
-                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Menu").build(w, cx))
+                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(ts!("menu-menu")).build(w, cx))
                     .child(crate::components::icon(crate::components::IconName::Menu, 15., p.fg))
                     // Down, not up: a press in the title bar would move the window.
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {

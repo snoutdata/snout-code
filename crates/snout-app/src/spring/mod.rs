@@ -310,7 +310,7 @@ pub fn kind_label(kind: &str) -> &'static str {
         "configuration" => "Configuration",
         "bean" => "Bean",
         "xml" => "XML",
-        "dataRepository" => "Data repository",
+        "dataRepository" => ts!("spring-data-repository"),
         "mapper" => "Mapper",
         "properties" => "ConfigurationProperties",
         "library" => "Library",

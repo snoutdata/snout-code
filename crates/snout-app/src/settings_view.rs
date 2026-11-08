@@ -997,7 +997,7 @@ fn engine_card(engine: EngineKind, on: bool, p: &Palette) -> gpui::Stateful<gpui
                 .text_color(if on { p.fg } else { p.fg_dim })
                 .when(on, |d| d.font_weight(FontWeight::SEMIBOLD))
                 .child(crate::components::icon(ico, 12., if on { p.accent } else { p.fg_dim }))
-                .child(engine.label()),
+                .child(crate::core_text::engine_label(engine)),
         )
         .child(div().text_size(px(11.)).text_color(p.fg_dim).child(if available {
             blurb
@@ -1041,7 +1041,7 @@ fn terminal_preview(engine: EngineKind, look: crate::console::TermLook, shell: &
                 )
                 .child(div().flex_1())
                 .child(crate::components::badge_with_icon(
-                    t!("settings-engine", shown = (shown.label()).to_string()),
+                    t!("settings-engine", shown = (crate::core_text::engine_label(shown)).to_string()),
                     ico,
                     crate::components::Tone::Accent,
                     p,
@@ -1399,17 +1399,29 @@ impl SettingsView {
                     )
                     .child(section(ts!("settings-display"), &p))
                     .child(check_line(
-                        look::checkbox("settings-soft-wrap", ts!("settings-soft-wrap-long-lines"), d.soft_wrap, true, &p)
-                            .debug_selector(|| "settings-soft-wrap".into())
-                            .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.soft_wrap = !s.soft_wrap))),
+                        look::checkbox(
+                            "settings-soft-wrap",
+                            ts!("settings-soft-wrap-long-lines"),
+                            d.soft_wrap,
+                            true,
+                            &p,
+                        )
+                        .debug_selector(|| "settings-soft-wrap".into())
+                        .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.soft_wrap = !s.soft_wrap))),
                         wrap_mark,
                     ))
                     .child(check_line(
-                        look::checkbox("settings-whitespace", ts!("settings-show-whitespace"), d.show_whitespace, true, &p)
-                            .debug_selector(|| "settings-whitespace".into())
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.set(cx, |s| s.show_whitespace = !s.show_whitespace)),
-                            ),
+                        look::checkbox(
+                            "settings-whitespace",
+                            ts!("settings-show-whitespace"),
+                            d.show_whitespace,
+                            true,
+                            &p,
+                        )
+                        .debug_selector(|| "settings-whitespace".into())
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.set(cx, |s| s.show_whitespace = !s.show_whitespace)),
+                        ),
                         space_mark,
                     ))
                     .child(check_line(
@@ -1469,10 +1481,7 @@ impl SettingsView {
                         ),
                         delay_mark,
                     ))
-                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                        "For problems and their fixes, and what a symbol is. \u{2318} always shows it at once, \
-                         with the link to the declaration.",
-                    ))
+                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-hover-hint")))
                     .child(section(ts!("settings-navigation"), &p))
                     .child(row(
                         ts!("settings-click-with"),
@@ -1487,10 +1496,7 @@ impl SettingsView {
                         })),
                         &p,
                     ))
-                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                        "Hold it to underline a name as a link, and click to go to its declaration (on the declaration, \
-                         its usages). \u{2325}\u{2318}-click goes to the implementations.",
-                    ))
+                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-click-hint")))
                     .child(section(ts!("settings-preview"), &p))
                     .child(editor_preview(&d, &p))
                     .into_any_element()
@@ -1542,7 +1548,9 @@ impl SettingsView {
                         )
                         .debug_selector(|| "settings-author-hints".into())
                         .on_click(
-                            cx.listener(|this, _, _, cx| this.set(cx, |s| s.blame_author_hints = !s.blame_author_hints)),
+                            cx.listener(|this, _, _, cx| {
+                                this.set(cx, |s| s.blame_author_hints = !s.blame_author_hints)
+                            }),
                         ),
                         None,
                     ))
@@ -1556,26 +1564,18 @@ impl SettingsView {
                         )
                         .debug_selector(|| "settings-line-blame".into())
                         .on_click(
-                            cx.listener(|this, _, _, cx| this.set(cx, |s| s.blame_current_line = !s.blame_current_line)),
+                            cx.listener(|this, _, _, cx| {
+                                this.set(cx, |s| s.blame_current_line = !s.blame_current_line)
+                            }),
                         ),
                         None,
                     ))
-                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(
-                        "From Git\u{2019}s blame of the file. The line\u{2019}s author shows once the caret rests for the \
-                         hover\u{2019}s delay (Editor \u{25b8} Hover). Annotate with Git Blame is in the gutter\u{2019}s \
-                         right-click menu and the Git menu.",
-                    ))
+                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-blame-hint")))
                     .child(crate::components::tips(
                         ts!("settings-good-to-know"),
                         &[
-                            (
-                                IconName::CloudDownload,
-                                ts!("settings-a-background-fetch-leaves-your-branches-as-they"),
-                            ),
-                            (
-                                IconName::GitBranch,
-                                ts!("settings-click-the-branch-in-the-title-bar-for"),
-                            ),
+                            (IconName::CloudDownload, ts!("settings-a-background-fetch-leaves-your-branches-as-they")),
+                            (IconName::GitBranch, ts!("settings-click-the-branch-in-the-title-bar-for")),
                             (IconName::Keyboard, ts!("settings-2-shows-the-git-view-in-the-message")),
                         ],
                         &p,
@@ -1705,10 +1705,7 @@ impl SettingsView {
                     ),
                     idle_mark,
                 ))
-                .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                    "SnoutCode's own Gradle daemons stop after this long without a build. A new value \
-                             holds for the daemons started after the Java engine starts again.",
-                ))
+                .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-daemons-hint")))
                 .child(crate::components::tips(
                     ts!("settings-good-to-know"),
                     &[
@@ -1780,10 +1777,14 @@ impl SettingsView {
                             &p,
                         ))
                     })
-                    .child(div().pl(px(162.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                        "The Spring window evaluates the beans under these profiles and dims those they leave out. \
-                         Its profile menu changes the same setting.",
-                    ))
+                    .child(
+                        div()
+                            .pl(px(162.))
+                            .pt(px(4.))
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(ts!("settings-profiles-hint")),
+                    )
                     .child(tips)
                     .into_any_element()
             }
@@ -1967,7 +1968,7 @@ impl SettingsView {
                         .text_size(px(11.5))
                         .text_color(p.fg_dim)
                         .child(div().flex_none().size(px(9.)).rounded_full().bg(color))
-                        .child(ts!("settings-its-colour-caret-and-marks")),
+                        .child(div().flex_1().min_w_0().child(ts!("settings-its-colour-caret-and-marks"))),
                 )
                 .child(div().text_size(px(11.5)).line_height(px(15.)).text_color(p.fg_dim).child(how))
         });
@@ -1977,19 +1978,13 @@ impl SettingsView {
             .flex_col()
             .child(section(ts!("settings-the-console-runs"), &p))
             .child(div().flex().flex_wrap().gap(px(8.)).children(cards))
-            .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                "Each agent writes in its own colour: a caret with its name while it types, a mark in the gutter \
-                 beside the lines it changed, and a dot on the tabs and files it changed until you review them.",
-            ))
+            .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-agent-colours-hint")))
             .child(section(ts!("settings-programs"), &p))
             .child(self.program_row("Claude Code", crate::agents::CLAUDE, "settings-browse-claude", d, &p, cx))
             .child(self.program_row("Codex", crate::agents::CODEX, "settings-browse-codex", d, &p, cx))
             .child(self.program_row("opencode", crate::agents::OPENCODE, "settings-browse-opencode", d, &p, cx))
             .child(self.program_row("Amp", crate::agents::AMP, "settings-browse-amp", d, &p, cx))
-            .child(note(
-                "Leave them empty and SnoutCode finds each program, on your PATH and where installers put it. \
-                 Browse to choose one yourself.",
-            ))
+            .child(note(ts!("settings-programs-hint")))
             .child(row(
                 ts!("settings-your-agent"),
                 div().w(px(360.)).child(look::field(&self.agent_command, false, None, &p)),
@@ -2025,10 +2020,13 @@ impl SettingsView {
                 .flex()
                 .flex_col()
                 .child(shell)
-                .child(div().pt(px(14.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                    "The terminals' look, engine and keys, and the external terminal, are yours: they are the same \
-                     in every project.",
-                ))
+                .child(
+                    div()
+                        .pt(px(14.))
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child(ts!("settings-terminal-scope-hint")),
+                )
                 .into_any_element();
         }
         div()
@@ -2062,11 +2060,10 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap(px(10.))
-            .child(div().text_size(px(12.)).line_height(px(17.)).text_color(p.fg_dim).child(
-                "The engine reads what runs in the terminals and the Claude Code console. A change applies to \
-                 the terminals you start after it; open terminals keep the engine they started with.",
-            ))
-            .when_some(EngineKind::Ghostty.unavailable(), |d, why| {
+            .child(
+                div().text_size(px(12.)).line_height(px(17.)).text_color(p.fg_dim).child(ts!("settings-engine-hint")),
+            )
+            .when_some(crate::core_text::engine_unavailable(EngineKind::Ghostty), |d, why| {
                 d.child(
                     callout_with(Tone::Info, Some(ts!("settings-ghostty-is-unavailable").into()), why, &p)
                         .debug_selector(|| "settings-ghostty-unavailable".into()),
@@ -2176,10 +2173,13 @@ impl SettingsView {
             .child(section(ts!("settings-preview"), &p))
             .child(terminal_preview(d.terminal_engine, crate::console::TermLook::of(d), &d.terminal_shell, &p))
             .when(d.terminal_engine.or_available() == EngineKind::Builtin, |b| {
-                b.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                    "Ghostty also draws the deprecated call struck through, its curly warning line, and the test \
-                     report's link.",
-                ))
+                b.child(
+                    div()
+                        .pt(px(6.))
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child(ts!("settings-ghostty-preview-hint")),
+                )
             })
             .into_any_element()
     }
@@ -2379,15 +2379,22 @@ impl SettingsView {
                     div().w(px(360.)).child(look::field(&self.external_command, false, None, &p)),
                     &p,
                 ))
-                .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                    "Run with /bin/sh. {dir} is the folder; on a remote machine, {ssh} is the ssh command that \
-                     opens a shell there.",
-                ))
+                .child(
+                    div()
+                        .pl(px(162.))
+                        .text_size(px(12.))
+                        .text_color(p.fg_dim)
+                        .child(ts!("settings-custom-terminal-hint")),
+                )
             })
-            .child(div().pl(px(162.)).pt(px(4.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                "Open in External Terminal, in the File menu and on a file's or folder's menu, opens it at the \
-                 folder. On a remote project it opens an ssh session there.",
-            ))
+            .child(
+                div()
+                    .pl(px(162.))
+                    .pt(px(4.))
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(ts!("settings-external-terminal-hint")),
+            )
             .into_any_element()
     }
 

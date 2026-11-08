@@ -256,7 +256,7 @@ fn phase_tip(phase: &str) -> Option<&'static str> {
     })
 }
 
-crate::panels::panel!(MavenWindow, "Maven", |_, _| "Maven".into(), true);
+crate::panels::panel!(MavenWindow, "Maven", |_, _| ts!("cmd-maven").into(), true);
 
 impl Render for MavenWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

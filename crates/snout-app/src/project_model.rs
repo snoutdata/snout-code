@@ -45,11 +45,11 @@ impl RootKind {
     /// What the tree's tooltip calls it.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Main => "Sources",
-            Self::Test => "Test sources",
-            Self::Resources => "Resources",
-            Self::TestResources => "Test resources",
-            Self::Generated => "Generated sources",
+            Self::Main => ts!("model-sources"),
+            Self::Test => ts!("model-test-sources"),
+            Self::Resources => ts!("structure-resources"),
+            Self::TestResources => ts!("model-test-resources"),
+            Self::Generated => ts!("model-generated-sources"),
         }
     }
 }
@@ -332,7 +332,7 @@ pub fn parse(json: &Value) -> Option<ProjectModel> {
                 build: str_of(f, "build")?.to_owned(),
                 root_dir: PathBuf::from(str_of(f, "rootDir")?),
                 gradle_version: str_of(f, "gradleVersion").map(str::to_owned),
-                reason: str_of(f, "reason").unwrap_or("The build did not sync").to_owned(),
+                reason: str_of(f, "reason").unwrap_or(ts!("model-the-build-did-not-sync")).to_owned(),
                 error: str_of(f, "error").unwrap_or_default().to_owned(),
                 needs_jdk: f.get("needsJdk").and_then(Value::as_u64).map(|v| v as u32),
             })
@@ -866,7 +866,7 @@ impl ProjectModels {
             let root = root.clone();
             async move {
                 let dist = crate::lang::java::engine_dist(&*host)
-                    .ok_or_else(|| "The Java engine is not built (run snout.sh)".to_owned())?;
+                    .ok_or_else(|| ts!("editor-the-java-engine-is-not-built-run-snout").to_owned())?;
                 run_sync(&*host, &dist, &root, &out, jdk.as_deref())
             }
         });
@@ -900,8 +900,8 @@ impl ProjectModels {
     pub fn task(&self) -> Option<crate::background::BgTask> {
         let root = self.root.as_ref()?;
         self.syncing.map(|_| crate::background::BgTask {
-            title: format!("Sync: {}", Model::dir_name(root)),
-            stage: "Syncing the build model".into(),
+            title: t!("model-sync", root = (Model::dir_name(root)).to_string()),
+            stage: ts!("editor-syncing-the-build-model").into(),
             percent: None,
             ..Default::default()
         })
@@ -952,7 +952,7 @@ pub fn run_sync(host: &dyn Host, dist: &Path, root: &Path, out: &Path, jdk: Opti
         return host.rename(&partial, out).map_err(|e| e.to_string());
     }
     let err = host.read_to_string(&log).unwrap_or_default();
-    Err(err.lines().last().unwrap_or("The Gradle sync failed").to_owned())
+    Err(err.lines().last().unwrap_or(ts!("model-the-gradle-sync-failed")).to_owned())
 }
 
 #[cfg(test)]

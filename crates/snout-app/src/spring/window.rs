@@ -353,7 +353,7 @@ impl SpringWindow {
     }
 }
 
-crate::panels::panel!(SpringWindow, "Spring", |_, _| "Spring".into(), true);
+crate::panels::panel!(SpringWindow, "Spring", |_, _| ts!("stripes-spring").into(), true);
 
 impl SpringWindow {
     /// A tab of the window's own header.

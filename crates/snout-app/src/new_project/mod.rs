@@ -427,12 +427,12 @@ impl NewProjectView {
             .flex()
             .flex_col()
             .child(row(
-                "Name",
+                ts!("dialogs-name"),
                 div().flex_1().min_w_0().max_w(px(340.)).child(look::field(&self.name, false, None, &p)),
                 &p,
             ))
             .child(row(
-                "Location",
+                ts!("newproject-location"),
                 div()
                     .flex_1()
                     .min_w_0()
@@ -518,7 +518,7 @@ impl NewProjectView {
                 },
             ))
         };
-        body = body.child(section(ts!("menu-build"), &p)).child(row(
+        body = body.child(section(ts!("stripes-build"), &p)).child(row(
             ts!("newproject-build-tool"),
             div()
                 .flex()
@@ -729,10 +729,7 @@ impl NewProjectView {
                     .gap(px(8.))
                     .text_size(px(12.))
                     .text_color(p.warn)
-                    .child(format!(
-                        "{why} These are the dependencies SnoutCode knows; the project is made here, and Gradle \
-                         downloads Spring Boot once there is a network."
-                    ))
+                    .child(t!("newproject-offline-fallback", why = why.to_string()))
                     .child(
                         look::small_button(
                             "new-project-retry",

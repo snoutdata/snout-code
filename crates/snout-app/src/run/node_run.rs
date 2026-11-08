@@ -367,11 +367,10 @@ pub fn file_launch(
                 }
             }
             _ => {
-                return Err(format!(
-                    "Running a TypeScript file needs the tsx package in the project ({} add -D tsx) or Node 22.6 \
-                     or later (this project runs on Node {}).",
-                    PackageManager::of(host, root).name(),
-                    node.version
+                return Err(t!(
+                    "run-ts-needs-tsx",
+                    manager = PackageManager::of(host, root).name().to_string(),
+                    node = node.version.to_string()
                 ));
             }
         }

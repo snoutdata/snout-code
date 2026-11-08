@@ -277,7 +277,7 @@ impl HierarchyWindow {
     }
 }
 
-crate::panels::panel!(HierarchyWindow, "Hierarchy", |_, _| "Hierarchy".into(), true);
+crate::panels::panel!(HierarchyWindow, "Hierarchy", |_, _| ts!("cmd-hierarchy").into(), true);
 
 impl Render for HierarchyWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

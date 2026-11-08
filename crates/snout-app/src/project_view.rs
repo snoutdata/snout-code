@@ -614,7 +614,7 @@ fn row_look(
             look.label = s.name.clone();
             look.bold = true;
             look.glyph = folder(Icon::Module, violet);
-            look.chip = Some(("shared".into(), violet));
+            look.chip = Some((ts!("project-shared").into(), violet));
             look.tip = Some(t!("project-compiled-by", join = (s.modules.join(", ")).to_string()));
             look.path = Some(s.content_root.clone());
             look.mark = marks.get(&s.content_root).copied();

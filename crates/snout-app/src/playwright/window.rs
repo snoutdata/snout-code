@@ -45,7 +45,7 @@ pub struct TestsWindow {
     loading: Option<(PathBuf, Task<()>)>,
 }
 
-crate::panels::panel!(TestsWindow, "Tests", |_, _| "Tests".into(), true);
+crate::panels::panel!(TestsWindow, "Tests", |_, _| ts!("stripes-tests").into(), true);
 
 /// The glyph and colour of a state.
 pub fn mark(s: State, p: &Palette) -> (Icon, Hsla) {
@@ -226,8 +226,8 @@ impl TestsWindow {
         let tests = self.tests.clone();
         let failed_any = c.failed > 0 && !running;
         let watch = t.watch;
-        let count = |g: Icon, n: usize, ink: Hsla, what: &'static str| {
-            div().flex().items_center().gap(px(4.)).child(icon(g, 12., ink)).child(format!("{n} {what}"))
+        let count = |g: Icon, ink: Hsla, what: String| {
+            div().flex().items_center().gap(px(4.)).child(icon(g, 12., ink)).child(what)
         };
         let tab = t.tab;
         let tab_button = |id: &'static str, label: &'static str, which: Tab| {
@@ -263,7 +263,7 @@ impl TestsWindow {
                         d.child(
                             button(
                                 "tests-watch",
-                                "Watch",
+                                ts!("tests-watch-label"),
                                 Some(Icon::Eye),
                                 if watch { p.accent } else { p.fg_dim },
                                 &p,
@@ -323,10 +323,10 @@ impl TestsWindow {
                         }),
                     ))
                     .child(div().child(format!("{} / {total}", c.done)))
-                    .child(count(Icon::Check, c.passed, p.ok, ts!("tests-count-passed")))
-                    .child(count(Icon::Close, c.failed, p.error, ts!("tests-count-failed")))
-                    .child(count(Icon::Warning, c.flaky, p.warn, ts!("tests-count-flaky")))
-                    .child(count(Icon::Minus, c.skipped, p.fg_dim, ts!("tests-count-skipped")))
+                    .child(count(Icon::Check, p.ok, t!("tests-count-passed", count = ((c.passed) as u64))))
+                    .child(count(Icon::Close, p.error, t!("tests-count-failed", count = ((c.failed) as u64))))
+                    .child(count(Icon::Warning, p.warn, t!("tests-count-flaky", count = ((c.flaky) as u64))))
+                    .child(count(Icon::Minus, p.fg_dim, t!("tests-count-skipped", count = ((c.skipped) as u64))))
                     .child(div().flex_1())
                     .child(div().text_color(p.fg_dim).child(time)),
             )

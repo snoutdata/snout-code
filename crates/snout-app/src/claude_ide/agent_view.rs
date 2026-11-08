@@ -141,7 +141,7 @@ impl AgentViewPanel {
         let _ = self.ws.update(cx, |ws, cx| {
             let Some(editor) = ws.active_editor(window, cx) else {
                 return ws.model.update(cx, |m, cx| {
-                    m.message = "Open a file to insert into".into();
+                    m.message = ts!("agents-open-a-file-to-insert-into").into();
                     cx.notify();
                 });
             };
@@ -192,7 +192,7 @@ impl AgentViewPanel {
                     .child(div().flex_1().min_w_0().text_color(p.fg_dim).child(language.to_owned()))
                     .child({
                         let s = selector("copy");
-                        crate::look::small_button(s.clone(), IconName::Copy, "Copy", p)
+                        crate::look::small_button(s.clone(), IconName::Copy, ts!("cmd-copy"), p)
                             .debug_selector(move || s.clone())
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copied.clone()));
@@ -200,13 +200,13 @@ impl AgentViewPanel {
                     })
                     .child({
                         let s = selector("insert");
-                        crate::look::small_button(s.clone(), IconName::Plus, "Insert", p)
+                        crate::look::small_button(s.clone(), IconName::Plus, ts!("agents-insert"), p)
                             .debug_selector(move || s.clone())
                             .on_click(cx.listener(move |this, _, w, cx| this.insert(inserted.clone(), w, cx)))
                     })
                     .children(shell.then(|| {
                         let s = selector("run");
-                        crate::look::small_button(s.clone(), IconName::Play, "Run in Terminal", p)
+                        crate::look::small_button(s.clone(), IconName::Play, ts!("agents-run-in-terminal"), p)
                             .debug_selector(move || s.clone())
                             .on_click(cx.listener(move |this, _, w, cx| this.run(ran.clone(), w, cx)))
                     })),
@@ -223,7 +223,7 @@ impl AgentViewPanel {
     }
 }
 
-crate::panels::panel!(AgentViewPanel, "Agent View", |_, _| "Agent View".into(), true);
+crate::panels::panel!(AgentViewPanel, "Agent View", |_, _| ts!("stripes-agent-view").into(), true);
 
 impl Render for AgentViewPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -240,16 +240,19 @@ impl Render for AgentViewPanel {
             .text_color(p.fg);
         if pushes.is_empty() {
             return base.child(
-                crate::components::EmptyState::new(snout_core::art::spots::quiet_bell(), "Nothing shown yet")
-                    .hint("What an agent in the console chooses to show you appears here, with buttons on its code.")
-                    .compact(),
+                crate::components::EmptyState::new(
+                    snout_core::art::spots::quiet_bell(),
+                    ts!("agents-nothing-shown-yet"),
+                )
+                .hint(ts!("agents-what-an-agent-in-the-console-chooses-to"))
+                .compact(),
             );
         }
         let mut rows: Vec<gpui::AnyElement> = Vec::new();
         for (i, push) in pushes.iter().enumerate() {
             let head = match &push.title {
-                Some(title) => format!("{title}, from {}", push.agent),
-                None => format!("From {}", push.agent),
+                Some(title) => t!("agents-from", title = title.to_string(), agent = (push.agent).to_string()),
+                None => t!("agents-from-2", agent = (push.agent).to_string()),
             };
             rows.push(div().text_color(p.fg_dim).text_size(px(11.5)).child(head).into_any_element());
             for (j, block) in push.blocks.iter().enumerate() {
@@ -266,7 +269,7 @@ impl Render for AgentViewPanel {
         let view = self.view.clone();
         base.child(
             div().flex().justify_end().px(px(8.)).py(px(4.)).border_b_1().border_color(p.border).child(
-                crate::look::small_button("agent-view-clear", IconName::Trash, "Clear", &p)
+                crate::look::small_button("agent-view-clear", IconName::Trash, ts!("tabs-clear"), &p)
                     .debug_selector(|| "agent-view-clear".into())
                     .on_click(move |_, _, cx: &mut App| view.update(cx, |v, cx| v.clear(cx))),
             ),

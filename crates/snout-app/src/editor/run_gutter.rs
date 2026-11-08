@@ -460,24 +460,26 @@ impl EditorPanel {
                 let body = div()
                     .flex()
                     .flex_col()
-                    .child(item("gutter-run", Icon::Play, p.ok, format!("Run '{label}'")).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.gutter_menu = None;
-                            if let Some(runs) = crate::run::runs(cx) {
-                                runs.update(cx, |r, cx| r.run_target(&t1, m1.as_deref(), false, cx));
-                            }
-                            cx.notify();
-                        },
-                    )))
-                    .child(item("gutter-debug", Icon::Bug, p.ok, format!("Debug '{label}'")).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.gutter_menu = None;
-                            if let Some(runs) = crate::run::runs(cx) {
-                                runs.update(cx, |r, cx| r.run_target(&t2, m2.as_deref(), true, cx));
-                            }
-                            cx.notify();
-                        },
-                    )))
+                    .child(
+                        item("gutter-run", Icon::Play, p.ok, t!("gutter-run-label", label = label.to_string()))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.gutter_menu = None;
+                                if let Some(runs) = crate::run::runs(cx) {
+                                    runs.update(cx, |r, cx| r.run_target(&t1, m1.as_deref(), false, cx));
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        item("gutter-debug", Icon::Bug, p.ok, t!("gutter-debug-label", label = label.to_string()))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.gutter_menu = None;
+                                if let Some(runs) = crate::run::runs(cx) {
+                                    runs.update(cx, |r, cx| r.run_target(&t2, m2.as_deref(), true, cx));
+                                }
+                                cx.notify();
+                            })),
+                    )
                     .into_any_element();
                 (*at, body)
             }
@@ -508,7 +510,7 @@ impl EditorPanel {
                                 crate::look::small_button(
                                     "gutter-condition-done",
                                     crate::components::APPLY_ICON,
-                                    "Done",
+                                    ts!("agents-done"),
                                     &p,
                                 )
                                 .on_click(cx.listener(move |this, _, w, cx| {
@@ -520,7 +522,7 @@ impl EditorPanel {
                                 crate::look::small_button(
                                     "gutter-condition-remove",
                                     crate::components::IconName::Trash,
-                                    "Remove",
+                                    ts!("debug-remove"),
                                     &p,
                                 )
                                 .on_click(cx.listener(move |this, _, _, cx| {

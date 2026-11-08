@@ -176,7 +176,7 @@ impl Render for Indicator {
     }
 }
 
-crate::panels::panel!(ChangesPanel, "Claude Changes", |_, _| "Agent Changes".into(), true);
+crate::panels::panel!(ChangesPanel, "Claude Changes", |_, _| ts!("cmd-agent-changes").into(), true);
 
 impl ChangesPanel {
     pub fn new(ws: WeakEntity<Workspace>, cx: &mut Context<Self>) -> Self {
@@ -427,7 +427,7 @@ impl Render for ChangesPanel {
                                     look::small_button(
                                         ("claude-reject", ix),
                                         crate::components::IconName::Ban,
-                                        "Reject",
+                                        ts!("editor-reject"),
                                         &p,
                                     )
                                     .debug_selector(move || format!("claude-reject-{ix}"))
@@ -606,7 +606,7 @@ impl Render for ChangesPanel {
                             .tooltip(|w, cx| {
                                 Tooltip::new(ts!("agents-seen-on-disk-while-claude-code-was-connected")).build(w, cx)
                             })
-                            .child("seen"),
+                            .child(ts!("agents-seen")),
                     )
                 })
                 .child(counts(f.added, f.removed, &p, cx))
@@ -760,7 +760,7 @@ impl Render for ChangesPanel {
 
 /// The pill of a file the agent made: it was not there before.
 fn new_chip(p: &Palette) -> gpui::Stateful<gpui::Div> {
-    look::chip("new", p.ok, p)
+    look::chip(ts!("agents-new"), p.ok, p)
         .id("agent-new-file")
         .tooltip(|w, cx| Tooltip::new(ts!("agents-a-new-file-the-agent-created-it-reverting")).build(w, cx))
 }

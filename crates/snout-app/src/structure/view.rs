@@ -143,7 +143,7 @@ impl ProjectStructureView {
                 .cursor_pointer()
                 .gap(px(8.))
                 .child(icon(page.icon(), 14., if on { p.accent } else { p.fg_dim }))
-                .child(page.title())
+                .child(page.shown())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.page = page;
                     cx.notify();
@@ -210,7 +210,7 @@ impl ProjectStructureView {
         let root_module = s.as_ref().and_then(|s| s.modules.first().map(|m| m.id.clone()));
         let mut body = div().flex().flex_col();
         body = body.child(section(ts!("cmd-project"), &p)).child(row(
-            "Name",
+            ts!("dialogs-name"),
             div().flex().items_center().gap(px(8.)).child(gradle_value(name, &p)).when_some(
                 root_module.clone(),
                 |d, id| {
@@ -223,7 +223,7 @@ impl ProjectStructureView {
         ));
         if let Some(root) = &self.root {
             body = body.child(row(
-                "Location",
+                ts!("newproject-location"),
                 div()
                     .flex()
                     .items_center()
@@ -273,11 +273,7 @@ impl ProjectStructureView {
                     .when(self.detected.is_none(), |d| d.child(look::weak(ts!("structure-looking-for-jdks"), &p))),
                 &p,
             ))
-            .child(hint(
-                "Gradle and the Java engine run on it. Kept in .snout/settings.json; the engine restarts on it \
-                 the next time it starts.",
-                &p,
-            ));
+            .child(hint(ts!("structure-jdk-hint"), &p));
         let Some(s) = s else {
             return body.children(self.without_model(cx)).into_any_element();
         };
@@ -380,13 +376,7 @@ impl ProjectStructureView {
         ));
         body.child(div().pt(px(14.)).child(crate::components::callout(
             Tone::Info,
-            if tools == "Maven" {
-                "Values with a lock are Maven's: Edit in build file opens the pom.xml line that sets them. Once \
-                     you save it, the bar over the editor offers to reload."
-            } else {
-                "Values with a lock are the build's: Edit in build file opens the line that sets them. Once you \
-                     save it, the bar over the editor offers to sync."
-            },
+            if tools == "Maven" { ts!("structure-locked-maven-hint") } else { ts!("structure-locked-gradle-hint") },
             &p,
         )))
         .into_any_element()
@@ -579,7 +569,7 @@ impl ProjectStructureView {
         );
         let mut facts = div().flex().flex_col();
         facts = facts.child(row(
-            "Folder",
+            ts!("newproject-folder"),
             div()
                 .flex()
                 .items_center()
@@ -985,8 +975,8 @@ impl ProjectStructureView {
                 declared = declared.to_string(),
                 count = (graph.nodes.len()).to_string()
             ))
-            .child(self.scope.detail_for(s.is_maven(m)))
-            .child(div().flex_1())
+            // Long words give way first: the counts on the right stay whole.
+            .child(div().flex_1().min_w_0().truncate().child(self.scope.detail_for(s.is_maven(m))))
             .when(!conflicts.is_empty(), |d| {
                 let n = conflicts.len();
                 d.child(badge_with_icon(
@@ -1369,7 +1359,7 @@ impl ProjectStructureView {
                 .collect();
             spring_card = spring_card
                 .child(row(
-                    "Modules",
+                    ts!("structure-modules-row"),
                     div().child(if names.is_empty() {
                         ts!("structure-none-with-the-spring-boot-plugin").to_owned()
                     } else {
@@ -1467,7 +1457,7 @@ impl ProjectStructureView {
                     ),
             )
             .child(row(
-                "Program",
+                ts!("settings-program"),
                 match &program {
                     Some(path) => div().child(short(path, &home)),
                     None => div().text_color(p.fg_dim).child(ts!("structure-claude-was-not-found-on-path-or-the")),
@@ -1825,7 +1815,7 @@ impl Render for ProjectStructureView {
                         .flex_col()
                         .child(crate::components::page_header(
                             self.page.art(),
-                            self.page.title(),
+                            self.page.shown(),
                             self.subtitle(),
                             div().when(gradle_page, |d| {
                                 d.child(

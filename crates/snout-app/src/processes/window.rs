@@ -88,7 +88,7 @@ fn shown_state(state: &str) -> String {
     }
 }
 
-crate::panels::panel!(ProcessesWindow, "Processes", |_, _| "Processes".into(), true);
+crate::panels::panel!(ProcessesWindow, "Processes", |_, _| ts!("cmd-processes").into(), true);
 
 fn glyph(kind: &Kind) -> Icon {
     match kind {

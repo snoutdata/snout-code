@@ -20,7 +20,7 @@ use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{Sizable as _, scroll::ScrollableElement as _};
 use snout_core::art::Glyph;
-use snout_core::diff_layout::{DiffLayout, SbsLine, UniLine, gap_label};
+use snout_core::diff_layout::{DiffLayout, SbsLine, UniLine};
 use snout_core::graph::GraphRow;
 use snout_core::{
     Branch, BranchKind, CheckoutTarget, DiffBase, FileEntry, PullMode, RowKind, Tag, on_disk, stage_paths,
@@ -436,7 +436,21 @@ impl GitView {
         // Words while they fit; then the first buttons, GitHub and the agent keep theirs;
         // then icons alone. A word gone moves to the button's tooltip.
         let words = |s: &str| s.chars().count() as f32 * 7.5;
-        let longer = words(&console) + words(&push) - words("Push");
+        // The widths below hold the English words: other languages' may take more room.
+        let translated = [
+            ts!("find-open"),
+            ts!("cmd-stage"),
+            ts!("cmd-unstage"),
+            ts!("dialogs-discard"),
+            ts!("dialogs-delete"),
+            ts!("cmd-refresh"),
+            ts!("cmd-check-out"),
+            ts!("git-new-branch"),
+        ]
+        .concat();
+        let translated =
+            (words(&translated) - words("OpenStageUnstageDiscardDeleteRefreshCheck Out…New Branch")).max(0.);
+        let longer = words(&console) + words(&push) - words("Push") + translated;
         let (all_words, main_words) = (self.width >= 1222. + longer, self.width >= 820. + longer);
         let theme = m.settings.theme;
         let has_github = m.github_url.is_some();
@@ -880,8 +894,8 @@ impl GitView {
         let m = self.model.read(cx);
         let summary = t!(
             "git-changed-staged",
-            count = (m.status.files.len()).to_string(),
-            staged_count = (m.status.staged_count()).to_string()
+            count = ((m.status.files.len()) as u64),
+            staged_count = ((m.status.staged_count()) as u64)
         );
         let files_w = self.fitted.map_or(f32::MAX, |f| f.middle - f.commit);
         let dir = m.dir_filter.clone();
@@ -1188,6 +1202,12 @@ impl GitView {
             .child(div().flex_none().h(px(1.)).bg(p.border))
             .child(actions)
             .into_any_element()
+    }
+
+    /// About how wide the words beside the Commit button are.
+    fn commit_scope_width(&self, cx: &App) -> f32 {
+        let scope = self.model.read(cx).commit_scope();
+        crate::core_text::scope_label(&scope).chars().count() as f32 * 7.5
     }
 
     fn changes(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -1738,9 +1758,14 @@ impl GitView {
                                             .child(d.id.clone()),
                                     )
                                     .child(
-                                        look::small_button("copy-sha", crate::components::IconName::Copy, "Copy", &p)
-                                            .flex_none()
-                                            .on_click(self.on_click(Action::Copy(d.id.clone()))),
+                                        look::small_button(
+                                            "copy-sha",
+                                            crate::components::IconName::Copy,
+                                            ts!("cmd-copy"),
+                                            &p,
+                                        )
+                                        .flex_none()
+                                        .on_click(self.on_click(Action::Copy(d.id.clone()))),
                                     )
                                     .into_any_element(),
                             ))
@@ -1936,7 +1961,8 @@ impl Render for GitView {
         let FittedRows { branches: branches_h, changes: changes_h, journal: journal_h, .. } = rows;
         let fitted = fit_columns(width, s.left, s.console, s.commit, console_open);
         let Fitted { left: left_w, console: console_w, commit: commit_w, middle } = fitted;
-        self.narrow_commit = commit_w < 364.;
+        let least = 106. + [ts!("git-amend-last-commit"), ts!("cmd-commit")].concat().chars().count() as f32 * 7.5;
+        self.narrow_commit = commit_w < 364.0_f32.max(least + self.commit_scope_width(cx));
         self.middle_w = middle;
         self.fitted = Some(fitted);
         self.rows = Some(rows);
@@ -2239,7 +2265,7 @@ fn diff_line(view: &DiffLayout, i: usize, side_by_side: bool, digits: usize, p: 
             .justify_center()
             .bg(p.input)
             .text_color(p.weak())
-            .child(gap_label(n))
+            .child(crate::core_text::gap_label(n))
             .into_any_element()
     };
     let line = div().h(px(DIFF_ROW)).w_full().flex();

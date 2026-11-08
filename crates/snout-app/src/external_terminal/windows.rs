@@ -18,7 +18,9 @@ pub const APPS: &[ExternalTerminal] = &[
 ];
 
 /// What the system's own terminal is called.
-pub const DEFAULT_LABEL: &str = "Windows Terminal";
+pub fn default_label() -> &'static str {
+    "Windows Terminal"
+}
 
 /// `name` on `PATH`, with Windows's program extensions.
 fn on_path(name: &str) -> Option<PathBuf> {
@@ -46,7 +48,7 @@ pub fn installed(term: ExternalTerminal) -> Option<PathBuf> {
 
 /// The command line that opens `term` at `at`, program first.
 pub fn command(term: ExternalTerminal, at: &Where, _scripts: &Path) -> std::io::Result<Vec<String>> {
-    let missing = || std::io::Error::other(format!("{} is not installed", term.label()));
+    let missing = || std::io::Error::other(t!("terminal-not-installed", name = term.label().to_string()));
     let s = |v: &str| v.to_owned();
     let exe = |p: PathBuf| p.display().to_string();
     let console = |dir: Option<&Path>, program: Vec<String>| {
@@ -88,7 +90,7 @@ pub fn command(term: ExternalTerminal, at: &Where, _scripts: &Path) -> std::io::
         (ExternalTerminal::Alacritty, _, Where::Remote { ssh, .. }) => {
             [vec![exe(on_path("alacritty").ok_or_else(missing)?), s("-e")], ssh.clone()].concat()
         }
-        _ => return Err(std::io::Error::other(format!("{} is not a Windows app", term.label()))),
+        _ => return Err(std::io::Error::other(t!("terminal-not-windows-app", name = term.label().to_string()))),
     })
 }
 
@@ -128,7 +130,9 @@ pub fn run(argv: &[String]) -> Result<(), String> {
         c.args(args);
     }
     c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    snout_host::win::spawn_detached(&mut c).map(drop).map_err(|e| format!("Could not open the external terminal: {e}"))
+    snout_host::win::spawn_detached(&mut c)
+        .map(drop)
+        .map_err(|e| t!("terminal-could-not-open-the-external-terminal", e = e.to_string()))
 }
 
 #[cfg(test)]

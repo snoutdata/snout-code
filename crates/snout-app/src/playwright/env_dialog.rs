@@ -171,10 +171,7 @@ impl EnvDialog {
             .child(row(ts!("newproject-application-url"), input(&self.fields.base_url)))
             .child(row(ts!("env-variables"), input(&self.fields.vars)))
             .child(row(".env file", input(&self.fields.env_file)))
-            .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(
-                "Runs get the URL as BASE_URL, which the configuration's baseURL reads. The file's variables come \
-                 first, then those above. Keep passwords in the .env file, which the repository should ignore.",
-            ))
+            .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("env-base-url-hint")))
             .into_any_element()
     }
 }
@@ -236,7 +233,7 @@ impl Render for EnvDialog {
                 crate::components::dialog_header_icon(
                     crate::components::Tone::Success,
                     crate::components::IconName::Globe,
-                    "Environments",
+                    ts!("env-environments"),
                     Some(ts!("env-where-the-tests-point-the-applications-url-and").into()),
                     &p,
                 )

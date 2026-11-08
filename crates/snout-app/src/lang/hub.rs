@@ -736,7 +736,7 @@ impl LangHub {
             if java::is_remote(&*host) && java::engine_dist(&*host).is_none() {
                 let progress = java::DownloadProgress::default();
                 super::remote_engine::install(&*host, &|_| {}, &progress)
-                    .map_err(|e| format!("The Java engine could not be installed: {e:#}"))?;
+                    .map_err(|e| t!("editor-java-engine-install-failed", why = format!("{e:#}")))?;
             }
             let dist = java::engine_dist(&*host)
                 .ok_or_else(|| ts!("editor-the-java-engine-is-not-built-run-snout").to_owned())?;

@@ -100,14 +100,14 @@ pub fn install(host: &dyn Host, say: &dyn Fn(&str), progress: &DownloadProgress)
     let jdk = match java::jdks_in(host, &downloads).into_iter().find(|j| j.major == ENGINE_JAVA) {
         Some(jdk) => jdk,
         None => {
-            say(&format!("Downloading Java {ENGINE_JAVA} for the engine"));
+            say(&t!("editor-downloading-java-for-the-engine", ENGINE_JAVA = (ENGINE_JAVA).to_string()));
             java::download_temurin(host, ENGINE_JAVA, &downloads, progress)?
         }
     };
 
     // The jars, in one archive, unpacked beside the folder and moved into place.
     if !host.is_file(&dir.join(COMPLETE)) {
-        say("Copying the Java engine");
+        say(ts!("editor-copying-the-java-engine"));
         let archive = local_archive(&dist, &hash)?;
         let part = engines_dir(host).join(format!("{hash}.part"));
         let _ = host.remove_dir_all(&part);

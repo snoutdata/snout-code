@@ -280,11 +280,11 @@ impl Session {
         let total = passed + failed + skipped + running;
         let mut parts = Vec::new();
         if failed > 0 {
-            parts.push(t!("run-failed-2", failed = failed.to_string()));
+            parts.push(t!("run-failed-2", failed = ((failed) as u64)));
         }
-        parts.push(t!("run-passed", passed = passed.to_string()));
+        parts.push(t!("run-passed", passed = ((passed) as u64)));
         if skipped > 0 {
-            parts.push(t!("run-skipped", skipped = skipped.to_string()));
+            parts.push(t!("run-skipped", skipped = ((skipped) as u64)));
         }
         Some(t!("run-tests-count", count = total, parts = parts.join(", ")))
     }
@@ -1088,10 +1088,7 @@ impl Runs {
                 EngineState::Waiting(server.readiness.summary().to_lowercase())
             }
             Stage::Ready if hub.client(&root).is_some() => EngineState::Ready,
-            Stage::NeedsJdk(v) => EngineState::Unavailable(format!(
-                "This build needs JDK {v}, which isn't installed. Download it from the bar above the editor, \
-                 or pick a JDK in Settings."
-            )),
+            Stage::NeedsJdk(v) => EngineState::Unavailable(t!("run-needs-jdk-note", v = v.to_string())),
             Stage::Failed(why) => {
                 EngineState::Unavailable(t!("run-the-java-engine-is-not-running", why = why.to_string()))
             }

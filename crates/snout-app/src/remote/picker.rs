@@ -271,7 +271,7 @@ impl Render for FolderPicker {
                 button(
                     "remote-picker-open",
                     crate::components::IconName::FolderOpen,
-                    "Open",
+                    ts!("find-open"),
                     true,
                     self.error.is_none(),
                     cx,

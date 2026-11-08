@@ -1058,7 +1058,11 @@ impl Model {
         let text =
             t!("model-snoutcode-could-not-connect-to", connection = connection.to_string(), why = why.to_string());
         self.ask(
-            Dialog::Info { title: format!("Could not open the project in {connection}"), text, mood: Mood::Warning },
+            Dialog::Info {
+                title: t!("model-could-not-open-in", connection = connection.to_string()),
+                text,
+                mood: Mood::Warning,
+            },
             cx,
         );
     }
@@ -1778,7 +1782,7 @@ impl Model {
                 SCAN_DEPTH = (SCAN_DEPTH).to_string(),
                 root = (root.display()).to_string()
             );
-            self.ask(Dialog::Info { title: "No repositories found".into(), text, mood: Mood::Empty }, cx);
+            self.ask(Dialog::Info { title: t!("model-no-repositories-found"), text, mood: Mood::Empty }, cx);
             return;
         }
         let before = self.settings.repos.len();

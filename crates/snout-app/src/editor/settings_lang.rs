@@ -116,7 +116,7 @@ impl EditorPanel {
             .map(|p| Diagnostic {
                 range: text::range_to_lsp(&rope, &p.range),
                 severity: Some(if p.error { DiagnosticSeverity::ERROR } else { DiagnosticSeverity::WARNING }),
-                source: Some("SnoutCode settings".into()),
+                source: Some(ts!("editor-settings-source").into()),
                 message: p.message,
                 ..Default::default()
             })

@@ -372,7 +372,7 @@ pub fn skip_install(cx: &mut App) {
 
 /// A background task for the status bar, while an update is on its way.
 pub fn task(cx: &App) -> Option<crate::background::BgTask> {
-    let (stage, percent) = read_updater(cx)?.status.as_ref()?.task()?;
+    let (stage, percent) = crate::core_text::update_task(read_updater(cx)?.status.as_ref()?)?;
     Some(crate::background::BgTask {
         title: ts!("updates-snoutcode-update").into(),
         stage,
@@ -512,7 +512,7 @@ impl Render for UpdateToast {
                     UpdateStatus::Error(f) => f.detail.clone().map(SharedString::from),
                     _ => None,
                 };
-                (icon_of(s), s.text(), tip)
+                (icon_of(s), crate::core_text::update_text(s), tip)
             }
             (None, Some(version)) => {
                 (IconName::CircleCheck, t!("updates-updated-to-v", version = version.to_string()), None)
