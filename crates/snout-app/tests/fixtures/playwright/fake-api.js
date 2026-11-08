@@ -20,7 +20,9 @@ const page = {
     keep();
   },
   async pickLocator() {
-    if (!picks.length) return new Promise(() => {});
+    // Then wait as a real browser does, until stopped: a bare pending promise would let Node
+    // exit, and the pick would end on its own before a slow test looks at it.
+    if (!picks.length) return new Promise(() => setInterval(() => {}, 60000));
     await new Promise((r) => setTimeout(r, picks.length === 2 ? 300 : 1500));
     const locator = picks.shift();
     return { toString: () => locator };

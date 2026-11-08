@@ -717,6 +717,9 @@ pub(crate) mod running {
         write(&repo, "package.json", r#"{ "devDependencies": { "@playwright/test": "1.64.1" } }"#);
         write(&repo, "playwright.config.ts", "export default {};\n");
         write(&repo, "tests/shop.spec.ts", "import { test } from '@playwright/test';\n");
+        // The fake picker's note of what it opened (fake-api.js) is no one's work: with an agent
+        // connected, the window would follow into it as the agent's and hide the spec in front.
+        write(&repo, ".gitignore", "picker-opened.json\n");
         write(&repo, "node_modules/@playwright/test/package.json", r#"{ "version": "1.64.1" }"#);
         write(&repo, "node_modules/playwright-core/package.json", r#"{ "version": "1.64.1" }"#);
         write(&repo, "node_modules/playwright-core/browsers.json", r#"{ "browsers": [] }"#);
