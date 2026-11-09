@@ -21,8 +21,6 @@ $ErrorActionPreference = "Stop"
 foreach ($v in "AZURE_SIGNING_ACCOUNT", "AZURE_SIGNING_PROFILE", "AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET") {
     if (-not [Environment]::GetEnvironmentVariable($v)) { throw "$v is not set: cannot sign." }
 }
-# GitHub hides secrets in the log by itself, but not variables.
-if ($env:GITHUB_ACTIONS) { "AZURE_SIGNING_ACCOUNT", "AZURE_SIGNING_PROFILE" | ForEach-Object { Write-Host "::add-mask::$([Environment]::GetEnvironmentVariable($_))" } }
 $endpoint = if ($env:AZURE_SIGNING_ENDPOINT) { $env:AZURE_SIGNING_ENDPOINT } else { "https://eus.codesigning.azure.net" }
 $tmp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
 

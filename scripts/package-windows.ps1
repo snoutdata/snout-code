@@ -123,8 +123,9 @@ if ($Sign) { & $signScript (Join-Path $Tree "snout-code.exe") }
 Get-ChildItem $Out -Filter "SnoutCode-*-setup.exe" | Remove-Item -Force
 $signArgs = @()
 if ($Sign) {
-    # Inno Setup signs the setup program and the uninstaller it writes with this command ($f: the file).
-    $signArgs = @("/DSignTool=snoutsign", "/Ssnoutsign=pwsh -NoProfile -File `"$signScript`" `$f")
+    # Inno Setup signs the setup program and the uninstaller it writes with this command ($f: the
+    # file, quoted; $q: a double quote, which Inno Setup's command line cannot take as it is).
+    $signArgs = @("/DSignTool=snoutsign", "/Ssnoutsign=pwsh -NoProfile -File `$q$signScript`$q `$f")
 }
 & $iscc /Q "/DAppVersion=$Version" "/DArch=$Arch" "/DSourceRoot=$Tree" "/DRepoRoot=$Root" "/O$Out" @signArgs `
     (Join-Path $Root "scripts\windows\snout-code.iss")

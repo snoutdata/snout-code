@@ -25,8 +25,9 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   # Azure Trusted Signing, for a tag here or a run started by hand on main; never for a fork, and
-  # this workflow has no pull_request trigger. It needs the secrets AZURE_TENANT_ID, AZURE_CLIENT_ID
-  # and AZURE_CLIENT_SECRET and the variables AZURE_SIGNING_ACCOUNT and AZURE_SIGNING_PROFILE.
+  # this workflow has no pull_request trigger. It needs the secrets AZURE_TENANT_ID, AZURE_CLIENT_ID,
+  # AZURE_CLIENT_SECRET, AZURE_SIGNING_ACCOUNT and AZURE_SIGNING_PROFILE. All are secrets, not
+  # variables: the logs are public, and GitHub prints a variable in them.
   SIGN_WINDOWS: ${{ github.repository == 'snoutdata/snout-code' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
 
 jobs:
@@ -195,8 +196,8 @@ jobs:
       - name: Sign and make the installer
         if: env.SIGN_WINDOWS == 'true'
         env:
-          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
