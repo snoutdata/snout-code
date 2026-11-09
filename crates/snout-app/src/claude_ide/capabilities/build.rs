@@ -134,7 +134,7 @@ fn sync(ws: &mut Workspace, _: &Value, reply: Reply, window: &mut Window, cx: &m
     let Some(project) = ws.model.read(cx).project_root() else {
         return reply.error(TOOL_ERROR, "No project is open", None);
     };
-    if crate::project_model::project_has_gradle(&project, cx) {
+    if crate::project_model::project_is_java(&project, cx) {
         window.dispatch_action(Box::new(crate::menus::SyncGradle), cx);
     }
     window.dispatch_action(Box::new(crate::menus::RefreshMaven), cx);

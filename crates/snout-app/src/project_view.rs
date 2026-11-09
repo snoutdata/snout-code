@@ -477,7 +477,7 @@ impl Render for ProjectView {
             let playwright = setup.and_then(|s| s.summary.clone()).filter(|_| !failed);
             let note = match (&store.sync_error, root.is_some()) {
                 (Some(e), true) => Some(t!("project-the-build-model-could-not-be-read", e = e.to_string())),
-                (None, true) if root.as_deref().is_some_and(|r| crate::project_model::project_has_gradle(r, cx)) => {
+                (None, true) if root.as_deref().is_some_and(|r| crate::project_model::project_is_java(r, cx)) => {
                     Some(ts!("project-reading-the-build-model").to_owned())
                 }
                 (None, true) if playwright.is_some() => playwright.clone(),

@@ -437,7 +437,7 @@ impl LangHub {
         }
     }
 
-    /// The folder whose engine serves `path`: the project, when it holds Gradle builds and
+    /// The folder whose engine serves `path`: the project, when it is a Java project and
     /// `path` is in it or in a source folder its model lists (one engine syncs every build
     /// of the folder); else the Gradle build of `path` inside the project. A file of no
     /// build of the project gets none: engines run for the project shown, and no other.
@@ -449,14 +449,14 @@ impl LangHub {
         let listed =
             crate::project_model::store(cx).and_then(|s| s.read(cx).model_for(project)).is_some_and(|m| m.holds(path));
         let inside = path.starts_with(project) && build.is_some();
-        // A build a few levels down in the project is one the project's look for builds finds
-        // (`project_model::has_gradle`): no need to wait for that look, which a tab restored
-        // at startup would otherwise beat, starting an engine of its own for its build.
+        // Until the look at the project (`project_model::is_java_project`) has finished, a
+        // build a few levels down counts: a tab restored at startup would otherwise beat that
+        // look, starting an engine of its own for its build.
         let near = build
             .as_deref()
             .and_then(|b| b.strip_prefix(project).ok())
             .is_some_and(|rel| rel.components().count() <= crate::project_model::GRADLE_DEPTH);
-        if (inside || listed) && (near || crate::project_model::project_has_gradle(project, cx)) {
+        if (inside || listed) && crate::project_model::project_java_known(project, cx).unwrap_or(near) {
             return Some(project.clone());
         }
         build.filter(|r| r.starts_with(project))

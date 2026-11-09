@@ -525,6 +525,7 @@ fn a_build_in_the_project_is_served_by_the_projects_engine(cx: &mut TestAppConte
     let repo = crate::tests::demo_repo("root-for");
     let (_, ws, cx) = open(cx, with_repo(&repo));
     let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    cx.update(|_, cx| crate::project_model::store(cx).unwrap().update(cx, |s, _| s.forget_look()));
     // Nothing on disk says the project holds a build: only the editor's look at the file does.
     let build = repo.join("services/api");
     let file = build.join("src/main/java/demo/Api.java");

@@ -78,6 +78,8 @@ mod node_tests;
 #[cfg(test)]
 mod playwright_tests;
 #[cfg(test)]
+mod project_kind_tests;
+#[cfg(test)]
 mod project_settings_tests;
 #[cfg(test)]
 mod project_tests;

@@ -51,17 +51,12 @@ pub fn scripts(text: &str) -> Vec<Script> {
     out
 }
 
-/// Whether `dir` holds a Gradle or Maven build (then it is a Java project with a
-/// `package.json` beside, not a Node project).
-pub fn has_java_build(host: &dyn Host, dir: &Path) -> bool {
-    ["settings.gradle", "settings.gradle.kts", "build.gradle", "build.gradle.kts", "pom.xml"]
-        .iter()
-        .any(|f| host.is_file(&dir.join(f)))
-}
-
-/// Whether `dir` is a Node project's folder: a `package.json`, no Playwright, no Java build.
+/// Whether `dir` is a Node project's folder: a `package.json`, no Playwright, and not a Java
+/// project with a `package.json` beside its build.
 pub fn is_node_project(host: &dyn Host, dir: &Path) -> bool {
-    host.is_file(&dir.join("package.json")) && !crate::playwright::is_root(host, dir) && !has_java_build(host, dir)
+    host.is_file(&dir.join("package.json"))
+        && !crate::playwright::is_root(host, dir)
+        && !crate::project_model::declares_java(host, dir)
 }
 
 /// Whether `dir/package.json` lists packages to install.

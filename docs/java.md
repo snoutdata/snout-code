@@ -4,7 +4,13 @@ How SnoutCode understands your Java code: completion, navigation, refactoring an
 
 ## Where it works
 
-The Java features work in the Java files of a Gradle build. They come from SnoutCode's Java engine, which starts when the project is a Gradle build, or when you open a Java file of one. There is one engine per Gradle build. It stops when you open another project in its place, or quit.
+The Java features work in the Java files of a Gradle build. They come from SnoutCode's Java engine, which starts when the project is a Java project, or when you open a Java file of a build. There is one engine per Gradle build. It stops when you open another project in its place, or quit.
+
+The root of the project decides whether it is a Java project:
+
+- A Gradle or Maven build at the root makes it one. If the root is also a Node, Python, Go, Rust, PHP, Ruby, Flutter or Elixir project, it needs Java, Kotlin, Scala or Groovy sources in `src/main` or `src/test` as well.
+- A root that belongs to one of those languages is not a Java project, whatever lies inside it. A Node project with an Android folder or a small Maven module stays a Node project, and no Java starts until you open a Java file of that build.
+- A root that claims no language is a Java project when it holds builds up to three levels down, or lies in a build of the same Git repository.
 
 The engine reads the build's Gradle model first, so it knows the source folders, the libraries and the Java level of every module without running a build. See [Gradle](gradle.md).
 

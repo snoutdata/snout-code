@@ -70,6 +70,7 @@ fn a_node_project_is_a_package_json_without_playwright_or_a_java_build() {
     let summary = crate::playwright::setup::summary(&*host, &dir, Some(&dir)).unwrap();
     assert!(summary.starts_with("npm · "), "{summary}");
     write(&dir, "build.gradle.kts", "");
+    write(&dir, "src/main/java/App.java", "");
     assert!(!crate::run::node_run::is_node_project(&*host, &dir), "a Java build with a package.json beside");
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -558,6 +559,32 @@ fn a_front_end_beside_a_java_build_installs_in_its_own_folder() {
     assert!(!crate::playwright::setup::uses_ci(&*host, &repo, &need));
     write(&repo, "frontend/package-lock.json", "{}");
     assert!(crate::playwright::setup::uses_ci(&*host, &repo, &need));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A Cypress project with a small Maven module inside: it stays a Node project, so no Java
+/// starts, and a Java file of the module would get an engine for that build alone.
+#[gpui::test]
+fn a_node_project_with_a_java_build_inside_starts_no_java(cx: &mut gpui::TestAppContext) {
+    cx.executor().allow_parking();
+    let repo = node_project("node-no-java");
+    write(&repo, "cypress.config.ts", "export default {}\n");
+    write(&repo, "tools/report/pom.xml", "<project/>\n");
+    write(&repo, "tools/report/src/main/java/Report.java", "class Report {}\n");
+    let (_model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(crate::panels::Activity::Project, w, cx)));
+    let look = |cx: &gpui::App| crate::project_model::store(cx).and_then(|s| s.read(cx).gradle_of(&repo));
+    let looked = pump_until(cx, 30, |cx| cx.update(|_, cx| look(cx).is_some()));
+    assert!(looked, "the project was looked at");
+    cx.update(|_, cx| assert_eq!(look(cx), Some((false, false))));
+    cx.update(|w, _| w.refresh());
+    cx.run_until_parked();
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    cx.update(|_, cx| {
+        assert!(hub.read(cx).servers.is_empty(), "no Java engine started");
+        let (build, file) = (repo.join("tools/report"), repo.join("tools/report/src/main/java/Report.java"));
+        assert_eq!(hub.read(cx).root_for(&file, Some(build.clone()), cx), Some(build), "that build, not the project");
+    });
     let _ = std::fs::remove_dir_all(repo);
 }
 

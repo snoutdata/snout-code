@@ -507,17 +507,23 @@ pub fn model_files(host: &dyn Host, root: &Path) -> Vec<(PathBuf, SystemTime)> {
     out
 }
 
-/// Whether the open project `dir` holds Gradle builds, for the views: as the project models
-/// last saw on the host (none until they have), so the UI thread never waits on the host.
+/// Whether the open project `dir` is a Java project ([`is_java_project`]), for the views: as
+/// the project models last saw on the host (no until they have), so the UI thread never
+/// waits on the host.
+pub fn project_is_java(dir: &Path, cx: &App) -> bool {
+    project_java_known(dir, cx).unwrap_or(false)
+}
+
+/// What [`project_is_java`] answers from, `None` while no look at the host has finished.
 /// Without the project models (no window), the host is asked.
-pub fn project_has_gradle(dir: &Path, cx: &App) -> bool {
+pub fn project_java_known(dir: &Path, cx: &App) -> Option<bool> {
     match store(cx) {
-        Some(s) => s.read(cx).gradle_of(dir).is_some_and(|(g, _)| g),
-        None => has_gradle(&*crate::host::host(cx), dir),
+        Some(s) => s.read(cx).gradle_of(dir).map(|(g, _)| g),
+        None => Some(is_java_project(&*crate::host::host(cx), dir)),
     }
 }
 
-/// Whether the open project `dir` is a Gradle build itself, as [`project_has_gradle`] knows it.
+/// Whether the open project `dir` is a Gradle build itself, as [`project_is_java`] knows it.
 pub fn project_is_gradle_root(dir: &Path, cx: &App) -> bool {
     match store(cx) {
         Some(s) => s.read(cx).gradle_of(dir).is_some_and(|(_, r)| r),
@@ -525,9 +531,10 @@ pub fn project_is_gradle_root(dir: &Path, cx: &App) -> bool {
     }
 }
 
-/// Whether `dir` holds Gradle builds: it is one, lies in one, or has one below it (a few
-/// levels down, as the engine looks). Remembered for a few seconds, as views ask often.
-pub fn has_gradle(host: &dyn Host, dir: &Path) -> bool {
+/// Whether `dir` is a Java project, the kind whose Java engine starts by itself. What its
+/// root declares decides ([`declares_java`]), not a build file somewhere inside it.
+/// Remembered for a few seconds, as views ask often.
+pub fn is_java_project(host: &dyn Host, dir: &Path) -> bool {
     thread_local! {
         static SEEN: std::cell::RefCell<HashMap<PathBuf, (Instant, bool)>> = Default::default();
     }
@@ -535,28 +542,81 @@ pub fn has_gradle(host: &dyn Host, dir: &Path) -> bool {
     if let Some(known) = known {
         return known;
     }
-    let found = look_for_gradle(host, dir);
+    let found = declares_java(host, dir);
     SEEN.with(|s| s.borrow_mut().insert(dir.to_owned(), (Instant::now(), found)));
     found
 }
 
-fn look_for_gradle(host: &dyn Host, dir: &Path) -> bool {
+/// The files that make a folder a project of another language, at its root.
+const OTHER_PROJECT_FILES: [&str; 9] = [
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    "Cargo.toml",
+    "composer.json",
+    "Gemfile",
+    "pubspec.yaml",
+    "mix.exs",
+];
+
+/// Whether the look for builds goes past a folder called `name`.
+fn skipped_folder(name: &str) -> bool {
+    name.starts_with('.') || matches!(name, "build" | "node_modules" | "out" | "target")
+}
+
+/// Whether the root of `dir` makes it a Java project:
+/// - It is a Gradle or Maven build, unless it is also another language's project and nothing
+///   in it compiles for the JVM (a `pom.xml` that only packages a Node project).
+/// - It is another language's project: no, whatever builds lie inside. An Android folder or
+///   a helper module does not change what the project is; opening one of their Java files
+///   starts an engine for that build alone.
+/// - It claims no language: yes when it lies in a build of its repository, or holds builds a
+///   few levels down (a folder of services).
+pub fn declares_java(host: &dyn Host, dir: &Path) -> bool {
     use crate::lang::java;
-    if java::is_gradle_root(host, dir) || java::gradle_root(host, &dir.join("x"), None).is_some() {
+    let other = host.read_dir(dir).unwrap_or_default().iter().any(|e| {
+        let name = e.file_name().to_string_lossy();
+        !e.is_dir && OTHER_PROJECT_FILES.contains(&name.as_ref())
+    });
+    if java::is_gradle_root(host, dir) {
+        return !other || compiles_for_the_jvm(host, dir, GRADLE_DEPTH);
+    }
+    if other {
+        return false;
+    }
+    // Only a build of the same repository: a stray pom.xml in the home folder says nothing.
+    let top = dir.ancestors().find(|d| host.exists(&d.join(".git"))).unwrap_or(dir);
+    if java::gradle_root(host, &dir.join("x"), Some(top)).is_some() {
         return true;
     }
     fn below(host: &dyn Host, dir: &Path, depth: usize) -> bool {
         let Ok(entries) = host.read_dir(dir) else { return false };
         entries.into_iter().any(|e| {
-            let name = e.file_name().to_string_lossy();
-            let skip = name.starts_with('.') || matches!(name.as_ref(), "build" | "node_modules" | "out" | "target");
+            let skip = skipped_folder(&e.file_name().to_string_lossy());
             !skip && e.is_dir && (java::is_gradle_root(host, &e.path) || (depth > 1 && below(host, &e.path, depth - 1)))
         })
     }
     below(host, dir, GRADLE_DEPTH)
 }
 
-/// How many levels below the project [`has_gradle`] looks for a build.
+/// Whether `dir`, or a folder up to `depth` levels below it, has JVM sources where Gradle and
+/// Maven expect them. An Android or iOS folder of a mobile app does not count.
+fn compiles_for_the_jvm(host: &dyn Host, dir: &Path, depth: usize) -> bool {
+    let Ok(entries) = host.read_dir(dir) else { return false };
+    entries.into_iter().filter(|e| e.is_dir).any(|e| {
+        let name = e.file_name().to_string_lossy();
+        if name == "src" {
+            return ["main", "test"].iter().any(|set| {
+                ["java", "kotlin", "scala", "groovy"].iter().any(|lang| host.is_dir(&e.path.join(set).join(lang)))
+            });
+        }
+        let skip = skipped_folder(&name) || matches!(name.as_ref(), "android" | "ios");
+        !skip && depth > 0 && compiles_for_the_jvm(host, &e.path, depth - 1)
+    })
+}
+
+/// How many levels below the project [`is_java_project`] looks for a build.
 pub const GRADLE_DEPTH: usize = 3;
 
 // ----- The store --------------------------------------------------------------------------
@@ -715,7 +775,7 @@ impl ProjectModels {
             let root = root.clone();
             async move {
                 let newest = model_files(&*host, &root).into_iter().max_by_key(|(_, t)| *t);
-                let gradle = (has_gradle(&*host, &root), crate::lang::java::is_gradle_root(&*host, &root));
+                let gradle = (is_java_project(&*host, &root), crate::lang::java::is_gradle_root(&*host, &root));
                 let changed = stamps.iter().any(|(path, t)| modified(&*host, path) != *t);
                 (newest, gradle, changed)
             }
@@ -777,10 +837,16 @@ impl ProjectModels {
         }
     }
 
-    /// Whether `dir` (the open project) holds Gradle builds, and whether it is one, as the
-    /// last look at the host saw; `None` until one has.
+    /// Whether `dir` (the open project) is a Java project, and a build itself, as the last
+    /// look at the host saw; `None` until one has.
     pub fn gradle_of(&self, dir: &Path) -> Option<(bool, bool)> {
         self.gradle.as_ref().filter(|(r, _, _)| r == dir).map(|(_, g, r)| (*g, *r))
+    }
+
+    /// Back to before the first look at the host, as at startup.
+    #[cfg(test)]
+    pub fn forget_look(&mut self) {
+        self.gradle = None;
     }
 
     fn read(&mut self, file: PathBuf, when: SystemTime, root: PathBuf, cx: &mut Context<Self>) {

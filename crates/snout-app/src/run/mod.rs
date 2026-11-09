@@ -1071,7 +1071,7 @@ impl Runs {
         };
         let hub = self.hub.read(cx);
         let Some(root) = hub.engine_root(&project) else {
-            return if !crate::project_model::project_has_gradle(&project, cx) {
+            return if !crate::project_model::project_is_java(&project, cx) {
                 EngineState::Unavailable(t!(
                     "run-has-no-gradle-or-maven-build-runs-tests",
                     project = (Model::dir_name(&project)).to_string()

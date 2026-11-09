@@ -1430,8 +1430,7 @@ impl Workspace {
         }
         let mut builds: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
         let host = crate::host::host(cx);
-        if let Some(root) =
-            self.model.read(cx).project_root().filter(|r| crate::project_model::project_has_gradle(r, cx))
+        if let Some(root) = self.model.read(cx).project_root().filter(|r| crate::project_model::project_is_java(r, cx))
             && !builds.contains(&root)
         {
             builds.push(root);

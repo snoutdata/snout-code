@@ -236,8 +236,9 @@ impl StatusBar {
             return self.hub.as_ref().is_some_and(|h| h.read(cx).engine_build.as_ref().is_some_and(|b| b.finished()));
         }
         let java_file = self.editor().is_some_and(|e| crate::editor::language_for(&e.read(cx).path) == "java");
-        let gradle =
-            self.model.read(cx).project_root().is_some_and(|r| crate::project_model::project_is_gradle_root(&r, cx));
+        let gradle = self.model.read(cx).project_root().is_some_and(|r| {
+            crate::project_model::project_is_gradle_root(&r, cx) && crate::project_model::project_is_java(&r, cx)
+        });
         java_file || gradle
     }
 
