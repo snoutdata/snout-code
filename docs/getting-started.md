@@ -89,10 +89,24 @@ Repository (Git), Window and Help. Each item shows an icon, an SF Symbol as macO
 use, so commands are quick to spot; its shortcut, when it has one, is at the right. Items that
 cannot act now (Save with no editor open, Stage with nothing selected) are greyed out.
 
+### Open files and folders from Finder
+
+- **Open With**: right-click a file, choose **Open With** and then **SnoutCode**. To make it the
+  app for that kind of file, choose **Get Info**, pick SnoutCode under **Open with** and click
+  **Change All**. SnoutCode never takes a file type over by itself.
+- **Open in SnoutCode**: right-click a file or a folder and choose it under **Quick Actions** or
+  **Services**. If it is not listed, turn it on in System Settings under Keyboard, Keyboard
+  Shortcuts, Services, Files and Folders.
+- **The Dock**: drop files or a folder on the SnoutCode icon.
+
+A file opens in a tab of the window with every panel collapsed, so only the editor shows, and the project open there stays. Open a panel again from the bars at the sides. When SnoutCode is not running, a file in a Git repository opens that repository as the project. A file in no repository, or several files at once, open on their own with no project behind them, so nothing else starts and a quick look at a text file stays quick. The next plain start brings your last project back. A folder always opens as the project.
+
+A file that is not text shows a message in its tab instead of its contents.
+
 ### Open a project from the command line
 
-The app's program takes one argument: a folder to open as the project, or a file to open in
-its repository. Add `:line` or `:line:column` to a file to put the caret there.
+The app's program takes folders and files, as Finder hands them over (above). Add `:line` or
+`:line:column` to a file to put the caret there.
 
 ```sh
 /Applications/SnoutCode.app/Contents/MacOS/snout-code ~/projects/shop

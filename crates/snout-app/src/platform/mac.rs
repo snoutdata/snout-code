@@ -61,3 +61,52 @@ pub fn clear_attention() {
     let Some(mtm) = objc2::MainThreadMarker::new() else { return };
     NSApplication::sharedApplication(mtm).dockTile().setBadgeLabel(None);
 }
+
+static OPEN_ASKED: std::sync::OnceLock<futures::channel::mpsc::UnboundedSender<Vec<String>>> =
+    std::sync::OnceLock::new();
+
+objc2::define_class!(
+    // SAFETY: NSObject has no subclassing requirements, and this adds no Drop.
+    #[unsafe(super(objc2_foundation::NSObject))]
+    #[thread_kind = objc2::MainThreadOnly]
+    #[name = "SnoutOpenService"]
+    struct OpenService;
+
+    impl OpenService {
+        /// `NSMessage` in the bundle's `NSServices` (`scripts/package-mac.sh`).
+        #[unsafe(method(openInSnoutCode:userData:error:))]
+        fn open_in_snout_code(
+            &self,
+            board: &objc2_app_kit::NSPasteboard,
+            _user_data: Option<&objc2_foundation::NSString>,
+            _error: *mut *mut objc2_foundation::NSString,
+        ) {
+            let kind = objc2_foundation::NSString::from_str("public.file-url");
+            let urls: Vec<String> = board
+                .pasteboardItems()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item.stringForType(&kind))
+                .map(|url| url.to_string())
+                .collect();
+            if let Some(asked) = OPEN_ASKED.get() {
+                let _ = asked.unbounded_send(urls);
+            }
+        }
+    }
+);
+
+/// Answer the Services menu's "Open in SnoutCode". The port's name is `NSPortName` in the
+/// bundle's `NSServices`.
+pub fn offer_open_service(asked: futures::channel::mpsc::UnboundedSender<Vec<String>>) {
+    use objc2::{MainThreadOnly as _, msg_send, rc::Retained};
+    let Some(mtm) = objc2::MainThreadMarker::new() else { return };
+    let _ = OPEN_ASKED.set(asked);
+    // SAFETY: a plain NSObject subclass, initialised on the main thread.
+    let provider: Retained<OpenService> = unsafe { msg_send![OpenService::alloc(mtm), init] };
+    let name = objc2_foundation::NSString::from_str("SnoutCode");
+    // SAFETY: the provider implements the method the bundle's `NSServices` names.
+    unsafe { objc2_app_kit::NSRegisterServicesProvider(Some(&provider), &name) };
+    // The system keeps no reference: it lives as long as the app.
+    std::mem::forget(provider);
+}

@@ -54,6 +54,10 @@ it.
 | `/usr/share/applications/snout-code.desktop` | the desktop entry |
 | `/usr/share/icons/hicolor/*/apps/snout-code.png` | the icon, in every size |
 
+### Open files and folders from the file manager
+
+SnoutCode is listed under **Open With** for folders and for text and source files. Each one opens a new SnoutCode window. A file opens with every panel collapsed, so only the editor shows. A file in a Git repository opens that repository as the project. A file in no repository, or several files at once, open on their own with no project behind them. A folder opens as the project.
+
 ### Open a project from the command line
 
 ```sh

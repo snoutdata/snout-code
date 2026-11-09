@@ -173,6 +173,8 @@ pub struct Workspace {
     pub hidden: bool,
     /// The project's settings file is being read.
     reading_project_settings: bool,
+    /// The panels were collapsed for files on their own: a project brings back the saved layout.
+    collapsed_for_files: bool,
     _project_settings_poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -322,6 +324,17 @@ fn restore_layout(
     (true, editors)
 }
 
+/// Only the editor shows: the left, right and bottom panels collapse.
+fn collapse_docks(dock: &Entity<DockArea>, window: &mut Window, cx: &mut App) {
+    dock.update(cx, |d, cx| {
+        for place in [DockPlacement::Left, DockPlacement::Right, DockPlacement::Bottom] {
+            if d.is_dock_open(place) {
+                d.toggle_dock(place, window, cx);
+            }
+        }
+    });
+}
+
 impl Workspace {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let cx_ws = cx.weak_entity();
@@ -433,7 +446,11 @@ impl Workspace {
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
         panels.push((panel_handle(claude_changes.clone()), DockPlacement::Right));
 
-        let saved = model.read(cx).settings.dock.clone();
+        let mut saved = model.read(cx).settings.dock.clone();
+        // Files on their own: the tabs of the project last open stay out of it.
+        if model.read(cx).files_alone {
+            saved = saved.map(|state| session::with_center(state, session::empty_tabs()));
+        }
         let root = model.read(cx).project_root();
         let restored = match saved.clone() {
             Some(state) => restore_layout(&dock, state, &panels, root.as_deref(), window, cx),
@@ -464,6 +481,11 @@ impl Workspace {
                 d.toggle_dock(console_dock, window, cx);
             }
         });
+        // Before the subscriptions: nothing of this is saved as the user's choice.
+        let files_alone = model.read(cx).files_alone;
+        if files_alone {
+            collapse_docks(&dock, window, cx);
+        }
 
         let subscriptions = vec![
             // With the theme on System, the window turns light or dark when the Mac does.
@@ -609,6 +631,7 @@ impl Workspace {
             quitting: false,
             hidden: false,
             reading_project_settings: false,
+            collapsed_for_files: files_alone,
             _project_settings_poll: Task::ready(()),
             _subscriptions: subscriptions,
         };
@@ -649,8 +672,8 @@ impl Workspace {
             async {}
         })
         .detach();
-        // Open on the activity the window showed last.
-        if let Some(activity) = this.model.read(cx).settings.activity {
+        // Open on the activity the window showed last (files on their own show only the editor).
+        if let Some(activity) = this.model.read(cx).settings.activity.filter(|_| !files_alone) {
             this.show_activity(activity, window, cx);
         }
         let size = this.model.read(cx).settings.editor_font_size;
@@ -663,11 +686,26 @@ impl Workspace {
             weak.update(cx, |this, cx| this.window_should_close(window, cx)).unwrap_or(true)
         });
         window.focus(&this.focus, cx);
+        if this.model.update(cx, |m, _| std::mem::take(&mut m.collapse_panels)) && !files_alone {
+            this.only_the_editor(window, cx);
+        }
         // A file named on the command line.
         if let Some((path, at)) = this.model.update(cx, |m, _| m.pending_file.take()) {
             this.open_file(path, at, false, window, cx);
         }
         this
+    }
+
+    /// A file came from the system: only the editor shows. The Git view gives way first, or
+    /// opening the file would bring the left panel back.
+    fn only_the_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.side.read(cx).activity == Activity::Git {
+            self.side.update(cx, |s, cx| {
+                s.activity = Activity::Project;
+                cx.notify();
+            });
+        }
+        collapse_docks(&self.dock, window, cx);
     }
 
     /// Make the editors' font larger or smaller by `by` points, or the usual size again.
@@ -877,7 +915,15 @@ impl Workspace {
             .as_ref()
             .and_then(|p| self.model.read(cx).settings.sessions.get(p).cloned())
             .unwrap_or_else(session::empty_tabs);
-        let Ok(full) = serde_json::to_value(self.dock.read(cx).dump(cx)) else { return };
+        // The panels collapsed for files on their own open again as they were saved.
+        let saved = std::mem::take(&mut self.collapsed_for_files).then(|| self.model.read(cx).settings.dock.clone());
+        let full = match saved.flatten() {
+            Some(saved) => saved,
+            None => {
+                let Ok(full) = serde_json::to_value(self.dock.read(cx).dump(cx)) else { return };
+                full
+            }
+        };
         let state = session::with_center(full, center);
         let (loaded, editors) = restore_layout(&self.dock, state, &self.panels, project.as_deref(), window, cx);
         if !loaded {
@@ -1118,6 +1164,10 @@ impl Workspace {
             ModelEvent::AgentAnswer(how) => crate::claude_ide::capabilities::asked(self, *how, window, cx),
             ModelEvent::Quit(choice) => self.on_quit_choice(*choice, window, cx),
             ModelEvent::PickRemoteFolder(then) => self.pick_remote(remote_ui::Purpose::Then(then.0), window, cx),
+            ModelEvent::CollapsePanels => {
+                model.update(cx, |m, _| m.collapse_panels = false);
+                self.only_the_editor(window, cx);
+            }
             ModelEvent::OpenFile(path, at, preview) => {
                 model.update(cx, |m, _| m.pending_file = None);
                 self.open_file(path.clone(), *at, *preview, window, cx)
@@ -1980,6 +2030,9 @@ impl Workspace {
     /// Save the layout and the activity showing: the next start opens as the window is now,
     /// whatever the settings file said meanwhile.
     pub fn save_layout(&mut self, cx: &mut Context<Self>) {
+        if self.model.read(cx).files_alone {
+            return;
+        }
         let state = self.dock.read(cx).dump(cx);
         let activity = self.side.read(cx).activity;
         let Ok(value) = serde_json::to_value(state) else { return };

@@ -285,6 +285,8 @@ pub enum ModelEvent {
     DraftStopped(PathBuf),
     /// Open a file in an editor tab (the preview tab when the flag says so).
     OpenFile(PathBuf, Option<(u32, u32)>, bool),
+    /// A file came from the system (a double click, a right-click): only the editor shows.
+    CollapsePanels,
     /// The project was closed.
     Closed,
     /// Put up the New Project dialog.
@@ -560,6 +562,11 @@ pub struct Model {
     pub claude: Option<PathBuf>,
     /// A file given on the command line, to open once the window is there.
     pub pending_file: Option<(PathBuf, Option<(u32, u32)>)>,
+    /// This window started on files alone: the layout it shows, with no project in it, is not
+    /// the one to come back to.
+    pub files_alone: bool,
+    /// The system handed over a file before the window was there: its panels collapse.
+    pub collapse_panels: bool,
     /// Opening another project asks the workspace first ([`ModelEvent::Switch`]); off
     /// without a window, as in the model's own tests.
     pub confirm_switch: bool,
@@ -612,6 +619,8 @@ impl Model {
             recent_files: Vec::new(),
             user_settings_error: None,
             pending_file: None,
+            files_alone: false,
+            collapse_panels: false,
             confirm_switch: false,
             saved: settings.clone(),
             settings,
@@ -983,7 +992,12 @@ impl Model {
             let opened = load.await;
             let _ = this.update(cx, |m, cx| {
                 match opened {
-                    Ok(o) if m.confirm_switch && m.project_open() && m.project.as_ref() != Some(&o.project) => {
+                    // With no project at all there may still be tabs, of files opened on their own.
+                    Ok(o)
+                        if m.confirm_switch
+                            && (m.project_open() || m.project.is_none())
+                            && m.project.as_ref() != Some(&o.project) =>
+                    {
                         let asked = o.asked.clone();
                         m.pending_open = Some(o);
                         cx.emit(ModelEvent::Switch(asked));
@@ -1013,6 +1027,7 @@ impl Model {
         self.remember(root.as_deref(), &o.project);
         self.settings.current = Some(o.project.clone());
         self.project = Some(o.project);
+        self.files_alone = false;
         self.project_side = None;
         self.git_jobs.clear();
         match o.git {
@@ -1174,6 +1189,18 @@ impl Model {
     /// Open `path` as the command line names it: `File.java:12` or `File.java:12:5` puts the
     /// caret on that line (and column), from 1.
     pub fn open_arg(&mut self, arg: &Path, cx: &mut Context<Self>) {
+        self.open_asked(arg, false, cx);
+    }
+
+    /// Open `path`, as the command line names it, in the window as it is: a file goes to a tab
+    /// and the project stays; a folder becomes the project.
+    pub fn open_in_window(&mut self, arg: &Path, cx: &mut Context<Self>) {
+        self.open_asked(arg, true, cx);
+    }
+
+    /// `arg` from the system. At a start (`in_window` false) a file in a repository opens that
+    /// repository, and a file in none opens alone in a tab.
+    fn open_asked(&mut self, arg: &Path, in_window: bool, cx: &mut Context<Self>) {
         // A file in WSL, and its line, too: the Linux side reads them, this side's Git never does.
         if self.go_to_wsl(arg, cx) {
             return;
@@ -1181,17 +1208,30 @@ impl Model {
         let host = self.host.clone();
         let arg = arg.to_owned();
         let look = cx.background_executor().spawn(async move {
-            if !host.exists(&arg)
-                && let Some((path, at)) = split_line_suffix(&arg.to_string_lossy())
-                && host.is_file(&path)
-            {
-                return (path, Some(at));
-            }
-            (arg, None)
+            let (path, at) = match split_line_suffix(&arg.to_string_lossy()) {
+                Some((path, at)) if !host.exists(&arg) && host.is_file(&path) => (path, Some(at)),
+                _ => (arg, None),
+            };
+            let is_file = host.is_file(&path);
+            let in_tab = is_file && (in_window || path.parent().is_none_or(|dir| Repo::open(&host, dir).is_err()));
+            (path, at, is_file, in_tab)
         });
         cx.spawn(async move |this, cx| {
-            let (path, at) = look.await;
-            let _ = this.update(cx, |m, cx| m.open_path_at(&path, at, cx));
+            let (path, at, is_file, in_tab) = look.await;
+            let _ = this.update(cx, |m, cx| {
+                if is_file {
+                    m.collapse_panels = true;
+                    cx.emit(ModelEvent::CollapsePanels);
+                }
+                if in_tab {
+                    // Once the window is there, if it is not yet.
+                    m.pending_file = Some((path.clone(), at));
+                    cx.emit(ModelEvent::OpenFile(path, at, false));
+                    cx.notify();
+                } else {
+                    m.open_path_at(&path, at, cx);
+                }
+            });
         })
         .detach();
     }

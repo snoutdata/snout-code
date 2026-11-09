@@ -94,7 +94,7 @@ Categories=Development;IDE;Java;
 Keywords=java;gradle;maven;spring;git;ide;
 StartupNotify=true
 StartupWMClass=snout-code
-MimeType=inode/directory;
+MimeType=inode/directory;text/plain;text/markdown;text/x-java;text/x-kotlin;text/html;text/css;text/csv;text/xml;application/json;application/xml;application/x-yaml;application/javascript;application/x-shellscript;
 DESKTOP
 desktop-file-validate "$ROOT/usr/share/applications/snout-code.desktop" 2>/dev/null || true
 

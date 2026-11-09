@@ -71,6 +71,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "explorermenu"; Description: "Add ""Open with SnoutCode"" to the right-click menu of files and folders"; GroupDescription: "File Explorer:"
 
 [Files]
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -78,6 +79,21 @@ Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 [Icons]
 Name: "{autoprograms}\SnoutCode"; Filename: "{app}\snout-code.exe"
 Name: "{autodesktop}\SnoutCode"; Filename: "{app}\snout-code.exe"; Tasks: desktopicon
+
+[Registry]
+; The right-click item on any file, on a folder, and on the background of an open folder.
+Root: HKA; Subkey: "Software\Classes\*\shell\SnoutCode"; ValueType: string; ValueData: "Open with SnoutCode"; Flags: uninsdeletekey; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\*\shell\SnoutCode"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\snout-code.exe"; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\*\shell\SnoutCode\command"; ValueType: string; ValueData: """{app}\snout-code.exe"" ""%1"""; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\SnoutCode"; ValueType: string; ValueData: "Open with SnoutCode"; Flags: uninsdeletekey; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\SnoutCode"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\snout-code.exe"; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\SnoutCode\command"; ValueType: string; ValueData: """{app}\snout-code.exe"" ""%V"""; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\SnoutCode"; ValueType: string; ValueData: "Open with SnoutCode"; Flags: uninsdeletekey; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\SnoutCode"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\snout-code.exe"; Tasks: explorermenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\SnoutCode\command"; ValueType: string; ValueData: """{app}\snout-code.exe"" ""%V"""; Tasks: explorermenu
+; So that "Open with" lists the app for any file.
+Root: HKA; Subkey: "Software\Classes\Applications\snout-code.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "SnoutCode"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Applications\snout-code.exe\shell\open\command"; ValueType: string; ValueData: """{app}\snout-code.exe"" ""%1"""
 
 [Run]
 Filename: "{app}\snout-code.exe"; Description: "{cm:LaunchProgram,SnoutCode}"; Flags: nowait postinstall skipifsilent

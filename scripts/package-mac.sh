@@ -137,6 +137,39 @@ cat >"$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <!-- Open With and drops on the Dock icon. Alternate: the app never takes a file type over. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Folder</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>public.folder</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Text</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>public.text</string><string>public.source-code</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>File</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>public.data</string></array>
+    </dict>
+  </array>
+  <!-- The right-click item in Finder (platform::mac::offer_open_service answers it). -->
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Open in SnoutCode</string></dict>
+      <key>NSMessage</key><string>openInSnoutCode</string>
+      <key>NSPortName</key><string>SnoutCode</string>
+      <key>NSRequiredContext</key><dict/>
+      <key>NSSendFileTypes</key><array><string>public.folder</string><string>public.data</string></array>
+    </dict>
+  </array>
   <key>NSHumanReadableCopyright</key><string>Copyright © $(date +%Y) SNOUTDATA INC. MIT License.</string>
 </dict>
 </plist>

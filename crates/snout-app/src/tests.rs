@@ -1674,6 +1674,90 @@ fn a_file_outside_any_repository_opens_with_its_folder_as_the_project(cx: &mut T
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// No panel shows, only the editor.
+fn no_docks_open(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> bool {
+    use gpui_component::dock::DockPlacement::{Bottom, Left, Right};
+    cx.update(|_, cx| {
+        let dock = ws.read(cx).dock.read(cx);
+        [Left, Right, Bottom].into_iter().all(|place| !dock.is_dock_open(place))
+    })
+}
+
+/// Wait until a tab shows `file`.
+fn wait_for_tab(ws: &Entity<Workspace>, file: &Path, cx: &mut VisualTestContext) {
+    cx.executor().allow_parking();
+    let start = std::time::Instant::now();
+    while !cx.update(|_, cx| ws.read(cx).editors(cx).iter().any(|e| e.read(cx).path == file)) {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "a tab shows {}", file.display());
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+#[gpui::test]
+fn a_file_handed_over_opens_in_a_tab_and_the_project_stays(cx: &mut TestAppContext) {
+    let project = plain_folder("handed-project");
+    let elsewhere = plain_folder("handed-elsewhere");
+    let file = elsewhere.join("notes.txt");
+    let (model, ws, cx) = open(cx, Settings::default());
+    act(&model, cx, Action::OpenPath(project.clone()));
+    wait_for_open(&model, cx);
+    cx.update(|_, cx| model.update(cx, |m, cx| m.open_in_window(&file, cx)));
+    wait_for_tab(&ws, &file, cx);
+    cx.update(|_, cx| assert_eq!(model.read(cx).project_root().as_deref(), Some(project.as_path())));
+    assert!(no_docks_open(&ws, cx), "only the editor shows");
+    let _ = std::fs::remove_dir_all(project);
+    let _ = std::fs::remove_dir_all(elsewhere);
+}
+
+#[gpui::test]
+fn a_folder_handed_over_becomes_the_project(cx: &mut TestAppContext) {
+    let dir = plain_folder("handed-folder");
+    let (model, ws, cx) = open(cx, Settings::default());
+    cx.update(|_, cx| model.update(cx, |m, cx| m.open_in_window(&dir, cx)));
+    wait_for_open(&model, cx);
+    cx.update(|_, cx| assert_eq!(model.read(cx).project_root().as_deref(), Some(dir.as_path())));
+    assert!(!no_docks_open(&ws, cx), "a project keeps its panels");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn a_file_with_unsaved_changes_and_no_project_is_asked_about_before_a_folder_opens(cx: &mut TestAppContext) {
+    let dir = plain_folder("alone-then-folder");
+    let project = plain_folder("alone-then-folder-project");
+    let file = dir.join("notes.txt");
+    let (model, ws, cx) = open(cx, Settings::default());
+    cx.update(|_, cx| model.update(cx, |m, cx| m.open_arg(&file, cx)));
+    wait_for_tab(&ws, &file, cx);
+    cx.update(|_, cx| ws.read(cx).editors(cx)[0].update(cx, |e, _| e.dirty = true));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.open_in_window(&project, cx)));
+    let start = std::time::Instant::now();
+    while !cx.has_pending_prompt() {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "it asks first");
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert_eq!(model.read(cx).project_root(), None, "Cancel stays");
+        assert!(ws.read(cx).editors(cx).iter().any(|e| e.read(cx).path == file), "the tab stays");
+    });
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[gpui::test]
+fn a_file_in_no_repository_named_at_the_start_opens_with_no_project(cx: &mut TestAppContext) {
+    let dir = plain_folder("named-alone");
+    let file = dir.join("notes.txt");
+    let (model, ws, cx) = open(cx, Settings::default());
+    cx.update(|_, cx| model.update(cx, |m, cx| m.open_arg(&file, cx)));
+    wait_for_tab(&ws, &file, cx);
+    cx.update(|_, cx| assert_eq!(model.read(cx).project_root(), None));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[gpui::test]
 fn a_folder_that_is_gone_still_says_so(cx: &mut TestAppContext) {
     let dir = scratch_dir("plain-gone").join("not-there");

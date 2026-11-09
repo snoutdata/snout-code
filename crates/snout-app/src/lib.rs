@@ -50,6 +50,7 @@ pub mod spring;
 pub mod startup;
 pub mod status;
 pub mod structure;
+pub mod system_open;
 pub mod tabs;
 pub mod theme;
 pub mod tool_windows;
@@ -171,6 +172,24 @@ fn model_with(
     model
 }
 
+/// The model of a start that shows files on their own: the project last open stays remembered
+/// for the next start, but does not open, and `open` goes to a tab whatever repository it is in.
+fn model_for_files(
+    store: Option<Store>,
+    mut settings: Settings,
+    open: &std::path::Path,
+    cx: &mut App,
+) -> Entity<Model> {
+    let current = settings.current.take();
+    let model = cx.new(|cx| Model::new(settings, store, cx));
+    model.update(cx, |m, cx| {
+        m.settings.current = current;
+        m.files_alone = true;
+        m.open_in_window(open, cx);
+    });
+    model
+}
+
 /// Start the app: one window on the saved repositories.
 pub fn run() {
     startup::mark("main");
@@ -190,8 +209,15 @@ pub fn run() {
         return;
     }
     platform::app_started();
-    let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
-    gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(move |cx: &mut App| {
+    let open: Vec<std::path::PathBuf> = std::env::args_os().skip(1).map(Into::into).collect();
+    let app = gpui_platform::application().with_assets(gpui_kit_assets::AllAssets);
+    // What the system asks to open, from before the first window on.
+    let (asked, requests) = futures::channel::mpsc::unbounded::<Vec<String>>();
+    platform::offer_open_service(asked.clone());
+    app.on_open_urls(move |urls| {
+        let _ = asked.unbounded_send(urls);
+    });
+    app.run(move |cx: &mut App| {
         startup::mark("app running");
         startup::watch_ui_thread(cx);
         // The workspace's host, made here: this thread is the UI thread.
@@ -220,7 +246,7 @@ pub fn run() {
         splash::once_shown(splash, cx, move |splash, cx| {
             startup::mark("splash shown");
             init_kit(&settings, cx);
-            open_main(store, settings, open, splash, cx);
+            open_main(store, settings, open, requests, splash, cx);
         });
     });
 }
@@ -265,18 +291,42 @@ fn quit_on_signals(cx: &mut App) {
 fn open_main(
     store: Option<Store>,
     settings: Settings,
-    open: Option<std::path::PathBuf>,
+    mut open: Vec<std::path::PathBuf>,
+    mut requests: futures::channel::mpsc::UnboundedReceiver<Vec<String>>,
     splash: Option<gpui::WindowHandle<splash::Splash>>,
     cx: &mut App,
 ) {
+    use futures::StreamExt as _;
     startup::mark("opening the main window");
     remote::init(store.clone(), cx);
-    let model = model_with(store, settings, open, cx);
-    if open_window(model, splash, cx).is_none() {
+    // Open With starts the app and says what to open while it is starting.
+    while let Ok(urls) = requests.try_recv() {
+        open.extend(urls.iter().filter_map(|url| system_open::path_of_url(url)));
+    }
+    let alone = system_open::opens_files_alone(&open);
+    let mut open = open.into_iter();
+    let first = open.next();
+    let model = match first.as_deref() {
+        Some(file) if alone => model_for_files(store, settings, file, cx),
+        _ => model_with(store, settings, first, cx),
+    };
+    if open_window(model.clone(), splash, cx).is_none() {
         cx.quit();
         return;
     }
     cx.activate(true);
+    model.update(cx, |m, cx| open.for_each(|path| m.open_in_window(&path, cx)));
+    cx.spawn(async move |cx| {
+        while let Some(urls) = requests.next().await {
+            cx.update(|cx| {
+                model.update(cx, |m, cx| {
+                    urls.iter().filter_map(|url| system_open::path_of_url(url)).for_each(|p| m.open_in_window(&p, cx));
+                });
+                cx.activate(true);
+            });
+        }
+    })
+    .detach();
 }
 
 /// A main window on `model`. What can wait waits until the window has painted (see

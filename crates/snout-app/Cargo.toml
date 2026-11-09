@@ -83,7 +83,7 @@ unic-langid = "0.9"
 # the menu bar's icons, set on the NSMenuItems GPUI makes.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSData", "NSGeometry", "NSArray"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSApplication", "NSResponder", "NSMenu", "NSMenuItem", "NSImage", "NSDockTile"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSApplication", "NSResponder", "NSMenu", "NSMenuItem", "NSImage", "NSDockTile", "NSPasteboard", "NSPasteboardItem"] }
 # Lucide icons drawn for menu items that have no SF Symbol (GPUI's own SVG renderer).
 resvg = { version = "0.46", default-features = false }
 

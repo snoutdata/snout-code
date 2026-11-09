@@ -28,6 +28,13 @@ pub const APP_ID: &str = "snout-code";
 
 pub use imp::{IN_WINDOW_MENUS, process_start, reveal, this_machine, window_decorations};
 
+/// Answer the system's "Open in SnoutCode" service, where it has one (a Mac's Services menu):
+/// what it hands over goes to `asked`, as `file://` URLs.
+pub fn offer_open_service(_asked: futures::channel::mpsc::UnboundedSender<Vec<String>>) {
+    #[cfg(target_os = "macos")]
+    imp::offer_open_service(_asked);
+}
+
 /// A long run ended: where the system has a way to say so while the app is in the
 /// background (the Dock's bounce and badge on a Mac), it does. `badge` is what it wears.
 pub fn attention(_badge: &str) {
