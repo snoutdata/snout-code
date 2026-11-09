@@ -19,11 +19,7 @@ Arm PC) and run it.
 
 ### The SmartScreen warning
 
-The installer is not signed yet, so Windows does not know who made it and Microsoft Defender
-SmartScreen stops it the first time: "Windows protected your PC". Click **More info**, check
-that the file is the one you downloaded, then click **Run anyway**. Some browsers ask too, and
-keep the download only when you choose **Keep**. A signed installer will come later; it will
-start without the warning.
+The installer is signed by SNOUTDATA. Microsoft Defender SmartScreen can still stop a new signed program the first time, until enough people have installed it: "Windows protected your PC". Click **More info**, check that the publisher is SNOUTDATA, then click **Run anyway**. Some browsers ask too, and keep the download only when you choose **Keep**.
 
 ### What the installer does
 
@@ -51,6 +47,12 @@ SnoutCode-1.0.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /CURRENTUSER
 ```
 
 `/ALLUSERS` in place of `/CURRENTUSER` installs for every user (as an administrator).
+
+### Open files and folders from File Explorer
+
+The installer adds **Open with SnoutCode** to the right-click menu of files, of folders and of the background of an open folder (on Windows 11, under **Show more options**). Clear the option on the installer's Additional Tasks page to leave it out. SnoutCode is also listed under **Open with** for any file.
+
+Each one opens a new SnoutCode window. A file opens with every panel collapsed, so only the editor shows. A file in a Git repository opens that repository as the project. A file in no repository opens on its own with no project behind it, so nothing else starts. A folder opens as the project.
 
 ### Open a project from the command line
 

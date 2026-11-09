@@ -1,5 +1,5 @@
 # SnoutCode on Windows: the checks (clippy, the workspace's tests, the real app started on a
-# demo Java project, with screenshots) and the installer (unsigned for now), for x64 and arm64.
+# demo Java project, with screenshots) and the installer (signed for a release), for x64 and arm64.
 # The installer is installed, started and uninstalled silently, and kept as the run's artifact;
 # nothing is published.
 name: Windows
@@ -24,11 +24,10 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  # Signing is OFF: the Windows builds are unsigned (SmartScreen warns, see docs/windows.md).
-  # To sign with Azure Trusted Signing, set this to 'true' and add the secrets AZURE_TENANT_ID,
-  # AZURE_CLIENT_ID and AZURE_CLIENT_SECRET and the variables AZURE_SIGNING_ACCOUNT and
-  # AZURE_SIGNING_PROFILE (scripts/windows/sign.ps1 says what each is).
-  SIGN_WINDOWS: 'false'
+  # Azure Trusted Signing, for a tag here or a run started by hand on main; never for a fork, and
+  # this workflow has no pull_request trigger. It needs the secrets AZURE_TENANT_ID, AZURE_CLIENT_ID
+  # and AZURE_CLIENT_SECRET and the variables AZURE_SIGNING_ACCOUNT and AZURE_SIGNING_PROFILE.
+  SIGN_WINDOWS: ${{ github.repository == 'snoutdata/snout-code' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
 
 jobs:
   check:
@@ -181,21 +180,27 @@ jobs:
           Invoke-WebRequest "https://jrsoftware.org/download.php/is.exe" -OutFile $is
           $p = Start-Process -FilePath $is -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/ALLUSERS"
           exit $p.ExitCode
-      # SIGNING, TURNED OFF (see SIGN_WINDOWS above): with it on, package-windows.ps1 -Sign signs
-      # snout-code.exe, the installer and its uninstaller through scripts/windows/sign.ps1.
-      - name: Build the installer
+      # No secrets here: this step runs every third-party build script and Gradle plugin.
+      - name: Build the app
         env:
           # A tag's build is a release: it updates itself (docs/updates.md).
           SNOUT_OFFICIAL_BUILD: ${{ github.ref_type == 'tag' && '1' || '' }}
+        run: scripts\package-windows.ps1 -ServerDist target\snout-server-dist -Stage build
+      - name: Make the installer, unsigned
+        if: env.SIGN_WINDOWS != 'true'
+        run: scripts\package-windows.ps1 -ServerDist target\snout-server-dist -Stage installer
+      # The only step that sees the signing secrets: it runs signtool and Inno Setup, on what the
+      # step above built. scripts/windows/sign.ps1 signs snout-code.exe, the installer and its
+      # uninstaller.
+      - name: Sign and make the installer
+        if: env.SIGN_WINDOWS == 'true'
+        env:
           AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
           AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        run: |
-          $sign = @()
-          if ($env:SIGN_WINDOWS -eq 'true') { $sign = @('-Sign') }
-          scripts\package-windows.ps1 -ServerDist target\snout-server-dist @sign
+        run: scripts\package-windows.ps1 -ServerDist target\snout-server-dist -Stage installer -Sign
       # Installed silently, then the installed app opens a project and starts its engine
       # (screenshots), then it is uninstalled.
       - name: Install it silently, start it, uninstall it

@@ -4,8 +4,9 @@
 #
 #   sign.ps1 <file.exe> [<file.exe> ...]
 #
-# NOT IN USE YET: SnoutCode's Windows builds are unsigned for now. scripts/package-windows.ps1
-# calls this with -Sign, which .github/workflows/windows.yml passes once signing is turned on.
+# scripts/package-windows.ps1 calls this with -Sign, which .github/workflows/windows.yml passes for
+# a release. This repository is public: the account's values come from the environment only, and
+# none of them may be written to a file that is kept or to the log.
 #
 # Needs, in the environment:
 #   AZURE_SIGNING_ACCOUNT    the Trusted Signing account
@@ -20,6 +21,8 @@ $ErrorActionPreference = "Stop"
 foreach ($v in "AZURE_SIGNING_ACCOUNT", "AZURE_SIGNING_PROFILE", "AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET") {
     if (-not [Environment]::GetEnvironmentVariable($v)) { throw "$v is not set: cannot sign." }
 }
+# GitHub hides secrets in the log by itself, but not variables.
+if ($env:GITHUB_ACTIONS) { "AZURE_SIGNING_ACCOUNT", "AZURE_SIGNING_PROFILE" | ForEach-Object { Write-Host "::add-mask::$([Environment]::GetEnvironmentVariable($_))" } }
 $endpoint = if ($env:AZURE_SIGNING_ENDPOINT) { $env:AZURE_SIGNING_ENDPOINT } else { "https://eus.codesigning.azure.net" }
 $tmp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
 
@@ -29,10 +32,14 @@ if (-not $signtool) { throw "signtool.exe (Windows SDK) not found." }
 
 $dlib = $env:AZURE_SIGNING_DLIB
 if (-not $dlib) {
+    # This runs beside the signing secret: exactly this build, and no other.
+    $version = "1.0.95"
+    $sha256 = "3bfcf1e0a3cb42af1692f0a8ed45c15de070c2de86f28a59b2795d904d8a920f"
     $pkg = Join-Path $tmp "trusted-signing-client"
     if (-not (Test-Path $pkg)) {
         $nupkg = Join-Path $tmp "trusted-signing-client.zip"
-        Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.Trusted.Signing.Client" -OutFile $nupkg
+        Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/microsoft.trusted.signing.client/$version/microsoft.trusted.signing.client.$version.nupkg" -OutFile $nupkg
+        if ((Get-FileHash -Algorithm SHA256 $nupkg).Hash -ne $sha256) { throw "The signing client is not the build this script names." }
         Expand-Archive $nupkg $pkg
     }
     $dlib = Join-Path $pkg "bin\x64\Azure.CodeSigning.Dlib.dll"
