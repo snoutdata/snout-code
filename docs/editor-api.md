@@ -115,7 +115,7 @@ the agent does not hear of what you click. **Clear** empties it, and it lasts un
 
 | Tool | Domain | What it does | Arguments |
 |---|---|---|---|
-| `getAppState` | app | Where the session stands: the project (none when it runs in the home folder), its branch, the open files, the runs, the problems, the windows showing and the connection | none |
+| `getAppState` | app | Where the session stands: the project (none when it runs in the home folder), its branch, the Git operation running and the last one that failed (with why Git could not sign in, when that is why), the open files, the runs, the problems, the windows showing and the connection | none |
 | `showToolWindow` | app | Brings a window to the front: Project, Git, Run, Debug, Build, Output, Terminal, Problems, Console, Gradle, Maven, Spring, Tests, Agent Changes, Structure, Hierarchy, Notifications, Processes, Agent Log or Agent View | `name` |
 | `showInApp` | app | Shows you markdown in the Agent View | `markdown`; `title`, `clear` |
 | `showNotification` | app | Tells you something in the status bar and Notifications | `message` |

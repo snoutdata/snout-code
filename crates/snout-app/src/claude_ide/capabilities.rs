@@ -404,9 +404,17 @@ fn app_state_of(ws: &Workspace, window: &Window, cx: &App) -> Value {
     let m = ws.model.read(cx);
     let project = m.project_root().map(|root| {
         let git = m.branch_summary().map(|branch| {
+            // The last pull, fetch, push or clone that failed, and, when Git could not sign in,
+            // why: what an agent that ran pushCommits or fetchRemotes reads for how it went.
+            let failed = m
+                .last_git_error
+                .as_ref()
+                .map(|e| json!({ "error": e, "signIn": snout_core::SignInProblem::from_error(e) }));
             json!({
                 "branch": branch,
                 "changedFiles": m.project_status().files.len(),
+                "running": m.job,
+                "lastFailure": failed,
             })
         });
         json!({

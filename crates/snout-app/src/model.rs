@@ -14,7 +14,7 @@ use snout_core::graph::{GraphRow, journal_matches};
 use snout_core::groups::{RepoGroup, dir_name, move_to_group, save_group};
 use snout_core::{
     Branch, BranchKind, CheckoutTarget, Commit, CommitDetails, CommitFile, FileEntry, LocalChanges, PullMode,
-    PullProblem, Repo, Scope, Status, Tag, Tracking, on_disk,
+    PullProblem, Repo, Scope, SignInProblem, Status, Tag, Tracking, on_disk,
 };
 
 use crate::settings::{Settings, Store, ThemeChoice};
@@ -115,6 +115,13 @@ pub enum Dialog {
     PullProblem {
         problem: PullProblem,
         details: String,
+    },
+    /// A pull, fetch, push or clone failed because Git could not sign in to the remote.
+    SignIn {
+        problem: SignInProblem,
+        details: String,
+        /// The repository it ran in (none for a clone).
+        repo: Option<PathBuf>,
     },
     GroupName {
         rename: Option<String>,
@@ -225,6 +232,10 @@ pub enum Action {
     ShowCommitFile(String, String),
     /// Pick a commit for the Git view without bringing the view forward.
     SelectCommit(String),
+    /// Narrow the Journal to the commits that changed this file (its full path): Show History.
+    ShowHistory(PathBuf),
+    /// The whole Journal again.
+    CloseHistory,
     CloseCommit,
     SetTheme(ThemeChoice),
     Reveal(PathBuf),
@@ -245,8 +256,33 @@ pub enum Action {
     ShowNewProject,
     /// The user's answer to an agent's asking.
     AgentAnswer(crate::claude_ide::capabilities::AskAnswer),
+    /// Send this prompt to the console's agent, its session in this folder.
+    AskAgent {
+        root: PathBuf,
+        prompt: String,
+    },
     /// Quit, as the Quit dialog was answered.
     Quit(QuitChoice),
+}
+
+/// The Journal narrowed to one file: the commits that changed it, newest first, followed
+/// through renames.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FileHistory {
+    /// From the repository's root, as it is now.
+    pub path: String,
+    pub commits: Vec<Commit>,
+    /// The file's path in each of `commits`, which a rename changes.
+    pub paths: Vec<String>,
+    /// It is being read.
+    pub loading: bool,
+}
+
+impl FileHistory {
+    /// The file's name, for the Journal's header.
+    pub fn name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
 }
 
 /// A draft of the commit message, asked of the console's agent.
@@ -275,6 +311,8 @@ pub enum ModelEvent {
     ShowCommit,
     /// Show the diff of the selected file.
     ShowDiff,
+    /// The Journal shows a file's history.
+    ShowHistory,
     ToggleConsole,
     Theme,
     /// The commit message changed from outside its text field.
@@ -293,6 +331,11 @@ pub enum ModelEvent {
     NewProject,
     /// The user answered an agent's asking.
     AgentAnswer(crate::claude_ide::capabilities::AskAnswer),
+    /// Send the prompt to the console's agent, its session in the folder.
+    AskAgent {
+        root: PathBuf,
+        prompt: String,
+    },
     /// Another project is to open in place of the one open: the workspace settles the
     /// open tabs first, then calls [`Model::switch_project`].
     Switch(PathBuf),
@@ -444,6 +487,7 @@ struct GitSide {
     amend: bool,
     draft: Option<DraftAsk>,
     journal_filter: String,
+    file_history: Option<FileHistory>,
     commit_view: Option<CommitView>,
     refresh_queued: bool,
 }
@@ -469,6 +513,7 @@ impl GitSide {
         swap(&mut self.amend, &mut m.amend);
         swap(&mut self.draft, &mut m.draft);
         swap(&mut self.journal_filter, &mut m.journal_filter);
+        swap(&mut self.file_history, &mut m.file_history);
         swap(&mut self.commit_view, &mut m.commit_view);
         swap(&mut self.refresh_queued, &mut m.refresh_queued);
     }
@@ -522,9 +567,14 @@ pub struct Model {
     pub draft: Option<DraftAsk>,
     _draft_watch: Option<Task<()>>,
     pub journal_filter: String,
+    /// Show History: the Journal shows this file's commits instead of the branch's.
+    pub file_history: Option<FileHistory>,
     pub commit_view: Option<CommitView>,
     pub output: Vec<OutputLine>,
     pub message: String,
+    /// What git said when the last pull, fetch, push or clone failed; none once one worked.
+    /// Agents read it in getAppState.
+    pub last_git_error: Option<String>,
     /// The label of the slow operation running, if any.
     pub job: Option<String>,
     /// Reload from Disk while it runs, and its outcome for a moment after: what the
@@ -654,9 +704,11 @@ impl Model {
             draft: None,
             _draft_watch: None,
             journal_filter: String::new(),
+            file_history: None,
             commit_view: None,
             output: Vec::new(),
             message: ts!("model-ready").into(),
+            last_git_error: None,
             job: None,
             reload: None,
             _job_task: None,
@@ -854,10 +906,64 @@ impl Model {
         cx.notify();
     }
 
-    /// Indices into `log` of the commits the Journal shows, after its filter.
+    /// The commits the Journal lists: the branch's, or with Show History the file's.
+    pub fn journal_log(&self) -> &[Commit] {
+        self.file_history.as_ref().map_or(&self.log, |h| &h.commits)
+    }
+
+    /// Indices into [`Self::journal_log`] of the commits the Journal shows, after its filter.
     pub fn journal_rows(&self) -> Vec<usize> {
         let needle = self.journal_filter.trim().to_lowercase();
-        (0..self.log.len()).filter(|&i| journal_matches(&self.log[i], &needle)).collect()
+        let log = self.journal_log();
+        (0..log.len()).filter(|&i| journal_matches(&log[i], &needle)).collect()
+    }
+
+    /// What a click on the Journal's commit `i` shows: the commit, or with Show History the
+    /// file's diff in it.
+    pub fn journal_action(&self, i: usize) -> Option<Action> {
+        let c = self.journal_log().get(i)?;
+        Some(match &self.file_history {
+            Some(h) => Action::ShowCommitFile(c.id.clone(), h.paths.get(i).cloned().unwrap_or_else(|| h.path.clone())),
+            None => Action::ShowCommit(c.id.clone()),
+        })
+    }
+
+    /// Show History of `path`: in the repository the Git panel shows, or the project's when the
+    /// panel shows another one.
+    fn show_history(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let rel_in = |repo: &Repo| path.strip_prefix(repo.root()).ok().map(snout_host::slash_path);
+        if self.repo.as_ref().and_then(rel_in).is_none()
+            && self.project_repo.as_ref().and_then(rel_in).is_some()
+            && let Some(mut side) = self.project_side.take()
+        {
+            let project = self.project_repo.clone();
+            self.git_jobs.retain(|j| Some(&j.repo) == project.as_ref());
+            side.swap(self);
+        }
+        let Some(rel) = self.repo.as_ref().and_then(rel_in).filter(|r| !r.is_empty()) else {
+            self.message = t!("model-not-in-the-repository", path = path.display().to_string());
+            return;
+        };
+        self.file_history = Some(FileHistory { path: rel, loading: true, ..Default::default() });
+        self.read_history(cx);
+        cx.emit(ModelEvent::ShowHistory);
+    }
+
+    /// Read the history the Journal shows again, off the UI thread.
+    fn read_history(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.file_history.as_ref().map(|h| h.path.clone()) else { return };
+        self.queue(cx, move |repo| {
+            let read = repo.file_history(&path, LOG_LIMIT).map_err(|e| e.to_string());
+            Box::new(move |m, cx| {
+                let Some(h) = m.file_history.as_mut().filter(|h| h.path == path) else { return };
+                h.loading = false;
+                match read {
+                    Ok(list) => (h.commits, h.paths) = list.into_iter().unzip(),
+                    Err(e) => m.fail(e, cx),
+                }
+                cx.notify();
+            })
+        });
     }
 
     // ----- Selection ------------------------------------------------------------------
@@ -938,15 +1044,15 @@ impl Model {
     pub fn step_commit(&mut self, up: bool, cx: &mut Context<Self>) {
         let Some(view) = &self.commit_view else { return };
         let visible = self.journal_rows();
-        let at = visible.iter().position(|&i| Some(self.log[i].id.as_str()) == view.id());
+        let log = self.journal_log();
+        let at = visible.iter().position(|&i| Some(log[i].id.as_str()) == view.id());
         let next = match at {
             Some(at) if up => at.checked_sub(1),
             Some(at) => Some(at + 1),
             None => Some(0),
         };
-        if let Some(&i) = next.and_then(|n| visible.get(n)) {
-            let id = self.log[i].id.clone();
-            self.handle(Action::ShowCommit(id), cx);
+        if let Some(action) = next.and_then(|n| visible.get(n)).and_then(|&i| self.journal_action(i)) {
+            self.handle(action, cx);
         }
     }
 
@@ -1062,6 +1168,7 @@ impl Model {
         self.dir_filter = None;
         self.commit_view = None;
         self.journal_filter.clear();
+        self.file_history = None;
         self.commit_msg.clear();
         self.amend = false;
         self.draft = None;
@@ -1091,6 +1198,7 @@ impl Model {
         self.anchor = None;
         self.dir_filter = None;
         self.journal_filter.clear();
+        self.file_history = None;
         self.commit_msg.clear();
         self.amend = false;
         self.draft = None;
@@ -1459,6 +1567,7 @@ impl Model {
             self.log_output(e, true);
         }
         self.graph = snout_core::graph::layout(&self.log);
+        self.read_history(cx);
         if self.dir_filter.as_ref().is_some_and(|d| self.dirs.binary_search(d).is_err()) {
             self.dir_filter = None;
         }
@@ -1790,6 +1899,7 @@ impl Model {
         self.job = None;
         self.git_wrote = Some(std::time::Instant::now());
         self.survey_hold.store(false, Ordering::Relaxed);
+        self.last_git_error = result.as_ref().err().cloned();
         match result {
             Ok(Outcome::Done(text)) => {
                 self.log_output(text, false);
@@ -1808,7 +1918,16 @@ impl Model {
                     self.log_output(e.clone(), true);
                     self.ask(Dialog::PullProblem { problem, details: e }, cx);
                 }
-                None => self.fail(t!("model-failed-2", label = label.to_string(), e = e.to_string()), cx),
+                None => match SignInProblem::from_error(&e) {
+                    Some(problem) => {
+                        self.message = t!("model-failed", label = label.to_string());
+                        self.log_output(e.clone(), true);
+                        // A clone has no repository of its own yet.
+                        let repo = if e.contains("`git clone") { None } else { self.repo_root() };
+                        self.ask(Dialog::SignIn { problem, details: e, repo }, cx);
+                    }
+                    None => self.fail(t!("model-failed-2", label = label.to_string(), e = e.to_string()), cx),
+                },
             },
         }
         self.refresh(cx);
@@ -2067,6 +2186,7 @@ impl Model {
             Action::ClearRecent => self.settings.recent = Some(Vec::new()),
             Action::ShowNewProject => cx.emit(ModelEvent::NewProject),
             Action::AgentAnswer(how) => cx.emit(ModelEvent::AgentAnswer(how)),
+            Action::AskAgent { root, prompt } => cx.emit(ModelEvent::AskAgent { root, prompt }),
             Action::PickFolder => self.pick_folder(ts!("model-open-project"), Action::OpenPath, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
             Action::InitRepo(path) => {
@@ -2344,6 +2464,8 @@ impl Model {
                     self.show_commit(repo, rev, Some(path), true, cx);
                 }
             }
+            Action::ShowHistory(path) => self.show_history(path, cx),
+            Action::CloseHistory => self.file_history = None,
             Action::SelectCommit(rev) => {
                 if let Some(repo) = repo {
                     self.show_commit(repo, rev, None, false, cx);

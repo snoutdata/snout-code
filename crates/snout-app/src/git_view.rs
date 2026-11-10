@@ -1060,6 +1060,13 @@ impl GitView {
                                 if let Some(root) = &root {
                                     menu = menu
                                         .item(
+                                            PopupMenuItem::new(ts!("cmd-show-history"))
+                                                .icon(crate::components::menu_icon(
+                                                    crate::components::IconName::FileClock,
+                                                ))
+                                                .on_click(send(Action::ShowHistory(root.join(&f2.path)))),
+                                        )
+                                        .item(
                                             PopupMenuItem::new(crate::platform::reveal())
                                                 .icon(crate::components::menu_icon(
                                                     crate::components::IconName::FolderOpen,
@@ -1290,8 +1297,9 @@ impl GitView {
         let p = palette(cx);
         let tab = self.bottom;
         let m = self.model.read(cx);
+        let history = m.file_history.clone();
         // Only where it fits beside the tabs.
-        let hint = m.commit_view.is_none() && !m.log.is_empty() && self.middle_w > 836.;
+        let hint = m.commit_view.is_none() && history.is_none() && !m.log.is_empty() && self.middle_w > 836.;
         let tabs = div()
             .flex_none()
             .h(px(22.))
@@ -1328,6 +1336,22 @@ impl GitView {
             .child(div().flex_1())
             .when(tab == BottomTab::Journal, |d| {
                 d.when(hint, |d| d.child(weak(ts!("git-click-a-commit-to-see-what-it-changed"), &p)))
+                    .when_some(history.as_ref(), |d, h| {
+                        let path = h.path.clone();
+                        d.child(
+                            look::small_button(
+                                "history-chip",
+                                crate::components::IconName::FileClock,
+                                t!("git-history-of", name = h.name().to_string()),
+                                &p,
+                            )
+                            .debug_selector(|| "history-chip".into())
+                            .tooltip(move |w, cx| {
+                                Tooltip::new(t!("git-history-of-tooltip", path = path.clone())).build(w, cx)
+                            })
+                            .on_click(self.on_click(Action::CloseHistory)),
+                        )
+                    })
                     .child(look::field(&self.journal_filter, true, Some(240.), &p).flex_shrink(1.).min_w(px(80.)))
             })
             .when(tab == BottomTab::Output, |d| {
@@ -1355,7 +1379,14 @@ impl GitView {
                         .map(|l| div().text_color(if l.error { p.error } else { p.fg }).child(l.text.clone())),
                 )
                 .into_any_element(),
-            BottomTab::Journal if m.log.is_empty() => pane_note(
+            BottomTab::Journal if history.as_ref().is_some_and(|h| !h.loading && h.commits.is_empty()) => pane_note(
+                self.rows.is_some_and(|r| r.journal < ART_LEAST_H),
+                snout_core::art::seed(),
+                ts!("git-no-commits-changed-it"),
+                ts!("git-it-is-not-committed-yet"),
+                cx,
+            ),
+            BottomTab::Journal if history.is_none() && m.log.is_empty() => pane_note(
                 self.rows.is_some_and(|r| r.journal < ART_LEAST_H),
                 snout_core::art::seed(),
                 ts!("git-no-commits-yet"),
@@ -1371,10 +1402,11 @@ impl GitView {
         let p = palette(cx);
         let m = self.model.read(cx);
         let rows = m.journal_rows();
-        // Lanes only mean something over the whole history, so a filter hides them.
-        let show_graph = rows.len() == m.log.len();
+        // Lanes only mean something over the whole history, so a filter (or a file's history)
+        // hides them.
+        let show_graph = m.file_history.is_none() && rows.len() == m.log.len();
         let graph_w = if show_graph { snout_core::graph::lane_count(&m.graph) as f32 * LANE_W + 8.0 } else { 14.0 };
-        let log = Rc::new(m.log.clone());
+        let log = Rc::new(m.journal_log().to_vec());
         let graph = Rc::new(m.graph.clone());
         let shown = m.commit_view.as_ref().and_then(|v| v.id()).map(str::to_owned);
         let model = self.model.clone();
@@ -1475,11 +1507,14 @@ impl GitView {
                         ];
                     table_row(("commit", k), RowState::new(selected, focused), &columns, cells, &p)
                         .on_click({
-                            let (model, id) = (model.clone(), id.clone());
+                            let model = model.clone();
                             move |_, _, cx| {
                                 if !selected {
-                                    let a = Action::ShowCommit(id.clone());
-                                    model.update(cx, |m, cx| m.handle(a, cx));
+                                    model.update(cx, |m, cx| {
+                                        if let Some(a) = m.journal_action(i) {
+                                            m.handle(a, cx)
+                                        }
+                                    });
                                 }
                             }
                         })
@@ -1604,6 +1639,13 @@ impl GitView {
                                 };
                                 let menu = match &root {
                                     Some(root) => menu
+                                        .item(
+                                            PopupMenuItem::new(ts!("cmd-show-history"))
+                                                .icon(crate::components::menu_icon(
+                                                    crate::components::IconName::FileClock,
+                                                ))
+                                                .on_click(send(Action::ShowHistory(root.join(&path)))),
+                                        )
                                         .item(
                                             PopupMenuItem::new(crate::platform::reveal())
                                                 .icon(crate::components::menu_icon(

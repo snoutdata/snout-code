@@ -183,7 +183,10 @@ fn paths_action(
 fn repo_action(ws: &mut Workspace, reply: Reply, action: Action, doing: &str, cx: &mut Context<Workspace>) {
     let Some(reply) = no_repository(ws, reply, cx) else { return };
     ws.send(action, cx);
-    reply.ok(tools::text(format!("{doing}. The status bar and the Git view show how it goes.")));
+    reply.ok(tools::text(format!(
+        "{doing}. In getAppState, project.git.running names it while it runs, and project.git.lastFailure says \
+         what Git said if it failed (signIn: why Git could not sign in to the remote)."
+    )));
 }
 
 fn commit(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {

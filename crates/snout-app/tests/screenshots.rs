@@ -114,6 +114,8 @@ mod shots {
 
     pub enum Select {
         File(&'static str),
+        /// Show History of a file: the Journal narrowed to its commits, one of them open.
+        History(&'static str),
         /// A commit (by summary) and one of its files, in a repository with a merge.
         Commit(&'static str, &'static str),
         Console,
@@ -1456,6 +1458,14 @@ sleep 30
                             problem: snout_core::PullProblem::Divergent,
                             details: "hint: You have divergent branches and need to specify how to reconcile them.\nfatal: Need to specify how to reconcile divergent branches.".into(),
                         },
+                        "sign-in" => {
+                            let details = "`git pull` failed: f() { test \"$1\" = get && echo username=demo && echo \"password=$(gh auth token -h github.com -u demo)\"; }; f get: gh: command not found\nremote: Invalid username or token. Password authentication is not supported for Git operations.\nfatal: Authentication failed for 'https://github.com/demo/demo.git/'";
+                            Dialog::SignIn {
+                                problem: snout_core::SignInProblem::from_error(details).unwrap(),
+                                details: details.into(),
+                                repo: Some(repo.clone()),
+                            }
+                        }
                         "checkout" => Dialog::ConfirmCheckout(snout_core::CheckoutTarget::Branch("feature/diff-view".into())),
                         "about" => Dialog::About,
                         other => panic!("no dialog {other}"),
@@ -1476,6 +1486,14 @@ sleep 30
                     });
                 })
                 .unwrap();
+            }
+            Some(Select::History(path)) => {
+                git(&repo, &["add", "-A"]);
+                git(&repo, &["commit", "-qm", "Say hello to snout"]);
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::ShowHistory(repo.join(path)), cx)));
+                cx.run_until_parked();
+                let action = cx.update(|cx| model.read(cx).journal_action(0)).unwrap();
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(action, cx)));
             }
             Some(Select::Clean) => {
                 git(&repo, &["add", "-A"]);
@@ -3420,6 +3438,7 @@ sleep 30
             "error",
             "info",
             "pull",
+            "sign-in",
             "checkout",
             "about",
         ] {
@@ -3442,6 +3461,7 @@ sleep 30
         }
         for (theme, mode) in [(ThemeChoice::Dark, "dark"), (ThemeChoice::Light, "light")] {
             shot(&format!("ui-empty-clean-{mode}"), theme, Activity::Git, Some(Select::Clean));
+            shot(&format!("git-history-{mode}"), theme, Activity::Git, Some(Select::History("src/main.rs")));
             shot(&format!("ui-empty-search-{mode}"), theme, Activity::Project, Some(Select::NoResults));
             shot(&format!("ui-remote-connecting-{mode}"), theme, Activity::Project, Some(Select::Connecting));
             shot(&format!("ui-jdk-bar-{mode}"), theme, Activity::Project, Some(Select::JdkBar));

@@ -125,6 +125,8 @@ Files are written where the project is, so a project on a remote machine (see [R
 
 Press ⌘P (File ▸ Go to File…) and type part of a file's path. Names match fuzzily: the letters you type must appear in order, not necessarily side by side. The best matches come first. ↑ and ↓ pick, ↩ opens, Esc closes.
 
+The files of source folders the build compiles from outside the project folder are listed too. A Gradle build whose `sourceSets` name `../core/src/main/java` shows that folder's files as `../core/src/main/java/...`, once its model is read. Find in Files searches them as well.
+
 ## Go to Line
 
 Press ⌘L (Edit ▸ Go to Line…) in an editor and type a line number, such as `120`, or a line and a column, such as `120:5`. ↩ moves the caret there.

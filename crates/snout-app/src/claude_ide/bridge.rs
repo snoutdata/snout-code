@@ -976,6 +976,37 @@ pub fn ask_to_fix(
     }
 }
 
+/// The prompt that asks an agent to get Git signing in again, after a pull, fetch, push or
+/// clone in `repo` could not: what git said, where to look, and what not to do. One line: it
+/// goes in as a paste, then Return.
+pub fn sign_in_prompt(details: &str, repo: Option<&Path>, host: Option<&str>) -> String {
+    let said = details.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" | ");
+    let server = host.unwrap_or("the remote");
+    let place = repo.map(|r| format!(" in {}", r.display())).unwrap_or_default();
+    format!(
+        "Git{place} could not sign in to {server}. Git said: {said}. Find out why: where the credentials come \
+         from (`git config --show-origin --get-regexp '^credential'`, `git remote -v`, the SSH config and agent), \
+         whether the programs a credential helper needs are installed here, and which account it signs in as. Then \
+         help me get working credentials: fix or remove a broken helper (a repository copied from another computer \
+         often names one), and for a login only I can do (a browser sign in, a new token, an SSH key), open the page \
+         for me or tell me the exact command to run in a terminal. Never print a token or password. When it works, \
+         check with `git fetch`."
+    )
+}
+
+/// Send `prompt` to the console's agent in its session at `root` (started if it is not), and
+/// bring the console forward: the user's click on Fix with the agent asked for it.
+pub fn ask_agent(ws: &mut Workspace, root: &Path, prompt: &str, window: &mut Window, cx: &mut Context<Workspace>) {
+    show_console(ws, window, cx);
+    let Some(console) = crate::console::console_of(ws, cx) else { return };
+    console.update(cx, |c, cx| {
+        c.ensure_session(root, window, cx);
+        c.send_when_ready(root, prompt, cx);
+        let name = c.session_agent(root, cx).short;
+        c.show_note(t!("agents-asked-to-fix-the-sign-in", name = name.to_string()), cx);
+    });
+}
+
 /// The prompt that asks an agent for the commit message, naming the script `api` that reaches
 /// this window. One line: it goes in as a paste, then Return.
 pub fn draft_prompt(api: &Path) -> String {

@@ -160,6 +160,12 @@ The Journal, at the bottom, lists recent commits on a graph of their branches an
 - **Click** a commit to open it in the commit view.
 - **Right-click** a commit for **Show changes**, **Check out this commit (detached)**, **Create branch here…**, **Copy SHA** and **Copy message**.
 
+### The history of a file
+
+**Show History** narrows the Journal to the commits that changed one file, newest first, following it through renames. It is on the right-click menu of a file in the Project view, in the Git view's changed files and in a commit's files, and **Git ▸ Show History of File** (or the command palette) does it for the file in front.
+
+**History of** and the file's name show at the top of the Journal while it is on; click it to see the whole Journal again. Click a commit to open it with that file's diff picked, by the name the file had in that commit. ↑ and ↓ in the commit view step through the file's commits. Search narrows them as usual.
+
 The **Output** tab beside Journal shows what Git printed for the last commands, errors in red. **Clear** empties it.
 
 ## Commit view
@@ -194,6 +200,20 @@ They use your normal Git credentials, as in a terminal.
 Each dialog shows what Git reported. When Git stops with an error (a push the remote turns back, for example), **Something went wrong** shows Git's own words, with **Copy** to put them on the clipboard.
 
 ![A push the remote turned back](images/git-error.png)
+
+### When Git cannot sign in
+
+When a pull, fetch, push or clone fails because Git could not sign in to the remote, **Git could not sign in** names the server, says what went wrong and what to do about it, and shows Git's own words. It recognizes:
+
+- **A credential helper that cannot run.** A repository copied from another computer brings its `.git/config` along, and with it a helper that may call a program not installed here (`gh`, say). The same happens when the credentials saved on this computer are lost. Install the program, or remove the helper and sign in again with your own credentials.
+- **Credentials the server refuses**: a token that expired, was revoked, or belongs to another account.
+- **No credentials at all**: no helper gave Git a user name, and SnoutCode never lets Git stop to ask in a hidden terminal.
+- **A repository the server says is not there**, which is also what it tells an account that may not see it. With several accounts, the saved one may be the wrong one.
+- **An SSH key the server does not accept**, or **a host key SSH does not know** yet or that changed.
+
+**Fix with** the console's agent (Claude, Codex, or the one you chose in Settings) sends it what Git said, the repository and where to look, and brings the console forward. The agent finds where the credentials come from and which account they use, fixes or removes a broken helper, and for a sign in only you can do (a browser login, a new token, an SSH key) opens the page or gives you the exact command. It is asked never to print a token. **Open Terminal** opens your terminal in the repository, for a login you would rather type yourself. ⏎ asks the agent; Esc closes.
+
+An agent working through the [editor API](editor-api.md) sees the same: after `pushCommits` or `fetchRemotes`, `getAppState` reports `project.git.running` while it runs and `project.git.lastFailure` (Git's words, and `signIn` with the reason) when it failed.
 
 ### Background fetch
 

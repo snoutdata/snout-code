@@ -6,7 +6,7 @@
 //! ⏎ does what the main button does, unless that destroys something: Discard, Delete and
 //! the like take a click or ⌘⌫. Esc cancels.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -19,7 +19,9 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement as _;
 use snout_core::art::{Drawing, spots};
 use snout_core::groups::{dir_name, group_name_problem};
-use snout_core::{BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, branch_name_problem, repo_dir_name};
+use snout_core::{
+    BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, SignInKind, branch_name_problem, repo_dir_name,
+};
 
 use crate::claude_ide::capabilities::AskAnswer;
 use crate::components::{
@@ -41,6 +43,7 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
     }
     let width = match dialog {
         Dialog::Checkout | Dialog::Quit(_) => 600.,
+        Dialog::SignIn { .. } => 620.,
         Dialog::Error(_) | Dialog::PullProblem { .. } | Dialog::Clone { .. } | Dialog::ConfirmCheckout(_) => 560.,
         _ => 520.,
     };
@@ -126,6 +129,13 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
             (Tone::Warning, Some(spots::merge_conflict()), None)
         }
         Dialog::PullProblem { .. } => (Tone::Warning, Some(spots::push_rejected()), None),
+        Dialog::SignIn { problem, .. } => {
+            let art = match problem.kind {
+                SignInKind::SshKey | SignInKind::HostKey => spots::ssh(),
+                _ => spots::remote_lost(),
+            };
+            (Tone::Danger, Some(art), Some(sign_in_cause(&problem.kind).into()))
+        }
         Dialog::GroupName { .. } => (Tone::Info, Some(spots::no_project()), None),
         Dialog::Clone { .. } => (
             Tone::Git,
@@ -171,6 +181,10 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
             ts!("dialogs-both-sides-have-new-commits").into()
         }
         Dialog::PullProblem { .. } => ts!("dialogs-no-shared-history").into(),
+        Dialog::SignIn { problem, .. } => match &problem.host {
+            Some(host) => t!("dialogs-git-could-not-sign-in-to", host = host.to_string()).into(),
+            None => ts!("dialogs-git-could-not-sign-in").into(),
+        },
         Dialog::GroupName { rename: Some(_), .. } => ts!("dialogs-rename-group").into(),
         Dialog::GroupName { .. } => ts!("dialogs-new-group").into(),
         Dialog::Clone { .. } => {
@@ -182,6 +196,39 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
             t!("dialogs-allow-to", agent = agent.to_string(), what = what.to_string()).into()
         }
     }
+}
+
+/// What went wrong when Git could not sign in, in a line.
+fn sign_in_cause(kind: &SignInKind) -> String {
+    match kind {
+        SignInKind::BrokenHelper { program: Some(program) } => {
+            t!("dialogs-sign-in-helper-missing", program = program.to_string())
+        }
+        SignInKind::BrokenHelper { program: None } => ts!("dialogs-sign-in-helper-broken").into(),
+        SignInKind::Rejected => ts!("dialogs-sign-in-rejected").into(),
+        SignInKind::NoCredentials => ts!("dialogs-sign-in-none").into(),
+        SignInKind::NoAccess => ts!("dialogs-sign-in-no-access").into(),
+        SignInKind::SshKey => ts!("dialogs-sign-in-ssh-key").into(),
+        SignInKind::HostKey => ts!("dialogs-sign-in-host-key").into(),
+    }
+}
+
+/// What to do about it.
+fn sign_in_fix(kind: &SignInKind) -> &'static str {
+    match kind {
+        SignInKind::BrokenHelper { .. } => ts!("dialogs-sign-in-fix-helper"),
+        SignInKind::Rejected => ts!("dialogs-sign-in-fix-rejected"),
+        SignInKind::NoCredentials => ts!("dialogs-sign-in-fix-none"),
+        SignInKind::NoAccess => ts!("dialogs-sign-in-fix-no-access"),
+        SignInKind::SshKey => ts!("dialogs-sign-in-fix-ssh-key"),
+        SignInKind::HostKey => ts!("dialogs-sign-in-fix-host-key"),
+    }
+}
+
+/// Sign in: the folder the agent and the terminal work in, and the agent's prompt.
+fn sign_in_ask(m: &Model, details: &str, repo: Option<&Path>, host: Option<&str>) -> Option<(PathBuf, String)> {
+    let root = repo.map(Path::to_path_buf).or_else(|| m.project_root())?;
+    Some((root, crate::claude_ide::bridge::sign_in_prompt(details, repo, host)))
 }
 
 pub struct DialogBody {
@@ -324,6 +371,13 @@ impl DialogBody {
     fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.dialog {
             Dialog::About | Dialog::Error(_) | Dialog::Info { .. } => self.close(window, cx),
+            Dialog::SignIn { ref problem, ref details, ref repo } => {
+                let ask = sign_in_ask(self.model.read(cx), details, repo.as_deref(), problem.host.as_deref());
+                match ask {
+                    Some((root, prompt)) => self.act(Action::AskAgent { root, prompt }, window, cx),
+                    None => self.close(window, cx),
+                }
+            }
             Dialog::Quit(ref info) => {
                 let save = (!info.unsaved.is_empty()).then_some(true);
                 let dont_ask = self.dont_ask && info.is_empty();
@@ -749,6 +803,52 @@ impl Render for DialogBody {
                         .disabled(has_tracked),
                     Action::ResetToUpstream
                 ));
+            }
+            Dialog::SignIn { problem, details, repo } => {
+                body.push(dim(sign_in_fix(&problem.kind).into()).into_any_element());
+                body.push(code(&details).into_any_element());
+                let ask = sign_in_ask(m, &details, repo.as_deref(), problem.host.as_deref());
+                let agent = crate::agents::console_agent(cx);
+                if ask.is_some() {
+                    let text = t!("dialogs-sign-in-agent", agent = agent.short.to_string());
+                    body.push(callout(Tone::Info, text, &p).into_any_element());
+                }
+                let copy = details.clone();
+                buttons.push(
+                    Button::new("copy", IconName::Copy)
+                        .ghost()
+                        .label(ts!("cmd-copy"))
+                        .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone())))
+                        .into_any_element(),
+                );
+                if let Some((root, prompt)) = ask {
+                    buttons.push(on!(
+                        Button::new("terminal", IconName::SquareTerminal)
+                            .debug_selector("sign-in-terminal")
+                            .focusable()
+                            .label(ts!("dialogs-open-terminal")),
+                        Action::OpenInTerminal(root.clone())
+                    ));
+                    buttons.push(
+                        Button::new("close", CANCEL_ICON)
+                            .focusable()
+                            .label(ts!("dialogs-close"))
+                            .kbd("Esc")
+                            .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
+                            .into_any_element(),
+                    );
+                    buttons.push(on!(
+                        Button::new("ok", agent.icon)
+                            .debug_selector("sign-in-fix-with-agent")
+                            .primary()
+                            .focusable()
+                            .label(t!("dialogs-fix-with", agent = agent.short.to_string()))
+                            .kbd("⏎"),
+                        Action::AskAgent { root, prompt }
+                    ));
+                } else {
+                    buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
+                }
             }
             Dialog::NewBranch(start) => {
                 let from = start.as_ref().map_or("HEAD".to_owned(), |s| s.label.clone());

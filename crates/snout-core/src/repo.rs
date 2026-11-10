@@ -177,6 +177,34 @@ impl Repo {
         Ok(commits)
     }
 
+    /// The commits that changed `path` (from the repository's root), newest first, followed
+    /// through renames: each with the file's path in that commit, for its diff there.
+    pub fn file_history(&self, path: &str, limit: usize) -> Result<Vec<(Commit, String)>> {
+        let n = format!("-n{limit}");
+        let out = self.git_raw(&["log", "--follow", &n, log::FORMAT, log::DATE, "HEAD", "--", path])?;
+        if !out.success {
+            return if self.has_head()? { Err(git_error("log", &out)) } else { Ok(Vec::new()) };
+        }
+        let commits = log::parse(&out.stdout_str());
+        // Where the file was in each: a second pass, as names do not fit the format.
+        let names = self.git(&["log", "--follow", &n, "--format=%x1f%H", "--name-only", "HEAD", "--", path])?;
+        let names = names.stdout_str();
+        let at: std::collections::HashMap<&str, &str> = names
+            .split('\x1f')
+            .filter_map(|r| {
+                let mut lines = r.lines().map(str::trim).filter(|l| !l.is_empty());
+                Some((lines.next()?, lines.next()?))
+            })
+            .collect();
+        Ok(commits
+            .into_iter()
+            .map(|c| {
+                let at = at.get(c.id.as_str()).map_or_else(|| path.to_owned(), |p| (*p).to_owned());
+                (c, at)
+            })
+            .collect())
+    }
+
     /// Every directory of the working tree that holds a tracked or untracked (not ignored)
     /// file, as repository-relative paths with `/` separators, sorted. The root is not
     /// included.
@@ -489,6 +517,28 @@ mod tests {
         run(&dir, &["config", "user.email", "test@example.com"]).unwrap();
         run(&dir, &["config", "commit.gpgsign", "false"]).unwrap();
         Repo::open(&snout_host::local(), &dir).unwrap()
+    }
+
+    #[test]
+    fn a_files_history_follows_it_through_a_rename() {
+        let repo = scratch_repo("file-history");
+        let commit = |msg: &str| {
+            run(repo.root(), &["add", "-A"]).unwrap();
+            run(repo.root(), &["commit", "-qm", msg]).unwrap();
+        };
+        assert!(repo.file_history("a.txt", 10).unwrap().is_empty(), "no history before the first commit");
+        fs::write(repo.root().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+        fs::write(repo.root().join("other.txt"), "x\n").unwrap();
+        commit("add a");
+        fs::write(repo.root().join("other.txt"), "y\n").unwrap();
+        commit("touch other");
+        run(repo.root(), &["mv", "a.txt", "b.txt"]).unwrap();
+        commit("rename to b");
+        fs::write(repo.root().join("b.txt"), "one\ntwo\nthree\nfour\nfive\n").unwrap();
+        commit("grow b");
+        let history = repo.file_history("b.txt", 10).unwrap();
+        let seen: Vec<(&str, &str)> = history.iter().map(|(c, p)| (c.summary.as_str(), p.as_str())).collect();
+        assert_eq!(seen, [("grow b", "b.txt"), ("rename to b", "b.txt"), ("add a", "a.txt")]);
     }
 
     #[test]

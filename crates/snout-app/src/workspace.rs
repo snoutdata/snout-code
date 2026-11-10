@@ -1154,7 +1154,9 @@ impl Workspace {
                 self.set_console_shown(show, window, cx);
             }
             // The commit and the diff show in the Git view.
-            ModelEvent::ShowCommit | ModelEvent::ShowDiff => self.show_activity(Activity::Git, window, cx),
+            ModelEvent::ShowCommit | ModelEvent::ShowDiff | ModelEvent::ShowHistory => {
+                self.show_activity(Activity::Git, window, cx)
+            }
             ModelEvent::Message => {}
             ModelEvent::DraftAsked => crate::claude_ide::bridge::ask_for_draft(self, window, cx),
             ModelEvent::DraftStopped(root) => crate::claude_ide::bridge::stop_draft(self, root, cx),
@@ -1162,6 +1164,9 @@ impl Workspace {
             ModelEvent::Switch(path) => self.switch_project(path.clone(), window, cx),
             ModelEvent::NewProject => self.open_new_project(window, cx),
             ModelEvent::AgentAnswer(how) => crate::claude_ide::capabilities::asked(self, *how, window, cx),
+            ModelEvent::AskAgent { root, prompt } => {
+                crate::claude_ide::bridge::ask_agent(self, root, prompt, window, cx)
+            }
             ModelEvent::Quit(choice) => self.on_quit_choice(*choice, window, cx),
             ModelEvent::PickRemoteFolder(then) => self.pick_remote(remote_ui::Purpose::Then(then.0), window, cx),
             ModelEvent::CollapsePanels => {
@@ -2471,6 +2476,12 @@ impl Render for Workspace {
             d.on_action(cx.listener(|this, _: &Reveal, _, cx| {
                 if let Some(root) = this.model.read(cx).project_root() {
                     this.send(Action::Reveal(root), cx);
+                }
+            }))
+            // Show History of the file in front.
+            .on_action(cx.listener(|this, _: &ShowFileHistory, window, cx| {
+                if let Some(path) = this.active_editor(window, cx).map(|e| e.read(cx).path.clone()) {
+                    this.send(Action::ShowHistory(path), cx);
                 }
             }))
             // The external terminal at the file in front's folder, else the project's.

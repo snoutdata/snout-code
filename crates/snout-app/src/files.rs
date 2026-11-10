@@ -555,6 +555,11 @@ impl Render for FileTree {
                                     .icon(crate::components::menu_icon(crate::components::IconName::File))
                                     .on_click(send(Action::OpenFile(path.clone(), None))),
                             )
+                            .item(
+                                PopupMenuItem::new(ts!("cmd-show-history"))
+                                    .icon(crate::components::menu_icon(crate::components::IconName::FileClock))
+                                    .on_click(send(Action::ShowHistory(path.clone()))),
+                            )
                             .separator()
                         } else {
                             menu

@@ -28,8 +28,10 @@ actions!(search, [SearchUp, SearchDown, SearchClose]);
 /// The most rows either search shows.
 pub const LIMIT: usize = 200;
 
-/// The files of `root` on `host` a search looks through, relative to it, sorted.
-pub fn list_files(host: &dyn Host, root: &Path) -> Vec<String> {
+/// The files of `root` on `host` a search looks through, relative to it, sorted; then those
+/// of the source folders the build compiles from outside it (`outside`, a folder beside the
+/// build that it names in its source sets), as `../shared/src/A.java`.
+pub fn list_files(host: &dyn Host, root: &Path, outside: &[PathBuf]) -> Vec<String> {
     let options = WalkOptions {
         hidden: true,
         gitignore: true,
@@ -37,13 +39,58 @@ pub fn list_files(host: &dyn Host, root: &Path) -> Vec<String> {
         files_only: true,
         ..Default::default()
     };
-    let mut out: Vec<String> = host
-        .walk(root, &options)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|e| e.path.strip_prefix(root).ok().map(snout_host::slash_path))
-        .collect();
+    let walk = |dir: &Path| host.walk(dir, &options).unwrap_or_default().into_iter();
+    let mut out: Vec<String> =
+        walk(root).filter_map(|e| e.path.strip_prefix(root).ok().map(snout_host::slash_path)).collect();
     out.sort();
+    let mut beside: Vec<String> = outside
+        .iter()
+        .filter(|d| !d.starts_with(root))
+        .flat_map(|d| walk(d))
+        .filter_map(|e| relative_to(&e.path, root))
+        .collect();
+    beside.sort();
+    beside.dedup();
+    out.extend(beside);
+    out
+}
+
+/// `path` from `root`, with `..` where it lies outside: `../core/src/A.java`. None when they
+/// share no ancestor (another drive).
+pub fn relative_to(path: &Path, root: &Path) -> Option<String> {
+    let (path, root) = (normalize(path), normalize(root));
+    if let Ok(inside) = path.strip_prefix(&root) {
+        return Some(snout_host::slash_path(inside));
+    }
+    let (p, r): (Vec<_>, Vec<_>) = (path.components().collect(), root.components().collect());
+    let common = p.iter().zip(&r).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return None;
+    }
+    let ups = std::iter::repeat_n("..".to_owned(), r.len() - common);
+    let rest = p[common..].iter().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    Some(ups.chain(rest).collect::<Vec<_>>().join("/"))
+}
+
+/// The file a search lists as `rel` from `root`: `root/../core/A.java` as `core/A.java`
+/// beside it, so it is the same tab as when it is opened any other way.
+pub fn file_at(root: &Path, rel: &str) -> PathBuf {
+    normalize(&root.join(rel))
+}
+
+/// `path` without `.` and `..`, as written (no link is followed).
+fn normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir if matches!(out.components().next_back(), Some(Component::Normal(_))) => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
     out
 }
 
@@ -211,7 +258,8 @@ impl SearchView {
         .then(|| {
             let list = cx.background_executor().spawn({
                 let (host, root) = (host.clone(), root.clone());
-                async move { list_files(&*host, &root) }
+                let outside = crate::project_model::outside_roots(&root, cx);
+                async move { list_files(&*host, &root, &outside) }
             });
             cx.spawn(async move |this, cx| {
                 let files = list.await;
@@ -276,8 +324,7 @@ impl SearchView {
                     .read(cx)
                     .recent_files
                     .iter()
-                    .filter_map(|p| p.strip_prefix(&root).ok())
-                    .map(snout_host::slash_path)
+                    .filter_map(|p| relative_to(p, &root))
                     .filter(|p| q.is_empty() || p.to_lowercase().contains(&q))
                     .map(|path| Item { path, ..Default::default() })
                     .collect();
@@ -367,7 +414,7 @@ impl SearchView {
             cx.emit(SearchEvent::Run(action));
             return;
         }
-        let action = Action::OpenFile(self.root.join(&item.path), item.at);
+        let action = Action::OpenFile(file_at(&self.root, &item.path), item.at);
         cx.emit(SearchEvent::Close);
         self.model.update(cx, |m, cx| m.handle(action, cx));
     }

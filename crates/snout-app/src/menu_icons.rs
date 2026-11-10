@@ -251,6 +251,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "NewBranch" => sf("plus.square.dashed", L::GitBranchPlus),
         "Github" => sf("safari", L::Globe),
         "Reveal" => sf("arrow.up.forward.app", L::FolderOpen),
+        "ShowFileHistory" => sf("clock.arrow.circlepath", L::FileClock),
         // Tools.
         "StopIdleProcesses" => sf("stop.circle", L::CircleStop),
         "RestartJava" => sf("arrow.clockwise.circle", L::RotateCw),

@@ -663,6 +663,37 @@ pub fn store(cx: &App) -> Option<Entity<ProjectModels>> {
     cx.try_global::<ProjectModelsHandle>().map(|h| h.0.clone())
 }
 
+/// The source folders the open project's builds compile from outside `root`, for the
+/// searches to look through too; none until its model is read.
+pub fn outside_roots(root: &Path, cx: &App) -> Vec<PathBuf> {
+    store(cx).and_then(|s| s.read(cx).model_for(root)).map(|m| m.outside_roots(root)).unwrap_or_default()
+}
+
+impl ProjectModel {
+    /// The source folders of its modules and shared folders that lie outside `root`, as a
+    /// build that names `../core/src/main/java` in its source sets has: the outermost of
+    /// each, sorted.
+    pub fn outside_roots(&self, root: &Path) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = self
+            .modules
+            .iter()
+            .flat_map(|m| &m.roots)
+            .chain(self.shared.iter().flat_map(|g| &g.roots))
+            .filter(|r| r.exists && !r.dir.starts_with(root))
+            .map(|r| r.dir.clone())
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        let mut out: Vec<PathBuf> = Vec::new();
+        for d in dirs {
+            if !out.iter().any(|o| d.starts_with(o)) {
+                out.push(d);
+            }
+        }
+        out
+    }
+}
+
 impl ProjectModels {
     pub fn new(model: Entity<Model>, hub: Option<Entity<LangHub>>, cx: &mut Context<Self>) -> Self {
         let auto_sync = hub.as_ref().is_some_and(|h| h.read(cx).enabled);

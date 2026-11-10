@@ -303,7 +303,7 @@ pub fn search(
     for path in candidates {
         let text = match open.get(&path) {
             Some(t) => t.clone(),
-            None => match host.read(&root.join(&path)) {
+            None => match host.read(&crate::search::file_at(root, &path)) {
                 Ok(bytes) if bytes.len() <= MAX_FILE && !bytes.contains(&0) => match String::from_utf8(bytes) {
                     Ok(s) => Arc::new(s),
                     Err(_) => continue,
@@ -521,7 +521,8 @@ impl FindInFiles {
         let listing = {
             let list = cx.background_executor().spawn({
                 let (host, root) = (host.clone(), root.clone());
-                async move { crate::search::list_files(&*host, &root) }
+                let outside = crate::project_model::outside_roots(&root, cx);
+                async move { crate::search::list_files(&*host, &root, &outside) }
             });
             cx.spawn(async move |this, cx| {
                 let files = list.await;
@@ -784,7 +785,7 @@ impl FindInFiles {
         };
         let Some(f) = self.found.files.get(fi) else { return };
         let at = f.hits.get(hi).map_or((0, 0), |h| (h.line, h.column));
-        cx.emit(FindEvent::Open(self.root.join(&f.path), at));
+        cx.emit(FindEvent::Open(crate::search::file_at(&self.root, &f.path), at));
     }
 
     /// The changes the selected row makes (a match, or a file's ticked matches).
@@ -803,7 +804,7 @@ impl FindInFiles {
             return Vec::new();
         }
         vec![FileChange {
-            path: self.root.join(&f.path),
+            path: crate::search::file_at(&self.root, &f.path),
             before: f.text.clone(),
             after: Arc::new(f.after(only)),
             count,
@@ -817,7 +818,7 @@ impl FindInFiles {
             .iter()
             .filter(|f| f.ticked() > 0)
             .map(|f| FileChange {
-                path: self.root.join(&f.path),
+                path: crate::search::file_at(&self.root, &f.path),
                 before: f.text.clone(),
                 after: Arc::new(f.after(None)),
                 count: f.ticked(),
@@ -1537,7 +1538,7 @@ mod tests {
         std::fs::write(dir.join("src/B.java"), "class B {}\n").unwrap();
         std::fs::write(dir.join("notes.txt"), "total\n").unwrap();
         let host = snout_host::local();
-        let files = crate::search::list_files(&*host, &dir);
+        let files = crate::search::list_files(&*host, &dir, &[]);
         let mut open = HashMap::new();
         open.insert("src/B.java".to_owned(), Arc::new("class B { int total = 1; }\n".to_owned()));
         let mask = Mask::parse("*.java").unwrap();

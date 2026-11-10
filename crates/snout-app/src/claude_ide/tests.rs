@@ -2427,3 +2427,15 @@ fn a_pull_is_not_put_down_to_claude(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }
+
+/// Fix with the agent, after Git could not sign in: one line, with what Git said, the
+/// repository, where to look, and the rule about tokens.
+#[test]
+fn the_sign_in_prompt_carries_the_error_on_one_line() {
+    let details = "`git pull` failed: f get: gh: command not found\nfatal: Authentication failed for 'https://github.com/a/b.git/'";
+    let p = super::bridge::sign_in_prompt(details, Some(Path::new("/work/b")), Some("github.com"));
+    assert!(!p.contains('\n'), "{p}");
+    assert!(p.contains("Git in /work/b could not sign in to github.com"), "{p}");
+    assert!(p.contains("gh: command not found | fatal: Authentication failed"), "{p}");
+    assert!(p.contains("--show-origin") && p.contains("Never print a token"), "{p}");
+}

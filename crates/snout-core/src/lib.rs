@@ -7,6 +7,7 @@
 //! values, so the same calls can back the desktop GUI and an MCP server.
 
 pub mod art;
+mod auth;
 pub mod blame;
 mod branches;
 mod checkout;
@@ -33,6 +34,7 @@ pub mod term;
 
 pub use scope::{Scope, branch_name_problem, on_disk, repo_dir_name, stage_paths, unstage_paths};
 
+pub use auth::{SignInKind, SignInProblem};
 pub use branches::{Branch, BranchKind};
 pub use checkout::{CheckoutOutcome, CheckoutTarget, LocalChanges};
 pub use diff::{DiffBase, DiffRow, FileDiff, RowKind};

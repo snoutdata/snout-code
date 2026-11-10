@@ -33,7 +33,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScrip
 
 ## Working with others and with agents
 
-- [Git](git.md): the Git view, its panes and dialogs.
+- [Git](git.md): the Git view, its panes and dialogs, a file's history, and what to do when Git cannot sign in.
 - [Annotate with Git Blame](blame.md): who changed each line and when, beside it; a line's commit, earlier revisions, and who wrote each class and method.
 - [Coding agents](agents.md): Claude Code, Codex, opencode, Amp or your own agent in the console; watching it write in its colour, sending it the selection, who wrote which lines, and reviewing its changes by prompt in the Agent Changes window.
 - [The API for agents](editor-api.md): how an agent in the console works the whole window through an Agent Skill, a UTCP manual and plain HTTP, what it asks you first, and the tokens that saves over an MCP server.

@@ -976,7 +976,7 @@ fn search_lists_matches_fuzzily_and_finds_text() {
     std::fs::create_dir_all(repo.join("target")).unwrap();
     std::fs::write(repo.join("target/main.rs"), "hello\n").unwrap();
     let host = snout_host::local();
-    let files = list_files(&*host, &repo);
+    let files = list_files(&*host, &repo, &[]);
     assert!(files.contains(&"src/main.rs".to_owned()) && !files.iter().any(|f| f.starts_with("target/")), "{files:?}");
     assert!(!files.iter().any(|f| f.starts_with(".git/")));
     assert_eq!(go_to_file(&files, "mainrs")[0].0, "src/main.rs");
@@ -987,6 +987,25 @@ fn search_lists_matches_fuzzily_and_finds_text() {
     assert_eq!(hits.len(), 1);
     assert_eq!((hits[0].path.as_str(), hits[0].line, hits[0].column), ("src/main.rs", 1, 14));
     let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A build that compiles a source folder beside it (`srcDirs ../core/src/main/java`): the
+/// searches list that folder's files too, from the project, and open them by their own path.
+#[test]
+fn the_searches_list_the_source_folders_a_build_names_outside_it() {
+    use crate::search::{file_at, list_files, relative_to};
+    let base = std::env::temp_dir().join(format!("snout-outside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (web, core) = (base.join("web"), base.join("core/src/main/java"));
+    std::fs::create_dir_all(web.join("src")).unwrap();
+    std::fs::create_dir_all(core.join("app")).unwrap();
+    std::fs::write(web.join("src/Web.java"), "class Web {}\n").unwrap();
+    std::fs::write(core.join("app/Core.java"), "class Core {}\n").unwrap();
+    let files = list_files(&*snout_host::local(), &web, &[core.clone(), web.join("src")]);
+    assert_eq!(files, ["src/Web.java", "../core/src/main/java/app/Core.java"], "a folder inside is listed once");
+    assert_eq!(file_at(&web, &files[1]), core.join("app/Core.java"), "opened without the ..");
+    assert_eq!(relative_to(&web.join("src/Web.java"), &web).as_deref(), Some("src/Web.java"));
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[gpui::test]
@@ -1771,4 +1790,38 @@ fn a_folder_that_is_gone_still_says_so(cx: &mut TestAppContext) {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     cx.update(|_, cx| assert!(!model.read(cx).project_open()));
+}
+
+/// Show History: the Journal lists the commits that changed the file, renames followed, and a
+/// click shows the file's diff in that commit, by the path it had there; the chip's Close
+/// brings the whole Journal back.
+#[gpui::test]
+fn show_history_narrows_the_journal_to_a_files_commits(cx: &mut TestAppContext) {
+    let repo = demo_repo("file-history");
+    git(&repo, &["commit", "-qm", "Greet snout"]);
+    git(&repo, &["mv", "src/main.rs", "src/app.rs"]);
+    git(&repo, &["commit", "-qm", "Rename main to app"]);
+    let (model, _, cx) = open(cx, with_repo(&repo));
+    cx.update(|_, cx| assert_eq!(model.read(cx).log.len(), 4));
+    act(&model, cx, Action::ShowHistory(repo.join("src/app.rs")));
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        let h = m.file_history.as_ref().unwrap();
+        assert!(!h.loading);
+        let seen: Vec<&str> = m.journal_log().iter().map(|c| c.summary.as_str()).collect();
+        assert_eq!(seen, ["Rename main to app", "Greet snout", "Initial import"], "not Second commit");
+        assert_eq!(h.paths, ["src/app.rs", "src/main.rs", "src/main.rs"]);
+        let first = m.journal_log()[2].id.clone();
+        assert_eq!(m.journal_action(2), Some(Action::ShowCommitFile(first, "src/main.rs".into())));
+    });
+    let action = cx.update(|_, cx| model.read(cx).journal_action(1).unwrap());
+    act(&model, cx, action);
+    cx.update(|_, cx| {
+        let view = model.read(cx).commit_view.as_ref().unwrap();
+        assert_eq!(view.details.as_ref().unwrap().summary(), "Greet snout");
+        assert_eq!(view.selected.as_deref(), Some("src/main.rs"), "the file's diff, not the first file's");
+    });
+    act(&model, cx, Action::CloseHistory);
+    cx.update(|_, cx| assert_eq!(model.read(cx).journal_log().len(), 4));
+    let _ = std::fs::remove_dir_all(repo);
 }
