@@ -14,7 +14,7 @@ npm run build      # dist/: one HTML file per page, plus the assets
 ## How it is put together
 
 - `src/routes.ts`: every page, with its title and description. `scripts/prerender.mjs` writes one
-  HTML file per entry (`index.html`, `download.html`, `404.html`) and `sitemap.xml`.
+  HTML file per entry (`index.html`, `download.html`, `privacy.html`, `terms.html`, `404.html`) and `sitemap.xml`.
 - `src/pages/`: the pages. `src/components/`: the header, footer, product shots and the art.
 - `src/site.ts`: every link to the repository, in one place.
 - `src/styles.css`: the one stylesheet. Colours are tokens defined for both themes at the top;

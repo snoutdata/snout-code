@@ -31,6 +31,10 @@
 		"family": "Un projet {link}.",
 		"copyright": "Copyright © 2026 SNOUTDATA INC. Publié sous licence MIT.",
 		"privacy": "Aucun cookie, aucun pistage sur ce site.",
+		"legal": {
+			"privacy": "Confidentialité",
+			"terms": "Conditions"
+		},
 		"product": {
 			"title": "Produit",
 			"features": "Fonctions",
@@ -461,5 +465,203 @@
 		"lede": "Le papillon a cherché partout, et cette page n'est pas ici.",
 		"home": "L'accueil",
 		"guide": "Le guide de l'utilisateur"
+	},
+	"legal": {
+		"eyebrow": "Mentions légales",
+		"updated": "Dernière mise à jour : 10 novembre 2026",
+		"links": {
+			"license": "licence MIT",
+			"notice": "fichier NOTICE",
+			"source": "son code source",
+			"updates": "le guide des mises à jour"
+		},
+		"privacy": {
+			"title": "Politique de confidentialité",
+			"intro": [
+				"Cette politique de confidentialité explique ce qu'il advient de vos informations lorsque vous utilisez SnoutCode, l'IDE de bureau gratuit et open source publié par SnoutData Inc., une société ontarienne (« SnoutData », « nous »), ainsi que son site web snoutcode.com. Elle ne couvre que SnoutCode et snoutcode.com, et aucun autre produit ou site de SnoutData."
+			],
+			"sections": {
+				"short": {
+					"title": "L'essentiel",
+					"points": [
+						"SnoutCode n'a ni compte ni connexion.",
+						"Il n'a ni télémétrie, ni analytique, ni rapport de plantage. Il ne nous envoie ni votre code, ni vos projets, ni vos réglages, ni vos journaux.",
+						"Vos projets et vos réglages restent sur votre ordinateur, ou sur une machine à vous lorsque vous utilisez Remote SSH.",
+						"Les connexions qu'il établit sont détaillées ci-dessous : la recherche de mises à jour sur GitHub, les téléchargements nécessaires à un build, les dépôts Git distants que vous utilisez, et l'agent de code que vous choisissez, si vous en choisissez un.",
+						"Le site web ne dépose aucun cookie et n'a ni analytique ni pistage."
+					]
+				},
+				"local": {
+					"title": "Ce qui reste sur votre ordinateur",
+					"body": [
+						"SnoutCode travaille sur les fichiers de votre ordinateur. Vos projets et leur contenu y restent. SnoutData n'en a aucune copie et n'a aucun moyen de les voir.",
+						"SnoutCode garde ses propres fichiers dans ces dossiers, uniquement sur votre ordinateur :"
+					],
+					"points": [
+						"macOS : `~/Library/Application Support/SnoutCode` pour les réglages et les données, `~/Library/Caches/SnoutCode` pour les caches et `~/Library/Logs/SnoutCode` pour les journaux.",
+						"Linux : `~/.config/SnoutCode` pour les réglages, `~/.local/share/SnoutCode` pour les données, `~/.cache/SnoutCode` pour les caches et `~/.local/state/SnoutCode` pour les journaux et l'historique, ou les dossiers que nomment vos variables XDG.",
+						"Windows : `%APPDATA%\\SnoutCode` pour les réglages et `%LOCALAPPDATA%\\SnoutCode` pour les données, les caches et les journaux."
+					],
+					"after": [
+						"Ils contiennent vos réglages, vos projets et hôtes SSH récents, la disposition des fenêtres, le relevé de ce que les agents de code ont modifié dans un projet (avec la première ligne de l'invite à l'origine de chaque modification), les journaux, ainsi que les JDK et autres outils téléchargés par SnoutCode. Pour les supprimer, effacez ces dossiers. Nous ne pouvons pas le faire pour vous, car nous ne les avons pas."
+					]
+				},
+				"telemetry": {
+					"title": "Aucune télémétrie",
+					"body": [
+						"SnoutCode ne collecte aucune donnée d'utilisation, ne nous signale ni plantages ni erreurs et n'attribue aucun identifiant à votre installation. Ses journaux restent sur votre ordinateur. Il est open source : vous pouvez le vérifier dans {source}.",
+						"Nous ne vendons pas de données personnelles, et SnoutCode ne nous en envoie aucune."
+					]
+				},
+				"updates": {
+					"title": "Installation et mises à jour de SnoutCode",
+					"body": [
+						"Les versions officielles sont publiées sur GitHub, et la page de téléchargement du site y renvoie. Si vous installez SnoutCode depuis le Microsoft Store, Microsoft traite ce téléchargement et votre utilisation du Store selon ses propres conditions et sa propre déclaration de confidentialité.",
+						"Environ 30 secondes après son démarrage, puis toutes les 4 heures tant qu'il reste ouvert, un SnoutCode installé demande à GitHub s'il existe une version plus récente. Sur macOS et Windows, lorsque SnoutCode peut se remplacer lui-même, il télécharge alors la nouvelle version depuis GitHub en arrière-plan. Sinon, comme sur Linux, il vous indique seulement qu'elle est disponible.",
+						"Ce sont de simples requêtes de fichiers publics. Elles ne portent aucun identifiant et rien sur vous ni sur vos projets. Comme pour toute requête web, GitHub voit votre adresse IP, et le fichier téléchargé révèle votre système d'exploitation et votre type de processeur. GitHub traite ces requêtes selon sa propre politique de confidentialité. Il tient aussi un compteur public du nombre de téléchargements de chaque fichier de version, qui ne dit pas qui l'a téléchargé.",
+						"Pour arrêter la recherche automatique, désactivez Settings ▸ Appearance ▸ Updates ▸ Check for updates automatically. Une version que vous compilez depuis les sources ne vérifie jamais."
+					]
+				},
+				"downloads": {
+					"title": "Les téléchargements nécessaires à un build",
+					"body": [
+						"SnoutCode obtient certains outils auprès de leurs éditeurs. Chaque requête indique la version voulue et le système visé. Elle ne porte rien sur vous ni sur votre projet, mais, comme pour toute requête web, l'éditeur voit votre adresse IP et traite la requête selon sa propre politique de confidentialité."
+					],
+					"points": [
+						"Java : lorsqu'un projet a besoin d'un JDK que vous n'avez pas, SnoutCode propose de télécharger Eclipse Temurin. Si vous acceptez, il interroge le service Adoptium (api.adoptium.net) et télécharge le JDK à l'adresse qu'Adoptium indique.",
+						"Maven : pour un projet Maven sans wrapper, SnoutCode télécharge Apache Maven depuis Maven Central (repo.maven.apache.org) la première fois qu'il en a besoin.",
+						"Node : lorsqu'un projet a besoin d'une version de Node que vous n'avez pas, SnoutCode propose de la télécharger depuis nodejs.org.",
+						"Débogueur JavaScript : la première fois que vous déboguez un projet Node ou Playwright, SnoutCode télécharge js-debug de Microsoft depuis ses releases GitHub."
+					]
+				},
+				"dependencies": {
+					"title": "Les dépendances de votre projet",
+					"body": [
+						"Compiler un projet lance ses propres outils, comme Gradle, Maven, npm, pnpm, Yarn ou Bun. Ils téléchargent ce que le projet déclare depuis les dépôts que lui-même ou vos réglages désignent, comme Maven Central ou le registre npm. Playwright télécharge ses navigateurs lorsque vous choisissez Install browsers. Ces serveurs sont choisis par votre projet et par ces outils, pas par SnoutCode, et chacun fonctionne selon les conditions et la politique de confidentialité de son exploitant."
+					]
+				},
+				"spring": {
+					"title": "Nouveaux projets Spring Boot",
+					"body": [
+						"Lorsque vous choisissez Spring Boot dans l'assistant New Project, SnoutCode demande au service Spring Initializr (start.spring.io) les versions et les dépendances qu'il propose. Lorsque vous créez le projet, ce que vous avez saisi est envoyé à ce service pour qu'il génère le projet : le nom, le group, l'artifact, le nom de package, la version de Java, l'outil de build, la version de Spring Boot et les dépendances choisies. Spring Initializr est un service tiers, soumis à ses propres conditions et à sa propre politique de confidentialité."
+					]
+				},
+				"git": {
+					"title": "Git et vos dépôts distants",
+					"body": [
+						"SnoutCode utilise Git sur votre ordinateur. Les opérations clone, fetch, pull et push se connectent aux dépôts distants que vous avez configurés, comme GitHub ou un serveur à vous, avec vos propres identifiants Git. Pour indiquer ce qu'il y a à récupérer, SnoutCode fait aussi un fetch en arrière-plan des dépôts de sa liste, toutes les 10 minutes par défaut. Vous pouvez changer cet intervalle dans Settings ▸ Version Control ▸ Fetch every. Rien de tout cela ne passe par SnoutData."
+					]
+				},
+				"agents": {
+					"title": "Agents de code tiers",
+					"body": [
+						"SnoutCode peut faire tourner un agent de code dans sa console : Claude Code, Codex, opencode, Amp, ou un agent en ligne de commande de votre choix. Les agents sont facultatifs et ne sont pas livrés avec SnoutCode. Vous installez chacun séparément (à votre demande, SnoutCode peut lancer l'installateur de l'agent pour vous) et vous vous y connectez auprès de son fournisseur.",
+						"Un agent est un programme distinct, soumis aux conditions et à la politique de confidentialité de son fournisseur. Ce qu'il lit dans votre projet et ce que vous lui demandez peuvent être envoyés au service de son fournisseur. SnoutCode ne contrôle pas cela, et rien de tout cela ne va à SnoutData.",
+						"SnoutCode ne communique avec les agents que sur la machine où ils tournent, par l'interface de bouclage (127.0.0.1), pour suivre leurs modifications et, pour un agent connecté à l'éditeur, lui montrer votre sélection et vos fichiers ouverts. Avec Remote SSH, cette liaison passe par votre connexion SSH."
+					]
+				},
+				"remote": {
+					"title": "Remote SSH",
+					"body": [
+						"Avec Remote SSH, SnoutCode utilise le `ssh` de votre système pour se connecter à une machine Linux de votre choix. Votre projet, Git, le moteur Java, les builds et les terminaux tournent sur cette machine, et ce que SnoutCode vous montre passe par cette connexion SSH, entre votre ordinateur et votre machine. Rien de cela ne passe par SnoutData.",
+						"SnoutCode installe sur cette machine un petit serveur et les fichiers dont il a besoin, sous `~/.snout-code` et `~/.cache/SnoutCode`. Lorsque Java y est nécessaire, la machine télécharge elle-même Eclipse Temurin ou, si elle n'a pas accès à Internet, votre ordinateur le télécharge et le copie. Les mots de passe et les phrases secrètes que vous saisissez vont à `ssh`, et SnoutCode ne les conserve pas. La liste des hôtes récents reste sur votre ordinateur."
+					]
+				},
+				"website": {
+					"title": "Le site web",
+					"body": [
+						"snoutcode.com est un site statique sans backend. Il ne dépose aucun cookie, n'a aucune balise d'analytique, de publicité ou de pistage et ne charge ni script ni police depuis d'autres sites.",
+						"Si vous choisissez une langue ou un thème, ce choix est gardé dans le stockage local de votre navigateur, sous `lang` et `theme`. Il reste dans votre navigateur et ne nous est pas envoyé.",
+						"Le site est hébergé sur Cloudflare Pages, et Cloudflare fournit aussi son DNS. Comme tout hébergeur, Cloudflare traite les données techniques nécessaires pour livrer et protéger le site, comme les adresses IP et le détail des requêtes, selon sa propre politique de confidentialité. Les en-têtes de réponse de Cloudflare demandent aussi aux navigateurs qui le prennent en charge de lui signaler les connexions qui échouent (Network Error Logging).",
+						"Les liens de téléchargement et de code source mènent à GitHub, qui a ses propres conditions et sa propre politique de confidentialité."
+					]
+				},
+				"messages": {
+					"title": "Si vous nous écrivez",
+					"body": [
+						"Si vous écrivez à {email}, nous recevons votre adresse et votre message, et nous les utilisons pour vous répondre. Si vous ouvrez un ticket sur GitHub, il y est public, selon les conditions de GitHub."
+					]
+				},
+				"choices": {
+					"title": "Vos choix",
+					"body": [
+						"SnoutCode n'a pas de compte et ne nous envoie rien : nous n'avons donc rien à consulter, corriger ou supprimer concernant votre utilisation. Vous contrôlez vous-même ses données : supprimez les dossiers ci-dessus et désactivez la recherche de mises à jour si vous le souhaitez.",
+						"Pour toute question sur cette politique, ou sur un message que vous nous avez envoyé, écrivez à {email}."
+					]
+				},
+				"changes": {
+					"title": "Modifications de cette politique",
+					"body": [
+						"Nous pouvons mettre à jour cette politique de temps à autre. Dans ce cas, nous modifions la date de dernière mise à jour ci-dessus."
+					]
+				},
+				"contact": {
+					"title": "Contact",
+					"body": [
+						"Les questions sur cette politique peuvent être envoyées à {email}. SnoutCode est publié par SnoutData Inc., une société ontarienne."
+					]
+				}
+			}
+		},
+		"terms": {
+			"title": "Conditions d'utilisation",
+			"intro": [
+				"Les présentes conditions d'utilisation (les « Conditions ») régissent votre utilisation du site web snoutcode.com (le « Site ») et expliquent comment SnoutCode, l'IDE de bureau gratuit et open source (le « Logiciel »), est fourni. Tous deux sont fournis par SnoutData Inc., une société ontarienne (« SnoutData », « nous »). En utilisant le Site, vous acceptez les présentes Conditions. Si vous ne les acceptez pas, n'utilisez pas le Site."
+			],
+			"sections": {
+				"software": {
+					"title": "Le Logiciel et sa licence",
+					"body": [
+						"SnoutCode est un logiciel gratuit et open source, publié par SNOUTDATA INC sous {license}. Il n'a ni compte ni frais. Vos droits d'utiliser, de copier, de modifier et de distribuer le Logiciel, ainsi que leurs conditions, sont définis par cette licence. Rien dans les présentes Conditions ne les limite, et si ces Conditions et la licence divergent au sujet du Logiciel, la licence s'applique.",
+						"Le Logiciel inclut des éléments de tiers, sous leurs propres licences, listés dans son {notice}."
+					]
+				},
+				"warranty": {
+					"title": "Absence de garantie et limitation de responsabilité pour le Logiciel",
+					"body": [
+						"Le Logiciel est fourni sous {license}, y compris son exclusion de garantie et sa limitation de responsabilité. Elles s'appliquent telles que rédigées dans la licence : veuillez la lire."
+					]
+				},
+				"site": {
+					"title": "Le Site",
+					"body": [
+						"Le Site donne des informations sur le Logiciel et des liens pour le télécharger. Vous vous engagez à ne pas utiliser le Site en violation de toute loi applicable, à ne pas tenter d'y accéder sans autorisation et à ne pas porter atteinte à son intégrité ou à ses performances. Nous pouvons modifier ou interrompre le Site à tout moment. Notre {privacy} décrit comment le Site et le Logiciel traitent vos informations.",
+						"Le Site est fourni « tel quel » et « selon sa disponibilité », sans garantie d'aucune sorte, expresse, implicite ou légale. Dans toute la mesure permise par la loi, nous ne serons en aucun cas responsables des dommages indirects, accessoires, spéciaux, consécutifs ou punitifs, ni de toute perte de données, de bénéfices ou de revenus, découlant de votre utilisation du Site ou s'y rapportant. Certaines juridictions n'autorisent pas certaines limitations : il se peut donc qu'une partie de ce qui précède ne s'applique pas à vous."
+					]
+				},
+				"thirdParty": {
+					"title": "Outils et agents tiers",
+					"body": [
+						"SnoutCode fonctionne avec des outils et des services d'autres éditeurs, qui n'en font pas partie : des agents de code comme Claude Code, Codex, opencode et Amp ; des JDK et des outils de build comme Eclipse Temurin, Gradle, Maven, Node, npm et Playwright ; et des services comme GitHub et start.spring.io. Chacun a ses propres conditions et sa propre politique de confidentialité, qui s'appliquent à votre utilisation. Les agents de code sont facultatifs : vous les installez et vous vous y connectez séparément, auprès de leurs fournisseurs.",
+						"Nous ne fournissons pas ces outils ou services et n'en sommes pas responsables. Un agent de code peut modifier vos fichiers et exécuter des commandes, et ce qu'il produit peut être faux : vérifiez ce qu'il fait avant de vous y fier."
+					]
+				},
+				"updates": {
+					"title": "Téléchargements et mises à jour automatiques",
+					"body": [
+						"Les versions officielles du Logiciel sont publiées sur GitHub, et la page de téléchargement du Site y renvoie. Si vous installez SnoutCode depuis le Microsoft Store, les conditions de Microsoft s'appliquent au Store et à ce téléchargement.",
+						"Une version officielle recherche les nouvelles versions et, lorsqu'elle peut se remplacer elle-même, les télécharge en arrière-plan et les installe comme le décrit {updates}. Chaque mise à jour est vérifiée par rapport à une liste signée de ses fichiers avant son installation. Ailleurs, comme sur Linux, elle vous indique seulement qu'une nouvelle version est disponible. Pour arrêter la recherche automatique, désactivez Settings ▸ Appearance ▸ Updates ▸ Check for updates automatically. Une version que vous compilez depuis les sources ne se met pas à jour elle-même."
+					]
+				},
+				"changes": {
+					"title": "Modifications des présentes Conditions",
+					"body": [
+						"Nous pouvons mettre à jour ces Conditions de temps à autre. Dans ce cas, nous modifions la date de dernière mise à jour ci-dessus. Si une modification est importante, nous en donnerons un préavis raisonnable sur le Site. Si vous continuez à utiliser le Site après l'entrée en vigueur des modifications, vous acceptez les Conditions mises à jour."
+					]
+				},
+				"law": {
+					"title": "Droit applicable",
+					"body": [
+						"Les présentes Conditions sont régies par les lois de la province de l'Ontario, au Canada, sans égard à ses règles de conflit de lois. Les tribunaux situés dans la province de l'Ontario, au Canada, auront compétence exclusive pour tout litige découlant des présentes Conditions ou du Site, ou s'y rapportant, sous réserve des droits impératifs de protection des consommateurs dont vous pouvez bénéficier dans votre pays de résidence."
+					]
+				},
+				"contact": {
+					"title": "Contact",
+					"body": [
+						"Les questions sur ces Conditions peuvent être envoyées à {email}. Le Site et le Logiciel sont fournis par SnoutData Inc., une société ontarienne."
+					]
+				}
+			}
+		}
 	}
 }

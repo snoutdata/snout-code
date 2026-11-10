@@ -23,6 +23,20 @@ export const ROUTES: Route[] = [
 			'Download SnoutCode, the free and open source IDE for Java, Gradle and Spring: a disk image for macOS, a .deb and an Arch package for Linux, and an installer for Windows. Or build it from source.'
 	},
 	{
+		path: '/privacy',
+		file: 'privacy.html',
+		title: 'Privacy Policy: SnoutCode',
+		description:
+			'What SnoutCode does with your information: no account, no telemetry, your projects stay on your computer. Every network connection the app makes, and how the snoutcode.com website is hosted.'
+	},
+	{
+		path: '/terms',
+		file: 'terms.html',
+		title: 'Terms of Service: SnoutCode',
+		description:
+			'The terms for the snoutcode.com website and how SnoutCode is provided: the MIT license, third party tools and coding agents, downloads and automatic updates.'
+	},
+	{
 		path: '/404',
 		file: '404.html',
 		title: 'Page not found: SnoutCode',

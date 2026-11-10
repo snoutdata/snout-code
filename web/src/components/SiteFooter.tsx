@@ -59,7 +59,11 @@ export function SiteFooter() {
 			</div>
 			<div className="footer-bottom">
 				<span>{t('footer.copyright')}</span>
-				<span>{t('footer.privacy')}</span>
+				<span className="footer-legal">
+					<a href="/privacy">{t('footer.legal.privacy')}</a>
+					<a href="/terms">{t('footer.legal.terms')}</a>
+					<span>{t('footer.privacy')}</span>
+				</span>
 			</div>
 		</footer>
 	)
