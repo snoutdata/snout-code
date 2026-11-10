@@ -1485,7 +1485,7 @@ a.card:hover .card-art .ill {
 }
 .footer-inner {
 	display: grid;
-	grid-template-columns: 1.6fr repeat(3, 1fr);
+	grid-template-columns: 1.6fr repeat(4, 1fr);
 	gap: 32px;
 	max-width: var(--maxw);
 	margin: 0 auto;
@@ -1521,16 +1521,6 @@ a.card:hover .card-art .ill {
 	color: var(--body);
 	text-decoration: none;
 }
-.footer-legal {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px 20px;
-}
-.footer-legal a {
-	color: var(--body);
-	text-decoration: none;
-}
-.footer-legal a:hover,
 .footer-col a:hover,
 .footer-family a:hover {
 	color: var(--text);
@@ -1815,7 +1805,7 @@ a.card:hover .card-art .ill {
 	.open-band { grid-template-columns: minmax(0, 1fr); padding: 32px; }
 	.open-art { order: -1; max-width: 360px; }
 	.need-grid { grid-template-columns: minmax(0, 1fr); }
-	.footer-inner { grid-template-columns: repeat(3, 1fr); }
+	.footer-inner { grid-template-columns: repeat(4, 1fr); }
 	.footer-brand { grid-column: 1 / -1; }
 	.ill.ill-perch { width: 180px; top: -88px; }
 }

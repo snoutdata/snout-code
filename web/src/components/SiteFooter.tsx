@@ -31,6 +31,13 @@ const COLUMNS = [
 			{ href: CONTRIBUTING_URL, key: 'contributing' },
 			{ href: LICENSE_URL, key: 'license' }
 		]
+	},
+	{
+		key: 'legal',
+		links: [
+			{ href: '/privacy', key: 'privacy' },
+			{ href: '/terms', key: 'terms' }
+		]
 	}
 ]
 
@@ -59,11 +66,7 @@ export function SiteFooter() {
 			</div>
 			<div className="footer-bottom">
 				<span>{t('footer.copyright')}</span>
-				<span className="footer-legal">
-					<a href="/privacy">{t('footer.legal.privacy')}</a>
-					<a href="/terms">{t('footer.legal.terms')}</a>
-					<span>{t('footer.privacy')}</span>
-				</span>
+				<span>{t('footer.privacy')}</span>
 			</div>
 		</footer>
 	)
