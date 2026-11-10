@@ -981,6 +981,9 @@ fn search_lists_matches_fuzzily_and_finds_text() {
     assert!(!files.iter().any(|f| f.starts_with(".git/")));
     assert_eq!(go_to_file(&files, "mainrs")[0].0, "src/main.rs");
     assert_eq!(go_to_file(&files, "stat")[0].0, "status.rs");
+    assert_eq!(go_to_file(&files, "main*.r")[0].0, "src/main.rs", "a wildcard is any gap");
+    assert_eq!(go_to_file(&files, "st?tus")[0].0, "status.rs");
+    assert_eq!(go_to_file(&files, "*").len(), files.len().min(crate::search::LIMIT), "only wildcards: everything");
     let hits = find_in_files(&*host, &repo, &files, "Hello");
     assert!(hits.is_empty(), "with a capital, case matters");
     let hits = find_in_files(&*host, &repo, &files, "hello, snout");

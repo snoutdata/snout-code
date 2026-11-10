@@ -123,7 +123,7 @@ Files are written where the project is, so a project on a remote machine (see [R
 
 ## Go to File
 
-Press ⌘P (File ▸ Go to File…) and type part of a file's path. Names match fuzzily: the letters you type must appear in order, not necessarily side by side. The best matches come first. ↑ and ↓ pick, ↩ opens, Esc closes.
+Press ⌘P (File ▸ Go to File…) and type part of a file's path. Names match fuzzily: the letters you type must appear in order, not necessarily side by side. A `*` or `?` stands for whatever is there, so `token*.ja` finds `TokenController.java`. The best matches come first. ↑ and ↓ pick, ↩ opens, Esc closes.
 
 The files of source folders the build compiles from outside the project folder are listed too. A Gradle build whose `sourceSets` name `../core/src/main/java` shows that folder's files as `../core/src/main/java/...`, once its model is read. Find in Files searches them as well.
 

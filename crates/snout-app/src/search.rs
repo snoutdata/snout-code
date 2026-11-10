@@ -95,15 +95,15 @@ fn normalize(path: &Path) -> PathBuf {
 }
 
 /// The files whose path matches `query` fuzzily, best first, with the matched characters.
+/// A wildcard (`token*.ja`, `Test?.java`) stands for whatever is there, as a gap does anyway.
 pub fn go_to_file(files: &[String], query: &str) -> Vec<(String, Vec<usize>)> {
-    if query.trim().is_empty() {
+    let query: String = query.trim().chars().filter(|c| !matches!(c, '*' | '?')).collect();
+    if query.is_empty() {
         return files.iter().take(LIMIT).map(|f| (f.clone(), Vec::new())).collect();
     }
     let matcher = SkimMatcherV2::default().smart_case();
-    let mut hits: Vec<(i64, &String, Vec<usize>)> = files
-        .iter()
-        .filter_map(|f| matcher.fuzzy_indices(f, query.trim()).map(|(score, idx)| (score, f, idx)))
-        .collect();
+    let mut hits: Vec<(i64, &String, Vec<usize>)> =
+        files.iter().filter_map(|f| matcher.fuzzy_indices(f, &query).map(|(score, idx)| (score, f, idx))).collect();
     // Best score first; among equals, the shorter path.
     hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())).then(a.1.cmp(b.1)));
     hits.into_iter().take(LIMIT).map(|(_, f, idx)| (f.clone(), idx)).collect()
