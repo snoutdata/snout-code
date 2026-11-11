@@ -4,7 +4,7 @@ import { GitHubMark, Glyph } from '../components/Glyph'
 import { CardArt, PageMark, ParcelScene, type CardArtKind } from '../components/Illustrations'
 import { useScrollReveal } from '../effects'
 import { useI18n } from '../i18n'
-import { GITHUB_URL, RELEASES_URL, docs } from '../site'
+import { GITHUB_URL, MS_STORE_URL, RELEASES_URL, docs } from '../site'
 
 // Each platform's words are in the catalogs, under download.platforms.<id> (file, points, guide).
 const PLATFORMS: { id: string, art: CardArtKind, name: string, guide: string }[] = [
@@ -36,9 +36,9 @@ export function Download() {
 							<ul className="check-list">
 								{tList(`download.platforms.${p.id}.points`).map((pt, j) => <li key={j}>{pt}</li>)}
 							</ul>
-							<a className="btn btn-block" href={RELEASES_URL}>
+							<a className="btn btn-block" href={p.id === 'windows' ? MS_STORE_URL : RELEASES_URL}>
 								<Glyph kind="download" />
-								{t('download.for', { os: p.name })}
+								{p.id === 'windows' ? t('download.store') : t('download.for', { os: p.name })}
 							</a>
 							<a className="more-link" href={p.guide}>{t(`download.platforms.${p.id}.guide`)} <span aria-hidden="true">&rarr;</span></a>
 						</article>

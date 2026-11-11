@@ -350,7 +350,7 @@
 			"sub": "Chacun embarque le moteur Java et son propre runtime Java : rien d'autre à installer avant.",
 			"mac": "Une image disque : ouvrez-la et glissez SnoutCode dans Applications.",
 			"linux": "Un .deb pour Debian et Ubuntu et un paquet pour Arch Linux, sur X11 et Wayland.",
-			"windows": "Un installeur pour Windows 10 et 11, sans droits d'administrateur."
+			"windows": "Sur le Microsoft Store, pour Windows 10 et 11, sans droits d'administrateur."
 		},
 		"cta": {
 			"title": "Ouvrez votre projet dans SnoutCode",
@@ -426,6 +426,7 @@
 		"lede": "Gratuit pour tous, sur macOS, Linux et Windows. Chaque build est publié dans les releases GitHub du projet, à côté du code source dont il est issu.",
 		"label": "Téléchargements",
 		"for": "Télécharger pour {os}",
+		"store": "Obtenir sur le Microsoft Store",
 		"platforms": {
 			"mac": {
 				"file": "SnoutCode .dmg",
@@ -438,8 +439,8 @@
 				"guide": "SnoutCode sous Linux"
 			},
 			"windows": {
-				"file": "Installeur (.exe)",
-				"points": ["Windows 10 et 11, x64 et arm64", "S'installe pour vous, sans droits d'administrateur", "Pas encore signé : SmartScreen pose la question la première fois"],
+				"file": "Microsoft Store",
+				"points": ["Windows 10 et 11, x64 et arm64", "Signé, et s'installe sans droits d'administrateur", "Se met ensuite à jour tout seul", "L'installeur (.exe) est aussi dans les releases GitHub"],
 				"guide": "SnoutCode sous Windows"
 			}
 		},

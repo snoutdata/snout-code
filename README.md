@@ -101,7 +101,7 @@ Without signing settings the app is signed ad hoc: it opens as is on the Mac tha
 
 ### Windows installer
 
-`scripts/package-windows.ps1`, run on Windows, builds the installer (`SnoutCode-<version>-windows-<x64|arm64>-setup.exe`, made with Inno Setup) in `target\windows-package\`, with the Java engine and its own Java 21 runtime. It is unsigned for now; `-Sign` signs it with Azure Trusted Signing once that is set up. The [Windows workflow](.github/workflows/windows.yml) runs clippy, the tests and the app on a demo project, and builds, installs, starts and uninstalls the installer, for x64 and arm64.
+`scripts/package-windows.ps1`, run on Windows, builds the installer (`SnoutCode-<version>-windows-<x64|arm64>-setup.exe`, made with Inno Setup) in `target\windows-package\`, with the Java engine and its own Java 21 runtime. `-Sign` signs it with Azure Trusted Signing, as a tag's build does. The [Windows workflow](.github/workflows/windows.yml) runs clippy, the tests and the app on a demo project, and builds, installs, starts and uninstalls the installer, for x64 and arm64.
 
 ## How it is built
 

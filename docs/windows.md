@@ -14,12 +14,18 @@ the menus in the window, the keys, the terminals, and where SnoutCode keeps its 
 
 ## Install
 
-Download `SnoutCode-<version>-windows-x64-setup.exe` (or `-arm64-setup.exe` for a Windows on
-Arm PC) and run it.
+Get SnoutCode from the [Microsoft Store](https://apps.microsoft.com/detail/xpfp2nj5xztk5s) and
+choose **Install**. Windows trusts it from the start, with no SmartScreen warning. The Store
+version can be a release or two behind: SnoutCode then updates itself to the newest, as any
+install does.
+
+The installer is also on the [GitHub releases](https://github.com/snoutdata/snout-code/releases/latest):
+`SnoutCode-<version>-windows-x64-setup.exe` (or `-arm64-setup.exe` for a Windows on Arm PC).
+Download it and run it.
 
 ### The SmartScreen warning
 
-The installer is signed by SNOUTDATA. Microsoft Defender SmartScreen can still stop a new signed program the first time, until enough people have installed it: "Windows protected your PC". Click **More info**, check that the publisher is SNOUTDATA, then click **Run anyway**. Some browsers ask too, and keep the download only when you choose **Keep**.
+This is about the installer from GitHub; the Store install never sees it. The installer is signed by SNOUTDATA. Microsoft Defender SmartScreen can still stop a new signed program the first time, until enough people have installed it: "Windows protected your PC". Click **More info**, check that the publisher is SNOUTDATA, then click **Run anyway**. Some browsers ask too, and keep the download only when you choose **Keep**.
 
 ### What the installer does
 

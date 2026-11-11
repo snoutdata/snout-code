@@ -20,7 +20,7 @@ export const ROUTES: Route[] = [
 		file: 'download.html',
 		title: 'Download SnoutCode for macOS, Linux and Windows',
 		description:
-			'Download SnoutCode, the free and open source IDE for Java, Gradle and Spring: a disk image for macOS, a .deb and an Arch package for Linux, and an installer for Windows. Or build it from source.'
+			'Download SnoutCode, the free and open source IDE for Java, Gradle and Spring: a disk image for macOS, a .deb and an Arch package for Linux, and the Microsoft Store for Windows. Or build it from source.'
 	},
 	{
 		path: '/privacy',
