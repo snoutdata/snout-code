@@ -65,35 +65,24 @@ fn percent_decode(s: &str) -> String {
 /// matches, then the project's own before the libraries', then the shorter name. Each shows
 /// its package, and where a library's comes from.
 pub fn rank(found: Vec<SymbolInformation>, typed: &str, root: &Path) -> Vec<Item> {
-    use fuzzy_matcher::FuzzyMatcher as _;
-    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default().ignore_case();
     let q = typed.trim();
     let name_part = q.rsplit('.').next().unwrap_or(q);
     let mut seen = std::collections::HashSet::new();
-    let mut hits: Vec<(i64, bool, SymbolInformation)> = found
+    let found: Vec<SymbolInformation> = found
         .into_iter()
         .filter(|s| is_class(s.kind))
         .filter(|s| seen.insert((s.name.clone(), s.container_name.clone(), s.location.uri.as_str().to_owned())))
-        .filter_map(|s| {
-            let score = if name_part.is_empty() { Some(0) } else { matcher.fuzzy_match(&s.name, name_part) }?;
-            // A name that starts as typed, or is it, goes first.
-            let bonus = if s.name.eq_ignore_ascii_case(name_part) {
-                1000
-            } else if s.name.to_lowercase().starts_with(&name_part.to_lowercase()) {
-                200
-            } else {
-                0
-            };
-            let library = library_of(&s.location.uri).is_some() || snout_lang::uri::to_path(&s.location.uri).is_none();
-            Some((score + bonus, library, s))
-        })
         .collect();
-    hits.sort_by(|a, b| {
-        b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.name.len().cmp(&b.2.name.len())).then(a.2.name.cmp(&b.2.name))
+    // Ranked as every search is; among equals the project's own before the libraries', then
+    // by name.
+    let mut hits = snout_find::rank(&found, name_part, LIMIT, |p, _, s| {
+        let library = library_of(&s.location.uri).is_some() || snout_lang::uri::to_path(&s.location.uri).is_none();
+        p.match_name(&s.name).map(|m| m.boosted(!library as u32))
     });
+    hits.sort_by(|a, b| a.0.rank(&b.0).then_with(|| found[a.1].name.cmp(&found[b.1].name)));
     hits.into_iter()
-        .take(LIMIT)
-        .map(|(_, _, s)| {
+        .map(|(m, i)| (m, found[i].clone()))
+        .map(|(m, s)| {
             let package = s.container_name.clone().unwrap_or_default();
             let place = library_of(&s.location.uri);
             let detail = match place {
@@ -103,6 +92,7 @@ pub fn rank(found: Vec<SymbolInformation>, typed: &str, root: &Path) -> Vec<Item
             };
             Item {
                 path: s.name.clone(),
+                marks: m.indices,
                 detail: Some(detail).filter(|d| !d.is_empty()),
                 target: Some((root.to_owned(), s.location.uri, s.location.range.start)),
                 symbol: Some((s.kind, None)),

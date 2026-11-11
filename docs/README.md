@@ -16,6 +16,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScrip
 ## Writing code
 
 - [Editor](editor.md): tabs, editing, finding and replacing text across files, finding files, Search Everywhere and the command palette.
+- [Searching](search.md): what every search box understands (word starts, `*`, folders, a line to open at), and the order results come in.
 - [Java](java.md): completion, navigation, find references, rename, quick fixes, formatting, problems, and the engine's readiness.
 - [TypeScript and JavaScript](typescript.md): completion, navigation, rename and problems for Node projects, test projects such as Playwright repositories, and the scripts beside a Java project, and the Node they run on.
 - [Playwright projects](playwright.md): a repository of Playwright tests as a project of its own: the packages and browsers its tests need, steps recorded into a spec and locators picked from the page, runs followed live in the Tests window, breakpoints in the test code, environments, traces and screenshot comparisons, and the runs kept.

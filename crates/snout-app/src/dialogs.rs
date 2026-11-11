@@ -44,7 +44,11 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
     let width = match dialog {
         Dialog::Checkout | Dialog::Quit(_) => 600.,
         Dialog::SignIn { .. } => 620.,
-        Dialog::Error(_) | Dialog::PullProblem { .. } | Dialog::Clone { .. } | Dialog::ConfirmCheckout(_) => 560.,
+        Dialog::Error(_)
+        | Dialog::Failed(_)
+        | Dialog::PullProblem { .. }
+        | Dialog::Clone { .. }
+        | Dialog::ConfirmCheckout(_) => 560.,
         _ => 520.,
     };
     let p = palette(cx);
@@ -93,6 +97,7 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
             };
             (Tone::Danger, Some(art), Some(ts!("dialogs-git-stopped-and-said-why").into()))
         }
+        Dialog::Failed(_) => (Tone::Danger, Some(spots::warning()), None),
         Dialog::Info { mood: Mood::Warning, .. } => (Tone::Warning, Some(spots::warning()), None),
         Dialog::Info { mood: Mood::Done, .. } => (Tone::Success, Some(spots::success()), None),
         Dialog::Info { .. } => (Tone::Info, Some(spots::no_results()), None),
@@ -167,7 +172,7 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
 fn title(d: &Dialog, m: &Model) -> SharedString {
     match d {
         Dialog::About => ts!("cmd-about-snoutcode").into(),
-        Dialog::Error(_) => ts!("dialogs-something-went-wrong").into(),
+        Dialog::Error(_) | Dialog::Failed(_) => ts!("dialogs-something-went-wrong").into(),
         Dialog::Info { title, .. } => title.clone().into(),
         Dialog::ConfirmDiscard(_) => ts!("dialogs-discard-changes").into(),
         Dialog::ConfirmCheckout(t) => t!("dialogs-check-out-2", t = (t.label()).to_string()).into(),
@@ -370,7 +375,7 @@ impl DialogBody {
     /// ⏎: the main button, unless it destroys something.
     fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.dialog {
-            Dialog::About | Dialog::Error(_) | Dialog::Info { .. } => self.close(window, cx),
+            Dialog::About | Dialog::Error(_) | Dialog::Failed(_) | Dialog::Info { .. } => self.close(window, cx),
             Dialog::SignIn { ref problem, ref details, ref repo } => {
                 let ask = sign_in_ask(self.model.read(cx), details, repo.as_deref(), problem.host.as_deref());
                 match ask {
@@ -422,8 +427,8 @@ struct PickItem {
 /// Candidates for the picker, filtered by `query`. Remote branches with a local
 /// counterpart are left out: checking them out would just switch to the local one.
 fn pick_items(m: &Model, query: &str) -> Vec<PickItem> {
-    let q = query.to_lowercase();
-    let matches = |s: &str| q.is_empty() || s.to_lowercase().contains(&q);
+    let pattern = snout_find::Pattern::new(query);
+    let matches = |s: &str| pattern.filter(s);
     let locals: Vec<&str> =
         m.branches.iter().filter(|b| b.kind == BranchKind::Local).map(|b| b.name.as_str()).collect();
     let mut items = Vec::new();
@@ -656,7 +661,7 @@ impl Render for DialogBody {
                 );
                 buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
             }
-            Dialog::Error(msg) => {
+            Dialog::Error(msg) | Dialog::Failed(msg) => {
                 body.push(code(&msg).into_any_element());
                 let copy = msg.clone();
                 buttons.push(

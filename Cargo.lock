@@ -2080,15 +2080,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fuzzy-matcher"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
-dependencies = [
- "thread_local",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4354,6 +4345,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -6628,7 +6629,6 @@ dependencies = [
  "embed-resource",
  "epaint_default_fonts",
  "futures",
- "fuzzy-matcher",
  "globset",
  "gpui-base",
  "gpui-component",
@@ -6654,6 +6654,7 @@ dependencies = [
  "sha2 0.10.9",
  "similar 3.2.0",
  "snout-core",
+ "snout-find",
  "snout-host",
  "snout-lang",
  "snout-remote",
@@ -6685,6 +6686,13 @@ dependencies = [
  "snout-host",
  "thiserror 2.0.21",
  "vt100",
+]
+
+[[package]]
+name = "snout-find"
+version = "1.0.7"
+dependencies = [
+ "nucleo-matcher",
 ]
 
 [[package]]
@@ -7128,15 +7136,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
-]
-
-[[package]]
-name = "thread_local"
-version = "1.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
-dependencies = [
- "cfg-if",
 ]
 
 [[package]]

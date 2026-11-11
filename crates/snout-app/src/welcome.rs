@@ -62,13 +62,12 @@ impl WelcomePanel {
 
     /// The recent projects the search box lets through.
     pub fn shown(&self, cx: &gpui::App) -> Vec<PathBuf> {
-        let query = self.search.read(cx).value().to_lowercase();
-        let query = query.trim();
+        let pattern = snout_find::Pattern::new(&self.search.read(cx).value());
         self.model
             .read(cx)
             .recent_projects()
             .into_iter()
-            .filter(|p| query.is_empty() || p.to_string_lossy().to_lowercase().contains(query))
+            .filter(|p| pattern.filter_path(&snout_host::slash_path(p)))
             .collect()
     }
 }

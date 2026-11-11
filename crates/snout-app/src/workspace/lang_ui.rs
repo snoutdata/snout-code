@@ -348,9 +348,11 @@ impl Workspace {
                 let v = call.await.unwrap_or_default();
                 let tree = symbols::parse(&v, &text);
                 let current = symbols::path_at(&tree, at);
+                let pattern = snout_find::Pattern::new(&query);
                 symbols::rows(&tree, &query, symbols::Sort::Position, &|_| false)
                     .into_iter()
                     .map(|r| Item {
+                        marks: pattern.match_name(&r.symbol.name).map(|m| m.indices).unwrap_or_default(),
                         path: r.symbol.name.clone(),
                         detail: Some(r.symbol.detail.trim().to_owned()).filter(|d| !d.is_empty()),
                         target: Some((root.clone(), uri.clone(), r.symbol.selection.start)),
@@ -847,20 +849,9 @@ fn file_symbols(v: &Value, root: &Path, uri: &Uri) -> Vec<Item> {
     out
 }
 
-/// The symbols whose name matches `query` fuzzily, best first (all, in order, when empty).
+/// The symbols whose name matches `query`, best first (all, in order, when empty).
 fn filter_symbols(items: Vec<Item>, query: &str) -> Vec<Item> {
-    use fuzzy_matcher::FuzzyMatcher as _;
-    if query.trim().is_empty() {
-        return items;
-    }
-    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default().ignore_case();
-    let mut hits: Vec<(i64, usize, Item)> = items
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, it)| matcher.fuzzy_match(&it.path, query.trim()).map(|s| (s, i, it)))
-        .collect();
-    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    hits.into_iter().map(|(_, _, it)| it).collect()
+    crate::search::rank_items(items, query, |_| 0)
 }
 
 /// The symbols of the build at `root` that match a query, from its server.
@@ -873,7 +864,11 @@ fn symbols_of(hub: Entity<crate::lang::LangHub>, root: PathBuf) -> crate::search
         let root = root.clone();
         cx.background_executor().spawn(async move {
             let v = call.await.unwrap_or_default();
-            workspace_symbols(&v, &root)
+            // Ranked as every search is, the project's own before the libraries'.
+            let own = |it: &Item| {
+                it.target.as_ref().is_some_and(|(_, uri, _)| snout_lang::uri::to_path(uri).is_some()) as u32
+            };
+            crate::search::rank_items(workspace_symbols(&v, &root), &query, own)
         })
     })
 }

@@ -1,0 +1,12 @@
+[package]
+name = "snout-find"
+description = "How SnoutCode's searches match and rank: one query syntax and one order for every search box"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The fuzzy tier: the fastest matcher there is, and it scores word starts and camel humps.
+nucleo-matcher = "0.3"

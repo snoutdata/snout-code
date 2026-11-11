@@ -526,8 +526,8 @@ impl Entry {
     /// Whether the search `query` finds it, by name or by keys.
     pub fn matches(&self, query: &str, cx: &App) -> bool {
         let q = query.trim().to_lowercase();
-        q.is_empty()
-            || self.name.to_lowercase().contains(&q)
+        let pattern = snout_find::Pattern::new(query);
+        pattern.filter(&self.name)
             || self.keys.iter().any(|k| k.contains(&q) || display(k, cx).to_lowercase().contains(&q))
     }
 }

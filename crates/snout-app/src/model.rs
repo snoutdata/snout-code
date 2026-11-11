@@ -96,7 +96,11 @@ pub enum Mood {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
     About,
+    /// Git refused or failed: what it said.
     Error(String),
+    /// Something other than Git failed (a folder that is not there, a terminal that would not
+    /// start): what went wrong, with no word of Git.
+    Failed(String),
     Info {
         title: String,
         text: String,
@@ -876,12 +880,12 @@ impl Model {
 
     /// The changed files the Git Panel lists: filtered by text and directory, then sorted.
     pub fn visible_files(&self) -> Vec<&FileEntry> {
-        let needle = self.filter.to_lowercase();
+        let pattern = snout_find::Pattern::new(&self.filter);
         let mut rows: Vec<&FileEntry> = self
             .status
             .files
             .iter()
-            .filter(|f| needle.is_empty() || f.path.to_lowercase().contains(&needle))
+            .filter(|f| pattern.filter_path(&f.path))
             .filter(|f| {
                 self.dir_filter
                     .as_ref()
@@ -1118,7 +1122,7 @@ impl Model {
                             m.project = None;
                         }
                         m.pending_file = None;
-                        m.fail(e, cx);
+                        m.fail_plain(e, cx);
                     }
                 }
                 m.persist();
@@ -1378,7 +1382,7 @@ impl Model {
                     }
                     m.open_repo(&project, cx);
                 } else {
-                    m.fail(t!("model-does-not-exist", path = (dir.display()).to_string()), cx);
+                    m.fail_plain(t!("model-does-not-exist", path = (dir.display()).to_string()), cx);
                 }
                 cx.notify();
             });
@@ -1673,7 +1677,7 @@ impl Model {
         cx.spawn(async move |this, cx| {
             if let Err(e) = opened.await {
                 let _ = this.update(cx, |m, cx| {
-                    m.fail(e, cx);
+                    m.fail_plain(e, cx);
                     cx.notify();
                 });
             }
@@ -1681,10 +1685,18 @@ impl Model {
         .detach();
     }
 
+    /// A Git command failed: what it said, in the Git dialog.
     fn fail(&mut self, message: String, cx: &mut Context<Self>) {
         self.message = message.lines().next().unwrap_or_default().to_owned();
         self.log_output(message.clone(), true);
         self.ask(Dialog::Error(message), cx);
+    }
+
+    /// Something other than Git failed.
+    fn fail_plain(&mut self, message: String, cx: &mut Context<Self>) {
+        self.message = message.lines().next().unwrap_or_default().to_owned();
+        self.log_output(message.clone(), true);
+        self.ask(Dialog::Failed(message), cx);
     }
 
     fn done(&mut self, summary: impl Into<String>) {

@@ -215,7 +215,7 @@ pub fn run() {
     let (asked, requests) = futures::channel::mpsc::unbounded::<Vec<String>>();
     platform::offer_open_service(asked.clone());
     app.on_open_urls(move |urls| {
-        let _ = asked.unbounded_send(urls);
+        let _ = asked.unbounded_send(urls.into_iter().map(platform::file_url).collect());
     });
     app.run(move |cx: &mut App| {
         startup::mark("app running");

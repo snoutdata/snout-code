@@ -1,22 +1,21 @@
 //! Go to file (⌘P), the command palette and the symbol boxes: a box over the window with a
-//! field and what matches. The host lists the files (so `.gitignore` holds); names are
-//! matched fuzzily (`fuzzy-matcher`). Find in Files has a window of its own
-//! ([`crate::find_in_files`]).
+//! field and what matches. The host lists the files (so `.gitignore` holds); what is typed
+//! matches and ranks as in every search ([`snout_find`]), the letters it matched marked.
+//! Find in Files has a window of its own ([`crate::find_in_files`]).
 //! ↑ ↓ pick, ↩ opens the file (at the line), Esc closes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fuzzy_matcher::FuzzyMatcher as _;
-use fuzzy_matcher::skim::SkimMatcherV2;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Task, Window, actions, div,
-    px, uniform_list,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, FontWeight, HighlightStyle, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, StyledText,
+    Task, Window, actions, div, px, uniform_list,
 };
 use gpui_component::input::{InputEvent, InputState};
+use snout_find::{Pattern, Place};
 use snout_host::{Host, WalkOptions};
 
 use crate::look;
@@ -94,19 +93,50 @@ fn normalize(path: &Path) -> PathBuf {
     out
 }
 
-/// The files whose path matches `query` fuzzily, best first, with the matched characters.
-/// A wildcard (`token*.ja`, `Test?.java`) stands for whatever is there, as a gap does anyway.
-pub fn go_to_file(files: &[String], query: &str) -> Vec<(String, Vec<usize>)> {
-    let query: String = query.trim().chars().filter(|c| !matches!(c, '*' | '?')).collect();
-    if query.is_empty() {
-        return files.iter().take(LIMIT).map(|f| (f.clone(), Vec::new())).collect();
+/// The files whose path matches `query`, best first, with the characters matched (see
+/// [`snout_find`]). Among equals the files of `recent` (the latest first) go first, then the
+/// project's own code, then a source folder beside it, then what a build made. Nothing typed:
+/// the recent files, then the rest in order.
+pub fn go_to_file(files: &[String], query: &str, recent: &[String]) -> Vec<(String, Vec<usize>)> {
+    if Pattern::new(query).is_empty() {
+        let first: std::collections::HashSet<&String> = recent.iter().collect();
+        return recent
+            .iter()
+            .chain(files.iter().filter(|f| !first.contains(f)))
+            .take(LIMIT)
+            .map(|f| (f.clone(), Vec::new()))
+            .collect();
     }
-    let matcher = SkimMatcherV2::default().smart_case();
-    let mut hits: Vec<(i64, &String, Vec<usize>)> =
-        files.iter().filter_map(|f| matcher.fuzzy_indices(f, &query).map(|(score, idx)| (score, f, idx))).collect();
-    // Best score first; among equals, the shorter path.
-    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())).then(a.1.cmp(b.1)));
-    hits.into_iter().take(LIMIT).map(|(_, f, idx)| (f.clone(), idx)).collect()
+    let recency: std::collections::HashMap<&str, usize> =
+        recent.iter().enumerate().map(|(i, p)| (p.as_str(), i)).collect();
+    snout_find::rank(files, query, LIMIT, |p, _, f| {
+        let lately = recency.get(f.as_str()).map_or(0, |i| 64usize.saturating_sub(*i) as u32);
+        let place = match Place::of(f) {
+            Place::Source | Place::Test => 2,
+            Place::Outside => 1,
+            Place::Generated => 0,
+        };
+        p.match_path(f).map(|m| m.boosted(lately * 4 + place))
+    })
+    .into_iter()
+    .map(|(m, i)| (files[i].clone(), m.indices))
+    .collect()
+}
+
+/// `text` with the characters `marks` (indices of its `char`s) shown as what the search
+/// matched.
+pub fn marked(text: String, marks: impl IntoIterator<Item = usize>, p: &crate::theme::Palette) -> StyledText {
+    let style = HighlightStyle { color: Some(p.accent), font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() };
+    let at: Vec<(usize, usize)> = text.char_indices().map(|(b, c)| (b, b + c.len_utf8())).collect();
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    for i in marks {
+        let Some(&(start, end)) = at.get(i) else { continue };
+        match ranges.last_mut() {
+            Some(r) if r.end == start => r.end = end,
+            _ => ranges.push(start..end),
+        }
+    }
+    StyledText::new(text).with_highlights(ranges.into_iter().map(|r| (r, style)))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -142,20 +172,29 @@ pub struct Command {
     pub keys: Option<String>,
 }
 
-/// The commands whose name matches `query` fuzzily, best first (all of them, in order,
-/// for an empty query).
-pub fn match_commands(commands: &[Command], query: &str) -> Vec<usize> {
-    if query.trim().is_empty() {
-        return (0..commands.len()).collect();
+/// The commands whose name matches `query`, best first, with the characters matched (all of
+/// them, in order, for an empty query).
+pub fn match_commands(commands: &[Command], query: &str) -> Vec<(usize, Vec<usize>)> {
+    if Pattern::new(query).is_empty() {
+        return (0..commands.len()).map(|i| (i, Vec::new())).collect();
     }
-    let matcher = SkimMatcherV2::default().ignore_case();
-    let mut hits: Vec<(i64, usize)> = commands
-        .iter()
-        .enumerate()
-        .filter_map(|(i, c)| matcher.fuzzy_match(&c.name, query.trim()).map(|s| (s, i)))
-        .collect();
-    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    hits.into_iter().map(|(_, i)| i).collect()
+    let names: Vec<&str> = commands.iter().map(|c| c.name.as_ref()).collect();
+    snout_find::rank(&names, query, usize::MAX, |p, _, name| p.match_name(name))
+        .into_iter()
+        .map(|(m, i)| (i, m.indices))
+        .collect()
+}
+
+/// The `items` whose name (`path`) matches `query`, best first, marked; in their order when
+/// nothing is typed. `boost` ranks among equals.
+pub fn rank_items(items: Vec<Item>, query: &str, boost: impl Fn(&Item) -> u32 + Sync) -> Vec<Item> {
+    if Pattern::new(query).is_empty() {
+        return items;
+    }
+    let ranked =
+        snout_find::rank(&items, query, usize::MAX, |p, _, it| p.match_name(&it.path).map(|m| m.boosted(boost(it))));
+    let mut slots: Vec<Option<Item>> = items.into_iter().map(Some).collect();
+    ranked.into_iter().filter_map(|(m, i)| slots[i].take().map(|it| Item { marks: m.indices, ..it })).collect()
 }
 
 /// The line and column (from 0) that `12` or `12:5` (from 1) names.
@@ -185,6 +224,8 @@ pub struct Item {
     pub symbol: Option<(lsp_types::SymbolKind, Option<crate::lang::symbols::Visibility>)>,
     pub depth: usize,
     pub current: bool,
+    /// The characters of `path` the search matched.
+    pub marks: Vec<usize>,
 }
 
 pub enum SearchEvent {
@@ -317,28 +358,30 @@ impl SearchView {
         match self.mode {
             Mode::GoToLine | Mode::NewFile => cx.notify(),
             Mode::RecentFiles => {
-                let q = query.trim().to_lowercase();
                 let root = self.root.clone();
-                self.items = self
-                    .model
-                    .read(cx)
-                    .recent_files
-                    .iter()
-                    .filter_map(|p| relative_to(p, &root))
-                    .filter(|p| q.is_empty() || p.to_lowercase().contains(&q))
-                    .map(|path| Item { path, ..Default::default() })
-                    .collect();
+                let recent: Vec<String> =
+                    self.model.read(cx).recent_files.iter().filter_map(|p| relative_to(p, &root)).collect();
+                let at = Pattern::new(&query).line();
+                // The latest first among equals.
+                self.items = if Pattern::new(&query).is_empty() {
+                    recent.into_iter().map(|path| Item { path, ..Default::default() }).collect()
+                } else {
+                    let n = recent.len() as u32;
+                    snout_find::rank(&recent, &query, LIMIT, |p, i, f| p.match_path(f).map(|m| m.boosted(n - i as u32)))
+                        .into_iter()
+                        .map(|(m, i)| Item { path: recent[i].clone(), at, marks: m.indices, ..Default::default() })
+                        .collect()
+                };
                 cx.notify();
             }
             Mode::Commands | Mode::Tasks | Mode::Profiles => {
                 self.items = match_commands(&self.commands, &query)
                     .into_iter()
-                    .map(|i| Item {
+                    .map(|(i, marks)| Item {
                         path: self.commands[i].name.to_string(),
-                        at: None,
-                        detail: None,
                         command: Some(i),
                         keys: self.commands[i].keys.clone(),
+                        marks,
                         ..Default::default()
                     })
                     .collect();
@@ -359,9 +402,20 @@ impl SearchView {
                 }));
             }
             Mode::GoToFile => {
-                self.items = go_to_file(&self.files, &query)
+                let root = self.root.clone();
+                let recent: Vec<String> = self
+                    .model
+                    .read(cx)
+                    .recent_files
+                    .iter()
+                    .filter(|p| p.starts_with(&root))
+                    .filter_map(|p| relative_to(p, &root))
+                    .collect();
+                // `Foo.java:12` opens at the line.
+                let at = Pattern::new(&query).line();
+                self.items = go_to_file(&self.files, &query, &recent)
                     .into_iter()
-                    .map(|(path, _)| Item { path, ..Default::default() })
+                    .map(|(path, marks)| Item { path, at, marks, ..Default::default() })
                     .collect();
                 cx.notify();
                 // Search Everywhere: the symbols that match follow the files.
@@ -486,6 +540,9 @@ impl Render for SearchView {
                         Some((d, n)) => (d.to_owned(), n.to_owned()),
                         None => (String::new(), item.path.clone()),
                     };
+                    // The marks in the name: those after the folder.
+                    let skip = if dir.is_empty() && !item.path.starts_with('/') { 0 } else { dir.chars().count() + 1 };
+                    let shown = marked(name.clone(), item.marks.iter().filter_map(|m| m.checked_sub(skip)), &p);
                     let view = view.clone();
                     div()
                         .id(("search-item", i))
@@ -506,7 +563,7 @@ impl Render for SearchView {
                         .when(item.symbol.is_none() && !commands, |d| {
                             d.child(crate::icons::file_icon(std::path::Path::new(&name), 16., &p))
                         })
-                        .child(div().flex_none().whitespace_nowrap().child(name))
+                        .child(div().flex_none().whitespace_nowrap().child(shown))
                         // The folder takes the rest of the row, shortened in its middle, unless
                         // the row has more to say after it.
                         .child(if item.detail.is_none() && !commands {

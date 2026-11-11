@@ -294,8 +294,7 @@ impl PwTests {
 
     /// Whether a row passes the filter.
     pub fn shows(&self, row: &Row, cx: &App) -> bool {
-        let text = self.text.trim().to_lowercase();
-        if !text.is_empty() && !row.key.to_lowercase().contains(&text) {
+        if !snout_find::Pattern::new(&self.text).filter(&row.key) {
             return false;
         }
         let projects = self.projects(cx);

@@ -8,6 +8,13 @@
 //! its own. One undo (Edit ▸ Undo Replace in Files) puts every file back as it was, unless
 //! it changed since.
 //!
+//! A plain text takes a `*` that touches a letter or a digit as a wildcard for whatever is on
+//! the line there (`get*Name`), as every search does ([`snout_find::wildcard_regex`]); any
+//! other `*` is itself (`java.util.*`). The files are ranked: the project's own code, then its
+//! tests, then source folders beside it, then what a build made; among those, files whose name
+//! holds the text, then those whose matches are the text as typed (not widened by a wildcard,
+//! in its case, a whole word), then the open ones, then those with more matches.
+//!
 //! The search itself ([`search`]) and the text side of a replacement ([`Query`], [`find`],
 //! [`replaced`], [`Mask`]) carry no UI, for the tests.
 
@@ -26,6 +33,7 @@ use gpui::{
 use gpui_component::input::{InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use regex::{Regex, RegexBuilder};
+use snout_find::Place;
 use snout_host::{Host, HostRef};
 
 use crate::components::{self, Button, IconButton, IconName, RowState, Tone};
@@ -62,7 +70,11 @@ impl Query {
         if self.text.is_empty() {
             return Err(String::new());
         }
-        let mut pattern = if self.regex { self.text.clone() } else { regex::escape(&self.text) };
+        let mut pattern = if self.regex {
+            self.text.clone()
+        } else {
+            snout_find::wildcard_regex(&self.text).unwrap_or_else(|| regex::escape(&self.text))
+        };
         if self.word {
             pattern = format!(r"\b(?:{pattern})\b");
         }
@@ -77,6 +89,25 @@ impl Query {
                 _ => ts!("find-the-regular-expression-is-too-large").to_owned(),
             },
         )
+    }
+
+    /// A plain text with a wildcard in it.
+    pub fn wild(&self) -> bool {
+        !self.regex && snout_find::wildcard_regex(&self.text).is_some()
+    }
+
+    /// How a match of `text` at `range` reads against what was typed: the text itself (not
+    /// what a wildcard widened it to), in its case, a whole word. Higher first.
+    pub fn quality(&self, text: &str, range: &Range<usize>) -> u8 {
+        let found = &text[range.clone()];
+        let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+        let whole = !word(text[..range.start].chars().next_back()) && !word(text[range.end..].chars().next());
+        let (literal, case) = if self.regex {
+            (true, false)
+        } else {
+            (found.to_lowercase() == self.text.to_lowercase(), found == self.text)
+        };
+        (literal as u8) << 2 | (whole as u8) << 1 | case as u8
     }
 
     /// What replaces the match `caps`.
@@ -288,19 +319,26 @@ pub fn search(
             candidates.push(f.clone());
         }
     }
-    // A plain text without line breaks: the host narrows the files down (case left aside).
+    // A plain text without line breaks: the host narrows the files down (case left aside), to
+    // those holding its longest run without a wildcard.
     if !query.regex && !query.text.contains('\n') && candidates.len() > 1 {
-        let needle = query.text.to_lowercase();
+        let runs = snout_find::literal_runs(&query.text);
+        let needle = runs.iter().max_by_key(|r| r.len()).cloned().unwrap_or_default().to_lowercase();
         let disk: Vec<String> = candidates.iter().filter(|f| !open.contains_key(*f)).cloned().collect();
         if let Ok(hits) = host.find_text(root, &disk, &needle, usize::MAX / 2) {
             let holding: HashSet<String> = hits.into_iter().map(|h| h.path).collect();
             candidates.retain(|f| open.contains_key(f) || holding.contains(f));
         }
     }
-    candidates.sort();
+    // The likeliest files first, so a search that stops at the limit stops in the others.
+    let named = |path: &str| file_named(path, query);
+    let mut candidates: Vec<(Place, Option<snout_find::Tier>, bool, String)> =
+        candidates.into_iter().map(|f| (Place::of(&f), named(&f), open.contains_key(&f), f)).collect();
+    candidates.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)).then(a.3.cmp(&b.3)));
     let mut found = Found::default();
     let mut total = 0;
-    for path in candidates {
+    let mut ranks = Vec::new();
+    for (place, name, is_open, path) in candidates {
         let text = match open.get(&path) {
             Some(t) => t.clone(),
             None => match host.read(&crate::search::file_at(root, &path)) {
@@ -316,6 +354,8 @@ pub fn search(
             continue;
         }
         total += hits.len();
+        let quality = hits.iter().map(|h| query.quality(&text, &h.range)).max().unwrap_or(0);
+        ranks.push((place, name, quality, is_open, hits.len()));
         let included = vec![true; hits.len()];
         found.files.push(FileHits { path, text, hits, included, expanded: true });
         if total >= MAX_MATCHES {
@@ -323,7 +363,27 @@ pub fn search(
             break;
         }
     }
+    // Best first; the path last.
+    let mut order: Vec<usize> = (0..found.files.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (ra, rb) = (&ranks[a], &ranks[b]);
+        (rb.0, rb.1, rb.2, rb.3, rb.4)
+            .cmp(&(ra.0, ra.1, ra.2, ra.3, ra.4))
+            .then(found.files[a].path.cmp(&found.files[b].path))
+    });
+    let mut files: Vec<Option<FileHits>> = std::mem::take(&mut found.files).into_iter().map(Some).collect();
+    found.files = order.into_iter().filter_map(|i| files[i].take()).collect();
     Ok(found)
+}
+
+/// How well the name of the file at `path` holds the text looked for (a plain one): the name
+/// as typed, beginning so, at its words' starts, or anywhere. None when it does not.
+fn file_named(path: &str, query: &Query) -> Option<snout_find::Tier> {
+    if query.regex || query.text.trim().is_empty() || query.text.contains(char::is_whitespace) {
+        return None;
+    }
+    let name = path.rsplit('/').next().unwrap_or(path);
+    snout_find::Pattern::new(&query.text).match_path(name).map(|m| m.tier).filter(|t| *t >= snout_find::Tier::Inside)
 }
 
 /// One line of the preview: its numbers in the old and the new text, and how it changed.
@@ -1544,10 +1604,43 @@ mod tests {
         let mask = Mask::parse("*.java").unwrap();
         let found = search(&*host, &dir, &files, &q("total", "sum"), &Within::All, &mask, &open).unwrap();
         let paths: Vec<&str> = found.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, ["src/A.java", "src/B.java"], "the open editor's text is searched");
-        assert_eq!(found.files[1].after(None), "class B { int sum = 1; }\n");
+        assert_eq!(paths, ["src/B.java", "src/A.java"], "the open editor's text is searched, and ranks first");
+        assert_eq!(found.files[0].after(None), "class B { int sum = 1; }\n");
         let lines = preview(&found.files[0].text, &found.files[0].after(None), 50);
         assert_eq!(lines.iter().map(|l| l.sign).collect::<String>(), "-+");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_star_by_a_word_is_a_wildcard_and_the_files_are_ranked() {
+        let dir = std::env::temp_dir().join(format!("snout-fif-rank-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (path, text) in [
+            ("src/A.java", "x = getUserName();\n"),
+            ("src/B.java", "// get*Name\n"),
+            ("src/test/DTest.java", "getName();\n"),
+            ("build/C.java", "getName();\n"),
+            ("src/E.java", "import java.util.*;\nimport java.util.List;\n"),
+            ("src/Other.java", "UserService service;\n"),
+            ("src/UserService.java", "class UserService {}\n"),
+        ] {
+            std::fs::create_dir_all(dir.join(path).parent().unwrap()).unwrap();
+            std::fs::write(dir.join(path), text).unwrap();
+        }
+        let host = snout_host::local();
+        let files = crate::search::list_files(&*host, &dir, &[]);
+        let found = |text: &str| {
+            let found = search(&*host, &dir, &files, &q(text, ""), &Within::All, &Mask::default(), &HashMap::new());
+            found.unwrap().files.into_iter().map(|f| (f.path, f.hits.len())).collect::<Vec<_>>()
+        };
+        let paths = |text: &str| found(text).into_iter().map(|(p, _)| p).collect::<Vec<_>>();
+        assert_eq!(
+            paths("get*Name"),
+            ["src/B.java", "src/A.java", "src/test/DTest.java", "build/C.java"],
+            "the text as typed first, then the project's code, its tests, what a build made"
+        );
+        assert_eq!(found("java.util.*"), [("src/E.java".to_owned(), 1)], "a star by a dot is itself");
+        assert_eq!(paths("UserService"), ["src/UserService.java", "src/Other.java"], "the file it names first");
         let _ = std::fs::remove_dir_all(dir);
     }
 

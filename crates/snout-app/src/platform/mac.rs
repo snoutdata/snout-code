@@ -87,7 +87,7 @@ objc2::define_class!(
                 .into_iter()
                 .flatten()
                 .filter_map(|item| item.stringForType(&kind))
-                .map(|url| url.to_string())
+                .map(|url| file_url(url.to_string()))
                 .collect();
             if let Some(asked) = OPEN_ASKED.get() {
                 let _ = asked.unbounded_send(urls);
@@ -95,6 +95,19 @@ objc2::define_class!(
         }
     }
 );
+
+/// `url` as a path: Finder hands a file over by reference (`file:///.file/id=6571367.1131259`),
+/// which names no path until the system resolves it. Any other URL is as it was.
+pub fn file_url(url: String) -> String {
+    if !url.starts_with("file:///.file/") {
+        return url;
+    }
+    let resolved = objc2_foundation::NSURL::URLWithString(&objc2_foundation::NSString::from_str(&url))
+        .and_then(|u| u.filePathURL())
+        .and_then(|u| u.absoluteString())
+        .map(|s| s.to_string());
+    resolved.unwrap_or(url)
+}
 
 /// Answer the Services menu's "Open in SnoutCode". The port's name is `NSPortName` in the
 /// bundle's `NSServices`.

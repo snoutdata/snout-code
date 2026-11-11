@@ -240,10 +240,9 @@ pub struct Row {
 /// ordered by `sort`, below the open ones (`closed` holds the paths folded; a filter opens
 /// everything).
 pub fn rows(symbols: &[Symbol], filter: &str, sort: Sort, closed: &dyn Fn(&[usize]) -> bool) -> Vec<Row> {
-    use fuzzy_matcher::FuzzyMatcher as _;
-    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default().ignore_case();
+    let pattern = snout_find::Pattern::new(filter);
     let filter = filter.trim();
-    let hit = |s: &Symbol| filter.is_empty() || matcher.fuzzy_match(&s.name, filter).is_some();
+    let hit = |s: &Symbol| pattern.is_empty() || pattern.match_name(&s.name).is_some();
     fn keeps(s: &Symbol, hit: &dyn Fn(&Symbol) -> bool) -> bool {
         hit(s) || s.children.iter().any(|c| keeps(c, hit))
     }

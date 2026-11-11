@@ -437,6 +437,7 @@ impl Host for LocalHost {
     fn find_text(&self, root: &Path, files: &[String], needle: &str, limit: usize) -> io::Result<Vec<TextHit>> {
         use grep_matcher::Matcher as _;
         use grep_searcher::{BinaryDetection, SearcherBuilder, sinks::UTF8};
+        use std::sync::atomic::{AtomicUsize, Ordering};
         if needle.is_empty() {
             return Ok(Vec::new());
         }
@@ -445,27 +446,64 @@ impl Host for LocalHost {
             .fixed_strings(true)
             .build(needle)
             .map_err(io::Error::other)?;
-        let mut searcher = SearcherBuilder::new().binary_detection(BinaryDetection::quit(0)).line_number(true).build();
-        let mut hits = Vec::new();
-        for file in files {
-            if hits.len() >= limit {
-                break;
+        // Every core takes runs of the files, in order; the hits come back in the files' order,
+        // the first `limit` of them. A run starts only while the runs before it found fewer.
+        let found = AtomicUsize::new(0);
+        let search = |part: &[String]| -> Vec<TextHit> {
+            let mut searcher =
+                SearcherBuilder::new().binary_detection(BinaryDetection::quit(0)).line_number(true).build();
+            let mut hits = Vec::new();
+            for file in part {
+                if hits.len() >= limit {
+                    break;
+                }
+                let _ = searcher.search_path(
+                    &matcher,
+                    root.join(file),
+                    UTF8(|line, text| {
+                        let column = matcher.find(text.as_bytes()).ok().flatten().map_or(0, |m| m.start());
+                        hits.push(TextHit {
+                            path: file.clone(),
+                            line: line.saturating_sub(1) as u32,
+                            column: column as u32,
+                            text: text.trim_end().to_owned(),
+                        });
+                        Ok(hits.len() < limit)
+                    }),
+                );
             }
-            let _ = searcher.search_path(
-                &matcher,
-                root.join(file),
-                UTF8(|line, found| {
-                    let column = matcher.find(found.as_bytes()).ok().flatten().map_or(0, |m| m.start());
-                    hits.push(TextHit {
-                        path: file.clone(),
-                        line: line.saturating_sub(1) as u32,
-                        column: column as u32,
-                        text: found.trim_end().to_owned(),
-                    });
-                    Ok(hits.len() < limit)
-                }),
-            );
-        }
+            found.fetch_add(hits.len(), Ordering::Relaxed);
+            hits
+        };
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+        let mut hits: Vec<TextHit> = if files.len() < 64 || threads < 2 {
+            search(files)
+        } else {
+            let size = files.len().div_ceil(threads * 4);
+            let parts: Vec<&[String]> = files.chunks(size).collect();
+            let next = AtomicUsize::new(0);
+            let mut done: Vec<(usize, Vec<TextHit>)> = std::thread::scope(|scope| {
+                let workers: Vec<_> = (0..threads)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            let mut mine = Vec::new();
+                            loop {
+                                let n = next.fetch_add(1, Ordering::Relaxed);
+                                let Some(part) = parts.get(n).filter(|_| found.load(Ordering::Relaxed) < limit) else {
+                                    break;
+                                };
+                                mine.push((n, search(part)));
+                            }
+                            mine
+                        })
+                    })
+                    .collect();
+                workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
+            });
+            done.sort_by_key(|(n, _)| *n);
+            done.into_iter().flat_map(|(_, h)| h).collect()
+        };
+        hits.truncate(limit);
         Ok(hits)
     }
 

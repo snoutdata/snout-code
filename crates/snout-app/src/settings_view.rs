@@ -177,11 +177,9 @@ impl Page {
 
     /// Whether the search `query` finds the page.
     pub fn matches(self, query: &str) -> bool {
-        let q = query.trim().to_lowercase();
-        q.is_empty()
-            || self.title().to_lowercase().contains(&q)
-            || self.group().is_some_and(|g| g.to_lowercase().contains(&q))
-            || self.keywords().contains(&q)
+        // Every word somewhere in the title, the group or the keywords.
+        let all = format!("{} {} {}", self.title(), self.group().unwrap_or_default(), self.keywords());
+        snout_find::Pattern::new(query).filter(&all)
     }
 }
 

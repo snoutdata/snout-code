@@ -55,8 +55,8 @@ impl BranchPopup {
 
     /// The branches the search keeps: (local, remote), the current one first.
     pub fn branches(&self, cx: &App) -> (Vec<(String, bool)>, Vec<String>) {
-        let needle = self.input.read(cx).value().trim().to_lowercase();
-        let keep = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
+        let pattern = snout_find::Pattern::new(&self.input.read(cx).value());
+        let keep = |name: &str| pattern.filter(name);
         let m = self.model.read(cx);
         let mut local: Vec<(String, bool)> = m
             .project_branches()

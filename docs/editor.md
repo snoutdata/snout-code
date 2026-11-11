@@ -94,13 +94,13 @@ In the find bar, ↩ goes to the next match, ⇧↩ to the previous one, and Esc
 
 Press ⇧⌘F (File ▸ Find in Files…, or Edit ▸ Find in Files…) to search the text of the project's files. The text selected in the editor in front, if any, is filled in.
 
-- Type what to look for. The search runs once you pause typing.
+- Type what to look for. The search runs once you pause typing. A `*` next to a letter or digit stands for whatever is on the line there (`get*Name`); any other `*` is searched as written (`java.util.*`). See [Searching](search.md#wildcards-in-find-in-files).
 - The buttons right of the field match case (**Aa**), only whole words, and treat the text as a regular expression.
 - Pick where to look: the whole **Project**, a **Module** (the one of the file in front at first; **Choose…** picks another), a **Directory** (the folder of the file in front at first, from the project's folder), or the **Open Files**.
 - The **file mask** narrows the files by name: `*.java, *.kt` takes those, `!*Test.java` leaves those out. A pattern with a `/` is matched against the path, such as `src/main/**`.
 - Files that `.gitignore` excludes are left out, and so is the `.git` folder. A file open in an editor is searched as the editor has it, unsaved changes included.
 
-The matches show as a tree, grouped by file; click a file's arrow to fold it. Under the tree, the lines around the match picked. Use ↑ and ↓ to pick a match, and ↩ (or a double click) to open the file at that line. Esc closes the window.
+The matches show as a tree, grouped by file, the most relevant files first: the project's own code before its tests and what a build made, files named after the text, exact matches, then open files. See [Searching](search.md#the-order-of-find-in-files). Click a file's arrow to fold it. Under the tree, the lines around the match picked. Use ↑ and ↓ to pick a match, and ↩ (or a double click) to open the file at that line. Esc closes the window.
 
 At most 5,000 matches are shown; the line at the bottom says when there were more.
 
@@ -123,7 +123,7 @@ Files are written where the project is, so a project on a remote machine (see [R
 
 ## Go to File
 
-Press ⌘P (File ▸ Go to File…) and type part of a file's path. Names match fuzzily: the letters you type must appear in order, not necessarily side by side. A `*` or `?` stands for whatever is there, so `token*.ja` finds `TokenController.java`. The best matches come first. ↑ and ↓ pick, ↩ opens, Esc closes.
+Press ⌘P (File ▸ Go to File…) and type part of a file's path. The starts of words find the words (`tc` finds `TokenController.java`), a `*` or `?` stands for whatever is there (`token*.ja`), a `/` names folders (`web/app`), and `Order.java:120` opens at line 120. The best matches come first, the files you opened lately first among equals, and the letters that matched are highlighted. See [Searching](search.md) for everything you can type and how results are ranked. ↑ and ↓ pick, ↩ opens, Esc closes.
 
 The files of source folders the build compiles from outside the project folder are listed too. A Gradle build whose `sourceSets` name `../core/src/main/java` shows that folder's files as `../core/src/main/java/...`, once its model is read. Find in Files searches them as well.
 

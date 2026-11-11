@@ -188,6 +188,10 @@ mod shots {
         Clean,
         /// Find in Files on a word no file holds.
         NoResults,
+        /// Go to File with this typed: the files ranked, the letters matched marked.
+        GoToFile(&'static str),
+        /// Find in Files with this typed.
+        FindInFiles(&'static str),
         /// Connect to SSH Host while it connects.
         Connecting,
         /// The bar offering a JDK the project needs.
@@ -1505,6 +1509,30 @@ sleep 30
                     ws.update(cx, |ws, cx| ws.open_find_in_files(false, window, cx));
                     let view = ws.read(cx).find_in_files.clone().unwrap();
                     view.update(cx, |v, cx| v.find.update(cx, |i, cx| i.set_value("zebraPattern", window, cx)));
+                })
+                .unwrap();
+            }
+            Some(Select::GoToFile(query)) => {
+                std::fs::create_dir_all(repo.join("src/main/java/demo/web")).unwrap();
+                for name in ["StatusController.java", "StatusService.java", "web/StatusView.java", "Settings.java"] {
+                    std::fs::write(repo.join("src/main/java/demo").join(name), "class X {}\n").unwrap();
+                }
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.open_search(snout_app::search::Mode::GoToFile, window, cx));
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    let view = ws.read(cx).search.clone().unwrap();
+                    view.update(cx, |v, cx| v.set_query(query, window, cx));
+                })
+                .unwrap();
+            }
+            Some(Select::FindInFiles(query)) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.open_find_in_files(false, window, cx));
+                    let view = ws.read(cx).find_in_files.clone().unwrap();
+                    view.update(cx, |v, cx| v.find.update(cx, |i, cx| i.set_value(query, window, cx)));
                 })
                 .unwrap();
             }
@@ -3463,6 +3491,13 @@ sleep 30
             shot(&format!("ui-empty-clean-{mode}"), theme, Activity::Git, Some(Select::Clean));
             shot(&format!("git-history-{mode}"), theme, Activity::Git, Some(Select::History("src/main.rs")));
             shot(&format!("ui-empty-search-{mode}"), theme, Activity::Project, Some(Select::NoResults));
+            shot(&format!("search-go-to-file-{mode}"), theme, Activity::Project, Some(Select::GoToFile("stc")));
+            shot(
+                &format!("search-find-wildcard-{mode}"),
+                theme,
+                Activity::Project,
+                Some(Select::FindInFiles("hel*snout")),
+            );
             shot(&format!("ui-remote-connecting-{mode}"), theme, Activity::Project, Some(Select::Connecting));
             shot(&format!("ui-jdk-bar-{mode}"), theme, Activity::Project, Some(Select::JdkBar));
             shot(&format!("ui-node-bar-{mode}"), theme, Activity::Project, Some(Select::NodeBar));

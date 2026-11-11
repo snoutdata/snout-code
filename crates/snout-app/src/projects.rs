@@ -130,14 +130,12 @@ impl Render for ProjectsView {
         let mut rows: Vec<AnyElement> = Vec::new();
         if !needle.is_empty() {
             // Matches in one flat list, each still filed under its group.
+            let pattern = snout_find::Pattern::new(&needle);
             let hits = groups
                 .iter()
                 .flat_map(|g| g.repos.iter().map(move |p| (p.clone(), Some(g.name.clone()))))
                 .chain(loose.iter().map(|p| (p.clone(), None)))
-                .filter(|(p, g)| {
-                    dir_name(p).to_lowercase().contains(&needle)
-                        || g.as_ref().is_some_and(|g| g.to_lowercase().contains(&needle))
-                })
+                .filter(|(p, g)| pattern.filter(&dir_name(p)) || g.as_ref().is_some_and(|g| pattern.filter(g)))
                 .collect::<Vec<_>>();
             if hits.is_empty() {
                 rows.push(div().text_color(p.fg_dim).child(ts!("projects-no-matches")).into_any_element());

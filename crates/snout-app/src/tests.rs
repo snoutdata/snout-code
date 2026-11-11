@@ -979,11 +979,14 @@ fn search_lists_matches_fuzzily_and_finds_text() {
     let files = list_files(&*host, &repo, &[]);
     assert!(files.contains(&"src/main.rs".to_owned()) && !files.iter().any(|f| f.starts_with("target/")), "{files:?}");
     assert!(!files.iter().any(|f| f.starts_with(".git/")));
-    assert_eq!(go_to_file(&files, "mainrs")[0].0, "src/main.rs");
-    assert_eq!(go_to_file(&files, "stat")[0].0, "status.rs");
-    assert_eq!(go_to_file(&files, "main*.r")[0].0, "src/main.rs", "a wildcard is any gap");
-    assert_eq!(go_to_file(&files, "st?tus")[0].0, "status.rs");
-    assert_eq!(go_to_file(&files, "*").len(), files.len().min(crate::search::LIMIT), "only wildcards: everything");
+    assert_eq!(go_to_file(&files, "mainrs", &[])[0].0, "src/main.rs");
+    assert_eq!(go_to_file(&files, "stat", &[])[0].0, "status.rs");
+    assert_eq!(go_to_file(&files, "main*.r", &[])[0].0, "src/main.rs", "a wildcard is any gap");
+    assert_eq!(go_to_file(&files, "st?tus", &[])[0].0, "status.rs");
+    assert_eq!(go_to_file(&files, "*", &[]).len(), files.len().min(crate::search::LIMIT), "only wildcards: everything");
+    assert_eq!(go_to_file(&files, "main.rs:3", &[])[0].0, "src/main.rs", "a line at the end");
+    assert_eq!(go_to_file(&files, "", &["status.rs".into()])[0].0, "status.rs", "nothing typed: the recent first");
+    assert_eq!(go_to_file(&files, "s", &["status.rs".into()])[0].0, "status.rs", "the recent first among equals");
     let hits = find_in_files(&*host, &repo, &files, "Hello");
     assert!(hits.is_empty(), "with a capital, case matters");
     let hits = find_in_files(&*host, &repo, &files, "hello, snout");
@@ -1080,12 +1083,16 @@ fn replace_in_files_writes_ticked_matches_updates_open_editors_and_undoes(cx: &m
     cx.update(|_, cx| {
         let v = find.read(cx);
         let paths: Vec<&str> = v.found.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, ["src/a.txt", "src/b.txt"], "the mask and the folder of the file in front");
+        assert_eq!(
+            paths,
+            ["src/b.txt", "src/a.txt"],
+            "the mask and the folder of the file in front, the open one first"
+        );
         assert_eq!(v.match_count(), 4, "the open editor's text, not the file's");
     });
     // Leave out the second match of a.txt.
-    cx.update(|_, cx| find.update(cx, |v, cx| v.toggle_hit(0, 1, cx)));
-    cx.update(|_, cx| assert_eq!(find.read(cx).rows[2], Row::Hit(0, 1)));
+    cx.update(|_, cx| find.update(cx, |v, cx| v.toggle_hit(1, 1, cx)));
+    cx.update(|_, cx| assert_eq!(find.read(cx).rows[5], Row::Hit(1, 1)));
     cx.update(|_, cx| find.update(cx, |v, cx| v.replace_all(cx)));
     settle(cx);
     assert_eq!(std::fs::read_to_string(repo.join("src/a.txt")).unwrap(), "sum = total + 1\n");
@@ -1104,7 +1111,7 @@ fn replace_in_files_writes_ticked_matches_updates_open_editors_and_undoes(cx: &m
     // Replace Selected: only the match picked.
     cx.update(|_, cx| {
         find.update(cx, |v, cx| {
-            v.selected = v.rows.iter().position(|r| *r == Row::Hit(1, 1)).unwrap();
+            v.selected = v.rows.iter().position(|r| *r == Row::Hit(0, 1)).unwrap();
             v.replace_selected(cx);
         })
     });
@@ -1793,6 +1800,12 @@ fn a_folder_that_is_gone_still_says_so(cx: &mut TestAppContext) {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     cx.update(|_, cx| assert!(!model.read(cx).project_open()));
+    cx.update(|_, cx| {
+        assert!(
+            matches!(model.read(cx).dialog, Some(crate::model::Dialog::Failed(_))),
+            "no word of Git for a folder that is not there"
+        )
+    });
 }
 
 /// Show History: the Journal lists the commits that changed the file, renames followed, and a

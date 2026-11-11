@@ -55,8 +55,8 @@ zip = { version = "9.3", default-features = false, features = ["deflate"] }
 tree-sitter-kotlin-sg = "0.4"
 # What a project's .gitignore leaves out (the host walks and watches the tree, and finds text).
 ignore = "0.4"
-# Go to file.
-fuzzy-matcher = "0.3"
+# How every search matches and ranks what is typed.
+snout-find.workspace = true
 # Find and Replace in Files: regular expressions, and file masks.
 regex = "1"
 globset = "0.4"
