@@ -202,7 +202,7 @@ export function Home() {
 
 				<HarnessSection />
 
-				<section className="section" aria-labelledby="git-title">
+				<section className="section" id="git" aria-labelledby="git-title">
 					<SectionHead id="git-title" art="git" eyebrow={t('home.git.eyebrow')} title={t('home.git.title')}>
 						{t('home.git.sub')}
 					</SectionHead>

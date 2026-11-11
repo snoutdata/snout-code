@@ -233,6 +233,89 @@ code, pre {
 	border-radius: 2px;
 	background: var(--text);
 }
+/* Features dropdown: the same <details> menu as snoutdata.com's header. */
+.nav-links > li { display: flex; align-items: center; }
+.nav-menu-group { position: relative; }
+.nav-menu-group summary {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	cursor: pointer;
+	list-style: none;
+	white-space: nowrap;
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--body);
+	transition: color var(--dur-2);
+}
+.nav-menu-group summary::-webkit-details-marker { display: none; }
+.nav-menu-group summary svg { display: block; flex: none; transition: transform var(--dur-2); }
+.nav-menu-group summary:hover,
+.nav-menu-group[open] summary { color: var(--text); }
+.nav-menu-group[open] summary svg { transform: rotate(180deg); }
+.nav-menu-links {
+	position: absolute;
+	top: calc(100% + 18px);
+	left: -12px;
+	min-width: 200px;
+	display: flex;
+	flex-direction: column;
+	padding: 6px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	box-shadow: var(--shadow);
+}
+.nav-links .nav-menu-links a { display: block; padding: 9px 10px; border-radius: 6px; }
+.nav-links .nav-menu-links a:hover { color: var(--text); background: var(--bg-soft); }
+/* Hamburger: hidden on desktop, shown at <=900 where the nav links collapse into the panel. */
+.nav-actions .nav-hamburger { display: none; }
+.nav-theme { display: contents; }
+/* The mobile panel under the header (only rendered while the hamburger is open). */
+.nav-panel {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 8px 16px 14px;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
+	box-shadow: var(--shadow);
+}
+.nav-panel a,
+.nav-panel .nav-menu-group summary {
+	padding: 10px 4px;
+	font-size: 15px;
+	font-weight: 500;
+	color: var(--body);
+	text-decoration: none;
+}
+.nav-panel a:hover,
+.nav-panel a.active { color: var(--text); }
+.nav-panel .nav-menu-links {
+	position: static;
+	min-width: 0;
+	margin: 0 0 6px 12px;
+	padding: 0 0 0 12px;
+	border: 0;
+	border-left: 1px solid var(--border);
+	border-radius: 0;
+	box-shadow: none;
+	background: transparent;
+}
+.nav-panel-theme {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-top: 6px;
+	padding: 8px 4px 2px;
+	border-top: 1px solid var(--border-soft);
+	font-size: 15px;
+	color: var(--body);
+}
 .nav-actions {
 	display: flex;
 	align-items: center;
@@ -1812,12 +1895,14 @@ a.card:hover .card-art .ill {
 
 @media (max-width: 900px) {
 	.nav-links { display: none; }
+	.nav-actions .nav-hamburger { display: inline-grid; }
 	.nav { gap: 12px; }
 }
 
 @media (max-width: 620px) {
 	:root { --sec-y: 52px; }
 	.nav { padding: 0 16px; }
+	.nav-theme { display: none; }
 	.hero { padding: 44px 16px 0; }
 	.hero h1 { font-size: 36px; }
 	.hero-name { margin-bottom: 20px; }
@@ -1859,4 +1944,9 @@ a.card:hover .card-art .ill {
 	font-weight: 600;
 	text-decoration-color: var(--mark);
 	text-underline-offset: 3px;
+}
+
+/* A panel left open while the window widens past the breakpoint goes away with the hamburger. */
+@media (min-width: 901px) {
+	.nav-panel { display: none; }
 }

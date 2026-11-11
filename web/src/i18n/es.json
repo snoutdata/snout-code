@@ -8,17 +8,22 @@
 	},
 	"nav": {
 		"main": "Navegación principal",
+		"menu": "Menú",
 		"home": "Inicio de SnoutCode",
 		"github": "SnoutCode en GitHub",
 		"features": "Funciones",
+		"java": "Java y Spring",
 		"playwright": "Playwright",
-		"node": "Node",
-		"agents": "Agentes",
+		"node": "Node y TypeScript",
+		"agents": "Agentes de código",
+		"git": "Git",
+		"remote": "Remote SSH",
 		"openSource": "Código abierto",
 		"docs": "Docs",
 		"download": "Descargar"
 	},
 	"theme": {
+		"label": "Tema",
 		"toLight": "Cambiar al tema claro",
 		"toDark": "Cambiar al tema oscuro"
 	},
