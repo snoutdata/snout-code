@@ -428,26 +428,42 @@
 		}
 	},
 	"download": {
-		"lede": "Gratis para todos, en macOS, Linux y Windows. Cada build se publica en las releases del proyecto en GitHub, junto al código fuente del que salió.",
+		"lede": "Gratis para todos, en macOS, Linux y Windows. El botón te da el archivo de tu sistema, directo desde la última release del proyecto en GitHub.",
 		"label": "Descargas",
 		"for": "Descargar para {os}",
 		"store": "Obtener en Microsoft Store",
+		"choose": "Elige tu sistema",
+		"title": "SnoutCode para {os}",
+		"version": "versión {v}",
+		"also": "También para {os}:",
+		"installer": "O el instalador:",
+		"storeMeta": "Microsoft Store, x64 y Arm",
+		"storeShort": "Microsoft Store",
+		"all": "Todos los archivos de la última release:",
+		"allOf": "Todos los archivos de SnoutCode {v}:",
+		"other": "Otras versiones en GitHub",
 		"platforms": {
 			"mac": {
-				"file": "SnoutCode .dmg",
-				"points": ["Abre la imagen de disco y arrastra SnoutCode a Aplicaciones", "Apple silicon"],
+				"points": ["Abre la imagen de disco y arrastra SnoutCode a Aplicaciones", "Después se actualiza solo"],
 				"guide": "Primeros pasos"
 			},
 			"linux": {
-				"file": "Paquete .deb y de Arch Linux",
 				"points": ["Debian, Ubuntu y Arch Linux", "x86_64 y aarch64, en X11 y Wayland"],
 				"guide": "SnoutCode en Linux"
 			},
 			"windows": {
-				"file": "Microsoft Store",
-				"points": ["Windows 10 y 11, x64 y arm64", "Firmado, y se instala sin permisos de administrador", "Después se actualiza solo", "El instalador (.exe) también está en las releases de GitHub"],
+				"points": ["Windows 10 y 11, x64 y Arm", "Firmado, y se instala sin permisos de administrador", "Después se actualiza solo"],
 				"guide": "SnoutCode en Windows"
 			}
+		},
+		"files": {
+			"dmg": "Apple silicon, .dmg",
+			"exe-x64": "x64, .exe",
+			"exe-arm64": "Arm, .exe",
+			"deb-x64": ".deb, x86_64",
+			"deb-arm64": ".deb, aarch64",
+			"arch-x64": "Arch Linux, x86_64",
+			"arch-arm64": "Arch Linux, aarch64"
 		},
 		"need": {
 			"eyebrow": "Qué necesitas",

@@ -17,6 +17,9 @@ npm run build      # dist/: one HTML file per page, plus the assets
   HTML file per entry (`index.html`, `download.html`, `privacy.html`, `terms.html`, `404.html`) and `sitemap.xml`.
 - `src/pages/`: the pages. `src/components/`: the header, footer, product shots and the art.
 - `src/site.ts`: every link to the repository, in one place.
+- `src/download.ts`: the download page's guess of the visitor's system, and the latest release's
+  files, read from the GitHub API in the browser so the page never needs a redeploy after a
+  release. The file names follow `scripts/make-release.sh`; a renamed file is changed in `FILES`.
 - `src/styles.css`: the one stylesheet. Colours are tokens defined for both themes at the top;
   light is the default and dark is opt-in from the header.
 - `scripts/assets.mjs` copies the screenshots the pages show from `../docs/images` and the icon

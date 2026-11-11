@@ -3,6 +3,7 @@ import { SiteHeader } from '../components/SiteHeader'
 import { SiteFooter } from '../components/SiteFooter'
 import { GitHubMark, Glyph } from '../components/Glyph'
 import { CardArt, HeroMark, PerchArt, SectionArt, WorkshopScene, type CardArtKind } from '../components/Illustrations'
+import { DownloadButton } from '../components/DownloadButton'
 import { HarnessSection } from '../components/Harness'
 import { SectionHead, Showcase, type ShotSpec } from '../components/Sections'
 import { Shot } from '../components/Shot'
@@ -123,10 +124,7 @@ export function Home() {
 						</h1>
 						<p className="lede">{t('home.hero.lede')}</p>
 						<div className="hero-cta">
-							<a className="btn btn-lg" href="/download">
-								<Glyph kind="download" />
-								{t('common.downloadSnoutCode')}
-							</a>
+							<DownloadButton />
 							<a className="btn btn-ghost btn-lg" href={GITHUB_URL}>
 								<GitHubMark />
 								{t('home.hero.github')}
@@ -257,7 +255,7 @@ export function Home() {
 					</div>
 					<div className="platform-grid">
 						{PLATFORMS.map((p, i) => (
-							<a className="card platform" href="/download" key={p.id} data-reveal style={{ ['--i' as string]: i }}>
+							<a className="card platform" href={`/download#${p.id}`} key={p.id} data-reveal style={{ ['--i' as string]: i }}>
 								<div className={`card-art tone-${(i + 1) % 4}`}><CardArt art={p.art} /></div>
 								<h3>{p.name}</h3>
 								<p>{t(`home.platforms.${p.id}`)}</p>
@@ -271,7 +269,7 @@ export function Home() {
 					<h2>{t('home.cta.title')}</h2>
 					<p>{t('home.cta.sub')}</p>
 					<div className="hero-cta">
-						<a className="btn btn-lg" href="/download"><Glyph kind="download" />{t('common.downloadSnoutCode')}</a>
+						<DownloadButton />
 						<a className="btn btn-ghost btn-lg" href={docs('getting-started.md')}><Glyph kind="book" />{t('common.gettingStarted')}</a>
 					</div>
 				</section>

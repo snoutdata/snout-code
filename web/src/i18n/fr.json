@@ -428,26 +428,42 @@
 		}
 	},
 	"download": {
-		"lede": "Gratuit pour tous, sur macOS, Linux et Windows. Chaque build est publié dans les releases GitHub du projet, à côté du code source dont il est issu.",
+		"lede": "Gratuit pour tous, sur macOS, Linux et Windows. Le bouton vous donne le fichier de votre système, directement depuis la dernière release GitHub du projet.",
 		"label": "Téléchargements",
 		"for": "Télécharger pour {os}",
 		"store": "Obtenir sur le Microsoft Store",
+		"choose": "Choisissez votre système",
+		"title": "SnoutCode pour {os}",
+		"version": "version {v}",
+		"also": "Aussi pour {os} :",
+		"installer": "Ou l'installeur :",
+		"storeMeta": "Microsoft Store, x64 et Arm",
+		"storeShort": "Microsoft Store",
+		"all": "Tous les fichiers de la dernière release :",
+		"allOf": "Tous les fichiers de SnoutCode {v} :",
+		"other": "Autres versions sur GitHub",
 		"platforms": {
 			"mac": {
-				"file": "SnoutCode .dmg",
-				"points": ["Ouvrez l'image disque et glissez SnoutCode dans Applications", "Apple silicon"],
+				"points": ["Ouvrez l'image disque et glissez SnoutCode dans Applications", "Se met ensuite à jour tout seul"],
 				"guide": "Prise en main"
 			},
 			"linux": {
-				"file": "Paquet .deb et Arch Linux",
 				"points": ["Debian, Ubuntu et Arch Linux", "x86_64 et aarch64, sur X11 et Wayland"],
 				"guide": "SnoutCode sous Linux"
 			},
 			"windows": {
-				"file": "Microsoft Store",
-				"points": ["Windows 10 et 11, x64 et arm64", "Signé, et s'installe sans droits d'administrateur", "Se met ensuite à jour tout seul", "L'installeur (.exe) est aussi dans les releases GitHub"],
+				"points": ["Windows 10 et 11, x64 et Arm", "Signé, et s'installe sans droits d'administrateur", "Se met ensuite à jour tout seul"],
 				"guide": "SnoutCode sous Windows"
 			}
+		},
+		"files": {
+			"dmg": "Apple silicon, .dmg",
+			"exe-x64": "x64, .exe",
+			"exe-arm64": "Arm, .exe",
+			"deb-x64": ".deb, x86_64",
+			"deb-arm64": ".deb, aarch64",
+			"arch-x64": "Arch Linux, x86_64",
+			"arch-arm64": "Arch Linux, aarch64"
 		},
 		"need": {
 			"eyebrow": "Ce qu'il vous faut",

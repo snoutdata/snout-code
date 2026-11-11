@@ -1,21 +1,68 @@
+import { useEffect, useState } from 'react'
 import { SiteHeader } from '../components/SiteHeader'
 import { SiteFooter } from '../components/SiteFooter'
-import { GitHubMark, Glyph } from '../components/Glyph'
-import { CardArt, PageMark, ParcelScene, type CardArtKind } from '../components/Illustrations'
+import { GitHubMark, Glyph, OsGlyph } from '../components/Glyph'
+import { CardArt, PageMark, ParcelScene } from '../components/Illustrations'
 import { useScrollReveal } from '../effects'
 import { useI18n } from '../i18n'
-import { GITHUB_URL, MS_STORE_URL, RELEASES_URL, docs } from '../site'
+import { ALL_RELEASES_URL, GITHUB_URL, MS_STORE_URL, docs } from '../site'
+import { detectVisitor, fallbackRelease, fetchLatestRelease, FILES, isOs, megabytes, OSES, refineArch, type Arch, type FileId, type Os, type Release } from '../download'
 
-// Each platform's words are in the catalogs, under download.platforms.<id> (file, points, guide).
-const PLATFORMS: { id: string, art: CardArtKind, name: string, guide: string }[] = [
-	{ id: 'mac', art: 'mac', name: 'macOS', guide: docs('getting-started.md') },
-	{ id: 'linux', art: 'linux', name: 'Linux', guide: docs('linux.md') },
-	{ id: 'windows', art: 'windows', name: 'Windows', guide: docs('windows.md') }
-]
+// The download page: the visitor's system is chosen for them, and one button gets them their
+// file straight from the latest GitHub release, with the system's other files under it. Each
+// system's words are in the catalogs, under download.platforms.<id> (points, guide), and each
+// file's under download.files.<id>. Every file is also listed as a plain link at the bottom, for a
+// reader that never picks a tab, and the release archive is a click away for any other version.
+
+const GUIDES: Record<Os, string> = {
+	mac: docs('getting-started.md'),
+	windows: docs('windows.md'),
+	linux: docs('linux.md')
+}
+
+const TONES: Record<Os, number> = { mac: 1, linux: 2, windows: 3 }
+
+// The files of `os`, the one for `arch` first and, on Linux, the .deb before the Arch package.
+function filesFor(os: Os, arch: Arch): FileId[] {
+	const own = FILES.filter((f) => f.os === os)
+	return [...own.filter((f) => f.arch === arch), ...own.filter((f) => f.arch !== arch)].map((f) => f.id)
+}
 
 export function Download() {
 	useScrollReveal()
 	const { t, tList } = useI18n()
+	// The prerendered page shows macOS; the visitor's own system is put in front once it loads.
+	const [os, setOs] = useState<Os>('mac')
+	const [arch, setArch] = useState<Arch>('x64')
+	const [release, setRelease] = useState<Release>(fallbackRelease)
+
+	useEffect(() => {
+		let live = true
+		const asked = window.location.hash.slice(1)
+		const guess = detectVisitor()
+		setOs(isOs(asked) ? asked : guess.os)
+		setArch(guess.arch)
+		refineArch(guess).then((v) => live && setArch(v.arch))
+		fetchLatestRelease().then((r) => live && setRelease(r))
+		return () => {
+			live = false
+		}
+	}, [])
+
+	function choose(next: Os) {
+		setOs(next)
+		history.replaceState(null, '', `#${next}`)
+	}
+
+	const name = OSES.find((o) => o.id === os)?.name ?? ''
+	const [first, ...rest] = filesFor(os, arch)
+	// Windows installs from the Store, so SmartScreen never stops it; its installers are the others.
+	const primary = os === 'windows' ? null : first
+	const others = os === 'windows' ? [first, ...rest] : rest
+	const file = primary ? release.files[primary] : null
+	const meta = os === 'windows'
+		? [t('download.storeMeta')]
+		: [t(`download.files.${primary}`), megabytes(file?.size ?? null), release.version && t('download.version', { v: release.version })]
 
 	return (
 		<div className="page page-download">
@@ -27,22 +74,70 @@ export function Download() {
 					<p className="lede">{t('download.lede')}</p>
 				</section>
 
-				<section className="section download-grid" aria-label={t('download.label')}>
-					{PLATFORMS.map((p, i) => (
-						<article className="card download-card" key={p.id} data-reveal style={{ ['--i' as string]: i }}>
-							<div className={`card-art tone-${(i + 1) % 4}`}><CardArt art={p.art} /></div>
-							<h2>{p.name}</h2>
-							<p className="download-file">{t(`download.platforms.${p.id}.file`)}</p>
-							<ul className="check-list">
-								{tList(`download.platforms.${p.id}.points`).map((pt, j) => <li key={j}>{pt}</li>)}
-							</ul>
-							<a className="btn btn-block" href={p.id === 'windows' ? MS_STORE_URL : RELEASES_URL}>
-								<Glyph kind="download" />
-								{p.id === 'windows' ? t('download.store') : t('download.for', { os: p.name })}
-							</a>
-							<a className="more-link" href={p.guide}>{t(`download.platforms.${p.id}.guide`)} <span aria-hidden="true">&rarr;</span></a>
-						</article>
-					))}
+				<section className="section download-pick" aria-label={t('download.label')}>
+					<div className="download-tabs" role="tablist" aria-label={t('download.choose')}>
+						{OSES.map((o) => (
+							<button
+								key={o.id}
+								type="button"
+								role="tab"
+								aria-selected={o.id === os}
+								className={`download-tab${o.id === os ? ' active' : ''}`}
+								onClick={() => choose(o.id)}
+							>
+								<OsGlyph os={o.id} />
+								{o.name}
+							</button>
+						))}
+					</div>
+
+					<article className="card download-card" role="tabpanel">
+						<div className={`card-art tone-${TONES[os]}`}><CardArt art={os} /></div>
+						<h2>{t('download.title', { os: name })}</h2>
+						<a className="btn btn-lg download-btn" href={os === 'windows' ? MS_STORE_URL : file?.url}>
+							<Glyph kind="download" />
+							{os === 'windows' ? t('download.store') : t('download.for', { os: name })}
+						</a>
+						<p className="download-meta">{meta.filter(Boolean).join(' · ')}</p>
+						{others.length > 0 && (
+							<div className="download-also">
+								<span>{os === 'windows' ? t('download.installer') : t('download.also', { os: name })}</span>
+								<ul>
+									{others.map((id) => (
+										<li key={id}>
+											<a href={release.files[id].url}>{t(`download.files.${id}`)}</a>
+											{release.files[id].size !== null && <span className="download-size"> {megabytes(release.files[id].size)}</span>}
+										</li>
+									))}
+								</ul>
+							</div>
+						)}
+						<ul className="check-list">
+							{tList(`download.platforms.${os}.points`).map((pt, j) => <li key={j}>{pt}</li>)}
+						</ul>
+						<a className="more-link" href={GUIDES[os]}>{t(`download.platforms.${os}.guide`)} <span aria-hidden="true">&rarr;</span></a>
+					</article>
+
+					<div className="download-more">
+						<p>
+							{release.version ? t('download.allOf', { v: release.version }) : t('download.all')}{' '}
+							{OSES.map((o, i) => (
+								<span key={o.id}>
+									{i > 0 && '; '}
+									{o.name}:{' '}
+									{(o.id === 'windows' ? ['store' as const, ...filesFor(o.id, 'x64')] : filesFor(o.id, 'x64')).map((id, j) => (
+										<span key={id}>
+											{j > 0 && ', '}
+											{id === 'store'
+												? <a href={MS_STORE_URL}>{t('download.storeShort')}</a>
+												: <a href={release.files[id].url}>{t(`download.files.${id}`)}</a>}
+										</span>
+									))}
+								</span>
+							))}
+						</p>
+						<a className="btn btn-ghost" href={ALL_RELEASES_URL}><GitHubMark />{t('download.other')}</a>
+					</div>
 				</section>
 
 				<section className="section need" aria-labelledby="need-title">

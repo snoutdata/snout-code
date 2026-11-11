@@ -43,3 +43,35 @@ export function GitHubMark() {
 		</svg>
 	)
 }
+
+// The systems' own marks, for the download page's tabs: one ink (currentColor), so they follow
+// the theme and the tab's state, except Tux, who reads only in his own colours.
+export function OsGlyph({ os }: { os: 'mac' | 'windows' | 'linux' }) {
+	if (os === 'windows') {
+		return (
+			<svg className="glyph-os" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M3 5.6 10.4 4.6v6.9H3V5.6Zm0 12.8 7.4 1v-6.8H3v5.8Zm8.3 1.1L21 21V12.5h-9.7v7Zm0-15.2v7H21V3l-9.7 1.3Z" />
+			</svg>
+		)
+	}
+	if (os === 'mac') {
+		return (
+			<svg className="glyph-os" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M16.4 12.6c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2-1.5 2.5-.4 6.3 1 8.4.7 1 1.5 2.1 2.6 2.1 1 0 1.4-.7 2.7-.7s1.6.7 2.7.7c1.1 0 1.8-1 2.5-2 .8-1.2 1.1-2.3 1.1-2.3-.1 0-2.1-.8-2.2-3.1ZM14.3 6c.6-.7 1-1.7.9-2.7-.8 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6.9.1 1.8-.5 2.5-1.2Z" />
+			</svg>
+		)
+	}
+	return (
+		<svg className="glyph-os" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+			<ellipse cx="9.2" cy="20.6" rx="2.3" ry="1.1" fill="#f6a623" />
+			<ellipse cx="14.8" cy="20.6" rx="2.3" ry="1.1" fill="#f6a623" />
+			<path d="M12 2.4c-3.1 0-5.1 2.5-5.1 6.1 0 1.4.1 2.6.1 4.1 0 4 2.1 7 5 7s5-3 5-7c0-1.5.1-2.7.1-4.1 0-3.6-2-6.1-5.1-6.1Z" fill="#1c1c1c" />
+			<path d="M12 9c-1.9 0-3 1.9-3 5 0 2.7 1.2 4.8 3 4.8s3-2.1 3-4.8c0-3.1-1.1-5-3-5Z" fill="#fff" />
+			<circle cx="10.4" cy="7.3" r="1" fill="#fff" />
+			<circle cx="13.6" cy="7.3" r="1" fill="#fff" />
+			<circle cx="10.6" cy="7.4" r="0.45" fill="#1c1c1c" />
+			<circle cx="13.4" cy="7.4" r="0.45" fill="#1c1c1c" />
+			<path d="M10.7 8.6 12 10.2l1.3-1.6z" fill="#f6a623" />
+		</svg>
+	)
+}

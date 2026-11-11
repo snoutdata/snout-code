@@ -428,26 +428,42 @@
 		}
 	},
 	"download": {
-		"lede": "Gratuito para todos, no macOS, Linux e Windows. Cada build é publicado nas releases do projeto no GitHub, ao lado do código-fonte de onde saiu.",
+		"lede": "Grátis para todos, no macOS, Linux e Windows. O botão traz o arquivo do seu sistema, direto da última release do projeto no GitHub.",
 		"label": "Downloads",
 		"for": "Baixar para {os}",
 		"store": "Obter na Microsoft Store",
+		"choose": "Escolha seu sistema",
+		"title": "SnoutCode para {os}",
+		"version": "versão {v}",
+		"also": "Também para {os}:",
+		"installer": "Ou o instalador:",
+		"storeMeta": "Microsoft Store, x64 e Arm",
+		"storeShort": "Microsoft Store",
+		"all": "Todos os arquivos da última release:",
+		"allOf": "Todos os arquivos do SnoutCode {v}:",
+		"other": "Outras versões no GitHub",
 		"platforms": {
 			"mac": {
-				"file": "SnoutCode .dmg",
-				"points": ["Abra a imagem de disco e arraste o SnoutCode para Aplicativos", "Apple silicon"],
+				"points": ["Abra a imagem de disco e arraste o SnoutCode para Aplicativos", "Depois se atualiza sozinho"],
 				"guide": "Primeiros passos"
 			},
 			"linux": {
-				"file": "Pacote .deb e do Arch Linux",
 				"points": ["Debian, Ubuntu e Arch Linux", "x86_64 e aarch64, no X11 e no Wayland"],
 				"guide": "SnoutCode no Linux"
 			},
 			"windows": {
-				"file": "Microsoft Store",
-				"points": ["Windows 10 e 11, x64 e arm64", "Assinado, e instala sem direitos de administrador", "Depois se atualiza sozinho", "O instalador (.exe) também está nas releases do GitHub"],
+				"points": ["Windows 10 e 11, x64 e Arm", "Assinado, e instala sem direitos de administrador", "Depois se atualiza sozinho"],
 				"guide": "SnoutCode no Windows"
 			}
+		},
+		"files": {
+			"dmg": "Apple silicon, .dmg",
+			"exe-x64": "x64, .exe",
+			"exe-arm64": "Arm, .exe",
+			"deb-x64": ".deb, x86_64",
+			"deb-arm64": ".deb, aarch64",
+			"arch-x64": "Arch Linux, x86_64",
+			"arch-arm64": "Arch Linux, aarch64"
 		},
 		"need": {
 			"eyebrow": "Do que você precisa",
