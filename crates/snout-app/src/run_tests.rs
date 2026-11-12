@@ -215,7 +215,7 @@ fn the_console_selects_copies_and_scrolls_sideways(cx: &mut TestAppContext) {
             });
         }
         cx.run_until_parked();
-        cx.simulate_keystrokes("cmd-c");
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" });
         cx.run_until_parked();
         cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default()
     };
