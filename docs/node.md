@@ -1,14 +1,14 @@
 # Node projects
 
-A folder with a `package.json`, and no Playwright tests or Gradle or Maven build, opens as a Node project. It never starts the Java engine. Its TypeScript and JavaScript get completion, navigation and problems as in [TypeScript and JavaScript](typescript.md), and it runs and debugs as a Java project does: its scripts are run configurations, any script file runs as Current File, and Debug stops at breakpoints in the TypeScript or JavaScript.
+A folder with a `package.json`, and no Gradle or Maven build, opens as a Node project, unless it is only a suite of Playwright tests (see [What counts as one](playwright.md#what-counts-as-one)). An app with Playwright tests is a Node project that has them. It never starts the Java engine. Its TypeScript and JavaScript get completion, navigation and problems as in [TypeScript and JavaScript](typescript.md), and it runs and debugs as a Java project does: its scripts are run configurations, any script file runs as Current File, and Debug stops at breakpoints in the TypeScript or JavaScript.
 
 Everything runs on the Node the project asks for (`.nvmrc`, `.node-version`, `volta`, `engines`), found on your machine or downloaded; see [Node](typescript.md#node).
 
 ## The project
 
-The Project view says, at the top, the project's package manager and its Node, such as `npm · Node 24.13.0`.
+The Project view says, at the top, the project's package manager and its Node, such as `npm · Node 24.13.0`, and its Playwright when it has Playwright tests: `npm · Node 24.13.0 · Playwright 1.62.1`.
 
-When `package.json` lists packages and `node_modules` is missing, a bar above the editor says so and offers **Install packages**. It runs `npm ci` (with a `package-lock.json`, else `npm install`), or `pnpm install`, `yarn install` or `bun install` by the project's lockfile, in the Build window; the button names the command it will run. **Not now** hides the bar.
+When `package.json` lists packages and `node_modules` is missing, a bar above the editor says so and offers **Install packages**. It runs `npm ci` (with a `package-lock.json`, else `npm install`), or `pnpm install`, `yarn install` or `bun install` by the project's lockfile, in the Build window; the button names the command it will run. In a project with Playwright tests, the bar says they cannot run either; once the packages are in, it offers to download the browsers that Playwright version needs. **Not now** hides the bar.
 
 In a project that is not a Node package itself, such as a Java build with its front end in a folder (`src/main/javascript`, `frontend`), that folder's bar waits until you open one of its files: opening the project says nothing about it.
 

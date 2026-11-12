@@ -51,12 +51,10 @@ pub fn scripts(text: &str) -> Vec<Script> {
     out
 }
 
-/// Whether `dir` is a Node project's folder: a `package.json`, no Playwright, and not a Java
-/// project with a `package.json` beside its build.
+/// Whether `dir` is a Node project's folder (an app or a package, with Playwright tests or
+/// not), as [`crate::project_kind::Kind`] decides.
 pub fn is_node_project(host: &dyn Host, dir: &Path) -> bool {
-    host.is_file(&dir.join("package.json"))
-        && !crate::playwright::is_root(host, dir)
-        && !crate::project_model::declares_java(host, dir)
+    matches!(crate::project_kind::Kind::of(host, dir), crate::project_kind::Kind::Node { .. })
 }
 
 /// Whether `dir/package.json` lists packages to install.

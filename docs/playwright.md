@@ -4,7 +4,15 @@ SnoutCode opens a repository of Playwright tests as a project of its own: TypeSc
 
 ## What counts as one
 
-A folder is a Playwright project when it has a `playwright.config.ts` (or `.js`, `.mjs`, `.cjs`, `.mts`, `.cts`), or a `package.json` that depends on `@playwright/test`. Open it as any project: **File ▸ Open…**, or from the welcome page.
+A folder is a Playwright project when it holds Playwright tests and nothing else: it has a `playwright.config.ts` (or `.js`, `.mjs`, `.cjs`, `.mts`, `.cts`), or a `package.json` that depends on `@playwright/test`, and it is not also an app. Open it as any project: **File ▸ Open…**, or from the welcome page.
+
+An app with Playwright tests beside it opens as the [Node project](node.md) it is, with its Playwright tests in the Tests window. SnoutCode takes a package for an app when any of these is true:
+
+- It depends on a package a test suite would not (`react`, `express`), beyond the test runner and helpers such as `dotenv` or `@faker-js/faker`.
+- A tool that builds or serves an app is set up beside it: an `index.html`, `vite.config.ts`, `next.config.js`, `angular.json`, `wrangler.toml` and the like.
+- It has workspaces, or a `dev`, `start`, `serve`, `preview` or `deploy` script that runs something other than Playwright.
+
+A Java build with a `playwright.config.ts` at its root opens as the Java project, with its Playwright tests too.
 
 The Project view shows the project's folders and files. A line at its top says which Playwright the project has, its package manager and the Node it runs on, such as `Playwright 1.64.1 · npm · Node 22.11.0`, or `not installed` until its packages are.
 

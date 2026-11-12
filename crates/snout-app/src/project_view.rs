@@ -473,7 +473,7 @@ impl Render for ProjectView {
             let failed = store.sync_error.is_some();
             // A Playwright or Node project has no build model: a line about what it runs on.
             let setup = cx.try_global::<crate::playwright::setup::SetupHandle>().map(|h| h.0.read(cx));
-            let tests_icon = setup.is_some_and(|s| s.playwright);
+            let tests_icon = setup.is_some_and(|s| s.kind == crate::project_kind::Kind::Playwright);
             let playwright = setup.and_then(|s| s.summary.clone()).filter(|_| !failed);
             let note = match (&store.sync_error, root.is_some()) {
                 (Some(e), true) => Some(t!("project-the-build-model-could-not-be-read", e = e.to_string())),

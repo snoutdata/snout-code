@@ -12,6 +12,7 @@ use snout_host::Host;
 
 use crate::lang::node::{self, Node, PackageManager};
 use crate::model::Model;
+use crate::project_kind::Kind;
 use crate::run::process::ProcessLaunch;
 use crate::run::{Launch, Place, Runs, RunsEvent};
 
@@ -92,22 +93,23 @@ pub fn missing_browsers(host: &dyn Host, manifest: &Value, browsers: &Path) -> V
     missing
 }
 
-/// A line about the Playwright project at `root` for the Project view: its Playwright, its
-/// package manager and the Node it runs on (`Playwright 1.64.1 · npm · Node 24.13.0`).
-pub fn summary(host: &dyn Host, root: &Path, stop: Option<&Path>) -> Option<String> {
-    let Some(project) = super::project_at(host, root) else {
-        // A Node project: its package manager and Node (`npm · Node 24.13.0`).
-        if !crate::run::node_run::is_node_project(host, root) {
-            return None;
-        }
-        return Some(format!("{} · {}", PackageManager::of(host, root).name(), node_line(host, root, stop)));
-    };
-    let playwright = match (&project.installed, &project.declared) {
+/// A line about the project at `root` (of `kind`) for the Project view: the package manager
+/// and the Node it runs on, with its Playwright. A Playwright suite names Playwright first
+/// (`Playwright 1.64.1 · npm · Node 24.13.0`), an app last (`npm · Node 24.13.0 · Playwright
+/// 1.64.1`).
+pub fn summary(host: &dyn Host, root: &Path, kind: Kind, stop: Option<&Path>) -> Option<String> {
+    let playwright = super::project_at(host, root).map(|project| match (&project.installed, &project.declared) {
         (Some(v), _) => format!("Playwright {v}"),
         (None, Some(v)) => t!("pwsetup-playwright-not-installed", v = v.to_string()),
         (None, None) => "Playwright".to_owned(),
-    };
-    Some(format!("{playwright} · {} · {}", project.package_manager.name(), node_line(host, root, stop)))
+    });
+    let node = || format!("{} · {}", PackageManager::of(host, root).name(), node_line(host, root, stop));
+    match (kind, playwright) {
+        (Kind::Node { .. }, Some(pw)) => Some(format!("{} · {pw}", node())),
+        (Kind::Node { .. }, None) => Some(node()),
+        (Kind::Playwright | Kind::Java { playwright: true }, Some(pw)) => Some(format!("{pw} · {}", node())),
+        _ => None,
+    }
 }
 
 /// The Node the project at `root` runs on, for the Project view (`Node 24.13.0`).
@@ -120,19 +122,27 @@ fn node_line(host: &dyn Host, root: &Path, stop: Option<&Path>) -> String {
     }
 }
 
-/// What the Playwright project (or Node project) at `root` needs, if anything.
-pub fn check(host: &dyn Host, root: &Path) -> Option<Need> {
-    let Some(project) = super::project_at(host, root) else {
-        // A Node package needs its packages once it lists some: the project's own first.
-        use crate::run::node_run::{has_dependencies, install_dir, manager_of, packages};
-        return packages(host, root).into_iter().find_map(|pkg| {
-            let at = install_dir(host, &pkg, root);
-            let installed =
-                pkg.ancestors().take_while(|d| d.starts_with(root)).any(|d| host.is_dir(&d.join("node_modules")));
-            (has_dependencies(host, &pkg) && !installed)
-                .then(|| Need::Packages { manager: manager_of(host, &at, root), dir: Some(at).filter(|a| a != root) })
-        });
-    };
+/// What the project at `root` (of `kind`) needs, if anything: a Node project's packages
+/// first, then what its Playwright tests need.
+pub fn check(host: &dyn Host, root: &Path, kind: Kind) -> Option<Need> {
+    if kind == Kind::Playwright {
+        return playwright_need(host, root);
+    }
+    // A Node package needs its packages once it lists some: the project's own first.
+    use crate::run::node_run::{has_dependencies, install_dir, manager_of, packages};
+    let packages_need = packages(host, root).into_iter().find_map(|pkg| {
+        let at = install_dir(host, &pkg, root);
+        let installed =
+            pkg.ancestors().take_while(|d| d.starts_with(root)).any(|d| host.is_dir(&d.join("node_modules")));
+        (has_dependencies(host, &pkg) && !installed)
+            .then(|| Need::Packages { manager: manager_of(host, &at, root), dir: Some(at).filter(|a| a != root) })
+    });
+    packages_need.or_else(|| kind.has_playwright().then(|| playwright_need(host, root)).flatten())
+}
+
+/// What the Playwright tests at `root` need: the test runner installed, then its browsers.
+fn playwright_need(host: &dyn Host, root: &Path) -> Option<Need> {
+    let project = super::project_at(host, root)?;
     let Some(version) = project.installed.clone() else {
         return Some(Need::Packages { manager: project.package_manager, dir: None });
     };
@@ -215,8 +225,8 @@ pub struct Setup {
     pub need: Option<Need>,
     /// What the Project view says of the project (see [`summary`]).
     pub summary: Option<String>,
-    /// The project is a Playwright one (else a Node one, or neither).
-    pub playwright: bool,
+    /// What the project is, as last looked at.
+    pub kind: Kind,
     /// The project is not a Node package itself (a Java build with a front end in a
     /// folder): a package's bar waits until one of that package's files is open.
     pub quiet: bool,
@@ -266,7 +276,7 @@ impl Setup {
             root,
             need: None,
             summary: None,
-            playwright: false,
+            kind: Kind::Plain,
             quiet: false,
             ci: false,
             installing: None,
@@ -293,20 +303,20 @@ impl Setup {
         };
         let host = crate::host::host(cx);
         let task = cx.background_executor().spawn(async move {
-            let need = check(&*host, &root);
-            let playwright = super::is_root(&*host, &root);
-            let quiet = !playwright && !crate::run::node_run::is_node_project(&*host, &root);
+            let kind = Kind::of(&*host, &root);
+            let need = check(&*host, &root, kind);
+            let quiet = !kind.has_playwright() && !kind.is_node_package();
             let ci = need.as_ref().is_some_and(|n| uses_ci(&*host, &root, n));
-            (need, summary(&*host, &root, Some(&root)), playwright, quiet, ci)
+            (need, summary(&*host, &root, kind, Some(&root)), kind, quiet, ci)
         });
         self.looking = Some(cx.spawn(async move |this, cx| {
-            let (need, summary, playwright, quiet, ci) = task.await;
+            let (need, summary, kind, quiet, ci) = task.await;
             let _ = this.update(cx, |this, cx| {
-                let now = (&need, &summary, playwright, quiet, ci);
-                if now != (&this.need, &this.summary, this.playwright, this.quiet, this.ci) {
+                let now = (&need, &summary, kind, quiet, ci);
+                if now != (&this.need, &this.summary, this.kind, this.quiet, this.ci) {
                     this.need = need;
                     this.summary = summary;
-                    this.playwright = playwright;
+                    this.kind = kind;
                     this.quiet = quiet;
                     this.ci = ci;
                     cx.notify();

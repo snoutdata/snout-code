@@ -59,15 +59,24 @@ fn a_node_project_is_a_package_json_without_playwright_or_a_java_build() {
     write(&dir, "package.json", r#"{ "name": "x" }"#);
     assert!(crate::run::node_run::is_node_project(&*host, &dir));
     assert!(!crate::run::node_run::has_dependencies(&*host, &dir));
-    assert_eq!(crate::playwright::setup::check(&*host, &dir), None, "nothing to install");
+    assert_eq!(
+        crate::playwright::setup::check(&*host, &dir, crate::project_kind::Kind::of(&*host, &dir)),
+        None,
+        "nothing to install"
+    );
     write(&dir, "package.json", r#"{ "name": "x", "dependencies": { "express": "^5.0.0" } }"#);
     assert!(
-        matches!(crate::playwright::setup::check(&*host, &dir), Some(crate::playwright::setup::Need::Packages { .. })),
+        matches!(
+            crate::playwright::setup::check(&*host, &dir, crate::project_kind::Kind::of(&*host, &dir)),
+            Some(crate::playwright::setup::Need::Packages { .. })
+        ),
         "its packages want installing"
     );
     std::fs::create_dir_all(dir.join("node_modules")).unwrap();
-    assert_eq!(crate::playwright::setup::check(&*host, &dir), None);
-    let summary = crate::playwright::setup::summary(&*host, &dir, Some(&dir)).unwrap();
+    assert_eq!(crate::playwright::setup::check(&*host, &dir, crate::project_kind::Kind::of(&*host, &dir)), None);
+    let summary =
+        crate::playwright::setup::summary(&*host, &dir, crate::project_kind::Kind::of(&*host, &dir), Some(&dir))
+            .unwrap();
     assert!(summary.starts_with("npm · "), "{summary}");
     write(&dir, "build.gradle.kts", "");
     write(&dir, "src/main/java/App.java", "");
@@ -532,10 +541,10 @@ fn every_package_of_a_workspace_gets_its_scripts_and_runs_in_its_folder() {
     assert_eq!(install_dir(&*host, &web, &repo), repo);
     // The workspace installs at its root; once it has, its packages have theirs.
     std::fs::remove_dir_all(repo.join("node_modules")).unwrap();
-    let need = crate::playwright::setup::check(&*host, &repo);
+    let need = crate::playwright::setup::check(&*host, &repo, crate::project_kind::Kind::of(&*host, &repo));
     assert_eq!(need, Some(Need::Packages { manager: PackageManager::Pnpm, dir: None }));
     std::fs::create_dir_all(repo.join("node_modules")).unwrap();
-    assert_eq!(crate::playwright::setup::check(&*host, &repo), None);
+    assert_eq!(crate::playwright::setup::check(&*host, &repo, crate::project_kind::Kind::of(&*host, &repo)), None);
     let _ = std::fs::remove_dir_all(repo);
 }
 
@@ -550,7 +559,7 @@ fn a_front_end_beside_a_java_build_installs_in_its_own_folder() {
         r#"{ "scripts": { "dev": "vite" }, "devDependencies": { "vite": "^6.0.0" } }"#,
     );
     assert!(!crate::run::node_run::is_node_project(&*host, &repo));
-    let need = crate::playwright::setup::check(&*host, &repo);
+    let need = crate::playwright::setup::check(&*host, &repo, crate::project_kind::Kind::of(&*host, &repo));
     assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm, dir: Some(repo.join("frontend")) }));
     let ids: Vec<String> = crate::run::node_run::configs(&*host, &repo).into_iter().map(|c| c.id).collect();
     assert_eq!(ids, ["npm:frontend:dev"]);

@@ -614,6 +614,7 @@ impl Workspace {
     /// packages, its browsers), offering to install it.
     pub(super) fn playwright_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::playwright::setup::Need;
+        use crate::project_kind::Kind;
         let setup = self.pw_setup.read(cx);
         let need = setup.shown()?.clone();
         // A front end in a folder of a project that is not a Node package (a Java build's)
@@ -645,10 +646,17 @@ impl Workspace {
             (Need::Packages { manager, dir }, false) => (
                 match dir {
                     Some(dir) => t!("lang-the-packages-of-are-not-installed-so-it", dir = (folder(dir)).to_string()),
-                    None if setup.playwright => {
-                        ts!("lang-this-playwright-projects-packages-are-not-installed-so").to_owned()
+                    None => match setup.kind {
+                        Kind::Playwright => ts!("lang-this-playwright-projects-packages-are-not-installed-so"),
+                        Kind::Node { playwright: true } => {
+                            ts!("lang-this-projects-packages-are-not-installed-nor-playwright")
+                        }
+                        Kind::Java { playwright: true } => {
+                            ts!("lang-this-projects-playwright-packages-are-not-installed")
+                        }
+                        _ => ts!("lang-this-projects-packages-are-not-installed-so-it"),
                     }
-                    None => ts!("lang-this-projects-packages-are-not-installed-so-it").to_owned(),
+                    .to_owned(),
                 },
                 Some(t!(
                     "lang-install-packages",

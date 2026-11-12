@@ -5,9 +5,7 @@ use std::path::Path;
 
 use snout_host::Host;
 
-use crate::playwright;
-use crate::project_model::declares_java;
-use crate::run::node_run::is_node_project;
+use crate::project_kind::Kind as K;
 use crate::tests::scratch_dir;
 
 use Kind::*;
@@ -17,28 +15,32 @@ enum Kind {
     Java,
     JavaAndPlaywright,
     Node,
+    NodeAndPlaywright,
     Playwright,
     Neither,
 }
 
 fn kind_of(host: &dyn Host, dir: &Path) -> Kind {
-    match (declares_java(host, dir), playwright::is_root(host, dir), is_node_project(host, dir)) {
-        (true, false, false) => Java,
-        (true, true, false) => JavaAndPlaywright,
-        (false, true, false) => Playwright,
-        (false, false, true) => Node,
-        (false, false, false) => Neither,
-        other => panic!("{} is two kinds at once: {other:?}", dir.display()),
+    match K::of(host, dir) {
+        K::Java { playwright: false } => Java,
+        K::Java { playwright: true } => JavaAndPlaywright,
+        K::Node { playwright: false } => Node,
+        K::Node { playwright: true } => NodeAndPlaywright,
+        K::Playwright => Playwright,
+        K::Plain => Neither,
     }
 }
 
-/// A scratch folder holding `files`; a `package.json` among them is a valid, plain one.
+/// A scratch folder holding `files`; a `package.json` among them is a valid, plain one. A
+/// file written `name=text` holds that text.
 fn folder(name: &str, files: &[&str]) -> std::path::PathBuf {
     let dir = scratch_dir(&format!("kind-{name}"));
     for file in files {
+        let (file, text) = file.split_once('=').unwrap_or((file, ""));
         let path = dir.join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, if file.ends_with("package.json") { r#"{ "name": "x" }"# } else { "" }).unwrap();
+        let text = if text.is_empty() && file.ends_with("package.json") { r#"{ "name": "x" }"# } else { text };
+        std::fs::write(&path, text).unwrap();
     }
     dir
 }
@@ -142,6 +144,64 @@ fn playwright_projects() {
             &["pom.xml", "package.json", "playwright.config.ts", "src/main/java/App.java"],
             JavaAndPlaywright,
         ),
+    ]);
+}
+
+/// An app with Playwright tests stays a Node project: what it depends on, the tool that builds
+/// it or a script that serves it says it is more than its tests.
+#[test]
+fn an_app_with_playwright_tests_is_a_node_project() {
+    check_roots(&[
+        (
+            "vite-app",
+            &["package.json", "playwright.config.ts", "vite.config.ts", "index.html", "src/main.tsx"],
+            NodeAndPlaywright,
+        ),
+        (
+            "app-by-its-dependencies",
+            &[
+                r#"package.json={ "dependencies": { "react": "^19.0.0" }, "devDependencies": { "@playwright/test": "^1.62.1" } }"#,
+                "playwright.config.ts",
+            ],
+            NodeAndPlaywright,
+        ),
+        (
+            "app-by-its-scripts",
+            &[
+                r#"package.json={ "scripts": { "dev": "node server.js", "test": "playwright test" } }"#,
+                "playwright.config.ts",
+            ],
+            NodeAndPlaywright,
+        ),
+        (
+            "workspace-with-e2e",
+            &[r#"package.json={ "workspaces": ["apps/*"] }"#, "playwright.config.ts", "apps/web/package.json"],
+            NodeAndPlaywright,
+        ),
+        (
+            "app-known-by-its-dependency-alone",
+            &[
+                r#"package.json={ "dependencies": { "express": "^5.0.0" }, "devDependencies": { "@playwright/test": "^1.62.1" } }"#,
+            ],
+            NodeAndPlaywright,
+        ),
+    ]);
+}
+
+/// A QA suite stays a Playwright project, whatever helpers its tests use and scripts run them.
+#[test]
+fn a_test_suite_with_helpers_is_still_a_playwright_project() {
+    check_roots(&[
+        (
+            "suite-with-helpers",
+            &[
+                r#"package.json={ "dependencies": { "dotenv": "^16.0.0", "@faker-js/faker": "^9.0.0" }, "devDependencies": { "@playwright/test": "^1.62.1" }, "scripts": { "test": "playwright test", "build": "tsc --noEmit", "start": "playwright test --ui" } }"#,
+                "playwright.config.ts",
+                "tests/login.spec.ts",
+            ],
+            Playwright,
+        ),
+        ("config-without-a-package", &["playwright.config.js", "tests/a.spec.js"], Playwright),
     ]);
 }
 

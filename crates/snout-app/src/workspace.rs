@@ -1556,11 +1556,7 @@ impl Workspace {
         let host = crate::host::host(cx);
         let look = cx.background_executor().spawn({
             let root = root.clone();
-            async move {
-                crate::project_model::declares_java(&*host, &root)
-                    || crate::run::node_run::is_node_project(&*host, &root)
-                    || crate::playwright::is_root(&*host, &root)
-            }
+            async move { crate::project_kind::Kind::of(&*host, &root).is_project() }
         });
         cx.spawn(async move |this, cx| {
             let answer = look.await;

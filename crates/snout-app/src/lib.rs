@@ -35,6 +35,7 @@ pub mod panels;
 pub mod platform;
 pub mod playwright;
 pub mod processes;
+pub mod project_kind;
 pub mod project_model;
 pub mod project_settings;
 pub mod project_view;

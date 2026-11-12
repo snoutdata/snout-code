@@ -329,6 +329,57 @@ fn a_playwright_project_without_its_packages_offers_to_install_them(cx: &mut gpu
     let _ = std::fs::remove_dir_all(repo);
 }
 
+/// A web app with Playwright tests is a Node project that has Playwright: the Project view names
+/// its Node first, the bar asks for the project's packages, then for Playwright's browsers.
+#[gpui::test]
+fn an_app_with_playwright_tests_stays_a_node_project(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::playwright::setup::Need;
+    use crate::project_kind::Kind;
+    use crate::tests::{open, with_repo};
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-in-app");
+    write(
+        &repo,
+        "package.json",
+        r#"{ "scripts": { "dev": "vite", "build": "vite build", "test:e2e": "playwright test" },
+             "dependencies": { "react": "^19.0.0" }, "devDependencies": { "@playwright/test": "^1.62.1", "vite": "^7.0.0" } }"#,
+    );
+    write(&repo, "playwright.config.ts", "export default {};\n");
+    write(&repo, "vite.config.ts", "export default {};\n");
+    write(&repo, "index.html", "<div id=root></div>\n");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let setup = cx.update(|_, cx| ws.read(cx).pw_setup.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).need.is_some()));
+    assert!(found, "the project is looked at");
+    assert_eq!(cx.update(|_, cx| setup.read(cx).kind), Kind::Node { playwright: true });
+    let need = cx.update(|_, cx| setup.read(cx).need.clone());
+    assert_eq!(need, Some(Need::Packages { manager: PackageManager::Npm, dir: None }));
+    assert!(cx.debug_bounds("playwright-bar").is_some() && cx.debug_bounds("playwright-install").is_some());
+    let summary = cx.update(|_, cx| setup.read(cx).summary.clone()).unwrap_or_default();
+    assert!(summary.starts_with("npm · ") && summary.ends_with(" · Playwright ^1.62.1, not installed"), "{summary}");
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.read(cx).playwright);
+    assert!(tests, "its Playwright tests are in the Tests window");
+    let project = pump_until(cx, 10, |cx| cx.update(|_, cx| ws.update(cx, |w, cx| w.is_project(cx))));
+    assert!(project, "Project Settings is on");
+
+    // Installed, the browsers are next.
+    write(&repo, "node_modules/react/package.json", r#"{ "version": "19.0.0" }"#);
+    write(&repo, "node_modules/@playwright/test/package.json", r#"{ "version": "1.62.1" }"#);
+    write(&repo, "node_modules/playwright-core/package.json", r#"{ "version": "1.62.1" }"#);
+    write(
+        &repo,
+        "node_modules/playwright-core/browsers.json",
+        r#"{ "browsers": [{ "name": "firefox", "revision": "999999", "installByDefault": true }] }"#,
+    );
+    cx.update(|_, cx| setup.update(cx, |s, cx| s.look(cx)));
+    let next = pump_until(cx, 10, |cx| cx.update(|_, cx| matches!(setup.read(cx).need, Some(Need::Browsers { .. }))));
+    assert!(next, "{:?}", cx.update(|_, cx| setup.read(cx).need.clone()));
+    let summary = cx.update(|_, cx| setup.read(cx).summary.clone()).unwrap_or_default();
+    assert!(summary.ends_with(" · Playwright 1.62.1"), "{summary}");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 /// Installs @playwright/test from npm through the bar (network): run by hand with `--ignored`.
 #[gpui::test]
 #[ignore]
