@@ -1045,6 +1045,124 @@ impl ProjectStructureView {
 
     // ----- SDKs ---------------------------------------------------------------------------
 
+    /// The Download JDK dialog: the Java version, the vendor, where it goes, and Download.
+    fn jdk_picker(&mut self, home: &Path, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let dir = crate::lang::java::downloads_dir(crate::host::host(cx).info());
+        let head = div()
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .child(tile(IconName::Download, p.accent, 26., &p))
+            .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(ts!("structure-download-jdk")));
+        let cancel = Button::new("structure-jdk-cancel", crate::components::CANCEL_ICON)
+            .debug_selector("structure-jdk-cancel")
+            .compact()
+            .label(ts!("settings-cancel"))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.picker = None;
+                cx.notify();
+            }));
+        let mut card =
+            card(&p).debug_selector(|| "structure-jdk-picker".into()).flex().flex_col().gap(px(10.)).child(head);
+        match &self.jdk_catalog {
+            None => {
+                card = card
+                    .child(look::weak(ts!("structure-looking-up-jdks"), &p))
+                    .child(div().flex().justify_end().child(cancel));
+            }
+            Some(Err(e)) => {
+                card = card
+                    .child(crate::components::callout(
+                        Tone::Warning,
+                        t!("structure-jdks-could-not-be-looked-up", e = e.to_string()),
+                        &p,
+                    ))
+                    .child(
+                        div().flex().justify_end().gap(px(8.)).child(cancel).child(
+                            Button::new("structure-jdk-retry", IconName::RefreshCw)
+                                .compact()
+                                .label(ts!("console-try-again"))
+                                .on_click(cx.listener(|this, _, _, cx| this.look_up_catalog(cx))),
+                        ),
+                    );
+            }
+            Some(Ok(all)) => {
+                let picked = self.picked();
+                let major = picked.as_ref().map(|p| p.major).unwrap_or_default();
+                let mut majors: Vec<(u32, bool)> = Vec::new();
+                for pkg in all {
+                    if !majors.iter().any(|(m, _)| *m == pkg.major) {
+                        majors.push((pkg.major, pkg.lts));
+                    }
+                }
+                let versions = majors
+                    .iter()
+                    .map(|(m, lts)| {
+                        let label = if *lts { t!("structure-java-lts", major = m.to_string()) } else { m.to_string() };
+                        (m.to_string(), label)
+                    })
+                    .collect();
+                let vendors = all
+                    .iter()
+                    .filter(|pkg| pkg.major == major)
+                    .map(|pkg| (pkg.vendor.clone(), format!("{} {}", pkg.vendor_name(), pkg.version)))
+                    .collect();
+                let (v1, v2) = (cx.entity(), cx.entity());
+                card = card
+                    .child(row(
+                        ts!("structure-version"),
+                        choice(
+                            "structure-jdk-version",
+                            &major.to_string(),
+                            versions,
+                            move |v, cx| {
+                                v1.update(cx, |this, cx| {
+                                    if let Some(picker) = this.picker.as_mut() {
+                                        picker.major = v.parse().ok();
+                                    }
+                                    cx.notify();
+                                })
+                            },
+                            &p,
+                        ),
+                        &p,
+                    ))
+                    .child(row(
+                        ts!("structure-vendor"),
+                        choice(
+                            "structure-jdk-vendor",
+                            picked.as_ref().map_or("", |p| p.vendor.as_str()),
+                            vendors,
+                            move |v, cx| {
+                                v2.update(cx, |this, cx| {
+                                    if let Some(picker) = this.picker.as_mut() {
+                                        picker.vendor = Some(v);
+                                    }
+                                    cx.notify();
+                                })
+                            },
+                            &p,
+                        ),
+                        &p,
+                    ))
+                    .child(row(ts!("structure-location"), look::weak(short(&dir, home), &p), &p))
+                    .child(
+                        div().flex().justify_end().gap(px(8.)).child(cancel).child(
+                            Button::new("structure-jdk-download", IconName::Download)
+                                .debug_selector("structure-jdk-download")
+                                .compact()
+                                .primary()
+                                .label(ts!("updates-download"))
+                                .disabled(picked.is_none())
+                                .on_click(cx.listener(|this, _, _, cx| this.download_picked(cx))),
+                        ),
+                    );
+            }
+        }
+        card.into_any_element()
+    }
+
     fn sdks_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let home = self.home(cx);
@@ -1054,26 +1172,12 @@ impl ProjectStructureView {
             None => t!("structure-on-machine", machine = crate::platform::this_machine()),
         };
         let downloading = self.download.clone();
-        let view = cx.entity();
-        let download = crate::look::Trigger(
-            div().id("structure-sdk-download").debug_selector(|| "structure-sdk-download".into()).child(
-                Button::new("structure-sdk-download-button", IconName::Download)
-                    .compact()
-                    .label(ts!("structure-download-jdk"))
-                    .disabled(downloading.is_some()),
-            ),
-        );
-        use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
-        let download = download.dropdown_menu(move |mut menu, _, _| {
-            for major in [25u32, 21, 17, 11] {
-                let view = view.clone();
-                menu = menu.item(
-                    PopupMenuItem::new(format!("JDK {major} (Eclipse Temurin)"))
-                        .on_click(move |_, _, cx| view.update(cx, |this, cx| this.download_jdk(major, cx))),
-                );
-            }
-            menu
-        });
+        let download = Button::new("structure-sdk-download", IconName::Download)
+            .debug_selector("structure-sdk-download")
+            .compact()
+            .label(ts!("structure-download-jdk-dialog"))
+            .disabled(downloading.is_some() || self.picker.is_some())
+            .on_click(cx.listener(|this, _, _, cx| this.open_jdk_picker(None, cx)));
         let mut body =
             div().flex().flex_col().gap(px(8.)).child(
                 div()
@@ -1093,6 +1197,9 @@ impl ProjectStructureView {
                     )
                     .child(download),
             );
+        if self.picker.is_some() {
+            body = body.child(self.jdk_picker(&home, cx));
+        }
         if let Some((major, progress)) = &downloading {
             let pct = progress.percent();
             body = body.child(
@@ -1483,11 +1590,19 @@ impl ProjectStructureView {
             Page::Dependencies => self.dependencies_page(cx),
             Page::Sdks => self.sdks_page(cx),
             Page::Facets => self.facets_page(cx),
+            Page::Settings(page) => self.settings.update(cx, |s, cx| s.project_page(page, cx)),
         }
     }
 
     /// What the page says under its title.
-    fn subtitle(&self) -> &'static str {
+    fn subtitle(&self) -> SharedString {
+        if let Page::Settings(page) = self.page {
+            return page.blurb().into();
+        }
+        self.structure_subtitle().into()
+    }
+
+    fn structure_subtitle(&self) -> &'static str {
         if self.structure().is_some_and(|s| s.tool() == "Maven") {
             match self.page {
                 Page::Project => {
@@ -1504,6 +1619,7 @@ impl ProjectStructureView {
             Page::Dependencies => ts!("structure-what-each-module-declares-and-what-that-brings-2"),
             Page::Sdks => ts!("structure-the-jdks-snoutcode-can-run-gradle-and-the"),
             Page::Facets => ts!("structure-frameworks-and-tools-as-they-stand-read-only"),
+            Page::Settings(_) => "",
         }
     }
 }
@@ -1817,27 +1933,45 @@ impl Render for ProjectStructureView {
                             self.page.art(),
                             self.page.shown(),
                             self.subtitle(),
-                            div().when(gradle_page, |d| {
-                                d.child(
-                                    Button::new("structure-sync", IconName::RefreshCw)
-                                        .debug_selector("structure-sync")
-                                        .compact()
-                                        .ghost()
-                                        .label(match (syncing, tool) {
-                                            (true, _) => ts!("structure-syncing"),
-                                            (_, "Maven") => ts!("structure-reload-maven"),
-                                            (_, "Gradle") => ts!("structure-sync-gradle"),
-                                            _ => ts!("lang-sync"),
-                                        })
-                                        .disabled(syncing)
-                                        .tooltip(match tool {
-                                            "Maven" => ts!("structure-read-the-maven-builds-again"),
-                                            "Gradle" => ts!("structure-read-the-gradle-builds-again"),
-                                            _ => ts!("structure-read-the-builds-again"),
-                                        })
-                                        .on_click(cx.listener(|this, _, _, cx| this.sync(cx))),
-                                )
-                            }),
+                            div()
+                                .when(matches!(self.page, Page::Settings(_)), |d| {
+                                    d.child(
+                                        Button::new("structure-edit-json", IconName::FileBraces)
+                                            .debug_selector("structure-edit-json")
+                                            .compact()
+                                            .ghost()
+                                            .label(ts!("settings-edit-as-json"))
+                                            .tooltip(ts!("settings-open-these-settings-file-in-a-tab-with"))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.apply(true, cx);
+                                                window.dispatch_action(
+                                                    Box::new(crate::menus::OpenProjectSettingsJson),
+                                                    cx,
+                                                );
+                                            })),
+                                    )
+                                })
+                                .when(gradle_page, |d| {
+                                    d.child(
+                                        Button::new("structure-sync", IconName::RefreshCw)
+                                            .debug_selector("structure-sync")
+                                            .compact()
+                                            .ghost()
+                                            .label(match (syncing, tool) {
+                                                (true, _) => ts!("structure-syncing"),
+                                                (_, "Maven") => ts!("structure-reload-maven"),
+                                                (_, "Gradle") => ts!("structure-sync-gradle"),
+                                                _ => ts!("lang-sync"),
+                                            })
+                                            .disabled(syncing)
+                                            .tooltip(match tool {
+                                                "Maven" => ts!("structure-read-the-maven-builds-again"),
+                                                "Gradle" => ts!("structure-read-the-gradle-builds-again"),
+                                                _ => ts!("structure-read-the-builds-again"),
+                                            })
+                                            .on_click(cx.listener(|this, _, _, cx| this.sync(cx))),
+                                    )
+                                }),
                             &p,
                         ))
                         .child(

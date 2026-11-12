@@ -537,3 +537,42 @@ fn a_build_in_the_project_is_served_by_the_projects_engine(cx: &mut TestAppConte
     assert_eq!(root.as_deref(), Some(deep.as_path()));
     let _ = std::fs::remove_dir_all(&repo);
 }
+
+/// A JDK that only IntelliJ IDEA or Gradle knows of is found: one Gradle provisioned (two
+/// folders down in `~/.gradle/jdks`), one in IntelliJ's `~/.jdks`, and one IntelliJ's JDK table
+/// names wherever it is.
+#[test]
+fn the_jdks_intellij_and_gradle_keep_are_found() {
+    let home = scratch_dir("jdks-elsewhere");
+    let fake = |home_dir: &Path, version: &str| {
+        let bin = if cfg!(windows) { "bin/java.exe" } else { "bin/java" };
+        std::fs::create_dir_all(home_dir.join("bin")).unwrap();
+        std::fs::write(home_dir.join(bin), "").unwrap();
+        std::fs::write(home_dir.join("release"), format!("JAVA_VERSION=\"{version}\"\n")).unwrap();
+    };
+    fake(&home.join(".gradle/jdks/eclipse_adoptium-11-aarch64-os_x.2/jdk-11.0.25+9/Contents/Home"), "11.0.25");
+    fake(&home.join(".jdks/corretto-15.0.2"), "15.0.2");
+    fake(&home.join("tools/zulu-13"), "13.0.14");
+    let options = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/JetBrains/IntelliJIdea2025.2/options")
+    } else if cfg!(windows) {
+        return; // IntelliJ's settings live under %APPDATA% there, which this test does not move.
+    } else {
+        home.join(".config/JetBrains/IntelliJIdea2025.2/options")
+    };
+    std::fs::create_dir_all(&options).unwrap();
+    std::fs::write(
+        options.join("jdk.table.xml"),
+        "<application><component name=\"ProjectJdkTable\"><jdk version=\"2\"><name value=\"13\" />\
+         <homePath value=\"$USER_HOME$/tools/zulu-13\" /></jdk></component></application>",
+    )
+    .unwrap();
+    let found: Vec<u32> = java::discover(&*snout_host::local(), &home)
+        .into_iter()
+        .filter(|j| j.home.starts_with(&home))
+        .map(|j| j.major)
+        .collect();
+    for major in [11, 13, 15] {
+        assert!(found.contains(&major), "JDK {major} is found: {found:?}");
+    }
+}

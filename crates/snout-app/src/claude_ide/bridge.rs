@@ -995,15 +995,23 @@ pub fn sign_in_prompt(details: &str, repo: Option<&Path>, host: Option<&str>) ->
 }
 
 /// Send `prompt` to the console's agent in its session at `root` (started if it is not), and
-/// bring the console forward: the user's click on Fix with the agent asked for it.
-pub fn ask_agent(ws: &mut Workspace, root: &Path, prompt: &str, window: &mut Window, cx: &mut Context<Workspace>) {
+/// bring the console forward: the user's click on Fix with the agent asked for it. `note`
+/// says what was asked, given the agent's short name.
+pub fn ask_agent(
+    ws: &mut Workspace,
+    root: &Path,
+    prompt: &str,
+    note: impl FnOnce(&str) -> String,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
     show_console(ws, window, cx);
     let Some(console) = crate::console::console_of(ws, cx) else { return };
     console.update(cx, |c, cx| {
         c.ensure_session(root, window, cx);
         c.send_when_ready(root, prompt, cx);
         let name = c.session_agent(root, cx).short;
-        c.show_note(t!("agents-asked-to-fix-the-sign-in", name = name.to_string()), cx);
+        c.show_note(note(&name), cx);
     });
 }
 

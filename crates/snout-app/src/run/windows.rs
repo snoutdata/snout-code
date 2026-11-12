@@ -7,12 +7,13 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
-    Styled as _, UniformListScrollHandle, Window, div, px, uniform_list,
+    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels,
+    Point, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled as _, UniformListScrollHandle,
+    Window, div, px, uniform_list,
 };
 use gpui_component::button::ButtonVariants as _;
-use gpui_component::input::{InputEvent, InputState};
+use gpui_component::input::{Copy, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
@@ -43,6 +44,77 @@ pub struct RunWindow {
     pub debug_tab: DebugTab,
     /// The Debug window's expression box.
     pub eval: Option<Entity<InputState>>,
+    /// The console's own focus, so ⌘C copies what is selected in it.
+    console_focus: FocusHandle,
+    /// What is selected in the console, and whether the mouse is still selecting.
+    sel: Option<ConsoleSel>,
+    selecting: bool,
+    /// The width of a character of the console's font, as last measured.
+    cell_w: Pixels,
+    /// The console's longest line, by (session, line count, dropped): the list is as wide as
+    /// it, so a long line scrolls sideways.
+    widest: ((u64, usize, usize), usize),
+}
+
+/// A place in a console: (line, character). Lines count from the session's first, the ones
+/// dropped from the top included, so a selection stays on its text as the console trims.
+type ConsolePos = (usize, usize);
+
+/// A selection in a session's console, from where the mouse went down to where it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConsoleSel {
+    session: u64,
+    anchor: ConsolePos,
+    head: ConsolePos,
+}
+
+impl ConsoleSel {
+    fn ordered(&self) -> (ConsolePos, ConsolePos) {
+        if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.anchor == self.head
+    }
+
+    /// The characters of line `line` (of `len`) it covers, the end past the last when it goes on
+    /// to the next line.
+    fn cols(&self, line: usize, len: usize) -> Option<(usize, usize)> {
+        let (a, b) = self.ordered();
+        if self.is_empty() || line < a.0 || line > b.0 {
+            return None;
+        }
+        let from = if line == a.0 { a.1.min(len) } else { 0 };
+        let to = if line == b.0 { b.1.min(len) } else { len + 1 };
+        (to > from).then_some((from, to))
+    }
+}
+
+/// The text `sel` covers in `lines`, the first of which is line `base`.
+fn selected_text(lines: &[ConsoleLine], base: usize, sel: &ConsoleSel) -> String {
+    let (a, b) = sel.ordered();
+    let mut out = Vec::new();
+    for line in a.0..=b.0 {
+        let Some(l) = line.checked_sub(base).and_then(|i| lines.get(i)) else { continue };
+        let chars: Vec<char> = l.text().chars().collect();
+        let from = if line == a.0 { a.1.min(chars.len()) } else { 0 };
+        let to = if line == b.0 { b.1.min(chars.len()) } else { chars.len() };
+        out.push(chars[from..to.max(from)].iter().collect::<String>());
+    }
+    out.join("\n")
+}
+
+/// The word of `text` at character `col`: letters, digits and `_ . $ -`, as a class name, a
+/// path or a number has them. None off a word.
+fn word_at(text: &str, col: usize) -> Option<(usize, usize)> {
+    let chars: Vec<char> = text.chars().collect();
+    let is_word = |c: char| c.is_alphanumeric() || "_.$-".contains(c);
+    if !chars.get(col).is_some_and(|c| is_word(*c)) {
+        return None;
+    }
+    let from = (0..col).rev().take_while(|i| is_word(chars[*i])).last().unwrap_or(col);
+    let to = (col..chars.len()).take_while(|i| is_word(chars[*i])).last().map_or(col, |i| i + 1);
+    Some((from, to))
 }
 
 impl RunWindow {
@@ -73,6 +145,11 @@ impl RunWindow {
             live_lines: 0,
             debug_tab: DebugTab::Debugger,
             eval,
+            console_focus: cx.focus_handle(),
+            sel: None,
+            selecting: false,
+            cell_w: px(7.5),
+            widest: ((u64::MAX, 0, 0), 0),
         }
     }
 
@@ -119,6 +196,11 @@ impl gpui_component::dock::Panel for RunWindow {
     fn zoom_control(&self, _: &App) -> Option<gpui_component::dock::PanelControl> {
         None
     }
+}
+
+/// Whether `s` ended in failure: what Fix with the agent is offered on.
+fn failed(s: &Session) -> bool {
+    s.ended.as_ref().is_some_and(|e| e.outcome == Outcome::Failed)
 }
 
 /// A console's context menu: Clear All (a live console only), Copy All, and Save Output to
@@ -175,14 +257,33 @@ pub fn ansi_color(c: Color, p: &Palette) -> Hsla {
     }
 }
 
-/// One console line: its spans in their colours, the links clickable.
-pub fn console_line(line: &ConsoleLine, ix: usize, runs: &Entity<Runs>, p: &Palette) -> AnyElement {
+/// One console line: its spans in their colours, the links clickable, and behind the
+/// characters `selected` (from, to) the selection, `cell_w` wide each.
+pub fn console_line(
+    line: &ConsoleLine,
+    ix: usize,
+    runs: &Entity<Runs>,
+    p: &Palette,
+    selected: Option<(usize, usize)>,
+    cell_w: Pixels,
+) -> AnyElement {
     let base = match line.stream {
         Stream::Out => p.fg,
         Stream::Err => mix(p.error, 0.85, p.fg),
         Stream::System => p.fg_dim,
     };
-    let mut row = div().h(px(18.)).flex().items_center().whitespace_nowrap().text_color(base);
+    let mut row = div().relative().h(px(18.)).flex().items_center().whitespace_nowrap().text_color(base);
+    if let Some((from, to)) = selected {
+        row = row.child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(cell_w * from as f32)
+                .w(cell_w * (to - from) as f32)
+                .bg(p.selection()),
+        );
+    }
     for (k, span) in line.spans.iter().enumerate() {
         let mut fg = span.style.fg.map_or(base, |c| ansi_color(c, p));
         if span.style.dim {
@@ -334,7 +435,19 @@ impl RunWindow {
                 Some(t) => format!("{t}  ·  {}", s.status()),
                 None => s.status(),
             };
-            row = row.child(div().flex_1()).child(
+            row = row.child(div().flex_1());
+            if failed(s) {
+                let agent = crate::agents::console_agent(cx);
+                let (runs, id) = (self.runs.clone(), s.id);
+                row = row.child(
+                    crate::components::Button::new("run-fix-with-agent", agent.icon)
+                        .label(t!("runwin-fix-with", agent = agent.short.to_string()))
+                        .compact()
+                        .ghost()
+                        .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.fix_with_agent(id, cx))),
+                );
+            }
+            row = row.child(
                 div()
                     .id("run-status")
                     .debug_selector(|| "run-status".into())
@@ -392,10 +505,13 @@ impl RunWindow {
     }
 
     /// The console of `s` (or `lines` in its place), following its end. Rows are read from
-    /// the session as they draw, so a long console is never copied.
+    /// the session as they draw, so a long console is never copied. The mouse selects in it
+    /// (a double click a word, a triple click a line), and ⌘C or the menu copies that.
     fn console(&mut self, s: &Session, lines: Option<Rc<Vec<ConsoleLine>>>, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let count = lines.as_ref().map_or(self.live_lines, |l| l.len());
+        // Lines are numbered from the session's first, those trimmed from the top included.
+        let base = if lines.is_some() { 0 } else { s.dropped };
         let seen = (s.id, count + s.dropped + if lines.is_some() { 1 << 40 } else { 0 });
         if seen != self.seen {
             let follow = self.seen.0 != s.id || self.console.is_scrolled_to_end() != Some(false);
@@ -404,39 +520,169 @@ impl RunWindow {
                 self.console.scroll_to_item(count - 1, ScrollStrategy::Bottom);
             }
         }
+        let key = (s.id ^ if lines.is_some() { 1 << 63 } else { 0 }, count, base);
+        if self.widest.0 != key {
+            let len = |l: &ConsoleLine| l.spans.iter().map(|s| s.text.len()).sum::<usize>();
+            let widest = match &lines {
+                Some(lines) => lines.iter().enumerate().max_by_key(|(_, l)| len(l)).map(|(i, _)| i),
+                None => self
+                    .runs
+                    .read(cx)
+                    .session(s.id)
+                    .and_then(|s| s.lines.iter().enumerate().max_by_key(|(_, l)| len(l)).map(|(i, _)| i)),
+            };
+            self.widest = (key, widest.unwrap_or(0));
+        }
+        let sel = self.sel.filter(|sel| sel.session == s.id && !sel.is_empty());
+        let cell_w = self.cell_w;
         let runs = self.runs.clone();
         let id = s.id;
         let mono = look::mono_font(cx);
+        let copy_text = {
+            let (runs, lines) = (runs.clone(), lines.clone());
+            move |cx: &App| -> Option<String> {
+                let sel = sel?;
+                Some(match &lines {
+                    Some(lines) => selected_text(lines, 0, &sel),
+                    None => runs.read(cx).session(id).map(|s| selected_text(&s.lines, s.dropped, &sel))?,
+                })
+            }
+        };
         let menu = {
             let runs = runs.clone();
             let lines = lines.clone();
-            move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
-                console_menu(menu, &runs, id, lines.clone())
+            let copy_text = copy_text.clone();
+            move |menu: PopupMenu, _: &mut Window, cx: &mut Context<PopupMenu>| {
+                let menu = match copy_text(cx) {
+                    Some(text) => menu
+                        .item(
+                            PopupMenuItem::new(ts!("cmd-copy"))
+                                .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
+                                }),
+                        )
+                        .separator(),
+                    None => menu,
+                };
+                let menu = console_menu(menu, &runs, id, lines.clone());
+                if lines.is_none() && runs.read(cx).session(id).is_some_and(failed) {
+                    let agent = crate::agents::console_agent(cx);
+                    let runs = runs.clone();
+                    menu.separator().item(
+                        PopupMenuItem::new(t!("runwin-fix-with", agent = agent.short.to_string()))
+                            .icon(crate::components::menu_icon(agent.icon))
+                            .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.fix_with_agent(id, cx))),
+                    )
+                } else {
+                    menu
+                }
+            }
+        };
+        let rows = {
+            let (runs, lines) = (runs.clone(), lines.clone());
+            move |range: std::ops::Range<usize>, _: &mut Window, cx: &mut App| {
+                let row = |i: usize, l: &ConsoleLine| {
+                    let len = l.spans.iter().map(|s| s.text.chars().count()).sum();
+                    console_line(l, i, &runs, &p, sel.and_then(|sel| sel.cols(base + i, len)), cell_w)
+                };
+                match &lines {
+                    Some(lines) => range.filter_map(|i| Some(row(i, lines.get(i)?))).collect(),
+                    None => {
+                        let all = runs.read(cx);
+                        let Some(s) = all.session(id) else { return Vec::new() };
+                        range.filter_map(|i| Some(row(i, s.lines.get(i)?))).collect()
+                    }
+                }
+            }
+        };
+        let line_text = {
+            let (runs, lines) = (runs.clone(), lines.clone());
+            move |line: usize, cx: &App| -> String {
+                match &lines {
+                    Some(lines) => lines.get(line).map(ConsoleLine::text).unwrap_or_default(),
+                    None => runs
+                        .read(cx)
+                        .session(id)
+                        .and_then(|s| line.checked_sub(s.dropped).and_then(|i| s.lines.get(i)))
+                        .map(ConsoleLine::text)
+                        .unwrap_or_default(),
+                }
             }
         };
         div()
             .id("run-console-area")
             .debug_selector(|| "run-console".into())
             .size_full()
-            .font_family(mono)
+            // As wide as its window, whatever the longest line: the list scrolls sideways inside.
+            .min_w_0()
+            .overflow_hidden()
+            .font_family(mono.clone())
             .text_size(px(12.5))
-            .child(
-                uniform_list("run-console", count, move |range, _, cx| match &lines {
-                    Some(lines) => range.filter_map(|i| Some(console_line(lines.get(i)?, i, &runs, &p))).collect(),
-                    None => {
-                        let all = runs.read(cx);
-                        let Some(s) = all.session(id) else { return Vec::new() };
-                        range.filter_map(|i| Some(console_line(s.lines.get(i)?, i, &runs, &p))).collect()
+            .track_focus(&self.console_focus)
+            .key_context("RunConsole")
+            .on_action(cx.listener({
+                let copy_text = copy_text.clone();
+                move |_, _: &Copy, _, cx| {
+                    if let Some(text) = copy_text(cx) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
                     }
-                })
-                .track_scroll(&self.console)
-                .with_horizontal_sizing_behavior(gpui::ListHorizontalSizingBehavior::Unconstrained)
-                .size_full()
-                .px(px(8.))
-                .py(px(4.)),
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    window.focus(&this.console_focus, cx);
+                    let ts = window.text_system().clone();
+                    let font = ts.resolve_font(&gpui::font(mono.clone()));
+                    this.cell_w = ts.advance(font, px(12.5), 'M').map_or(px(7.5), |a| a.width);
+                    let at = this.console_pos(e.position, base);
+                    let (anchor, head) = match e.click_count {
+                        1 => (at, at),
+                        2 => match word_at(&line_text(at.0, cx), at.1) {
+                            Some((from, to)) => ((at.0, from), (at.0, to)),
+                            None => (at, at),
+                        },
+                        _ => ((at.0, 0), (at.0, line_text(at.0, cx).chars().count())),
+                    };
+                    this.sel = Some(ConsoleSel { session: id, anchor, head });
+                    this.selecting = e.click_count == 1;
+                    cx.notify();
+                }),
+            )
+            .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
+                if this.selecting && e.pressed_button == Some(MouseButton::Left) {
+                    let head = this.console_pos(e.position, base);
+                    if let Some(sel) = this.sel.as_mut().filter(|s| s.head != head) {
+                        sel.head = head;
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| this.selecting = false))
+            .child(
+                uniform_list("run-console", count, rows)
+                    .track_scroll(&self.console)
+                    .with_horizontal_sizing_behavior(gpui::ListHorizontalSizingBehavior::Unconstrained)
+                    .with_width_from_item(Some(self.widest.1))
+                    .size_full()
+                    .px(px(8.))
+                    .py(px(4.)),
             )
             .context_menu(menu)
             .into_any_element()
+    }
+
+    /// The console place (line, character) under the window point `at`: the rows are 18 high
+    /// below 4 of padding, the characters [`Self::cell_w`] wide after 8.
+    fn console_pos(&self, at: Point<Pixels>, base: usize) -> ConsolePos {
+        let state = self.console.0.borrow();
+        let (bounds, offset) = (state.base_handle.bounds(), state.base_handle.offset());
+        let y = at.y - bounds.origin.y - px(4.) - offset.y;
+        let x = at.x - bounds.origin.x - px(8.) - offset.x;
+        let line = (y / px(18.)).floor().max(0.) as usize;
+        let col = (x / self.cell_w).round().max(0.) as usize;
+        (base + line, col)
     }
 
     /// The test results: the tree on the left, the selected test on the right.
@@ -691,18 +937,16 @@ impl RunWindow {
                     .into_any_element(),
             );
         }
+        // The column keeps its width and its border whatever the rows' length; they scroll in it.
         div()
-            .id("build-tree")
             .debug_selector(|| "build-tree".into())
             .flex_none()
             .w(gpui::relative(0.45))
             .max_w(px(320.))
             .h_full()
-            .p(px(4.))
             .border_r_1()
             .border_color(mix(p.border, 0.6, p.ground))
-            .overflow_y_scrollbar()
-            .children(rows)
+            .child(div().id("build-tree").size_full().p(px(4.)).overflow_y_scrollbar().children(rows))
             .into_any_element()
     }
 

@@ -608,6 +608,8 @@ pub enum RunsEvent {
     ShowTests,
     /// Session `id`'s process, a tool of ours, said this to the app (a locator picked).
     Said(u64, serde_json::Value),
+    /// Ask the console's agent, in the project at `root`, to fix the run `title`.
+    AskAgent { root: PathBuf, title: String, prompt: String },
 }
 
 pub struct Runs {
@@ -981,6 +983,33 @@ impl Runs {
             s.clear_console();
             cx.notify();
         }
+    }
+
+    /// Fix with the agent, on a run that failed: its whole output goes to a file on the
+    /// project's machine, where the agent runs, and the agent is asked to read it, find the
+    /// cause and fix it.
+    pub fn fix_with_agent(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(s) = self.session(id) else { return };
+        let Some(root) = self.project_root.clone() else { return };
+        let host = self.hub.read(cx).host.clone();
+        let (text, name, title) = (s.console_text(), s.log_name(), s.title.clone());
+        let how = s.ended.as_ref().map(|e| (e.exit_code, e.error.clone())).unwrap_or_default();
+        let tail: Vec<String> = s.lines.iter().rev().take(40).map(ConsoleLine::text).collect();
+        cx.spawn(async move |this, cx| {
+            let saved = cx
+                .background_executor()
+                .spawn(async move {
+                    let dir = host.info().temp_dir.join("snout-code-runs");
+                    host.create_dir_all(&dir)?;
+                    let path = dir.join(name);
+                    host.write(&path, text.as_bytes())?;
+                    Ok::<_, std::io::Error>(path)
+                })
+                .await;
+            let prompt = fix_prompt(&title, &how, saved.as_deref().ok(), &tail);
+            let _ = this.update(cx, |_, cx| cx.emit(RunsEvent::AskAgent { root, title, prompt }));
+        })
+        .detach();
     }
 
     /// Save Output to File in a console's context menu: the console as it is now, to a file
@@ -2038,6 +2067,31 @@ pub fn main_classes(path: &Path, text: &str) -> Vec<(u32, String)> {
         }
     }
     out
+}
+
+/// The prompt that asks an agent to fix the run `title` that failed (`how`: its exit code and
+/// the error SnoutCode saw), its whole output at `log`, else the end of it (`tail`, last line
+/// first). One line: it goes in as a paste, then Return.
+pub fn fix_prompt(title: &str, how: &(Option<i64>, Option<String>), log: Option<&Path>, tail: &[String]) -> String {
+    let mut said = String::new();
+    if let Some(code) = how.0 {
+        said += &format!(" with exit code {code}");
+    }
+    if let Some(error) = how.1.as_deref().filter(|e| !e.trim().is_empty()) {
+        said += &format!(" ({})", error.trim().replace('\n', " "));
+    }
+    let output = match log {
+        Some(path) => format!("Its whole output is in {}: read it.", path.display()),
+        None => {
+            let end: Vec<&str> = tail.iter().rev().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+            format!("The end of its output: {}.", end.join(" | "))
+        }
+    };
+    format!(
+        "My run \"{title}\" failed{said}. {output} Find the cause in this project and fix it. If the fix needs \
+         something only I can do (start a service, give a credential, change a setting outside the project), tell \
+         me exactly what and how. Then tell me to run it again."
+    )
 }
 
 #[cfg(test)]

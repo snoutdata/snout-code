@@ -262,6 +262,10 @@ pub struct JdkPrompt {
     pub resync: bool,
     pub progress: Option<DownloadProgress>,
     pub error: Option<String>,
+    /// The Java versions of the JDKs that were found and do not fit the build, oldest first.
+    pub installed: Vec<u32>,
+    /// The newest Java the build's Gradle runs on, when that is what rules them out.
+    pub gradle_max: Option<u32>,
 }
 
 /// What the hub asks of the workspace.
@@ -569,11 +573,13 @@ impl LangHub {
             }
             let saved = saved.and_then(|h| java::jdk_at(&*host, &h));
             let req = java::requirement(&*host, &root_buf);
+            let mut installed = Vec::new();
             let jdk = saved.filter(|j| req.fits(j.major)).or_else(|| {
                 let all = java::discover_with(&*host, &home, &added);
+                installed = all.iter().map(|j| j.major).collect();
                 java::choose(&req, &all).cloned()
             });
-            (req, jdk)
+            (req, jdk, installed)
         });
         let server = Server {
             root: root.to_owned(),
@@ -596,8 +602,8 @@ impl LangHub {
         self.servers.insert(root.to_owned(), server);
         let root_buf = root.to_owned();
         cx.spawn(async move |this, cx| {
-            let (req, jdk) = look.await;
-            let _ = this.update(cx, |this, cx| this.jdk_found(&root_buf, generation, req, jdk, cx));
+            let (req, jdk, installed) = look.await;
+            let _ = this.update(cx, |this, cx| this.jdk_found(&root_buf, generation, req, jdk, installed, cx));
         })
         .detach();
         cx.emit(HubEvent::Changed);
@@ -612,6 +618,7 @@ impl LangHub {
         generation: u64,
         req: java::Requirement,
         jdk: Option<Jdk>,
+        mut installed: Vec<u32>,
         cx: &mut Context<Self>,
     ) {
         let Some(server) =
@@ -634,12 +641,16 @@ impl LangHub {
                         root.display(),
                         req.wanted_on(self.host.info().arch == "aarch64" && self.host.info().is_mac())
                     );
+                    installed.sort_unstable();
+                    installed.dedup();
                     self.jdk_prompt = Some(JdkPrompt {
                         root: root.to_owned(),
                         major: req.wanted_on(self.host.info().arch == "aarch64" && self.host.info().is_mac()),
                         resync: false,
                         progress: None,
                         error: None,
+                        installed,
+                        gradle_max: req.gradle_max,
                     });
                 }
             }
@@ -1385,7 +1396,15 @@ impl LangHub {
                     return;
                 }
                 eprintln!("[java] a build of {} needs JDK {major}: offering it", root.display());
-                this.jdk_prompt = Some(JdkPrompt { root, major, resync: true, progress: None, error: None });
+                this.jdk_prompt = Some(JdkPrompt {
+                    root,
+                    major,
+                    resync: true,
+                    progress: None,
+                    error: None,
+                    installed: Vec::new(),
+                    gradle_max: None,
+                });
                 cx.emit(HubEvent::Changed);
                 cx.notify();
             });

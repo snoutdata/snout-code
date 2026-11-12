@@ -104,11 +104,12 @@ pub struct Workspace {
     branch_popup: Option<Entity<crate::branch_popup::BranchPopup>>,
     /// The Settings sheet, while it shows.
     pub settings_sheet: Option<Entity<crate::settings_view::SettingsView>>,
-    /// The Settings sheet is about to come up (the host's JDKs are being looked for).
-    settings_opening: bool,
     /// The page the Settings sheet opens on when it comes up (from Project Structure).
     settings_page: Option<crate::settings_view::Page>,
-    /// The Project Structure window, while it shows.
+    /// Whether the open folder is a project SnoutCode knows (a Gradle, Maven or Node build), by
+    /// its root, once looked at: Project Settings is there only for one.
+    project_kind: Option<(PathBuf, Option<bool>)>,
+    /// The Project Settings window, while it shows.
     pub project_structure: Option<Entity<crate::structure::ProjectStructureView>>,
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::run::gradle_window::GradleWindow>,
@@ -591,8 +592,8 @@ impl Workspace {
             references,
             branch_popup: None,
             settings_sheet: None,
-            settings_opening: false,
             settings_page: None,
+            project_kind: None,
             project_structure: None,
             gradle,
             maven,
@@ -1165,7 +1166,8 @@ impl Workspace {
             ModelEvent::NewProject => self.open_new_project(window, cx),
             ModelEvent::AgentAnswer(how) => crate::claude_ide::capabilities::asked(self, *how, window, cx),
             ModelEvent::AskAgent { root, prompt } => {
-                crate::claude_ide::bridge::ask_agent(self, root, prompt, window, cx)
+                let note = |name: &str| t!("agents-asked-to-fix-the-sign-in", name = name.to_string());
+                crate::claude_ide::bridge::ask_agent(self, root, prompt, note, window, cx)
             }
             ModelEvent::Quit(choice) => self.on_quit_choice(*choice, window, cx),
             ModelEvent::PickRemoteFolder(then) => self.pick_remote(remote_ui::Purpose::Then(then.0), window, cx),
@@ -1478,45 +1480,8 @@ impl Workspace {
         }
     }
 
-    /// Put up the Settings sheet.
+    /// Put up the Settings sheet (⌘,): the user's settings, the same in every project.
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings_sheet.is_some() {
-            return;
-        }
-        let mut builds: Vec<PathBuf> = self.hub.read(cx).servers.keys().cloned().collect();
-        let host = crate::host::host(cx);
-        if let Some(root) = self.model.read(cx).project_root().filter(|r| crate::project_model::project_is_java(r, cx))
-            && !builds.contains(&root)
-        {
-            builds.push(root);
-        }
-        builds.sort();
-        // The JDKs of the host are looked for off the UI thread; the sheet comes up then.
-        if self.settings_opening {
-            return;
-        }
-        self.settings_opening = true;
-        let home = self.hub.read(cx).home.clone();
-        let added = crate::structure::window_added_jdks(cx);
-        let found =
-            cx.background_executor().spawn(async move { crate::lang::java::discover_with(&*host, &home, &added) });
-        cx.spawn_in(window, async move |this, cx| {
-            let jdks = found.await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.settings_opening = false;
-                this.show_settings(builds, jdks, window, cx);
-            });
-        })
-        .detach();
-    }
-
-    fn show_settings(
-        &mut self,
-        builds: Vec<PathBuf>,
-        jdks: Vec<crate::lang::java::Jdk>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
         use crate::settings_view::{SettingsEvent, SettingsView};
         if self.settings_sheet.is_some() {
             return;
@@ -1524,12 +1489,9 @@ impl Workspace {
         let model = self.model.clone();
         let page = self.settings_page.take();
         let sheet = cx.new(|cx| {
-            let mut s = SettingsView::new(model, builds, jdks, window, cx);
+            let mut s = SettingsView::new(model, window, cx);
             if let Some(page) = page {
                 s.page = page;
-                if page.per_project() && s.has_project() {
-                    s.set_scope(crate::settings_view::Scope::Project, window, cx);
-                }
             }
             s
         });
@@ -1542,6 +1504,12 @@ impl Workspace {
                 SettingsEvent::OpenJson(which) => {
                     this.open_settings_json(*which, window, cx);
                     true
+                }
+                SettingsEvent::OpenProjectSettings(page) => {
+                    this.settings_sheet = None;
+                    this.open_project_settings_at(crate::structure::Page::Settings(*page), window, cx);
+                    cx.notify();
+                    return;
                 }
                 SettingsEvent::Cancel => true,
             };
@@ -1571,13 +1539,73 @@ impl Workspace {
         self.open_settings(window, cx);
     }
 
-    /// Put up the Project Structure window (⌘;).
+    /// Whether the open folder is a project (a Gradle, Maven or Node build), as last looked at
+    /// on the host; the look is started (off the UI thread) when the folder is new.
+    pub fn is_project(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(root) = self.model.read(cx).project_root() else { return false };
+        // What the project models know already answers for a Java build.
+        if crate::project_model::project_is_java(&root, cx) {
+            return true;
+        }
+        if let Some((known, answer)) = &self.project_kind
+            && *known == root
+        {
+            return answer.unwrap_or(false);
+        }
+        self.project_kind = Some((root.clone(), None));
+        let host = crate::host::host(cx);
+        let look = cx.background_executor().spawn({
+            let root = root.clone();
+            async move {
+                crate::project_model::declares_java(&*host, &root)
+                    || crate::run::node_run::is_node_project(&*host, &root)
+                    || crate::playwright::is_root(&*host, &root)
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let answer = look.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.project_kind.as_ref().is_some_and(|(r, _)| *r == root) {
+                    this.project_kind = Some((root, Some(answer)));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        false
+    }
+
+    /// Look at whether the open folder is a project again (its build files changed).
+    pub fn forget_project_kind(&mut self, cx: &mut Context<Self>) {
+        self.project_kind = None;
+        cx.notify();
+    }
+
+    /// Put up Project Settings on `page`.
+    pub fn open_project_settings_at(
+        &mut self,
+        page: crate::structure::Page,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_project_structure(window, cx);
+        if let Some(view) = &self.project_structure {
+            view.update(cx, |v, cx| {
+                v.page = page;
+                cx.notify();
+            });
+        }
+    }
+
+    /// Put up the Project Settings window (⌘;): the project's structure, its own settings over
+    /// the user's, and the JDKs.
     pub fn open_project_structure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::structure::{ProjectStructureView, StructureEvent};
         if self.project_structure.is_some() {
             return;
         }
-        if self.model.read(cx).project_root().is_none() {
+        // A plain folder has no project settings (its menu item is off; this covers the other ways in).
+        if !self.is_project(cx) {
             self.model.update(cx, |m, cx| {
                 m.message = ts!("workspace-open-a-project-to-see-its-structure").into();
                 cx.notify();
@@ -2140,6 +2168,7 @@ impl Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_window(window, cx);
+        let is_project = self.is_project(cx);
         if self.model.read(cx).pending_wsl.is_some() {
             cx.defer_in(window, |this, window, cx| this.go_to_wsl(window, cx));
         }
@@ -2234,9 +2263,12 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoToClass, w, cx| this.open_classes(w, cx)))
             .on_action(cx.listener(|this, _: &SearchEverywhere, w, cx| this.search_everywhere(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, w, cx| this.open_settings(w, cx)))
-            .on_action(
-                cx.listener(|this, _: &crate::menus::ProjectStructure, w, cx| this.open_project_structure(w, cx)),
-            )
+            // Project Settings, for a project: with a plain folder open, its menu item is off.
+            .when(is_project, |d| {
+                d.on_action(
+                    cx.listener(|this, _: &crate::menus::ProjectStructure, w, cx| this.open_project_structure(w, cx)),
+                )
+            })
             .on_action(cx.listener(|this, _: &crate::menus::OpenSettingsJson, w, cx| {
                 this.open_settings_json(crate::settings_json::Which::User, w, cx)
             }))

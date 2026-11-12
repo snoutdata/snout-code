@@ -168,6 +168,104 @@ fn the_console_clears_copies_and_saves_from_its_context_menu(cx: &mut TestAppCon
     let _ = std::fs::remove_dir_all(repo);
 }
 
+/// The console's text is selected with the mouse and copied with ⌘C: a double click takes a
+/// word, a triple click the line. A line longer than the window scrolls it sideways. A run that
+/// failed offers Fix with the agent.
+#[gpui::test]
+fn the_console_selects_copies_and_scrolls_sideways(cx: &mut TestAppContext) {
+    let repo = demo_repo("run-console-select");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = runs_of(&ws, cx);
+    let launch = Launch::Task { build: None, task: "build".into() };
+    let id = cx.update(|_, cx| runs.update(cx, |r, cx| r.adopt(launch, "run-1", cx)));
+    let long: String = (0..120).map(|i| format!("w{i:03} ")).collect();
+    for line in ["alpha beta", "gamma delta", long.trim_end()] {
+        cx.update(|_, cx| {
+            runs.update(cx, |r, cx| {
+                r.engine_notification(
+                    "snout/taskOutput",
+                    json!({ "runId": "run-1", "stream": "stdout", "line": line }),
+                    cx,
+                )
+            })
+        });
+    }
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_tool(crate::workspace::Tool::Build, w, cx)));
+    cx.run_until_parked();
+    let row_of = |text: &str, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| runs.read(cx).session(id).unwrap().lines.iter().position(|l| l.text().starts_with(text)))
+            .expect("the line is in the console")
+    };
+    let clicks = |row: usize, x: f32, count: usize, cx: &mut VisualTestContext| {
+        let b = cx.debug_bounds("run-console").expect("the console is drawn");
+        let at = b.origin + gpui::point(gpui::px(8. + x), gpui::px(4. + 18. * row as f32 + 9.));
+        for n in 1..=count {
+            cx.simulate_event(gpui::MouseDownEvent {
+                button: gpui::MouseButton::Left,
+                position: at,
+                modifiers: gpui::Modifiers::none(),
+                click_count: n,
+                first_mouse: false,
+            });
+            cx.simulate_event(gpui::MouseUpEvent {
+                button: gpui::MouseButton::Left,
+                position: at,
+                modifiers: gpui::Modifiers::none(),
+                click_count: n,
+            });
+        }
+        cx.run_until_parked();
+        cx.simulate_keystrokes("cmd-c");
+        cx.run_until_parked();
+        cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default()
+    };
+    // The task column ends where the console begins.
+    let (tree, console) = (cx.debug_bounds("build-tree").unwrap(), cx.debug_bounds("run-console").unwrap());
+    assert!((console.origin.x - tree.right()).abs() < gpui::px(2.), "{tree:?} {console:?}");
+    let gamma = row_of("gamma", cx);
+    assert_eq!(clicks(gamma, 2., 2, cx), "gamma", "a double click takes the word");
+    assert_eq!(clicks(gamma, 2., 3, cx), "gamma delta", "a triple click takes the line");
+
+    // Scrolled right, the long line's left edge is a word further along it.
+    let long_row = row_of("w000", cx);
+    let b = cx.debug_bounds("run-console").unwrap();
+    cx.simulate_event(gpui::ScrollEvent {
+        position: b.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(-300.), gpui::px(0.))),
+        modifiers: gpui::Modifiers::none(),
+        touch_phase: gpui::TouchPhase::Moved,
+        source: Default::default(),
+    });
+    cx.run_until_parked();
+    let word = clicks(long_row, 2., 2, cx);
+    assert!(word.starts_with('w') && word != "w000", "the console scrolled sideways: {word:?}");
+
+    // Failed, the run offers its fix to the agent, and the prompt points it at the output.
+    assert!(cx.debug_bounds("run-fix-with-agent").is_none(), "not while it runs");
+    cx.update(|_, cx| {
+        runs.update(cx, |r, cx| {
+            r.engine_notification(
+                "snout/taskFinished",
+                json!({ "runId": "run-1", "outcome": "failed", "millis": 10 }),
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("run-fix-with-agent").is_some(), "a failed run offers Fix with the agent");
+    let prompt = crate::run::fix_prompt(
+        "Application",
+        &(Some(1), None),
+        Some(Path::new("/tmp/snout-code-runs/Application.log")),
+        &[],
+    );
+    assert!(prompt.contains("\"Application\" failed with exit code 1"), "{prompt}");
+    assert!(prompt.contains("/tmp/snout-code-runs/Application.log"), "{prompt}");
+    let without = crate::run::fix_prompt("App", &(None, None), None, &["second".into(), "first".into()]);
+    assert!(without.contains("first | second"), "the end of the output, in order: {without}");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 #[gpui::test]
 fn breakpoints_are_kept_and_drawn_and_the_gutter_offers_runs(cx: &mut TestAppContext) {
     let repo = demo_repo("run-breakpoints");

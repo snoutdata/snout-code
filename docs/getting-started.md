@@ -150,10 +150,11 @@ tab. See [Java](java.md) for what the engine gives you.
 SnoutCode runs each Gradle build on a JDK that suits it: the Java level its build scripts ask
 for, within what its Gradle version can run on. It looks for JDKs in these places:
 
-- the JDKs `/usr/libexec/java_home` lists
+- `JAVA_HOME`, and the JDKs `/usr/libexec/java_home` lists
 - `~/Library/Java/JavaVirtualMachines` and `/Library/Java/JavaVirtualMachines`
-- `~/.sdkman/candidates/java`
-- `~/.gradle/jdks`
+- the JDKs IntelliJ IDEA and Android Studio were given (their JDK tables), and `~/.jdks`
+- SDKMAN (`~/.sdkman/candidates/java`), asdf, mise, jenv and Homebrew
+- `~/.gradle/jdks`, the toolchains Gradle provisioned
 - `~/Library/Application Support/SnoutCode/jdks`, where SnoutCode puts the JDKs it downloads
 
 On Linux it looks in `JAVA_HOME`, the `java` on your `PATH` and `/usr/lib/jvm` instead of the
@@ -163,10 +164,13 @@ first two, and keeps its downloads in `~/.local/share/SnoutCode/jdks` (see
 and keeps its downloads in `%LOCALAPPDATA%\SnoutCode\jdks` (see
 [SnoutCode on Windows](windows.md#java-gradle-and-maven)).
 
-When none fits, a bar above the editor says so: "This project needs JDK 17. Download it?"
+When none fits, a bar above the editor says so: "This project needs JDK 17. Download it?" When
+JDKs were found but none fits, it says which and why: for example, that the build's Gradle runs
+on Java 15 at most and the JDKs found are 17 and 21.
 
 - Click **Download** to download Eclipse Temurin of that version into SnoutCode's JDK folder. The bar shows the progress. The Java engine
   starts once the download is done, as does any other build waiting for the same JDK.
+- Click **Use Another JDK…** to pick a JDK installed somewhere else, in Project Settings.
 - Click **Not now** to hide the bar. It does not offer that version again until SnoutCode
   starts again.
 

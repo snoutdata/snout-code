@@ -34,7 +34,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, Task, UniformListScrollHandle, Window,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString, Task,
+    UniformListScrollHandle, Window,
 };
 use gpui_component::input::{InputEvent, InputState};
 
@@ -52,11 +53,27 @@ pub enum Page {
     Modules,
     Dependencies,
     Facets,
+    /// A page of the project's own settings over the user's (Editor, Version Control, Gradle,
+    /// Spring, Terminal), drawn by an embedded Settings view.
+    Settings(SettingsPage),
     Sdks,
 }
 
+use crate::settings_view::Page as SettingsPage;
+
 impl Page {
-    pub const ALL: [Page; 5] = [Page::Project, Page::Modules, Page::Dependencies, Page::Facets, Page::Sdks];
+    pub const ALL: [Page; 10] = [
+        Page::Project,
+        Page::Modules,
+        Page::Dependencies,
+        Page::Facets,
+        Page::Settings(SettingsPage::Editor),
+        Page::Settings(SettingsPage::VersionControl),
+        Page::Settings(SettingsPage::Gradle),
+        Page::Settings(SettingsPage::Spring),
+        Page::Settings(SettingsPage::Terminal),
+        Page::Sdks,
+    ];
 
     /// The page's spot drawing, at its head.
     pub fn art(self) -> &'static snout_core::art::Drawing {
@@ -67,11 +84,13 @@ impl Page {
             Page::Dependencies => spots::dependencies(),
             Page::Facets => spots::facets(),
             Page::Sdks => spots::jdk(),
+            Page::Settings(page) => page.art(),
         }
     }
 
     pub fn title(self) -> &'static str {
         match self {
+            Page::Settings(page) => page.slug(),
             Page::Project => "Project",
             Page::Modules => "Modules",
             Page::Dependencies => "Dependencies",
@@ -81,13 +100,14 @@ impl Page {
     }
 
     /// Its title in the language in use (`title` names it in the code).
-    pub fn shown(self) -> &'static str {
+    pub fn shown(self) -> SharedString {
         match self {
-            Page::Project => ts!("cmd-project"),
-            Page::Modules => ts!("structure-modules-row"),
-            Page::Dependencies => ts!("newproject-dependencies"),
-            Page::Facets => ts!("structure-facets"),
-            Page::Sdks => "SDKs",
+            Page::Project => ts!("cmd-project").into(),
+            Page::Modules => ts!("structure-modules-row").into(),
+            Page::Dependencies => ts!("newproject-dependencies").into(),
+            Page::Facets => ts!("structure-facets").into(),
+            Page::Sdks => "SDKs".into(),
+            Page::Settings(page) => page.title().into(),
         }
     }
 
@@ -99,6 +119,7 @@ impl Page {
             Page::Dependencies => IconName::Network,
             Page::Facets => IconName::Blocks,
             Page::Sdks => IconName::Coffee,
+            Page::Settings(page) => page.icon(),
         }
     }
 
@@ -106,12 +127,14 @@ impl Page {
     pub fn group(self) -> &'static str {
         match self {
             Page::Sdks => ts!("structure-platform-settings"),
-            _ => ts!("structure-project-settings"),
+            Page::Settings(_) => ts!("structure-group-settings"),
+            _ => ts!("structure-group-structure"),
         }
     }
 
     fn keywords(self) -> &'static str {
         match self {
+            Page::Settings(page) => page.keywords(),
             Page::Project => "name folder jdk java language level gradle version jvm wrapper",
             Page::Modules => {
                 "source sets roots resources tests generated output folders target compatibility buildsrc included composite"
@@ -167,6 +190,13 @@ pub enum ModuleSel {
     SourceSet(String, String),
 }
 
+/// The Download JDK dialog: the Java version and the vendor picked.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct JdkPicker {
+    pub major: Option<u32>,
+    pub vendor: Option<String>,
+}
+
 /// A JDK added by hand, as read from its folder (`None`: no JDK is there now).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Added {
@@ -176,6 +206,8 @@ pub struct Added {
 
 pub struct ProjectStructureView {
     pub(crate) model: Entity<Model>,
+    /// The project's own settings pages (Editor, Version Control, Gradle, Spring, Terminal).
+    pub settings: Entity<crate::settings_view::SettingsView>,
     pub page: Page,
     pub search: Entity<InputState>,
     pub load: Load,
@@ -207,6 +239,10 @@ pub struct ProjectStructureView {
     // The SDKs page.
     pub selected_jdk: Option<PathBuf>,
     pub download: Option<(u32, DownloadProgress)>,
+    /// The Download JDK dialog, while it shows.
+    pub picker: Option<JdkPicker>,
+    /// The JDKs one can download, once looked up (an error: why they could not be).
+    pub jdk_catalog: Option<Result<Vec<java::JdkPackage>, String>>,
     /// A line saying what just happened, or what went wrong (true).
     pub note: Option<(String, bool)>,
     /// The Spring modules' configuration files.
@@ -319,8 +355,11 @@ impl ProjectStructureView {
             subscriptions.push(cx.observe(&spring, |_, _, cx| cx.notify()));
         }
         subscriptions.push(cx.observe_global::<crate::claude_ide::IdeStatus>(|_, cx| cx.notify()));
+        let settings = cx.new(|cx| crate::settings_view::SettingsView::for_project(model.clone(), window, cx));
+        subscriptions.push(cx.observe(&settings, |_, _, cx| cx.notify()));
         let mut this = Self {
             model,
+            settings,
             page: Page::Project,
             search,
             load: Load::Loading,
@@ -341,6 +380,8 @@ impl ProjectStructureView {
             conflicts_only: false,
             dep_scroll: UniformListScrollHandle::new(),
             selected_jdk: None,
+            picker: None,
+            jdk_catalog: None,
             download: None,
             note: None,
             config_files: Vec::new(),
@@ -476,15 +517,27 @@ impl ProjectStructureView {
     /// The settings differ from those in use.
     pub fn changed(&self, cx: &App) -> bool {
         let m = self.model.read(cx);
-        self.project != m.project_settings || self.added != added_jdks(&m.user_settings(), self.host_name.as_deref())
+        self.edited(cx) != m.project_settings || self.added != added_jdks(&m.user_settings(), self.host_name.as_deref())
+    }
+
+    /// The project's settings as the window has them: its pages' values, with the JDK of the
+    /// Project page.
+    pub fn edited(&self, cx: &App) -> ProjectSettings {
+        let mut project = self.settings.read(cx).project.clone();
+        project.jdk = self.project.jdk.clone();
+        project
     }
 
     /// Put the changes in place (and close when `close` says so).
     pub fn apply(&mut self, close: bool, cx: &mut Context<Self>) {
+        let edited = self.edited(cx);
         let m = self.model.read(cx);
         let mut user = m.user_settings();
         set_added_jdks(&mut user, self.host_name.as_deref(), self.added.clone());
-        let project = (self.project != m.project_settings).then(|| self.project.clone());
+        let project = (edited != m.project_settings).then_some(edited);
+        if let Some(project) = &project {
+            self.project = project.clone();
+        }
         cx.emit(StructureEvent::Apply { user: Box::new(user), project, close });
     }
 
@@ -561,9 +614,70 @@ impl ProjectStructureView {
         cx.notify();
     }
 
+    /// Show the Download JDK dialog, on Java `major` when given, and look up what can be
+    /// downloaded (once per window).
+    pub fn open_jdk_picker(&mut self, major: Option<u32>, cx: &mut Context<Self>) {
+        self.picker = Some(JdkPicker { major, vendor: None });
+        if !matches!(self.jdk_catalog, Some(Ok(_))) {
+            self.look_up_catalog(cx);
+        }
+        cx.notify();
+    }
+
+    /// Ask foojay for the JDKs this machine can download, off the UI thread.
+    pub fn look_up_catalog(&mut self, cx: &mut Context<Self>) {
+        self.jdk_catalog = None;
+        let host = crate::host::host(cx);
+        let look = cx.background_executor().spawn(async move { java::jdk_catalog(&*host) });
+        cx.spawn(async move |this, cx| {
+            let found = look.await.map_err(|e| format!("{e:#}"));
+            let _ = this.update(cx, |this, cx| {
+                this.jdk_catalog = Some(found);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The dialog's choice: its version (else the newest long-term support one), and its vendor
+    /// for that version (else the first that has it).
+    pub fn picked(&self) -> Option<java::JdkPackage> {
+        let picker = self.picker.as_ref()?;
+        let all = self.jdk_catalog.as_ref()?.as_ref().ok()?;
+        let major = picker
+            .major
+            .filter(|m| all.iter().any(|p| p.major == *m))
+            .or_else(|| all.iter().find(|p| p.lts).map(|p| p.major))?;
+        let of = all.iter().filter(|p| p.major == major);
+        of.clone().find(|p| Some(&p.vendor) == picker.vendor.as_ref()).or_else(|| of.clone().next()).cloned()
+    }
+
+    /// Download what the dialog picked, and close it.
+    pub fn download_picked(&mut self, cx: &mut Context<Self>) {
+        let Some(package) = self.picked() else { return };
+        self.picker = None;
+        let major = package.major;
+        self.start_download(
+            major,
+            move |host, dir, progress| java::download_package(host, &package, dir, progress),
+            cx,
+        );
+    }
+
     /// Download JDK `major` (Eclipse Temurin) where SnoutCode keeps the JDKs it downloads, as
     /// the bar offering a missing JDK does.
     pub fn download_jdk(&mut self, major: u32, cx: &mut Context<Self>) {
+        self.start_download(major, move |host, dir, progress| java::download_temurin(host, major, dir, progress), cx);
+    }
+
+    /// Run `fetch` (a download of JDK `major` into SnoutCode's JDK folder) off the UI thread,
+    /// showing its progress, then list the JDK and pick it.
+    fn start_download(
+        &mut self,
+        major: u32,
+        fetch: impl FnOnce(&dyn snout_host::Host, &Path, &DownloadProgress) -> anyhow::Result<Jdk> + Send + 'static,
+        cx: &mut Context<Self>,
+    ) {
         if self.download.is_some() {
             return;
         }
@@ -572,7 +686,7 @@ impl ProjectStructureView {
         self.note = None;
         let host = crate::host::host(cx);
         let dir = java::downloads_dir(host.info());
-        let job = cx.background_executor().spawn(async move { java::download_temurin(&*host, major, &dir, &progress) });
+        let job = cx.background_executor().spawn(async move { fetch(&*host, &dir, &progress) });
         cx.spawn(async move |this, cx| {
             let ticker = cx.spawn({
                 let this = this.clone();
@@ -662,8 +776,14 @@ impl ProjectStructureView {
         cx.emit(StructureEvent::Open(Place { file, line: None }));
     }
 
-    /// Open the Settings sheet on `page` (the changes put in place first).
+    /// Show the settings page `page`: here when the project may set it, else in the Settings
+    /// sheet (the changes put in place first).
     pub fn open_settings(&mut self, page: crate::settings_view::Page, cx: &mut Context<Self>) {
+        if page.has_project_rows() {
+            self.page = Page::Settings(page);
+            cx.notify();
+            return;
+        }
         if self.changed(cx) {
             self.apply(false, cx);
         }

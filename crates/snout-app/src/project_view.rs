@@ -905,8 +905,23 @@ impl ProjectView {
                     }
                 }
             }))
-            .context_menu(move |menu, _, _| {
+            .context_menu(move |menu, window, cx| {
                 let Some(path) = menu_path.clone() else { return menu };
+                // On the project itself: its settings, when it is a project (not a plain folder).
+                let settings = model.read(cx).project_root().as_deref() == Some(path.as_path())
+                    && window.is_action_available(&crate::menus::ProjectStructure, cx);
+                let menu = if settings {
+                    menu.item(
+                        PopupMenuItem::new(ts!("cmd-project-structure"))
+                            .icon(crate::components::menu_icon(crate::components::IconName::FolderCog))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(crate::menus::ProjectStructure), cx)
+                            }),
+                    )
+                    .separator()
+                } else {
+                    menu
+                };
                 let send = |a: Action| {
                     let model = model.clone();
                     move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {

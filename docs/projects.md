@@ -59,6 +59,10 @@ Click **Clone Repository…** on the Welcome page. Enter the **Repository URL**,
 **Into folder** the folder to clone it in; the dialog shows where it lands. **Clone** copies the repository and opens
 it. File ▸ Clone from GitHub… opens the same dialog.
 
+**Into folder** starts at the folder of the open project. Under it, **Recent** lists the folders
+your recent projects are in, the latest first: click one to clone there. **Browse…** picks any
+other folder.
+
 ## Close a project
 
 Choose File ▸ Close Project, or **Close Project** in the project menu of the title bar. If a

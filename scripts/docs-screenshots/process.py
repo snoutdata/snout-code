@@ -82,7 +82,7 @@ SPEC = {
     "settings-and-keymap-terminal": ("settings-terminal-light", (580, 240, 2300, 1560)),
     "settings-and-keymap-terminal-shell": ("settings-terminal-shell-light", (580, 240, 2300, 1560)),
     "settings-and-keymap-agents": ("settings-agents-light", (580, 240, 2300, 1560)),
-    "settings-and-keymap-project": ("settings-project-light", (580, 240, 2300, 1560)),
+    "settings-and-keymap-project": ("settings-project-light", (420, 220, 2460, 1580)),
     "settings-and-keymap-overridden": ("settings-overridden-light", (580, 240, 2300, 1560)),
     "tool-windows-empty": ("tool-windows-empty-light", None),
     "settings-resized": ("settings-resized-light", None),

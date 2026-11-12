@@ -85,8 +85,8 @@ When no installed JDK fits, SnoutCode offers the one the build asks for, or else
 long term support release its Gradle runs on, not newer than 21. For example, a build on
 Gradle 8.1 gets Java 17.
 
-To choose the JDK of a build yourself, open Settings ▸ Build Tools ▸ Gradle and pick it under
-**JDK per project** (see [Settings](settings-and-keymap.md#build-tools--gradle)). Upgrading the
+To choose the JDK of a project yourself, open Project Settings (⌘;) and pick it on its
+**Project** page (see [Project Settings](project-settings.md#project)). Upgrading the
 build's Gradle wrapper also lets it run on a newer JDK.
 
 ## A build did not sync

@@ -11,13 +11,13 @@ Any of these opens the Settings sheet:
 - **Settings…** in the command palette (⇧⌘P)
 
 The pages are listed on the left. Type in **Search settings** to find a page by what it holds,
-for example "jdk" or "font". Each page opens with a drawing of its subject and a line saying
+for example "daemon" or "font". Each page opens with a drawing of its subject and a line saying
 what it is for. The pages with only a few settings show what they change (the Editor and
 Terminal pages have a live preview) or a few tips under **Good to know**.
 
 Drag the sheet's edges or corners to make it bigger or smaller. The page tree keeps its width
 and the page takes the rest. SnoutCode remembers the size (`dialog_sizes` in your settings) and
-keeps the sheet inside the window. Project Structure and New Project resize the same way.
+keeps the sheet inside the window. Project Settings and New Project resize the same way.
 
 **Tools ▸ Tool Settings** opens the Keymap, Terminal, Agents and Gradle pages directly.
 
@@ -29,71 +29,19 @@ The sheet edits a copy of your settings:
 
 ## Your settings and the project's
 
-The switch at the top right of each page picks whose settings it shows:
+Settings holds your settings, the same in every project. A project can set some of them for
+itself (its tab size, its fetch interval, its JDK, its Spring profiles, its terminal shell):
+those are in [Project Settings](project-settings.md#settings-for-this-project) (⌘;), kept in
+the project's `.snout/settings.json`.
 
-- **User**: your settings, for every project. This is where the sheet opens.
-- **Project**: the open project's own settings, kept in `.snout/settings.json` in the
-  project's folder. A value set there overrides yours, for that project only. Commit the file
-  and everyone who opens the project in SnoutCode gets the same values.
+Here, a setting the open project sets for itself says **Overridden by this project**. You can
+still change your value: it holds in the projects that do not set it.
 
-![The Editor page in the Project scope](images/settings-and-keymap-project.png)
-
-*The shop sets its own tab size and soft wrap; whitespace and parameter hints are yours.*
-
-In the **Project** scope, each setting a project can set says where its value comes from:
-
-- **Set for this project**: the project's file sets it. The round arrow beside it resets it to
-  your setting (the file no longer sets it).
-- **Your setting**: the project leaves it to you. Change it here to set it for the project.
-
-In the **User** scope, a setting the open project sets for itself says **Overridden by this
-project**. You can still change your value: it holds in the projects that do not set it.
-
-![The Editor page in the User scope](images/settings-and-keymap-overridden.png)
+![The Editor page with the project's tab size](images/settings-and-keymap-overridden.png)
 
 *Your tab size is 4, but in the shop it is 2.*
 
-A project can set these, by their names in the file:
-
-| Setting | In the file | Values |
-| --- | --- | --- |
-| Editor ▸ Tab size | `tab_size` | 1 to 8 |
-| Editor ▸ Soft wrap long lines | `soft_wrap` | `true` or `false` |
-| Editor ▸ Show whitespace | `show_whitespace` | `true` or `false` |
-| Editor ▸ Show parameter names of literal arguments | `param_hints` | `true` or `false` |
-| Editor ▸ Show hover | `show_hover` | `"after_delay"` or `"while_command_held"` |
-| Editor ▸ Hover delay | `hover_delay_ms` | 0 to 3000 |
-| Version Control ▸ Fetch every | `fetch_minutes` | 5 to 120 |
-| Gradle ▸ JDK, every build | `jdk` | the JDK's home folder |
-| Gradle ▸ Stop idle daemons after | `daemon_idle_minutes` | 1 to 240 |
-| Spring ▸ Active profiles | `spring_profiles` | `"any"`, `"config"`, or a list of names |
-| Terminal ▸ Shell ▸ Program | `terminal_shell` | a program; `""` is the login shell |
-| Terminal ▸ Shell ▸ Arguments | `terminal_shell_args` | a list, such as `["-l"]` |
-| Terminal ▸ Shell ▸ Environment | `terminal_env` | `{ "NAME": "value" }`, in place of yours |
-
-The other pages (Appearance, Keymap, Agents), and the rest of the Terminal page, hold
-settings that are yours alone; in the **Project** scope they say so. Run configurations are kept per project already: see
-[Run and debug](run-and-debug.md).
-
-A project's file looks like this:
-
-```json
-{
-  "tab_size": 2,
-  "soft_wrap": true,
-  "jdk": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
-  "spring_profiles": ["dev"]
-}
-```
-
-SnoutCode reads the file again whenever it changes, within a second, whoever changed it: you
-in an editor, a `git pull`, a teammate's commit. When it cannot be read (it is not JSON, or a
-value has the wrong type), SnoutCode keeps the values it read last, says what is wrong in the
-status bar and over the **Project** scope's pages, and reads it again once you fix it. Keys
-SnoutCode does not know are kept when it writes the file.
-
-On a project opened over [Remote SSH](remote-ssh.md), the file is on the remote machine, in
-the project's folder there, and SnoutCode reads and writes it there.
+Run configurations are kept per project already: see [Run and debug](run-and-debug.md).
 
 ## Appearance
 
@@ -219,22 +167,8 @@ hints, and a long line wrapped or cut at the edge.
 
 ## Build Tools ▸ Gradle
 
-**JDK per project** (User scope)
-
-Each Gradle build of the open project has a row. Pick the JDK its Gradle runs on, or
-**Automatic (the build's Java level)** to let SnoutCode choose. SnoutCode remembers the JDK it
-chose for a build, so that JDK shows here once the build has run. The list holds the JDKs
-found on this Mac (see [Getting started](getting-started.md#java-for-your-builds)).
-
-In the **Project** scope, one row, **Every build**, sets the JDK of all the project's builds
-(`jdk` in its file); **Each build's own (your settings)** leaves the choice to the rows above.
-
-The chosen JDK is used the next time the Java engine starts for the project: when you open
-the project again, or start SnoutCode again. A JDK that cannot run the build's Gradle version,
-or is older than the Java level the build asks for, is passed over for one that fits.
-
-File ▸ Project Structure… (⌘;) sets the same project JDK on its Project page, and adds,
-removes and downloads JDKs on its SDKs page (see [Project Structure](project-structure.md)).
+The JDK a project's builds run on is the project's: see [Project Settings](project-settings.md#project),
+and [The JDK each build runs on](gradle.md#the-jdk-each-build-runs-on).
 
 **Gradle daemons**
 
@@ -247,12 +181,11 @@ removes and downloads JDKs on its SDKs page (see [Project Structure](project-str
 
 **Active profiles**
 
-- **Evaluate beans under**: the profiles the open project's Spring model is evaluated under.
-  **Any (no profile chosen)**, **Those the application files make active**, or **These
-  profiles**, with their names in **Profiles**, separated by commas. It is the same setting
-  as the Spring window's **Active profiles** switch: see [Spring](spring.md#profiles). Set it
-  in the **Project** scope to share it in the project's file; then the switch in the Spring
-  window changes the file too.
+Each project chooses the profiles its Spring model is evaluated under, on the Spring page of
+[Project Settings](project-settings.md#settings-for-this-project): **Any (no profile
+chosen)**, **Those the application files make active**, or **These profiles**, with their names
+in **Profiles**, separated by commas. It is the same setting as the Spring window's **Active
+profiles** switch: see [Spring](spring.md#profiles). Here, **Open Project Settings** goes there.
 
 ## Tools ▸ Terminal
 

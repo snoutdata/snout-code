@@ -91,25 +91,26 @@ A build that checks the Java it runs on and asks for a newer one ("This build re
 
 SnoutCode remembers the JDK it picked for the build.
 
-SnoutCode finds the JDKs macOS knows of (those in `/Library/Java/JavaVirtualMachines` and `~/Library/Java/JavaVirtualMachines`), those of SDKMAN, Gradle's provisioned toolchains, and the JDKs SnoutCode downloaded.
+SnoutCode finds the JDKs macOS knows of (`JAVA_HOME`, `/Library/Java/JavaVirtualMachines` and `~/Library/Java/JavaVirtualMachines`), the JDKs IntelliJ IDEA and Android Studio use, those of SDKMAN, asdf, mise, jenv and Homebrew, Gradle's provisioned toolchains, and the JDKs SnoutCode downloaded. See [Getting started](getting-started.md#java-for-your-builds) for the list.
 
 ### When no installed JDK fits
 
 A bar above the editor says, for example, **This project needs JDK 17. Download it?**
 
 - Click **Download** to download Eclipse Temurin of that version into `~/Library/Application Support/SnoutCode/jdks`. The bar shows the progress. When it is done, the builds waiting for that JDK start on it.
+- Click **Use Another JDK…** to pick a JDK installed elsewhere, in Project Settings.
 - Click **Not now** to leave it. Runs, tests and the debugger then say that the build needs a JDK that is not installed.
 
 If the download fails, the bar says why and offers **Try again**.
 
 ### Choose the JDK yourself
 
-1. Open Settings (⌘,) and go to **Gradle**, under Build Tools.
-2. Under **JDK per project**, pick a JDK for each build of the open project, or **Automatic (the build's Java level)**.
+1. Open Project Settings (⌘;, or File ▸ Project Settings…).
+2. On the **Project** page, pick the **JDK**, or **Each build's own (for its Java level)** to let SnoutCode choose for each build.
 
 The Java engine restarts on the chosen JDK the next time it starts. A JDK that the build's Gradle version cannot run on is not used.
 
-[Project Structure](project-structure.md) (⌘;) sets the JDK of every build of the project, adds a JDK from a folder SnoutCode did not find, and shows each module's source sets, Java levels and dependencies, with the versions that lost a conflict and the line of the build file that declares each.
+[Project Settings](project-settings.md) also adds a JDK from a folder SnoutCode did not find, downloads one from the vendor of your choice, and shows each module's source sets, Java levels and dependencies, with the versions that lost a conflict and the line of the build file that declares each.
 
 ## Gradle daemons
 

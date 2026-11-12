@@ -109,7 +109,7 @@ pub fn ago(secs: u64, now: u64) -> String {
 }
 
 /// `path` with the home folder (`home`) as `~`.
-fn tilde(path: &Path, home: &Path) -> String {
+pub(crate) fn tilde(path: &Path, home: &Path) -> String {
     if path.starts_with(home) && !home.as_os_str().is_empty() {
         format!("~/{}", path.strip_prefix(home).unwrap_or(path).display())
     } else {

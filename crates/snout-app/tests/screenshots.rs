@@ -196,6 +196,12 @@ mod shots {
         Connecting,
         /// The bar offering a JDK the project needs.
         JdkBar,
+        /// The bar offering JDK 11 when the JDKs installed are too new for the build's Gradle.
+        JdkBarTooNew,
+        /// Project Settings on a page; with the Download JDK dialog open (on a made-up catalogue).
+        ProjectSettings(snout_app::structure::Page, bool),
+        /// A run that failed: its output, and Fix with the agent.
+        RunFailed,
         NodeBar,
         PlaywrightBar,
         TestsWindow,
@@ -1642,9 +1648,99 @@ sleep 30
                             resync: false,
                             progress: None,
                             error: None,
+                            installed: Vec::new(),
+                            gradle_max: None,
                         });
                         cx.notify();
                     });
+                })
+                .unwrap();
+            }
+            Some(Select::JdkBarTooNew) => {
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let hub = ws.read(cx).hub.clone();
+                    hub.update(cx, |h, cx| {
+                        h.jdk_prompt = Some(snout_app::lang::hub::JdkPrompt {
+                            root: repo.clone(),
+                            major: 11,
+                            resync: false,
+                            progress: None,
+                            error: None,
+                            installed: vec![17, 21],
+                            gradle_max: Some(15),
+                        });
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            }
+            Some(Select::ProjectSettings(page, picker)) => {
+                // A project (a Node build), so Project Settings is there.
+                std::fs::write(repo.join("package.json"), "{ \"name\": \"demo\" }\n").unwrap();
+                cx.update_window(handle.into(), |_, _, cx| ws.update(cx, |ws, cx| ws.forget_project_kind(cx))).unwrap();
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.open_project_settings_at(page, window, cx));
+                })
+                .unwrap();
+                cx.run_until_parked();
+                if picker {
+                    use snout_app::lang::java::JdkPackage;
+                    let pkg = |vendor: &str, major: u32, version: &str, lts: bool| JdkPackage {
+                        vendor: vendor.into(),
+                        major,
+                        version: version.into(),
+                        id: format!("{vendor}-{major}"),
+                        file: String::new(),
+                        lts,
+                    };
+                    cx.update_window(handle.into(), |_, _, cx| {
+                        let view = ws.read(cx).project_structure.clone().expect("Project Settings is up");
+                        view.update(cx, |v, cx| {
+                            v.jdk_catalog = Some(Ok(vec![
+                                pkg("temurin", 25, "25.0.1+8", true),
+                                pkg("corretto", 25, "25.0.1.8.1", true),
+                                pkg("zulu", 25, "25.0.1+8", true),
+                                pkg("temurin", 21, "21.0.9+10", true),
+                                pkg("temurin", 17, "17.0.17+10", true),
+                                pkg("temurin", 11, "11.0.29+7", true),
+                            ]));
+                            v.picker = Some(Default::default());
+                            cx.notify();
+                        });
+                    })
+                    .unwrap();
+                }
+            }
+            Some(Select::RunFailed) => {
+                use serde_json::json;
+                let runs = cx.update(|cx| ws.read(cx).runs.clone());
+                let launch = snout_app::run::Launch::Task { build: None, task: "bootRun".into() };
+                cx.update(|cx| runs.update(cx, |r, cx| r.adopt(launch, "f1", cx)));
+                let long = "org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'sqsSenderService': Unsatisfied dependency expressed through field 'amazonSQS': No qualifying bean of type 'com.amazonaws.services.sqs.AmazonSQS' available";
+                for line in [
+                    "Starting com.solarpanda.bamboo.Application",
+                    "INFO  o.s.b.w.e.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)",
+                    "WARN  ConfigServletWebServerApplicationContext : Exception encountered during context initialization",
+                    "",
+                    long,
+                    "\tat org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:713)",
+                ] {
+                    note(
+                        &runs,
+                        "snout/taskOutput",
+                        json!({ "runId": "f1", "stream": "stdout", "line": line }),
+                        &mut cx,
+                    );
+                }
+                note(
+                    &runs,
+                    "snout/taskFinished",
+                    json!({ "runId": "f1", "outcome": "failed", "millis": 3700 }),
+                    &mut cx,
+                );
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| ws.show_tool(snout_app::workspace::Tool::Build, window, cx));
                 })
                 .unwrap();
             }
@@ -3500,6 +3596,30 @@ sleep 30
             );
             shot(&format!("ui-remote-connecting-{mode}"), theme, Activity::Project, Some(Select::Connecting));
             shot(&format!("ui-jdk-bar-{mode}"), theme, Activity::Project, Some(Select::JdkBar));
+            shot(&format!("ui-jdk-bar-too-new-{mode}"), theme, Activity::Project, Some(Select::JdkBarTooNew));
+            {
+                use snout_app::settings_view::Page as P;
+                use snout_app::structure::Page as S;
+                shot(
+                    &format!("ui-project-settings-editor-{mode}"),
+                    theme,
+                    Activity::Project,
+                    Some(Select::ProjectSettings(S::Settings(P::Editor), false)),
+                );
+                shot(
+                    &format!("ui-project-settings-spring-{mode}"),
+                    theme,
+                    Activity::Project,
+                    Some(Select::ProjectSettings(S::Settings(P::Spring), false)),
+                );
+                shot(
+                    &format!("ui-project-settings-sdks-picker-{mode}"),
+                    theme,
+                    Activity::Project,
+                    Some(Select::ProjectSettings(S::Sdks, true)),
+                );
+            }
+            shot(&format!("ui-run-failed-{mode}"), theme, Activity::Project, Some(Select::RunFailed));
             shot(&format!("ui-node-bar-{mode}"), theme, Activity::Project, Some(Select::NodeBar));
             shot(&format!("ui-playwright-bar-{mode}"), theme, Activity::Project, Some(Select::PlaywrightBar));
             shot(&format!("ui-tests-window-{mode}"), theme, Activity::Project, Some(Select::TestsWindow));

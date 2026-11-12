@@ -124,6 +124,10 @@ fn with_items(
             OwnedMenuItem::Separator => menu.separator(),
             OwnedMenuItem::Action { name, action, checked, disabled, .. } => {
                 let icon = crate::menu_icons::for_action(action.name());
+                // Project Settings is off with a plain folder open, as the Mac's menu has it.
+                let off = action.as_any().is::<crate::menus::ProjectStructure>()
+                    && !window.is_action_available(&**action, cx);
+                let disabled = &(*disabled || off);
                 match icon {
                     _ if *checked => {
                         menu.menu_with_check_and_disabled(name.clone(), true, action.boxed_clone(), *disabled)

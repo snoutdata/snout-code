@@ -1841,3 +1841,30 @@ fn show_history_narrows_the_journal_to_a_files_commits(cx: &mut TestAppContext) 
     cx.update(|_, cx| assert_eq!(model.read(cx).journal_log().len(), 4));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// The Clone dialog offers the folders the recent projects are in, the latest first, and
+/// Browse… to pick another; a click on one puts it in Into folder.
+#[gpui::test]
+fn the_clone_dialog_offers_the_recent_folders_and_browse(cx: &mut TestAppContext) {
+    let a = demo_repo("clone-recent-a");
+    let mut settings = with_repo(&a);
+    settings.repos = vec![PathBuf::from("/work/old/one"), PathBuf::from("/work/clients/two"), a.clone()];
+    settings.recent = None;
+    let folders = crate::dialogs::clone_folders(&settings);
+    assert_eq!(
+        folders,
+        [a.parent().unwrap().to_owned(), PathBuf::from("/work/clients"), PathBuf::from("/work/old")],
+        "the latest first, each once"
+    );
+    let (model, _ws, cx) = open(cx, settings);
+    act(&model, cx, Action::ShowClone);
+    assert!(cx.debug_bounds("clone-browse").is_some(), "Browse… is offered");
+    // Into folder starts at the open project's folder, so that one is not offered again.
+    let chip = cx.debug_bounds("clone-recent-0").expect("the recent folders are offered").center();
+    cx.simulate_click(chip, gpui::Modifiers::none());
+    cx.run_until_parked();
+    cx.simulate_input("https://example.com/team/app.git");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("clone-recent-0").is_some(), "the folder the dialog started at is offered now");
+    let _ = std::fs::remove_dir_all(a);
+}

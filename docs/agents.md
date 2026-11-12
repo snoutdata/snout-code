@@ -128,6 +128,10 @@ SnoutCode puts the file, the problem's lines and what is wrong in the agent's pr
 
 Nothing is sent until you press ↩, so you can add to it first. The lines light up in the agent's colour for a moment, and a note by the console says what went: **Asked Claude to fix OrderService.java line 27**.
 
+### A run that failed
+
+When a run fails, the Run window offers **Fix with Claude** beside **Failed after …**, and in the console's right-click menu. SnoutCode saves the run's whole output to a file on the machine the project is on and sends the agent a request to read it, find the cause in the project and fix it, telling you what only you can do, such as starting a service the run needs. This one is sent at once, and a note by the console says **Asked Claude to fix Application**. See [Run and debug](run-and-debug.md).
+
 ## Watch the agent write
 
 With **Follow** on (the default), the editor follows the files the agent changes:

@@ -38,6 +38,11 @@ impl Workspace {
             RunsEvent::Ended(id) => self.tool_ended(*id, window, cx),
             RunsEvent::Said(id, v) => self.tool_said(*id, v, window, cx),
             RunsEvent::ShowTests => self.show_tool(crate::workspace::Tool::Tests, window, cx),
+            RunsEvent::AskAgent { root, title, prompt } => {
+                let note =
+                    |name: &str| t!("agents-asked-to-fix-the-run", name = name.to_string(), title = title.clone());
+                crate::claude_ide::bridge::ask_agent(self, root, prompt, note, window, cx)
+            }
         }
     }
 

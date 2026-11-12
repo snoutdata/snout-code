@@ -109,11 +109,17 @@ The console shows:
 
 File places in the output are links. Click a stack trace line such as `at demo.App.main(App.java:12)`, or a file path followed by a line number as compilers print it, to open that line.
 
+Drag over the output to select part of it, double-click to select a word, or triple-click to select a line, then press ⌘C to copy it. Long lines scroll sideways: swipe with two fingers on the trackpad, or hold Shift while turning the mouse wheel.
+
+When a run fails, **Fix with Claude** (or your console agent's name) appears beside **Failed after …**. It saves the run's whole output to a file and asks the agent in the console to read it, find the cause in the project and fix it. If the fix needs something only you can do, such as starting a service or giving a credential, the agent says what. See [Agents](agents.md).
+
 Right-click the console, in Run, Debug or Build, for:
 
+- **Copy**, which copies what is selected.
 - **Clear All**, which empties the console. What the program prints next still shows.
 - **Copy All**, which copies the whole console as plain text.
 - **Save Output to File…**, which saves the console as plain text to a file you name, `<run name>.log` by default, in the project's folder.
+- **Fix with Claude**, on a run that failed, as above.
 
 A test's output, shown beside the test results, offers **Copy All**.
 

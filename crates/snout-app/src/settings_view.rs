@@ -21,7 +21,6 @@ use gpui_component::scroll::ScrollableElement as _;
 
 use crate::components::IconName;
 use crate::glyphs::{Icon, icon};
-use crate::lang::java::Jdk;
 use crate::look::{self, Trigger};
 use crate::model::Model;
 use crate::project_settings::{self as ps, Key, ProjectSettings};
@@ -155,7 +154,7 @@ impl Page {
     }
 
     /// Words the search finds the page by, besides its title.
-    fn keywords(self) -> &'static str {
+    pub fn keywords(self) -> &'static str {
         match self {
             Page::Appearance => {
                 "theme colors studio vivid deep classic dark light system font size interface quit quitting confirm update updates version"
@@ -163,7 +162,7 @@ impl Page {
             Page::Keymap => "shortcuts keys bindings",
             Page::Editor => "tab size indent soft wrap whitespace font navigation click declaration modifier",
             Page::VersionControl => "git fetch interval background blame annotate annotations author hints line",
-            Page::Gradle => "build tools jdk java daemon idle timeout",
+            Page::Gradle => "build tools daemon idle timeout",
             Page::Spring => "frameworks boot profiles active beans",
             Page::Terminal => {
                 "tools engine ghostty built-in builtin shell console emulator vt font cursor blink scrollback \
@@ -197,6 +196,8 @@ pub enum SettingsEvent {
     },
     /// Close, and open the settings of this scope as JSON in a tab.
     OpenJson(crate::settings_json::Which),
+    /// Close, and open Project Settings on this page.
+    OpenProjectSettings(Page),
     Cancel,
 }
 
@@ -227,10 +228,8 @@ pub struct SettingsView {
     installed_terminals: Vec<crate::external_terminal::ExternalTerminal>,
     /// Where each agent was found: for which path set, and the answer once it is in.
     agents_found: std::collections::HashMap<&'static str, (Option<PathBuf>, Option<Option<PathBuf>>)>,
-    /// The JDKs on this Mac, for the Gradle page.
-    jdks: Vec<Jdk>,
-    /// The Gradle builds the Gradle page lists.
-    builds: Vec<PathBuf>,
+    /// The project's own settings, in Project Settings (else the user's, in the Settings sheet).
+    pub project_only: bool,
     /// The Keymap page's search box.
     pub key_search: Entity<InputState>,
     /// The command whose new shortcut is being pressed, and what catches the keys.
@@ -250,13 +249,21 @@ impl Focusable for SettingsView {
 }
 
 impl SettingsView {
-    pub fn new(
-        model: Entity<Model>,
-        builds: Vec<PathBuf>,
-        jdks: Vec<Jdk>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    /// The Settings sheet: the user's settings, the same in every project.
+    pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(model, false, window, cx)
+    }
+
+    /// The pages of the open project's own settings, as Project Settings shows them: each
+    /// value is the user's until the project sets its own.
+    pub fn for_project(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut this = Self::build(model, true, window, cx);
+        this.page = Page::Editor;
+        this.set_scope(Scope::Project, window, cx);
+        this
+    }
+
+    fn build(model: Entity<Model>, project_only: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let m = model.read(cx);
         let draft = m.user_settings();
         let project = m.project_settings.clone();
@@ -420,8 +427,7 @@ impl SettingsView {
             external_command,
             installed_terminals: crate::external_terminal::installed(),
             agents_found: Default::default(),
-            jdks,
-            builds,
+            project_only,
             key_search,
             recording: None,
             taken: None,
@@ -463,7 +469,7 @@ impl SettingsView {
 
     /// Show the user's settings or the project's (there is none without a project).
     pub fn set_scope(&mut self, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
-        if scope == Scope::Project && self.root.is_none() {
+        if (scope == Scope::Project && self.root.is_none()) || (scope == Scope::User && self.project_only) {
             return;
         }
         self.scope = scope;
@@ -651,55 +657,24 @@ impl SettingsView {
 }
 
 impl SettingsView {
-    /// User or Project: whose settings the sheet shows.
-    fn scope_switch(&self, cx: &mut Context<Self>) -> AnyElement {
-        let p = palette(cx);
-        let has_project = self.root.is_some();
-        let segment = |scope: Scope, id: &'static str, ico: IconName, text: &'static str, cx: &mut Context<Self>| {
-            let on = self.scope == scope;
-            let enabled = scope == Scope::User || has_project;
-            let hover = p.button_hover;
-            let ink = if on {
-                p.fg
-            } else if enabled {
-                p.fg_dim
-            } else {
-                p.fg_dim.opacity(0.5)
-            };
-            div()
-                .id(id)
-                .debug_selector(move || id.to_owned())
-                .h(px(24.))
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .rounded(px(5.))
-                .text_size(px(12.5))
-                .text_color(ink)
-                .when(on, |d| d.bg(p.card).shadow_sm().font_weight(FontWeight::MEDIUM))
-                .when(!on && enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover)))
-                .child(crate::components::icon(ico, 13., if on { p.accent } else { ink }))
-                .child(text)
-                .when(enabled, |d| d.on_click(cx.listener(move |this, _, w, cx| this.set_scope(scope, w, cx))))
-        };
-        div()
-            .flex()
-            .items_center()
-            .gap(px(2.))
-            .p(px(2.))
-            .rounded(px(7.))
-            .border_1()
-            .border_color(p.border)
-            .bg(p.ground)
-            .child(segment(Scope::User, "settings-scope-user", IconName::User, ts!("settings-user"), cx))
-            .child(segment(Scope::Project, "settings-scope-project", IconName::FolderCog, ts!("cmd-project"), cx))
-            .into_any_element()
+    /// A page of the project's own settings, as Project Settings shows it: whose settings
+    /// these are, then the page.
+    pub fn project_page(&mut self, page: Page, cx: &mut Context<Self>) -> AnyElement {
+        self.page = page;
+        let line = self.scope_line_in(false, cx);
+        let body = self.page_body(cx);
+        div().flex().flex_col().child(line.into_any_element()).child(body).into_any_element()
     }
 
     /// Under the page's title: whose settings these are and where they are kept, and the
     /// project file's error if it has one.
     fn scope_line(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.scope_line_in(true, cx)
+    }
+
+    /// [`Self::scope_line`], with the sheet's side margins (`pad`) or without (Project
+    /// Settings has its own).
+    fn scope_line_in(&self, pad: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let m = self.model.read(cx);
         let (error, file) = match self.scope {
@@ -718,7 +693,7 @@ impl SettingsView {
             _ => (IconName::User, ts!("settings-your-settings-for-every-project-a-project-can").to_owned()),
         };
         div()
-            .px(px(20.))
+            .when(pad, |d| d.px(px(20.)))
             .pb(px(8.))
             .flex()
             .flex_col()
@@ -727,12 +702,12 @@ impl SettingsView {
                 div()
                     .debug_selector(|| "settings-scope-line".into())
                     .flex()
-                    .items_center()
+                    .items_start()
                     .gap(px(6.))
                     .text_size(px(12.))
                     .text_color(p.fg_dim)
-                    .child(crate::components::icon(ico, 12., p.fg_dim))
-                    .child(text),
+                    .child(div().flex_none().pt(px(2.)).child(crate::components::icon(ico, 12., p.fg_dim)))
+                    .child(div().flex_1().min_w_0().child(text)),
             )
             .when_some(error, |d, e| {
                 d.child(
@@ -1582,139 +1557,47 @@ impl SettingsView {
                     .into_any_element()
             }
             Page::Gradle => {
-                let mut body = body;
-                if self.scope == Scope::Project {
-                    body = body.child(section("JDK", &p));
-                    let current = self.project.jdk.as_ref().map(|h| h.display().to_string()).unwrap_or_default();
-                    let mut choices = vec![(String::new(), ts!("settings-each-builds-own-your-settings").to_owned())];
-                    choices.extend(
-                        self.jdks
-                            .iter()
-                            .map(|j| (j.home.display().to_string(), format!("JDK {} ({})", j.major, j.version))),
-                    );
-                    let view = cx.entity();
-                    let mark = self.mark(Key::Jdk, cx);
-                    body = body.child(marked(
-                        row(
-                            ts!("settings-every-build"),
-                            choice(
-                                "settings-project-jdk",
-                                &current,
-                                choices,
-                                move |v, cx| {
-                                    view.update(cx, |this, cx| {
-                                        this.project.jdk = (!v.is_empty()).then(|| PathBuf::from(&v));
-                                        cx.notify();
-                                    })
-                                },
-                                &p,
-                            ),
-                            &p,
-                        ),
-                        mark,
-                    ));
-                } else {
-                    body = body.child(section(ts!("settings-jdk-per-project"), &p));
-                    if self.builds.is_empty() {
-                        body = body.child(div().text_color(p.fg_dim).child(ts!("settings-no-gradle-build-is-open")));
-                    }
-                }
-                let project_jdk = self.model.read(cx).project_settings.jdk.is_some();
-                let builds = if self.scope == Scope::User { self.builds.clone() } else { Vec::new() };
-                for (i, root) in builds.into_iter().enumerate() {
-                    let ids = ["settings-jdk-0", "settings-jdk-1", "settings-jdk-2", "settings-jdk-3"];
-                    let Some(id) = ids.get(i).copied() else { break };
-                    let current = d.project_jdks.get(&root).map(|h| h.display().to_string()).unwrap_or_default();
-                    let mut choices = vec![(String::new(), ts!("settings-automatic-the-builds-java-level").to_owned())];
-                    choices.extend(
-                        self.jdks
-                            .iter()
-                            .map(|j| (j.home.display().to_string(), format!("JDK {} ({})", j.major, j.version))),
-                    );
-                    let pick = set.clone();
-                    let key = root.clone();
-                    let overridden = project_jdk && self.root.as_ref().is_some_and(|r| root.starts_with(r));
-                    let mark = if overridden { self.mark(Key::Jdk, cx) } else { None };
-                    body = body.child(marked(
-                        row(
-                            ts!("cmd-project"),
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.))
-                                .child(div().text_color(p.fg_dim).child(Model::dir_name(&root)))
-                                .child(choice(
-                                    id,
-                                    &current,
-                                    choices,
-                                    move |v, cx| {
-                                        let key = key.clone();
-                                        pick(Box::new(move |s: &mut Settings| {
-                                            if v.is_empty() {
-                                                s.project_jdks.remove(&key);
-                                            } else {
-                                                s.project_jdks.insert(key.clone(), PathBuf::from(&v));
-                                            }
-                                        }))(cx)
-                                    },
-                                    &p,
-                                )),
-                            &p,
-                        ),
-                        mark,
-                    ));
-                }
-                if self.jdks.is_empty() {
-                    body = body.child(
-                        div()
-                            .pt(px(8.))
-                            .text_color(p.fg_dim)
-                            .child(t!("settings-no-jdk", machine = crate::platform::this_machine())),
-                    );
-                }
                 let idle_mark = self.mark(Key::DaemonIdleMinutes, cx);
                 let view = cx.entity();
-                body.child(
-                    div()
-                        .pt(px(10.))
-                        .text_size(px(12.))
-                        .text_color(p.fg_dim)
-                        .child(ts!("settings-the-java-server-restarts-on-the-chosen-jdk")),
-                )
-                .child(section(ts!("settings-gradle-daemons"), &p))
-                .child(marked(
-                    row(
-                        ts!("settings-stop-idle-daemons-after"),
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            .child(stepper(
-                                "settings-daemon-idle",
-                                d.daemon_idle_minutes.to_string(),
-                                move |by, _, cx| {
-                                    view.update(cx, |v, cx| {
-                                        v.set(cx, |s| s.daemon_idle_minutes = step_idle(s.daemon_idle_minutes, by))
-                                    })
-                                },
-                                &p,
-                            ))
-                            .child(div().text_color(p.fg_dim).child(ts!("settings-unit-minutes"))),
+                body.child(section(ts!("settings-gradle-daemons"), &p))
+                    .child(marked(
+                        row(
+                            ts!("settings-stop-idle-daemons-after"),
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(stepper(
+                                    "settings-daemon-idle",
+                                    d.daemon_idle_minutes.to_string(),
+                                    move |by, _, cx| {
+                                        view.update(cx, |v, cx| {
+                                            v.set(cx, |s| s.daemon_idle_minutes = step_idle(s.daemon_idle_minutes, by))
+                                        })
+                                    },
+                                    &p,
+                                ))
+                                .child(div().text_color(p.fg_dim).child(ts!("settings-unit-minutes"))),
+                            &p,
+                        ),
+                        idle_mark,
+                    ))
+                    .child(
+                        div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-daemons-hint")),
+                    )
+                    .child(crate::components::tips(
+                        ts!("settings-good-to-know"),
+                        &[
+                            (IconName::Hammer, ts!("settings-double-click-a-task-in-the-gradle-tool")),
+                            (IconName::Activity, ts!("settings-the-processes-window-lists-the-gradle-daemons-running")),
+                            (
+                                IconName::LayoutGrid,
+                                ts!("settings-project-structure-downloads-jdks-and-sets-the-projects"),
+                            ),
+                        ],
                         &p,
-                    ),
-                    idle_mark,
-                ))
-                .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-daemons-hint")))
-                .child(crate::components::tips(
-                    ts!("settings-good-to-know"),
-                    &[
-                        (IconName::Hammer, ts!("settings-double-click-a-task-in-the-gradle-tool")),
-                        (IconName::Activity, ts!("settings-the-processes-window-lists-the-gradle-daemons-running")),
-                        (IconName::LayoutGrid, ts!("settings-project-structure-downloads-jdks-and-sets-the-projects")),
-                    ],
-                    &p,
-                ))
-                .into_any_element()
+                    ))
+                    .into_any_element()
             }
             Page::Spring => {
                 let tips = crate::components::tips(
@@ -1726,10 +1609,32 @@ impl SettingsView {
                     ],
                     &p,
                 );
-                if self.root.is_none() {
+                if self.root.is_none() || !self.project_only {
+                    let open = self.root.is_some().then(|| {
+                        crate::components::Button::new("settings-open-project-spring", IconName::FolderCog)
+                            .debug_selector("settings-open-project-spring")
+                            .compact()
+                            .label(ts!("settings-open-project-settings"))
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::OpenProjectSettings(Page::Spring))),
+                            )
+                    });
+                    let text = if self.root.is_some() {
+                        ts!("settings-each-project-chooses-its-profiles")
+                    } else {
+                        ts!("settings-open-a-project-to-choose-its-profiles")
+                    };
                     return body
                         .child(section(ts!("settings-active-profiles"), &p))
-                        .child(div().text_color(p.fg_dim).child(ts!("settings-open-a-project-to-choose-its-profiles")))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_start()
+                                .gap(px(8.))
+                                .child(div().text_color(p.fg_dim).child(text))
+                                .children(open),
+                        )
                         .child(tips)
                         .into_any_element();
                 }
@@ -2761,7 +2666,6 @@ impl Render for SettingsView {
         let changed = self.changed(cx);
         let page = self.page_body(cx);
         let tree = self.tree(cx);
-        let scope_switch = self.scope_switch(cx);
         let scope_line = self.scope_line(cx);
         let button = |id: &'static str, ico: IconName, text: &'static str, primary: bool, enabled: bool| {
             crate::components::footer_button(id, ico, text, primary, enabled, &p)
@@ -2808,7 +2712,7 @@ impl Render for SettingsView {
                             self.page.art(),
                             self.page.title(),
                             self.page.blurb(),
-                            div().flex().flex_col().items_end().gap(px(6.)).child(scope_switch).child(
+                            div().flex().flex_col().items_end().gap(px(6.)).child(
                                 crate::components::Button::new("settings-edit-json", IconName::FileBraces)
                                     .debug_selector("settings-edit-json")
                                     .compact()
@@ -2897,7 +2801,7 @@ mod tests {
         assert!(Page::Terminal.matches("cursor"));
         assert!(Page::Terminal.matches("scrollback"));
         assert!(Page::Gradle.matches("build"));
-        assert!(Page::Gradle.matches("JDK"));
+        assert!(!Page::Gradle.matches("JDK"), "the JDK is the project's, in Project Settings");
         assert!(Page::Gradle.matches("daemon"));
         assert!(Page::Editor.matches("wrap"));
         assert!(Page::ClaudeCode.matches("tools"));

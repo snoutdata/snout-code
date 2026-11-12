@@ -445,6 +445,15 @@ impl Workspace {
         Some(symbols_of(self.hub.clone(), root))
     }
 
+    /// Use Another JDK… on the JDK bar: Project Settings on its SDKs, to add an installed JDK
+    /// or download JDK `major` from the vendor of one's choice.
+    pub fn choose_jdk(&mut self, major: u32, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_project_settings_at(crate::structure::Page::Sdks, window, cx);
+        if let Some(view) = &self.project_structure {
+            view.update(cx, |v, cx| v.open_jdk_picker(Some(major), cx));
+        }
+    }
+
     /// The bar offering a JDK when the build needs one this Mac lacks.
     pub(super) fn jdk_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let prompt = self.hub.read(cx).jdk_prompt.clone()?;
@@ -457,9 +466,20 @@ impl Workspace {
             (None, Some(error)) => {
                 t!("lang-jdk-could-not-be-downloaded", major = (prompt.major).to_string(), error = error.to_string())
             }
-            (None, None) => t!("lang-this-project-needs-jdk-download-it", major = (prompt.major).to_string()),
+            (None, None) => {
+                let major = prompt.major.to_string();
+                let list = prompt.installed.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
+                match (prompt.installed.last(), prompt.gradle_max) {
+                    (Some(newest), Some(max)) if *newest > max => {
+                        t!("lang-jdk-installed-too-new", major = major, installed = list, max = max.to_string())
+                    }
+                    (Some(_), _) => t!("lang-jdk-installed-too-old", major = major, installed = list),
+                    (None, _) => t!("lang-this-project-needs-jdk-download-it", major = major),
+                }
+            }
         };
         let busy = prompt.progress.is_some();
+        let major = prompt.major;
         let hub = self.hub.clone();
         let hub2 = self.hub.clone();
         Some(
@@ -505,6 +525,16 @@ impl Workspace {
                         look::small_button("jdk-download", crate::components::IconName::Download, label, &p)
                             .debug_selector(|| "jdk-download".into())
                             .on_click(move |_, _, cx| hub.update(cx, |h, cx| h.download_jdk(cx))),
+                    )
+                    .child(
+                        look::small_button(
+                            "jdk-choose",
+                            crate::components::IconName::FolderOpen,
+                            ts!("lang-use-another-jdk"),
+                            &p,
+                        )
+                        .debug_selector(|| "jdk-choose".into())
+                        .on_click(cx.listener(move |this, _, window, cx| this.choose_jdk(major, window, cx))),
                     )
                     .child(
                         look::small_button("jdk-dismiss", crate::components::CLOSE_ICON, ts!("lang-not-now"), &p)

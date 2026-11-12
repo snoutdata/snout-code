@@ -409,8 +409,55 @@ impl FileTree {
                 this.root_closed = !this.root_closed;
                 cx.notify();
             }))
+            .context_menu({
+                let (model, root) = (self.model.clone(), root.to_owned());
+                move |menu, window, cx| root_menu(menu, &model, &root, window, cx)
+            })
             .into_any_element()
     }
+}
+
+/// The project folder's right-click menu: Project Settings… (for a project, not a plain
+/// folder), then what the folders' menus have.
+fn root_menu(
+    menu: gpui_component::menu::PopupMenu,
+    model: &Entity<Model>,
+    root: &Path,
+    window: &mut Window,
+    cx: &mut Context<gpui_component::menu::PopupMenu>,
+) -> gpui_component::menu::PopupMenu {
+    use crate::components::{IconName, menu_icon};
+    let send = |a: Action| {
+        let model = model.clone();
+        move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {
+            model.update(cx, |m, cx| m.handle(a.clone(), cx))
+        }
+    };
+    let menu = if window.is_action_available(&crate::menus::ProjectStructure, cx) {
+        menu.item(
+            PopupMenuItem::new(ts!("cmd-project-structure"))
+                .icon(menu_icon(IconName::FolderCog))
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::ProjectStructure), cx)),
+        )
+        .separator()
+    } else {
+        menu
+    };
+    menu.item(
+        PopupMenuItem::new(crate::platform::reveal())
+            .icon(menu_icon(IconName::FolderOpen))
+            .on_click(send(Action::Reveal(root.to_owned()))),
+    )
+    .item(
+        PopupMenuItem::new(ts!("cmd-open-in-external-terminal"))
+            .icon(menu_icon(IconName::SquareTerminal))
+            .on_click(send(Action::OpenInTerminal(root.to_owned()))),
+    )
+    .item(
+        PopupMenuItem::new(ts!("projects-copy-path"))
+            .icon(menu_icon(IconName::Copy))
+            .on_click(send(Action::Copy(root.display().to_string()))),
+    )
 }
 
 impl Render for FileTree {

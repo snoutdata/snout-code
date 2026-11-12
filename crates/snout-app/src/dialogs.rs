@@ -236,6 +236,23 @@ fn sign_in_ask(m: &Model, details: &str, repo: Option<&Path>, host: Option<&str>
     Some((root, crate::claude_ide::bridge::sign_in_prompt(details, repo, host)))
 }
 
+/// The folders the Clone dialog offers, most recent first: those holding the projects opened
+/// and cloned lately, so a clone can go beside any of them.
+pub(crate) fn clone_folders(settings: &crate::settings::Settings) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for project in crate::model::recent_projects(settings).iter().chain(settings.repos.iter().rev()) {
+        if let Some(parent) = project.parent().filter(|p| !p.as_os_str().is_empty())
+            && !out.iter().any(|d| d == parent)
+        {
+            out.push(parent.to_owned());
+            if out.len() == 6 {
+                break;
+            }
+        }
+    }
+    out
+}
+
 pub struct DialogBody {
     model: Entity<Model>,
     dialog: Dialog,
@@ -364,6 +381,27 @@ impl DialogBody {
             }
             _ => None,
         }
+    }
+
+    /// Browse… in the Clone dialog: a folder picked in the system's dialog goes in Into folder.
+    fn browse_clone_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(ts!("settings-choose").into()),
+        });
+        let parent = self.parent.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await
+                && let Some(dir) = paths.into_iter().next()
+            {
+                let _ = cx.update(|window, cx| {
+                    parent.update(cx, |i, cx| i.set_value(dir.display().to_string(), window, cx));
+                });
+            }
+        })
+        .detach();
     }
 
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -972,7 +1010,69 @@ impl Render for DialogBody {
                 body.push(field_label(ts!("dialogs-repository-url"), &p).into_any_element());
                 body.push(Input::new(&self.url).into_any_element());
                 body.push(field_label(ts!("dialogs-into-folder"), &p).into_any_element());
-                body.push(Input::new(&self.parent).into_any_element());
+                let browse = (!crate::remote::is_remote(cx)).then(|| {
+                    Button::new("clone-browse", IconName::FolderOpen)
+                        .debug_selector("clone-browse")
+                        .label(ts!("settings-browse"))
+                        .on_click(cx.listener(|this, _, w, cx| this.browse_clone_folder(w, cx)))
+                });
+                body.push(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .items_center()
+                        .child(div().flex_1().min_w_0().child(Input::new(&self.parent)))
+                        .children(browse)
+                        .into_any_element(),
+                );
+                let typed = Self::value(&self.parent, cx);
+                // The recent projects are this computer's: a clone on a remote machine goes there.
+                let local = !crate::remote::is_remote(cx);
+                let recent: Vec<String> = clone_folders(&self.model.read(cx).settings)
+                    .into_iter()
+                    .filter(|_| local)
+                    .map(|d| d.display().to_string())
+                    .filter(|d| *d != typed)
+                    .collect();
+                if !recent.is_empty() {
+                    let chips = recent.into_iter().enumerate().map(|(i, dir)| {
+                        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+                        let shown = crate::welcome::tilde(Path::new(&dir), &home);
+                        let tip = SharedString::from(dir.clone());
+                        div()
+                            .id(("clone-recent", i))
+                            .max_w(px(280.))
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+                            .debug_selector(move || format!("clone-recent-{i}"))
+                            .px(px(8.))
+                            .py(px(2.))
+                            .rounded(px(5.))
+                            .border_1()
+                            .border_color(p.border)
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(p.fg).bg(p.button_hover))
+                            .child(shown)
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.parent.update(cx, |s, cx| s.set_value(dir.clone(), w, cx));
+                                cx.notify();
+                            }))
+                    });
+                    body.push(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(6.))
+                            .items_center()
+                            .child(dim(ts!("remote-recent").into()))
+                            .children(chips)
+                            .into_any_element(),
+                    );
+                }
                 if let Some(Action::Clone { dest, .. }) = self.primary(cx) {
                     body.push(
                         div()

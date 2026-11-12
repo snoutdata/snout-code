@@ -79,7 +79,7 @@ says so, with the same kind of drawing.
 | **Run Gradle Task…** (⌃⌥G) | Picks a Gradle task or a Maven goal by name and runs it. |
 | **Run Maven Goal…** | The same, with the Maven goals alone. |
 | **Build Window**, **Gradle**, **Maven** | Shows that tool window. |
-| **Project Structure…** (⌘;) | See [Project Structure](project-structure.md). |
+| **Project Settings…** (⌘;) | See [Project Settings](project-settings.md). |
 
 ## The Tools menu
 
@@ -95,7 +95,7 @@ says so, with the same kind of drawing.
 
 ## Sheets you can resize
 
-Settings, Project Structure and New Project open as sheets over the window. Drag an edge or a
+Settings, Project Settings and New Project open as sheets over the window. Drag an edge or a
 corner to resize one; the list on the left keeps its width and the page grows. Each sheet opens
 at the size you left it, kept within the window.
 

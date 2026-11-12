@@ -70,7 +70,7 @@ pub fn engine_command(
 
 /// The JDKs the app downloaded, under the user's home on `host`.
 pub fn downloaded_jdks(host: &dyn Host) -> Vec<Jdk> {
-    jdks_in(host, &downloads_dir(host.info()))
+    jdks_within(host, &downloads_dir(host.info()), 2)
 }
 
 /// SnoutCode's cache folder on `host`, where the engine keeps its builds, models and jdtls data.
@@ -203,16 +203,70 @@ pub fn major_of(version: &str) -> Option<u32> {
 
 /// The JDK homes in a folder of JDKs: each entry, or its `Contents/Home` (macOS bundles).
 pub fn jdks_in(host: &dyn Host, dir: &Path) -> Vec<Jdk> {
+    jdks_within(host, dir, 1)
+}
+
+/// [`jdks_in`], looking `depth` folders down: Gradle's toolchains, and the JDKs IntelliJ IDEA
+/// and SnoutCode unpack, keep a JDK inside its archive's own folder
+/// (`~/.gradle/jdks/eclipse_adoptium-17-aarch64-os_x.2/jdk-17.0.20.1+1/Contents/Home`).
+fn jdks_within(host: &dyn Host, dir: &Path, depth: u32) -> Vec<Jdk> {
     let Ok(entries) = host.read_dir(dir) else { return Vec::new() };
     let mut out = Vec::new();
     for e in entries {
         let p = e.path;
-        for home in [p.join("Contents/Home"), p.clone()] {
-            if let Some(jdk) = jdk_at(host, &home) {
-                out.push(jdk);
-                break;
+        match [p.join("Contents/Home"), p.clone()].iter().find_map(|h| jdk_at(host, h)) {
+            Some(jdk) => out.push(jdk),
+            None if depth > 1 && e.is_dir => out.extend(jdks_within(host, &p, depth - 1)),
+            None => {}
+        }
+    }
+    out
+}
+
+/// The JDKs IntelliJ IDEA and Android Studio know of: the homes of their JDK tables (wherever
+/// the user picked them), under the IDEs' settings folders for this host's system.
+fn jetbrains_jdks(host: &dyn Host, home: &Path) -> Vec<PathBuf> {
+    let info = host.info();
+    let bases: Vec<PathBuf> = if info.is_mac() {
+        vec![home.join("Library/Application Support/JetBrains"), home.join("Library/Application Support/Google")]
+    } else if info.is_windows() {
+        info.var("APPDATA")
+            .map(|a| vec![Path::new(a).join("JetBrains"), Path::new(a).join("Google")])
+            .unwrap_or_default()
+    } else {
+        vec![home.join(".config/JetBrains"), home.join(".config/Google")]
+    };
+    let mut out = Vec::new();
+    for base in bases {
+        let Ok(ides) = host.read_dir(&base) else { continue };
+        for ide in ides.into_iter().filter(|e| e.is_dir) {
+            let Ok(table) = host.read_to_string(&ide.path.join("options/jdk.table.xml")) else { continue };
+            for part in table.split("<homePath value=\"").skip(1) {
+                let Some(path) = part.split('"').next() else { continue };
+                let path = path.replace("$USER_HOME$", &home.to_string_lossy());
+                out.push(PathBuf::from(path));
             }
         }
+    }
+    out
+}
+
+/// The JDKs package managers keep where `jdks_in` cannot list them: Homebrew's (in a formula's
+/// `libexec`), and jenv's (links to the others, by version).
+fn packaged_jdks(host: &dyn Host, home: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for opt in ["/opt/homebrew/opt", "/usr/local/opt", "/home/linuxbrew/.linuxbrew/opt"] {
+        let Ok(entries) = host.read_dir(Path::new(opt)) else { continue };
+        for e in entries {
+            let name = e.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if name.contains("openjdk") || name.contains("temurin") || name.contains("java") {
+                out.push(e.path.join("libexec/openjdk.jdk/Contents/Home"));
+                out.push(e.path.join("libexec"));
+            }
+        }
+    }
+    if let Ok(entries) = host.read_dir(&home.join(".jenv/versions")) {
+        out.extend(entries.into_iter().filter_map(|e| host.canonicalize(&e.path).ok()));
     }
     out
 }
@@ -236,13 +290,18 @@ fn downloads_under(info: &snout_host::HostInfo, home: &Path) -> PathBuf {
 }
 
 /// Every JDK `host` has where JDKs usually are. On a Mac: what `java_home` lists, the
-/// user's and the system's JavaVirtualMachines. On Linux: `JAVA_HOME` (of the login shell),
-/// the `java` on `PATH`, and the distributions' folders (`/usr/lib/jvm`, …). On both:
-/// SDKMAN, Gradle's toolchains, and SnoutCode's own.
+/// user's and the system's JavaVirtualMachines. On Linux: the `java` on `PATH`, and the
+/// distributions' folders (`/usr/lib/jvm`, …). Everywhere: `JAVA_HOME` (of the login shell),
+/// the JDKs IntelliJ IDEA and Android Studio were given, theirs (`~/.jdks`), SDKMAN, asdf,
+/// mise, jenv, Homebrew, Gradle's toolchains, and SnoutCode's own.
 pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
-    let mut found = Vec::new();
+    let mut found: Vec<Jdk> =
+        host.info().var("JAVA_HOME").and_then(|h| jdk_at(host, Path::new(h))).into_iter().collect();
+    for h in jetbrains_jdks(host, home).into_iter().chain(packaged_jdks(host, home)) {
+        found.extend(jdk_at(host, &h));
+    }
     if !host.info().is_mac() {
-        let mut homes: Vec<PathBuf> = host.info().var("JAVA_HOME").map(PathBuf::from).into_iter().collect();
+        let mut homes: Vec<PathBuf> = Vec::new();
         if let Some(java) = snout_host::which(host, &["java"], &[])
             && let Ok(real) = host.canonicalize(&java)
             && let Some(home) = real.parent().and_then(Path::parent)
@@ -281,10 +340,13 @@ pub fn discover(host: &dyn Host, home: &Path) -> Vec<Jdk> {
     let mac_dirs = [home.join("Library/Java/JavaVirtualMachines"), PathBuf::from("/Library/Java/JavaVirtualMachines")];
     for dir in mac_dirs.into_iter().filter(|_| mac).chain([
         home.join(".sdkman/candidates/java"),
-        home.join(".gradle/jdks"),
-        downloads_under(host.info(), home),
+        home.join(".asdf/installs/java"),
+        home.join(".local/share/mise/installs/java"),
     ]) {
         found.extend(jdks_in(host, &dir));
+    }
+    for dir in [home.join(".jdks"), home.join(".gradle/jdks"), downloads_under(host.info(), home)] {
+        found.extend(jdks_within(host, &dir, 2));
     }
     let mut seen = std::collections::HashSet::new();
     found.retain(|j| seen.insert(host.canonicalize(&j.home).unwrap_or_else(|_| j.home.clone())));
@@ -493,6 +555,17 @@ pub(crate) fn fetch_file(host: &dyn Host, url: &str, out: &Path, progress: &Down
     Err(last)
 }
 
+/// The size of the file at `url`, as its server's last answer (after redirects) gives it.
+fn remote_size(host: &dyn Host, url: &str) -> Option<u64> {
+    let out = host.run(&Cmd::new("curl").args(["-sIL", "--max-time", "15"]).arg(url), None).ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split_once(':'))
+        .filter(|(k, _)| k.trim().eq_ignore_ascii_case("content-length"))
+        .filter_map(|(_, v)| v.trim().parse().ok())
+        .next_back()
+}
+
 /// The SHA-256 of `path` on `host`, in hex: read here on the machine the app runs on, else
 /// with the host's `sha256sum` or `shasum`.
 pub fn sha256_on(host: &dyn Host, path: &Path) -> anyhow::Result<String> {
@@ -545,7 +618,7 @@ pub fn upload(host: &dyn Host, from: &Path, to: &Path, progress: &DownloadProgre
 /// that cannot reach the internet gets it fetched on this Mac and copied over. Blocking;
 /// run it off the main thread.
 pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &DownloadProgress) -> anyhow::Result<Jdk> {
-    use anyhow::{Context as _, bail};
+    use anyhow::Context as _;
     let arch = if host.info().arch == "aarch64" { "aarch64" } else { "x64" };
     let os = if host.info().is_mac() { "mac" } else { host.info().os.as_str() };
     let api = format!(
@@ -563,19 +636,40 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
     let link = package.get("link").and_then(|v| v.as_str()).context("no download link")?;
     let sha = package.get("checksum").and_then(|v| v.as_str()).unwrap_or_default().to_ascii_lowercase();
     let size = package.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-    progress.total.store(size, Ordering::Relaxed);
+    install(host, &format!("temurin-{major}"), link, &sha, size, dir, progress)
+}
 
+/// Fetch the JDK archive at `link` onto `host` (its SHA-256 `sha` when known, `size` bytes),
+/// unpack it into `dir`, and return the JDK in it. `tag` names its scratch files. A remote
+/// machine fetches it itself; one that cannot reach the internet gets it fetched on this Mac
+/// and copied over. Blocking.
+fn install(
+    host: &dyn Host,
+    tag: &str,
+    link: &str,
+    sha: &str,
+    size: u64,
+    dir: &Path,
+    progress: &DownloadProgress,
+) -> anyhow::Result<Jdk> {
+    use anyhow::{Context as _, bail};
+    let remote = is_remote(host);
+    let local = snout_host::local();
+    // A vendor that says no size: its server does, so the progress can show a percentage.
+    let size = if size > 0 { size } else { remote_size(host, link).unwrap_or(0) };
+    progress.total.store(size, Ordering::Relaxed);
+    let zip = link.ends_with(".zip");
     host.create_dir_all(dir)?;
     // Windows's JDKs come as zip files, the others' as gzipped tarballs; Windows's own `tar`
     // (bsdtar) unpacks both.
-    let part = dir.join(format!(".temurin-{major}.{}.part", if link.ends_with(".zip") { "zip" } else { "tar.gz" }));
+    let part = dir.join(format!(".{tag}.{}.part", if zip { "zip" } else { "tar.gz" }));
     if let Err(e) = fetch_file(host, link, &part, progress) {
         if !remote {
             return Err(e);
         }
         // The remote machine cannot fetch it: this Mac does, and copies it over.
-        let tmp = tempfile::Builder::new().prefix("snout-temurin").tempdir()?;
-        let file = tmp.path().join("jdk.tar.gz");
+        let tmp = tempfile::Builder::new().prefix("snout-jdk").tempdir()?;
+        let file = tmp.path().join("jdk.archive");
         fetch_file(&*local, link, &file, progress)
             .with_context(|| format!("download the JDK on {}", crate::platform::this_machine()))?;
         if !sha.is_empty() && sha256_on(&*local, &file)? != sha {
@@ -583,15 +677,15 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
         }
         upload(host, &file, &part, progress).context("copy the JDK to the remote machine")?;
     }
-    progress.done.store(size, Ordering::Relaxed);
+    progress.done.store(progress.total.load(Ordering::Relaxed).max(size), Ordering::Relaxed);
     if !sha.is_empty() && sha256_on(host, &part)? != sha {
         let _ = host.remove_file(&part);
         bail!("the download is damaged (its checksum does not match)");
     }
-    let unpack = dir.join(format!(".temurin-{major}.unpack"));
+    let unpack = dir.join(format!(".{tag}.unpack"));
     let _ = host.remove_dir_all(&unpack);
     host.create_dir_all(&unpack)?;
-    let flags = if link.ends_with(".zip") { "-xf" } else { "-xzf" };
+    let flags = if zip { "-xf" } else { "-xzf" };
     let ok = host.run(&Cmd::new("tar").arg(flags).arg(&part).arg("-C").arg(&unpack), None)?.status.success();
     let _ = host.remove_file(&part);
     if !ok {
@@ -603,7 +697,147 @@ pub fn download_temurin(host: &dyn Host, major: u32, dir: &Path, progress: &Down
     let _ = host.remove_dir_all(&dest);
     host.rename(&top, &dest)?;
     let _ = host.remove_dir_all(&unpack);
-    [dest.join("Contents/Home"), dest.clone()].iter().find_map(|h| jdk_at(host, h)).context("the download holds no JDK")
+    // The JDK is the folder, its `Contents/Home`, or (Zulu's, Liberica's) a bundle inside it.
+    [dest.join("Contents/Home"), dest.clone()]
+        .iter()
+        .find_map(|h| jdk_at(host, h))
+        .or_else(|| jdks_within(host, &dest, 1).into_iter().next())
+        .context("the download holds no JDK")
+}
+
+/// The vendors the Download JDK dialog offers, by their foojay id, in the order it lists
+/// them, with the name it shows.
+pub const VENDORS: [(&str, &str); 12] = [
+    ("temurin", "Eclipse Temurin"),
+    ("corretto", "Amazon Corretto"),
+    ("zulu", "Azul Zulu"),
+    ("liberica", "BellSoft Liberica"),
+    ("graalvm_community", "GraalVM Community"),
+    ("oracle_open_jdk", "Oracle OpenJDK"),
+    ("oracle", "Oracle Java"),
+    ("microsoft", "Microsoft Build of OpenJDK"),
+    ("sap_machine", "SapMachine"),
+    ("semeru", "IBM Semeru"),
+    ("jetbrains", "JetBrains Runtime"),
+    ("dragonwell", "Alibaba Dragonwell"),
+];
+
+/// A JDK one can download: a vendor's latest build of a Java version, for this host's system.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JdkPackage {
+    /// The vendor's foojay id (`temurin`), see [`VENDORS`].
+    pub vendor: String,
+    pub major: u32,
+    /// "21.0.9+10".
+    pub version: String,
+    /// Its foojay package id, which [`download_package`] fetches.
+    pub id: String,
+    /// The archive's file name.
+    pub file: String,
+    /// Long-term support ("lts"), or not.
+    pub lts: bool,
+}
+
+impl JdkPackage {
+    /// The vendor's name as the dialog shows it.
+    pub fn vendor_name(&self) -> &str {
+        VENDORS.iter().find(|(id, _)| *id == self.vendor).map_or(self.vendor.as_str(), |(_, n)| n)
+    }
+}
+
+const FOOJAY: &str = "https://api.foojay.io/disco/v3.0";
+
+/// The JDKs one can download for `host`, from the foojay catalogue (the one IntelliJ IDEA and
+/// Gradle's toolchains use): each vendor's latest of each Java version, as a plain JDK
+/// archive (no JavaFX, no musl). Newest first, then by vendor. Blocking.
+pub fn jdk_catalog(host: &dyn Host) -> anyhow::Result<Vec<JdkPackage>> {
+    use anyhow::Context as _;
+    let info = host.info();
+    let os = if info.is_mac() {
+        "macos"
+    } else if info.is_windows() {
+        "windows"
+    } else {
+        "linux"
+    };
+    let arch = if info.arch == "aarch64" { "aarch64" } else { "x64" };
+    let archive = if info.is_windows() { "zip" } else { "tar.gz" };
+    let url = format!(
+        "{FOOJAY}/packages?os={os}&architecture={arch}&archive_type={archive}&package_type=jdk\
+         &latest=available&release_status=ga&directly_downloadable=true"
+    );
+    let answer = match fetch_text(host, &url) {
+        Ok(a) => a,
+        Err(_) if is_remote(host) => fetch_text(&*snout_host::local(), &url).context("ask foojay")?,
+        Err(e) => return Err(e.context("ask foojay")),
+    };
+    let json: serde_json::Value = serde_json::from_slice(&answer).context("read foojay's answer")?;
+    Ok(catalog_from(&json, os))
+}
+
+/// [`jdk_catalog`] from foojay's answer `json`, for the system `os` ("macos", "linux", …).
+pub fn catalog_from(json: &serde_json::Value, os: &str) -> Vec<JdkPackage> {
+    let mut out: Vec<JdkPackage> = Vec::new();
+    for p in json.get("result").and_then(|r| r.as_array()).into_iter().flatten() {
+        let text = |k: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+        let vendor = text("distribution");
+        let plain = p.get("javafx_bundled").and_then(|v| v.as_bool()) == Some(false)
+            && p.get("feature").and_then(|v| v.as_array()).is_none_or(|f| f.is_empty())
+            && (os != "linux" || text("lib_c_type") == "glibc");
+        let Some(major) = p.get("major_version").and_then(|v| v.as_u64()).map(|m| m as u32) else { continue };
+        if !plain || !VENDORS.iter().any(|(id, _)| *id == vendor) {
+            continue;
+        }
+        let package = JdkPackage {
+            vendor,
+            major,
+            version: text("java_version"),
+            id: text("id"),
+            file: text("filename"),
+            lts: text("term_of_support") == "lts",
+        };
+        // One per vendor and version: the newest build.
+        match out.iter_mut().find(|q| q.vendor == package.vendor && q.major == package.major) {
+            Some(q) if version_key(&package.version) > version_key(&q.version) => *q = package,
+            Some(_) => {}
+            None => out.push(package),
+        }
+    }
+    let rank = |v: &str| VENDORS.iter().position(|(id, _)| *id == v).unwrap_or(usize::MAX);
+    out.sort_by(|a, b| b.major.cmp(&a.major).then(rank(&a.vendor).cmp(&rank(&b.vendor))));
+    out
+}
+
+/// "21.0.9+10" as numbers, to compare builds.
+fn version_key(v: &str) -> Vec<u64> {
+    v.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse().ok()).collect()
+}
+
+/// Download the foojay package `package` into `dir` on `host`, check it and unpack it, as
+/// [`download_temurin`] does. Blocking.
+pub fn download_package(
+    host: &dyn Host,
+    package: &JdkPackage,
+    dir: &Path,
+    progress: &DownloadProgress,
+) -> anyhow::Result<Jdk> {
+    use anyhow::Context as _;
+    let url = format!("{FOOJAY}/ids/{}", package.id);
+    let answer = match fetch_text(host, &url) {
+        Ok(a) => a,
+        Err(_) if is_remote(host) => fetch_text(&*snout_host::local(), &url).context("ask foojay")?,
+        Err(e) => return Err(e.context("ask foojay")),
+    };
+    let json: serde_json::Value = serde_json::from_slice(&answer).context("read foojay's answer")?;
+    let info = json.pointer("/result/0").context("no such JDK")?;
+    let link = info.get("direct_download_uri").and_then(|v| v.as_str()).context("no download link")?;
+    let sha = match info.get("checksum_type").and_then(|v| v.as_str()) {
+        Some("sha256") => info.get("checksum").and_then(|v| v.as_str()).unwrap_or_default().to_ascii_lowercase(),
+        _ => String::new(),
+    };
+    let size = info.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+    let tag = format!("{}-{}", package.vendor, package.major);
+    install(host, &tag, link, &sha, size, dir, progress)
 }
 
 #[cfg(test)]
@@ -620,6 +854,34 @@ mod tests {
         assert_eq!(l, [11, 21]);
         assert_eq!(declared_levels("sourceCompatibility = 1.8"), [8]);
         assert!(declared_levels("version = '1.0.3'").is_empty());
+    }
+
+    #[test]
+    fn the_catalogue_keeps_one_plain_jdk_per_vendor_and_version() {
+        let pkg = |dist: &str, major: u64, version: &str, fx: bool, lts: &str| {
+            serde_json::json!({ "id": format!("{dist}-{version}"), "distribution": dist, "major_version": major,
+                "java_version": version, "javafx_bundled": fx, "feature": [], "lib_c_type": "libc",
+                "filename": "x.tar.gz", "term_of_support": lts })
+        };
+        let answer = serde_json::json!({ "result": [
+            pkg("zulu", 21, "21.0.8+9", false, "lts"),
+            pkg("zulu", 21, "21.0.9+10", false, "lts"),
+            pkg("liberica", 21, "21.0.9+11", true, "lts"),
+            pkg("temurin", 21, "21.0.9+10", false, "lts"),
+            pkg("temurin", 24, "24.0.2+12", false, "sts"),
+            pkg("trava", 11, "11.0.15+1", false, "lts"),
+        ]});
+        let got: Vec<(String, u32, String)> =
+            catalog_from(&answer, "macos").into_iter().map(|p| (p.vendor, p.major, p.version)).collect();
+        assert_eq!(
+            got,
+            [
+                ("temurin".into(), 24, "24.0.2+12".into()),
+                ("temurin".into(), 21, "21.0.9+10".into()),
+                ("zulu".into(), 21, "21.0.9+10".into()),
+            ],
+            "newest version first, Temurin first, the newest build, no JavaFX, no vendor it does not list"
+        );
     }
 
     #[test]

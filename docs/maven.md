@@ -118,9 +118,9 @@ Maven runs on the build's JDK (see [Gradle](gradle.md#the-jdk-each-build-runs-on
 
 When you save a POM, the bar above the editor offers to reload the build.
 
-## Project Structure
+## Project Settings
 
-Project Structure (⌘;) shows the Maven modules, their source sets and Java levels, and each module's resolved dependencies by scope, with the version dependency management chose and the one the POM asked for. **Edit in build file** opens the POM line that declares a dependency, the module, the plugin or the Java level, in the module's POM or the parent that sets it. See [Project Structure](project-structure.md).
+Project Settings (⌘;) shows the Maven modules, their source sets and Java levels, and each module's resolved dependencies by scope, with the version dependency management chose and the one the POM asked for. **Edit in build file** opens the POM line that declares a dependency, the module, the plugin or the Java level, in the module's POM or the parent that sets it. See [Project Settings](project-settings.md).
 
 ![The web module's modules page](images/maven-structure-modules.png)
 
