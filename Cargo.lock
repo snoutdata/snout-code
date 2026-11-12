@@ -6622,7 +6622,7 @@ dependencies = [
 
 [[package]]
 name = "snout-app"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "dekobon-tree-sitter-groovy",
@@ -6674,7 +6674,7 @@ dependencies = [
 
 [[package]]
 name = "snout-core"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "libghostty-vt",
@@ -6690,14 +6690,14 @@ dependencies = [
 
 [[package]]
 name = "snout-find"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "nucleo-matcher",
 ]
 
 [[package]]
 name = "snout-host"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "grep-matcher",
  "grep-regex",
@@ -6712,7 +6712,7 @@ dependencies = [
 
 [[package]]
 name = "snout-lang"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6725,7 +6725,7 @@ dependencies = [
 
 [[package]]
 name = "snout-remote"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "sha2 0.10.9",
  "snout-host",
@@ -6734,7 +6734,7 @@ dependencies = [
 
 [[package]]
 name = "snout-remote-proto"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -6742,7 +6742,7 @@ dependencies = [
 
 [[package]]
 name = "snout-server"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "libc",
@@ -6759,7 +6759,7 @@ dependencies = [
 
 [[package]]
 name = "snout-update"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "ed25519-dalek",
  "libc",
