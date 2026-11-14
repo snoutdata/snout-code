@@ -353,6 +353,147 @@ fn the_open_repository_folds_at_its_chevron(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(a);
 }
 
+/// Mouse clicks at `at`, `count` of them (the last a double or triple click).
+fn clicks_at(at: gpui::Point<gpui::Pixels>, count: usize, cx: &mut VisualTestContext) {
+    for n in 1..=count {
+        let m = gpui::Modifiers::none();
+        let button = gpui::MouseButton::Left;
+        cx.simulate_event(gpui::MouseDownEvent {
+            button,
+            position: at,
+            modifiers: m,
+            click_count: n,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui::MouseUpEvent { button, position: at, modifiers: m, click_count: n });
+    }
+    cx.run_until_parked();
+}
+
+/// In the Git panel's list, one click picks a repository out and a double click shows it; a
+/// cloned one joins the list and shows, and the project stays.
+#[gpui::test]
+fn a_repository_shows_on_a_double_click_and_a_clone_leaves_the_project(cx: &mut TestAppContext) {
+    let a = demo_repo("dbl-a");
+    let b = demo_repo("dbl-b");
+    let mut settings = with_repo(&a);
+    settings.repos.push(b.clone());
+    let (model, ws, cx) = open(cx, settings);
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    let row: &'static str = format!("row:repo:{}", b.display()).leak();
+    let at = cx.debug_bounds(row).expect("the other repository is listed").center();
+    clicks_at(at, 1, cx);
+    cx.update(|_, cx| assert_eq!(model.read(cx).repo_root().as_deref(), Some(a.as_path()), "one click shows nothing"));
+    clicks_at(at, 2, cx);
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.repo_root().as_deref(), Some(b.as_path()), "a double click shows it");
+        assert_eq!(m.project.as_deref(), Some(a.as_path()));
+    });
+
+    let dest = scratch_dir("dbl-clone");
+    act(&model, cx, Action::Clone { url: b.display().to_string(), dest: dest.clone() });
+    let dest = dest.canonicalize().unwrap();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert_eq!(m.project.as_deref(), Some(a.as_path()), "the clone is not opened as the project");
+        assert_eq!(m.repo_root().map(|r| r.canonicalize().unwrap()), Some(dest.clone()), "it shows in the panel");
+        assert!(m.settings.repos.iter().any(|r| r.canonicalize().ok().as_ref() == Some(&dest)), "and is listed");
+    });
+    for dir in [a, b, dest] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// The diff selects with the mouse and copies: a triple click takes a line, a double click a
+/// word, a drag the lines it crosses; side by side, only the side it began in.
+#[gpui::test]
+fn the_diff_selects_and_copies_its_text(cx: &mut TestAppContext) {
+    use snout_core::diff_layout::{SbsLine, UniLine};
+    let repo = demo_repo("diff-copy");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.click_file("src/main.rs", false, false, cx)));
+    cx.update(|_, cx| model.update(cx, |m, cx| m.set_diff_options(Some(false), Some(false), cx)));
+    cx.run_until_parked();
+    let digits = cx.update(|_, cx| model.read(cx).diff.as_ref().unwrap().as_ref().unwrap().number_digits) as f32;
+    let (char_w, row_h) = (7.8, 17.);
+    let num_w = (digits + 1.) * char_w;
+    let copied = |cx: &mut VisualTestContext| {
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" });
+        cx.run_until_parked();
+        cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default()
+    };
+    let unified = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| model.read(cx).diff.as_ref().unwrap().as_ref().unwrap().unified.clone())
+    };
+    let lines = unified(cx);
+    let new_at = lines.iter().position(|l| matches!(l, UniLine::New(_))).expect("the changed line");
+    let area = cx.debug_bounds("diff-lines-area").expect("the diff is drawn");
+    let text_x = 4. + 2. * num_w + 2. * char_w;
+    let at = |line: usize, col: f32| {
+        area.origin + gpui::point(gpui::px(text_x + col * char_w + 1.), gpui::px(row_h * line as f32 + 8.))
+    };
+
+    clicks_at(at(new_at, 6.), 3, cx);
+    assert_eq!(copied(cx), "    println!(\"hello, snout\");", "a triple click takes the line");
+    clicks_at(at(new_at, 23.), 2, cx);
+    assert_eq!(copied(cx), "snout", "a double click takes the word");
+
+    // A drag from the start of the first line to past the end of the last.
+    let last = lines.len() - 1;
+    let m = gpui::Modifiers::none();
+    let button = gpui::MouseButton::Left;
+    cx.simulate_event(gpui::MouseDownEvent {
+        button,
+        position: at(0, 0.),
+        modifiers: m,
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseMoveEvent { position: at(last, 40.), pressed_button: Some(button), modifiers: m });
+    cx.simulate_event(gpui::MouseUpEvent { button, position: at(last, 40.), modifiers: m, click_count: 1 });
+    cx.run_until_parked();
+    assert_eq!(
+        copied(cx),
+        "fn main() {\n    println!(\"hello\");\n    println!(\"hello, snout\");\n}",
+        "a drag takes the lines it crosses"
+    );
+
+    // Side by side: the left column is the old file's.
+    cx.update(|_, cx| model.update(cx, |m, cx| m.set_diff_options(Some(true), None, cx)));
+    cx.run_until_parked();
+    let sbs = cx.update(|_, cx| model.read(cx).diff.as_ref().unwrap().as_ref().unwrap().sbs.clone());
+    let changed = sbs.iter().position(|l| matches!(l, SbsLine::Row(r) if *r == 1)).expect("the changed row");
+    let area = cx.debug_bounds("diff-lines-area").expect("the diff is drawn");
+    let left = area.origin
+        + gpui::point(gpui::px(4. + num_w + char_w * 0.5 + 10.), gpui::px(20. + row_h * changed as f32 + 8.));
+    clicks_at(left, 3, cx);
+    assert_eq!(copied(cx), "    println!(\"hello\");", "the old side's line");
+    let right = left + gpui::point((area.size.width - gpui::px(2.)) / 2. + gpui::px(2.), gpui::px(0.));
+    clicks_at(right, 3, cx);
+    assert_eq!(copied(cx), "    println!(\"hello, snout\");", "the new side's line");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Text that is not in a field selects with the mouse and copies, as in the editor: here an
+/// empty pane's words.
+#[gpui::test]
+fn plain_text_selects_and_copies(cx: &mut TestAppContext) {
+    let repo = demo_repo("plain-copy");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    let title = cx.debug_bounds("empty-state-title").expect("an empty pane's title");
+    clicks_at(title.center(), 3, cx);
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" });
+    cx.run_until_parked();
+    let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default();
+    assert_eq!(copied, ts!("git-select-a-file-to-see-its-changes"), "a triple click takes the title");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 #[gpui::test]
 fn the_activity_bar_switches_between_the_git_view_and_the_docks(cx: &mut TestAppContext) {
     let (_, ws, cx) = open(cx, Settings::default());
@@ -407,6 +548,41 @@ fn git_panel_branches_check_out_create_and_delete(cx: &mut TestAppContext) {
     act(&model, cx, Action::DeleteBranch { name: "topic".into(), force: false, upstream: None });
     cx.update(|_, cx| assert!(!model.read(cx).branches.iter().any(|b| b.name == "topic")));
     let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A local branch shows the remote it tracks, and its menu pushes, tracks and renames it.
+#[gpui::test]
+fn git_panel_branches_track_push_and_rename(cx: &mut TestAppContext) {
+    let work = demo_repo("branch-ops");
+    let remote = scratch_dir("branch-ops-remote").join("remote.git");
+    let (w, r) = (work.to_str().unwrap(), remote.to_str().unwrap());
+    git(work.parent().unwrap(), &["clone", "-q", "--bare", w, r]);
+    git(&work, &["remote", "set-url", "origin", r]);
+    git(&work, &["fetch", "-q", "origin"]);
+    git(&work, &["branch", "-q", "--set-upstream-to=origin/main"]);
+    let (model, ws, cx) = open(cx, with_repo(&work));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("branch-upstream").is_some(), "main shows the remote it tracks");
+
+    let upstream = |cx: &mut VisualTestContext, name: &str| {
+        let name = name.to_owned();
+        cx.update(|_, cx| model.read(cx).branches.iter().find(|b| b.name == name).and_then(|b| b.upstream.clone()))
+    };
+    act(&model, cx, Action::CreateBranch { name: "topic".into(), start: None, checkout: false });
+    act(&model, cx, Action::PushBranch("topic".into()));
+    assert_eq!(upstream(cx, "topic").as_deref(), Some("origin/topic"), "a first push tracks where it went");
+    act(&model, cx, Action::UnsetUpstream("topic".into()));
+    assert_eq!(upstream(cx, "topic"), None);
+    act(&model, cx, Action::SetUpstream { name: "topic".into(), upstream: "origin/main".into() });
+    assert_eq!(upstream(cx, "topic").as_deref(), Some("origin/main"));
+    act(&model, cx, Action::RenameBranch { old: "topic".into(), new: "topic-2".into() });
+    assert_eq!(upstream(cx, "topic-2").as_deref(), Some("origin/main"), "renamed, still tracking");
+    act(&model, cx, Action::AskReset(crate::model::StartPoint { label: "topic-2".into(), rev: "topic-2".into() }));
+    cx.update(|_, cx| assert!(matches!(model.read(cx).dialog, Some(crate::model::Dialog::Reset(_)))));
+    for dir in [work, remote.parent().unwrap().to_owned()] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[gpui::test]

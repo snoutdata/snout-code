@@ -133,13 +133,17 @@ fn row(e: &Entry, now: u64, cx: &App) -> gpui::AnyElement {
                 .flex()
                 .gap(px(8.))
                 .items_baseline()
-                .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(e.tool))
-                .child(div().text_color(p.fg_dim).child(effect))
+                .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(crate::look::text(e.tool)))
+                .child(div().text_color(p.fg_dim).child(crate::look::text(effect)))
                 .child(div().flex_1())
-                .child(div().text_color(p.fg_dim).child(format!("{}, {}", e.agent, crate::welcome::ago(e.at, now)))),
+                .child(div().text_color(p.fg_dim).child(crate::look::text(format!(
+                    "{}, {}",
+                    e.agent,
+                    crate::welcome::ago(e.at, now)
+                )))),
         )
         .when_some_args(&e.arguments, &p)
-        .child(div().text_color(tone).child(mark))
+        .child(div().text_color(tone).child(crate::look::text(mark)))
         .into_any_element()
 }
 
@@ -153,7 +157,7 @@ impl WhenArguments for gpui::Div {
         if arguments.is_empty() {
             return self;
         }
-        self.child(div().text_color(p.fg_dim).child(arguments.to_owned()))
+        self.child(div().text_color(p.fg_dim).child(crate::look::text(arguments.to_owned())))
     }
 }
 

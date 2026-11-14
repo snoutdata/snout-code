@@ -499,7 +499,7 @@ impl EditorPanel {
                     .child(
                         div()
                             .font_weight(FontWeight::MEDIUM)
-                            .child(t!("editor-breakpoint-on-line", line = (line + 1).to_string())),
+                            .child(crate::look::text(t!("editor-breakpoint-on-line", line = (line + 1).to_string()))),
                     )
                     .child(crate::look::field(input, false, None, &p))
                     .child(

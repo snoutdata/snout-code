@@ -604,7 +604,7 @@ impl Render for UpdateToast {
                     .when_some(tip, |d, tip| {
                         d.tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
                     })
-                    .child(text),
+                    .child(crate::look::text(text)),
             )
             .child(actions.flex_none().flex().items_center().gap(px(4.)))
             .into_any_element()

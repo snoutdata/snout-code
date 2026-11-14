@@ -529,7 +529,7 @@ impl Render for SearchView {
                 .text_size(px(look::BODY))
                 .text_color(p.fg)
                 .child(look::field(&self.input, false, None, &p))
-                .child(div().px(px(4.)).text_size(px(12.)).text_color(p.weak()).child(hint));
+                .child(div().px(px(4.)).text_size(px(12.)).text_color(p.weak()).child(crate::look::text(hint)));
         }
         let list = uniform_list("search-items", count, move |range, _, _| {
             range

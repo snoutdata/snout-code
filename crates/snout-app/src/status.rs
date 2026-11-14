@@ -438,13 +438,11 @@ impl StatusBar {
                                                     .child(
                                                         div()
                                                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                                                            .child(ts!("status-in-the-background")),
+                                                            .child(crate::look::text(ts!("status-in-the-background"))),
                                                     )
-                                                    .child(
-                                                        div()
-                                                            .text_color(p.fg_dim)
-                                                            .child(ts!("status-the-editor-works-meanwhile")),
-                                                    ),
+                                                    .child(div().text_color(p.fg_dim).child(crate::look::text(ts!(
+                                                        "status-the-editor-works-meanwhile"
+                                                    )))),
                                             ),
                                     )
                                     .children(tasks.into_iter().map(|t| {
@@ -457,12 +455,20 @@ impl StatusBar {
                                                     .flex()
                                                     .justify_between()
                                                     .gap(px(8.))
-                                                    .child(div().font_weight(gpui::FontWeight::MEDIUM).child(t.title))
+                                                    .child(
+                                                        div()
+                                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                                            .child(crate::look::text(t.title)),
+                                                    )
                                                     .when_some(t.percent, |d, pc| {
-                                                        d.child(div().text_color(p.fg_dim).child(format!("{pc}%")))
+                                                        d.child(
+                                                            div()
+                                                                .text_color(p.fg_dim)
+                                                                .child(crate::look::text(format!("{pc}%"))),
+                                                        )
                                                     }),
                                             )
-                                            .child(div().text_color(p.fg_dim).child(t.stage))
+                                            .child(div().text_color(p.fg_dim).child(crate::look::text(t.stage)))
                                             .child(progress_bar(t.percent, 316., &p))
                                             .when(!t.parts.is_empty(), |d| d.child(task_parts(&t.parts, &p)))
                                     }))
@@ -606,7 +612,13 @@ impl Render for StatusBar {
                 .when_some(message_icon(m).filter(|_| !busy), |d, (i, c)| {
                     d.child(crate::components::icon(i, 13., c(&p)))
                 })
-                .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(m.message.clone()))
+                .child(
+                    div()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(crate::look::text(m.message.clone())),
+                )
                 .when_some(m.branch_summary().filter(|_| self.git), |d, s| {
                     d.child(div().w(px(10.))).child(
                         div()
@@ -621,7 +633,7 @@ impl Render for StatusBar {
                                 })
                             })
                             .child(icon(Icon::Branch, 13., if p.tinted { p.branch() } else { p.fg_dim }))
-                            .child(div().whitespace_nowrap().child(s)),
+                            .child(div().whitespace_nowrap().child(crate::look::text(s))),
                     )
                 })
                 .into_any_element()
@@ -764,7 +776,7 @@ impl StatusBar {
                                 .shadow_lg()
                                 .text_size(px(12.5))
                                 .text_color(p.fg)
-                                .child(JAVA_MISSING_NOTE)
+                                .child(crate::look::text(JAVA_MISSING_NOTE))
                                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                                     this.java_note = false;
                                     cx.notify();

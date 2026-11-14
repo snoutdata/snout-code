@@ -848,7 +848,7 @@ impl EditorPanel {
                         .flex()
                         .items_center()
                         .gap(px(10.))
-                        .child(div().min_w_0().truncate().child(what))
+                        .child(div().min_w_0().truncate().child(crate::look::text(what)))
                         .child(
                             div()
                                 .flex_none()
@@ -856,8 +856,8 @@ impl EditorPanel {
                                 .gap(px(6.))
                                 .font_family(look::mono_font(cx))
                                 .text_size(px(12.))
-                                .child(div().text_color(p.added).child(format!("+{plus}")))
-                                .child(div().text_color(p.removed).child(format!("−{minus}"))),
+                                .child(div().text_color(p.added).child(crate::look::text(format!("+{plus}"))))
+                                .child(div().text_color(p.removed).child(crate::look::text(format!("−{minus}")))),
                         )
                         .when(waiting > 0, |d| {
                             d.child(div().flex_none().child(look::chip(
@@ -1356,7 +1356,7 @@ impl EditorPanel {
                         .flex()
                         .items_center()
                         .gap(px(10.))
-                        .child(div().min_w_0().truncate().child(what))
+                        .child(div().min_w_0().truncate().child(crate::look::text(what)))
                         .child(
                             div()
                                 .flex_none()
@@ -1364,8 +1364,8 @@ impl EditorPanel {
                                 .gap(px(6.))
                                 .font_family(look::mono_font(cx))
                                 .text_size(px(12.))
-                                .child(div().text_color(c.added).child(format!("+{plus}")))
-                                .child(div().text_color(c.removed).child(format!("−{minus}"))),
+                                .child(div().text_color(c.added).child(crate::look::text(format!("+{plus}"))))
+                                .child(div().text_color(c.removed).child(crate::look::text(format!("−{minus}")))),
                         )
                         .child(div().flex_1())
                         .child(div().flex_none().child(hint(ts!("editor-next")))),
@@ -1694,8 +1694,8 @@ impl EditorPanel {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().font_weight(gpui::FontWeight::MEDIUM).child(title))
-                            .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(what)),
+                            .child(div().font_weight(gpui::FontWeight::MEDIUM).child(crate::look::text(title)))
+                            .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(what))),
                     )
                     .when(hunk.is_none(), |d| d.child(look::chip(ts!("editor-reviewed"), p.ok, &p))),
             )
@@ -1716,7 +1716,7 @@ impl EditorPanel {
                                 .text_size(px(12.))
                                 .line_height(px(16.))
                                 .text_color(p.fg)
-                                .child(format!("\u{201c}{prompt}\u{201d}")),
+                                .child(crate::look::text(format!("\u{201c}{prompt}\u{201d}"))),
                         ),
                 )
             })

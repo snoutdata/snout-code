@@ -105,7 +105,14 @@ fn row(
 
 fn heading(text: &'static str, cx: &App) -> AnyElement {
     let p = palette(cx);
-    div().px(px(12.)).pt(px(8.)).pb(px(2.)).text_size(px(11.5)).text_color(p.fg_dim).child(text).into_any_element()
+    div()
+        .px(px(12.))
+        .pt(px(8.))
+        .pb(px(2.))
+        .text_size(px(11.5))
+        .text_color(p.fg_dim)
+        .child(crate::look::text(text))
+        .into_any_element()
 }
 
 impl Render for BranchPopup {

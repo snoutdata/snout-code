@@ -89,7 +89,14 @@ impl Render for NotificationsPanel {
                     .border_1()
                     .border_color(p.border)
                     .child(crate::components::icon(crate::components::IconName::OctagonAlert, 15., p.error))
-                    .child(div().flex_1().min_w_0().text_size(px(12.5)).line_height(px(18.)).child(text))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(12.5))
+                            .line_height(px(18.))
+                            .child(crate::look::text(text)),
+                    )
             }),
         ))
     }

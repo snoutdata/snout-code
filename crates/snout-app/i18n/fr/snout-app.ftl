@@ -554,6 +554,27 @@ dialogs-allow-to = Autoriser { $agent } à { $what } ?
 dialogs-its-upstream = sa branche amont
 dialogs-delete-from = Supprimer de { $remote }
 dialogs-allow-for-this-session-lets-it-use-again = Autoriser pour cette session lui permet de réutiliser { $tool } sans demander.
+dialogs-reset-subtitle = Déplacer la branche courante vers un autre commit
+dialogs-reset-branch-to = Réinitialiser { $head } sur { $to }
+dialogs-reset-soft = Douce
+dialogs-reset-soft-detail = Déplace seulement la branche. Les changements depuis restent indexés.
+dialogs-reset-mixed = Mixte
+dialogs-reset-mixed-detail = Déplace la branche et désindexe. Les changements depuis restent dans vos fichiers.
+dialogs-reset-hard = Dure
+dialogs-reset-hard-detail = La branche et vos fichiers y correspondent. Les changements non validés sont perdus.
+dialogs-reset-hard-loses-changes = Vous avez des changements non validés : Dure les supprime pour de bon.
+dialogs-rename-branch = Renommer la branche
+dialogs-renaming-branch = Renommer
+dialogs-push-branch-to = Pousser { $name } vers
+dialogs-push-to-subtitle = Choisissez le dépôt distant et le nom de la branche là-bas
+dialogs-remote = Dépôt distant
+dialogs-no-remote = Ce dépôt n'a pas encore de dépôt distant.
+dialogs-remote-branch = Branche sur le dépôt distant
+dialogs-track-the-pushed-branch = La suivre : pull et push y vont désormais
+dialogs-set-upstream-of = Branche suivie par { $name }
+dialogs-set-upstream-subtitle = Pull et push vont à la branche choisie ici
+dialogs-no-matching-remote-branch = Aucune branche distante correspondante
+dialogs-track = Suivre
 
 ## welcome
 
@@ -623,7 +644,7 @@ tabs-hide = Masquer
 ## projects
 
 projects-filter = Filtrer
-projects-open-local-repository = Ouvrir un dépôt local…
+projects-add-local-repository = Ajouter un dépôt local…
 projects-find-repositories-in-folder = Rechercher des dépôts dans un dossier…
 projects-no-matches = Aucun résultat
 projects-rename = Renommer…
@@ -780,6 +801,7 @@ model-no-commit-message-yet = Pas encore de message de commit
 model-drafted-the-commit-message = { $name } a rédigé le message de commit
 model-refreshed = Actualisé
 model-open-project = Ouvrir un projet
+model-add-repository = Ajouter un dépôt
 model-initialized-repository-in = Dépôt initialisé dans { $root }
 model-find-repositories-in-folder = Rechercher des dépôts dans un dossier
 model-searching-for-repositories = Recherche de dépôts
@@ -823,6 +845,14 @@ model-generated-sources = Sources générées
 model-the-build-did-not-sync = Le build ne s’est pas synchronisé
 model-sync = Synchronisation : { $root }
 model-the-gradle-sync-failed = La synchronisation Gradle a échoué
+model-merged-into = { $rev } fusionnée dans { $head }
+model-rebased-onto = { $head } rebasée sur { $rev }
+model-fast-forwarded = { $name } avancée en avance rapide
+model-push-branch = Pousser { $name }
+model-push-branch-to = Pousser { $name } vers { $to }
+model-renamed-branch = { $old } renommée en { $new }
+model-now-tracks = { $name } suit maintenant { $upstream }
+model-tracks-nothing = { $name } ne suit plus rien
 
 ## branch
 
@@ -984,6 +1014,15 @@ git-changed-staged = { $count ->
     [one] { $staged_count } indexé
    *[other] { $staged_count } indexés
     }
+git-merge-into = Fusionner dans { $head }
+git-rebase-onto-here = Rebaser { $head } sur celle-ci
+git-fast-forward-to-upstream = Avance rapide jusqu'à l'amont
+git-push-to = Pousser vers…
+git-reset-to-here = Réinitialiser { $head } ici…
+git-rename = Renommer…
+git-set-tracked-branch = Définir la branche suivie…
+git-stop-tracking = Ne plus suivre
+git-show-last-commit = Afficher le dernier commit
 
 ## console
 

@@ -559,6 +559,27 @@ dialogs-allow-to = Allow { $agent } to { $what }?
 dialogs-its-upstream = its upstream
 dialogs-delete-from = Delete from { $remote }
 dialogs-allow-for-this-session-lets-it-use-again = Allow for This Session lets it use { $tool } again without asking.
+dialogs-reset-subtitle = Move the current branch to another commit
+dialogs-reset-branch-to = Reset { $head } to { $to }
+dialogs-reset-soft = Soft
+dialogs-reset-soft-detail = Move the branch only. The changes since stay staged.
+dialogs-reset-mixed = Mixed
+dialogs-reset-mixed-detail = Move the branch and unstage. The changes since stay in your files.
+dialogs-reset-hard = Hard
+dialogs-reset-hard-detail = Make the branch and your files match it. Uncommitted changes are lost.
+dialogs-reset-hard-loses-changes = You have uncommitted changes: Hard discards them for good.
+dialogs-rename-branch = Rename branch
+dialogs-renaming-branch = Renaming
+dialogs-push-branch-to = Push { $name } to
+dialogs-push-to-subtitle = Pick the remote and the branch name there
+dialogs-remote = Remote
+dialogs-no-remote = This repository has no remote yet.
+dialogs-remote-branch = Branch on the remote
+dialogs-track-the-pushed-branch = Track it: pull and push go there from now on
+dialogs-set-upstream-of = Set tracked branch of { $name }
+dialogs-set-upstream-subtitle = Pull and push go to the branch picked here
+dialogs-no-matching-remote-branch = No matching remote branch
+dialogs-track = Track
 
 ## welcome
 
@@ -628,7 +649,7 @@ tabs-hide = Hide
 ## projects
 
 projects-filter = Filter
-projects-open-local-repository = Open local repository…
+projects-add-local-repository = Add local repository…
 projects-find-repositories-in-folder = Find repositories in folder…
 projects-no-matches = No matches
 projects-rename = Rename…
@@ -785,6 +806,7 @@ model-no-commit-message-yet = No commit message yet
 model-drafted-the-commit-message = { $name } drafted the commit message
 model-refreshed = Refreshed
 model-open-project = Open project
+model-add-repository = Add repository
 model-initialized-repository-in = Initialized repository in { $root }
 model-find-repositories-in-folder = Find repositories in folder
 model-searching-for-repositories = Searching for repositories
@@ -828,6 +850,14 @@ model-generated-sources = Generated sources
 model-the-build-did-not-sync = The build did not sync
 model-sync = Sync: { $root }
 model-the-gradle-sync-failed = The Gradle sync failed
+model-merged-into = Merged { $rev } into { $head }
+model-rebased-onto = Rebased { $head } onto { $rev }
+model-fast-forwarded = Fast-forwarded { $name }
+model-push-branch = Push { $name }
+model-push-branch-to = Push { $name } to { $to }
+model-renamed-branch = Renamed { $old } to { $new }
+model-now-tracks = { $name } now tracks { $upstream }
+model-tracks-nothing = { $name } tracks nothing now
 
 ## branch
 
@@ -983,6 +1013,15 @@ git-changed = { $count ->
    *[other] { $count } changed
     }
 git-changed-staged = { $count } changed, { $staged_count } staged
+git-merge-into = Merge into { $head }
+git-rebase-onto-here = Rebase { $head } onto this
+git-fast-forward-to-upstream = Fast-forward to upstream
+git-push-to = Push to…
+git-reset-to-here = Reset { $head } to here…
+git-rename = Rename…
+git-set-tracked-branch = Set tracked branch…
+git-stop-tracking = Stop tracking
+git-show-last-commit = Show last commit
 
 ## console
 

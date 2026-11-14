@@ -20,7 +20,8 @@ use gpui_component::scroll::ScrollableElement as _;
 use snout_core::art::{Drawing, spots};
 use snout_core::groups::{dir_name, group_name_problem};
 use snout_core::{
-    BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, SignInKind, branch_name_problem, repo_dir_name,
+    BranchKind, CheckoutTarget, LocalChanges, PullMode, PullProblem, ResetMode, SignInKind, branch_name_problem,
+    repo_dir_name,
 };
 
 use crate::claude_ide::capabilities::AskAnswer;
@@ -130,6 +131,12 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
         Dialog::DeleteRemoteBranch(_) => {
             (Tone::Danger, Some(spots::discard()), Some(ts!("dialogs-it-goes-for-everyone-who-uses-the-remote").into()))
         }
+        Dialog::Reset(_) => (Tone::Warning, Some(spots::warning()), Some(ts!("dialogs-reset-subtitle").into())),
+        Dialog::RenameBranch(_) => (Tone::Git, Some(spots::new_branch()), None),
+        Dialog::PushTo(_) => (Tone::Git, Some(spots::version_control()), Some(ts!("dialogs-push-to-subtitle").into())),
+        Dialog::SetUpstream(_) => {
+            (Tone::Git, Some(spots::version_control()), Some(ts!("dialogs-set-upstream-subtitle").into()))
+        }
         Dialog::PullProblem { problem: PullProblem::Divergent, .. } => {
             (Tone::Warning, Some(spots::merge_conflict()), None)
         }
@@ -180,6 +187,13 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
         Dialog::NewBranch(_) => ts!("dialogs-new-branch").into(),
         Dialog::DeleteBranch { .. } => ts!("dialogs-delete-branch-2").into(),
         Dialog::DeleteRemoteBranch(r) => t!("dialogs-delete-branch-from", remote = (r.remote).to_string()).into(),
+        Dialog::Reset(to) => {
+            let head = m.dialog_status().branch.head.clone().unwrap_or_else(|| "HEAD".into());
+            t!("dialogs-reset-branch-to", head = head, to = to.label.clone()).into()
+        }
+        Dialog::RenameBranch(_) => ts!("dialogs-rename-branch").into(),
+        Dialog::PushTo(name) => t!("dialogs-push-branch-to", name = name.to_string()).into(),
+        Dialog::SetUpstream(name) => t!("dialogs-set-upstream-of", name = name.to_string()).into(),
         Dialog::ConfirmDeleteFiles(_) if snout_core::can_trash(&*m.host) => ts!("dialogs-move-to-the-trash").into(),
         Dialog::ConfirmDeleteFiles(_) => ts!("dialogs-delete-files").into(),
         Dialog::PullProblem { problem: PullProblem::Divergent, .. } => {
@@ -264,6 +278,11 @@ pub struct DialogBody {
     with_upstream: bool,
     local: LocalChanges,
     cursor: usize,
+    /// Push To: the repository's remotes, and the one picked.
+    remotes: Vec<String>,
+    remote: usize,
+    /// Push To: the pushed branch tracks where it went.
+    track: bool,
     /// Quit: "Don't ask again" is ticked.
     dont_ask: bool,
     /// Holds the keyboard in a dialog with no field, so ⌘⌫ and ⏎ reach it.
@@ -276,6 +295,8 @@ impl DialogBody {
             Dialog::NewBranch(_) => ("feature/my-idea", String::new()),
             Dialog::GroupName { rename, .. } => (ts!("dialogs-group-example"), rename.clone().unwrap_or_default()),
             Dialog::Checkout => (ts!("dialogs-checkout-placeholder"), String::new()),
+            Dialog::RenameBranch(old) | Dialog::PushTo(old) => ("feature/my-idea", old.clone()),
+            Dialog::SetUpstream(_) => ("origin/main", String::new()),
             _ => ("", String::new()),
         };
         let name = cx.new(|cx| {
@@ -296,7 +317,7 @@ impl DialogBody {
         for input in [&name, &url, &parent] {
             cx.subscribe_in(input, window, |this, input, e: &InputEvent, window, cx| match e {
                 InputEvent::Change => {
-                    if matches!(this.dialog, Dialog::NewBranch(_)) {
+                    if matches!(this.dialog, Dialog::NewBranch(_) | Dialog::RenameBranch(_) | Dialog::PushTo(_)) {
                         // Branch names cannot hold spaces; most people mean a dash.
                         let v = input.read(cx).value();
                         if v.contains(' ') {
@@ -313,7 +334,28 @@ impl DialogBody {
             .detach();
         }
         let focus = cx.focus_handle();
+        let (remotes, track) = match &dialog {
+            Dialog::PushTo(name) => {
+                let m = model.read(cx);
+                let remotes: Vec<String> = m
+                    .repo
+                    .as_ref()
+                    .and_then(|r| r.remotes().ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(n, _)| n)
+                    .collect();
+                let tracks =
+                    m.branches.iter().any(|b| b.kind == BranchKind::Local && &b.name == name && b.upstream.is_some());
+                (remotes, !tracks)
+            }
+            _ => (Vec::new(), false),
+        };
+        let remote = remotes.iter().position(|r| r == "origin").unwrap_or(0);
         Self {
+            remotes,
+            remote,
+            track,
             focus,
             model,
             dialog,
@@ -334,9 +376,12 @@ impl DialogBody {
     fn take_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         match &self.dialog {
             Dialog::Clone { .. } => self.url.update(cx, |s, cx| s.focus(window, cx)),
-            Dialog::NewBranch(_) | Dialog::GroupName { .. } | Dialog::Checkout => {
-                self.name.update(cx, |s, cx| s.focus(window, cx))
-            }
+            Dialog::NewBranch(_)
+            | Dialog::GroupName { .. }
+            | Dialog::Checkout
+            | Dialog::RenameBranch(_)
+            | Dialog::PushTo(_)
+            | Dialog::SetUpstream(_) => self.name.update(cx, |s, cx| s.focus(window, cx)),
             _ => window.focus(&self.focus, cx),
         }
     }
@@ -379,6 +424,21 @@ impl DialogBody {
                 let items = pick_items(m, &name);
                 items.into_iter().nth(self.cursor).map(|i| Action::Checkout(i.target, self.local))
             }
+            Dialog::RenameBranch(old) => (!name.is_empty() && name != *old && branch_name_problem(&name).is_none())
+                .then(|| Action::RenameBranch { old: old.clone(), new: name }),
+            Dialog::PushTo(local) => {
+                let remote = self.remotes.get(self.remote)?.clone();
+                (!name.is_empty() && branch_name_problem(&name).is_none()).then(|| Action::PushTo {
+                    name: local.clone(),
+                    remote,
+                    branch: name,
+                    track: self.track,
+                })
+            }
+            Dialog::SetUpstream(local) => upstream_items(m, &name)
+                .into_iter()
+                .nth(self.cursor)
+                .map(|u| Action::SetUpstream { name: local.clone(), upstream: u }),
             _ => None,
         }
     }
@@ -428,9 +488,13 @@ impl DialogBody {
             }
             // It comes up while the user may be typing: Return must not answer it for them.
             Dialog::AgentAsks { .. } => {}
-            Dialog::NewBranch(_) | Dialog::GroupName { .. } | Dialog::Clone { .. } | Dialog::Checkout => {
-                self.confirm(window, cx)
-            }
+            Dialog::NewBranch(_)
+            | Dialog::GroupName { .. }
+            | Dialog::Clone { .. }
+            | Dialog::Checkout
+            | Dialog::RenameBranch(_)
+            | Dialog::PushTo(_)
+            | Dialog::SetUpstream(_) => self.confirm(window, cx),
             _ => {}
         }
     }
@@ -499,6 +563,16 @@ fn pick_items(m: &Model, query: &str) -> Vec<PickItem> {
         items.push(PickItem { target, label: query.to_owned(), detail: described, section: ts!("cmd-commit") });
     }
     items
+}
+
+/// The remote branches a local branch could track, filtered by `query`.
+fn upstream_items(m: &Model, query: &str) -> Vec<String> {
+    let pattern = snout_find::Pattern::new(query);
+    m.branches
+        .iter()
+        .filter(|b| b.kind == BranchKind::Remote && pattern.filter(&b.name))
+        .map(|b| b.name.clone())
+        .collect()
 }
 
 /// The Cancel button of a dialog.
@@ -610,7 +684,7 @@ impl Render for DialogBody {
         let m = self.model.read(cx);
         let (tone, art, subtitle) = look(&self.dialog, m);
         let heading = title(&self.dialog, m);
-        let dim = |t: String| div().text_color(p.fg_dim).line_height(px(19.)).child(t);
+        let dim = |t: String| div().text_color(p.fg_dim).line_height(px(19.)).child(crate::look::text(t));
         let code = |t: &str| {
             div()
                 .id("code")
@@ -625,7 +699,7 @@ impl Render for DialogBody {
                 .font_family(gpui_component::Theme::global(cx).mono_font_family.clone())
                 .text_size(px(12.))
                 .line_height(px(18.))
-                .child(t.to_owned())
+                .child(crate::look::text(t.to_owned()))
         };
         // The files a dialog is about, each as a chip; a long list scrolls.
         let files = |entries: &[snout_core::FileEntry]| {
@@ -673,7 +747,7 @@ impl Render for DialogBody {
                 body.push(
                     div()
                         .line_height(px(19.))
-                        .child(ts!("dialogs-an-ide-for-java-gradle-and-spring-boot"))
+                        .child(crate::look::text(ts!("dialogs-an-ide-for-java-gradle-and-spring-boot")))
                         .into_any_element(),
                 );
                 body.push(
@@ -1006,6 +1080,164 @@ impl Render for DialogBody {
                     Action::DeleteRemoteBranch(r.clone())
                 ));
             }
+            Dialog::Reset(to) => {
+                let choices = [
+                    (
+                        "soft",
+                        IconName::Archive,
+                        ResetMode::Soft,
+                        ts!("dialogs-reset-soft"),
+                        ts!("dialogs-reset-soft-detail"),
+                    ),
+                    (
+                        "mixed",
+                        IconName::FileDiff,
+                        ResetMode::Mixed,
+                        ts!("dialogs-reset-mixed"),
+                        ts!("dialogs-reset-mixed-detail"),
+                    ),
+                    (
+                        "hard",
+                        IconName::Trash,
+                        ResetMode::Hard,
+                        ts!("dialogs-reset-hard"),
+                        ts!("dialogs-reset-hard-detail"),
+                    ),
+                ];
+                for (id, ico, mode, label, detail) in choices {
+                    let rev = to.rev.clone();
+                    body.push(
+                        choice_card(id, ico, label, detail, &p)
+                            .debug_selector(move || format!("reset-{id}"))
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.act(Action::Reset { rev: rev.clone(), mode }, w, cx)
+                            }))
+                            .into_any_element(),
+                    );
+                }
+                if has_tracked {
+                    body.push(callout(Tone::Danger, ts!("dialogs-reset-hard-loses-changes"), &p).into_any_element());
+                }
+                buttons.push(cancel);
+            }
+            Dialog::RenameBranch(old) => {
+                body.push(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .items_center()
+                        .child(dim(ts!("dialogs-renaming-branch").into()))
+                        .child(badge(old.clone(), Tone::Git, &p))
+                        .into_any_element(),
+                );
+                body.push(Input::new(&self.name).into_any_element());
+                if let Some(problem) = branch_name_problem(&Self::value(&self.name, cx)) {
+                    body.push(callout(Tone::Warning, crate::core_text::name_problem(problem), &p).into_any_element());
+                }
+                buttons.push(cancel);
+                buttons.push(
+                    ok(ts!("dialogs-rename"))
+                        .icon(IconName::Pencil)
+                        .disabled(!primary_enabled)
+                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
+                        .into_any_element(),
+                );
+            }
+            Dialog::PushTo(_) => {
+                body.push(field_label(ts!("dialogs-remote"), &p).into_any_element());
+                if self.remotes.is_empty() {
+                    body.push(callout(Tone::Warning, ts!("dialogs-no-remote"), &p).into_any_element());
+                }
+                body.push(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .children(self.remotes.iter().enumerate().map(|(i, r)| {
+                            Button::new(SharedString::from(format!("remote-{i}")), IconName::Cloud)
+                                .compact()
+                                .label(r.clone())
+                                .when(i == self.remote, |b| b.primary())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.remote = i;
+                                    cx.notify();
+                                }))
+                        }))
+                        .into_any_element(),
+                );
+                body.push(field_label(ts!("dialogs-remote-branch"), &p).into_any_element());
+                body.push(Input::new(&self.name).into_any_element());
+                if let Some(problem) = branch_name_problem(&Self::value(&self.name, cx)) {
+                    body.push(callout(Tone::Warning, crate::core_text::name_problem(problem), &p).into_any_element());
+                }
+                body.push(
+                    Checkbox::new("track")
+                        .label(ts!("dialogs-track-the-pushed-branch"))
+                        .checked(self.track)
+                        .on_click(cx.listener(|this, v: &bool, _, cx| {
+                            this.track = *v;
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                );
+                buttons.push(cancel);
+                buttons.push(
+                    ok(ts!("cmd-push"))
+                        .icon(IconName::ArrowUp)
+                        .disabled(!primary_enabled)
+                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
+                        .into_any_element(),
+                );
+            }
+            Dialog::SetUpstream(_) => {
+                let items = upstream_items(m, &Self::value(&self.name, cx));
+                self.cursor = self.cursor.min(items.len().saturating_sub(1));
+                body.push(Input::new(&self.name).into_any_element());
+                let mut list = div().id("upstreams").flex().flex_col().max_h(px(240.)).overflow_y_scrollbar();
+                for (i, item) in items.iter().enumerate() {
+                    let selected = i == self.cursor;
+                    list = list.child(
+                        div()
+                            .id(("upstream", i))
+                            .debug_selector(move || format!("upstream-{i}"))
+                            .flex()
+                            .gap(px(8.))
+                            .px(px(8.))
+                            .h(px(28.))
+                            .items_center()
+                            .rounded(px(6.))
+                            .when(selected, |d| d.bg(p.row_selected()))
+                            .hover(|s| s.bg(p.row_hover()))
+                            .child(crate::components::icon(IconName::Cloud, 14., p.fg_dim))
+                            .child(item.clone())
+                            .on_click(cx.listener(move |this, e: &ClickEvent, w, cx| {
+                                this.cursor = i;
+                                if e.click_count() > 1 {
+                                    this.confirm(w, cx);
+                                }
+                                cx.notify();
+                            })),
+                    );
+                }
+                if items.is_empty() {
+                    list = list.child(
+                        crate::components::EmptyState::new(
+                            spots::no_results(),
+                            ts!("dialogs-no-matching-remote-branch"),
+                        )
+                        .compact(),
+                    );
+                }
+                body.push(list.into_any_element());
+                buttons.push(cancel);
+                buttons.push(
+                    ok(ts!("dialogs-track"))
+                        .icon(IconName::Link)
+                        .disabled(items.is_empty())
+                        .on_click(cx.listener(|this, _, w, cx| this.confirm(w, cx)))
+                        .into_any_element(),
+                );
+            }
             Dialog::Clone { .. } => {
                 body.push(field_label(ts!("dialogs-repository-url"), &p).into_any_element());
                 body.push(Input::new(&self.url).into_any_element());
@@ -1116,7 +1348,7 @@ impl Render for DialogBody {
                                 .text_size(px(10.5))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(p.fg_dim)
-                                .child(section.to_uppercase()),
+                                .child(crate::look::text(section.to_uppercase())),
                         );
                     }
                     let selected = i == self.cursor;

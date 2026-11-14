@@ -8,9 +8,9 @@ use std::rc::Rc;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle, FontWeight, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels,
-    Point, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled as _, UniformListScrollHandle,
-    Window, div, px, uniform_list,
+    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Pixels, Point, Render,
+    ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled as _, UniformListScrollHandle, Window, div,
+    px, uniform_list,
 };
 use gpui_component::button::ButtonVariants as _;
 use gpui_component::input::{Copy, InputEvent, InputState};
@@ -54,6 +54,9 @@ pub struct RunWindow {
     /// The console's longest line, by (session, line count, dropped): the list is as wide as
     /// it, so a long line scrolls sideways.
     widest: ((u64, usize, usize), usize),
+    /// Where the mouse is while it selects, and the scrolling it does at an edge of the console.
+    drag_at: Point<Pixels>,
+    autoscroll: Option<gpui::Task<()>>,
 }
 
 /// A place in a console: (line, character). Lines count from the session's first, the ones
@@ -106,7 +109,7 @@ fn selected_text(lines: &[ConsoleLine], base: usize, sel: &ConsoleSel) -> String
 
 /// The word of `text` at character `col`: letters, digits and `_ . $ -`, as a class name, a
 /// path or a number has them. None off a word.
-fn word_at(text: &str, col: usize) -> Option<(usize, usize)> {
+pub(crate) fn word_at(text: &str, col: usize) -> Option<(usize, usize)> {
     let chars: Vec<char> = text.chars().collect();
     let is_word = |c: char| c.is_alphanumeric() || "_.$-".contains(c);
     if !chars.get(col).is_some_and(|c| is_word(*c)) {
@@ -150,6 +153,8 @@ impl RunWindow {
             selecting: false,
             cell_w: px(7.5),
             widest: ((u64::MAX, 0, 0), 0),
+            drag_at: Point::default(),
+            autoscroll: None,
         }
     }
 
@@ -313,7 +318,7 @@ pub fn console_line(
                         .child(text),
                 )
             }
-            None => row = row.child(el.child(text)),
+            None => row = row.child(el.child(crate::look::text(text))),
         }
     }
     row.into_any_element()
@@ -456,7 +461,7 @@ impl RunWindow {
                     .text_color(p.fg_dim)
                     .text_size(px(12.))
                     .whitespace_nowrap()
-                    .child(status),
+                    .child(crate::look::text(status)),
             );
         }
         row.into_any_element()
@@ -650,16 +655,21 @@ impl RunWindow {
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
-                if this.selecting && e.pressed_button == Some(MouseButton::Left) {
-                    let head = this.console_pos(e.position, base);
-                    if let Some(sel) = this.sel.as_mut().filter(|s| s.head != head) {
-                        sel.head = head;
-                        cx.notify();
+            // The mouse keeps selecting outside the console, which scrolls when it is at an edge.
+            .child(crate::drag_select::follow_mouse(
+                cx.entity().downgrade(),
+                move |this: &mut Self, at, cx| {
+                    if this.selecting {
+                        this.drag_at = at;
+                        this.drag_select(base, cx);
+                        this.start_autoscroll(base, cx);
                     }
-                }
-            }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| this.selecting = false))
+                },
+                |this: &mut Self, _| {
+                    this.selecting = false;
+                    this.autoscroll = None;
+                },
+            ))
             .child(
                 uniform_list("run-console", count, rows)
                     .track_scroll(&self.console)
@@ -671,6 +681,34 @@ impl RunWindow {
             )
             .context_menu(menu)
             .into_any_element()
+    }
+
+    /// Move the selection's end to where the mouse is.
+    fn drag_select(&mut self, base: usize, cx: &mut Context<Self>) {
+        let head = self.console_pos(self.drag_at, base);
+        if let Some(sel) = self.sel.as_mut().filter(|s| s.head != head) {
+            sel.head = head;
+            cx.notify();
+        }
+    }
+
+    /// While the mouse selects at an edge of the console, scroll it that way, the selection
+    /// following.
+    fn start_autoscroll(&mut self, base: usize, cx: &mut Context<Self>) {
+        let at_edge = crate::drag_select::edge_scroll(&self.console.0.borrow().base_handle, self.drag_at, true, false);
+        if self.autoscroll.is_some() || !at_edge {
+            return;
+        }
+        self.autoscroll = Some(crate::drag_select::autoscroll(cx, move |this: &mut Self, cx| {
+            let handle = this.console.0.borrow().base_handle.clone();
+            if !this.selecting || !crate::drag_select::edge_scroll(&handle, this.drag_at, true, true) {
+                this.autoscroll = None;
+                return false;
+            }
+            this.drag_select(base, cx);
+            cx.notify();
+            true
+        }));
     }
 
     /// The console place (line, character) under the window point `at`: the rows are 18 high
@@ -846,8 +884,8 @@ impl RunWindow {
                     .bg(p.wash(color))
                     .border_1()
                     .border_color(mix(color, 0.4, p.panel))
-                    .child(div().text_size(px(11.)).text_color(p.fg_dim).child(title))
-                    .child(div().font_family(look::mono_font(cx)).text_size(px(12.5)).child(text))
+                    .child(div().text_size(px(11.)).text_color(p.fg_dim).child(crate::look::text(title)))
+                    .child(div().font_family(look::mono_font(cx)).text_size(px(12.5)).child(crate::look::text(text)))
             };
             div()
                 .id("test-diff")
@@ -880,7 +918,7 @@ impl RunWindow {
                 .items_center()
                 .gap(px(6.))
                 .child(icon(g, 12., ink))
-                .child(div().font_weight(FontWeight::MEDIUM).child(s.title.clone()))
+                .child(div().font_weight(FontWeight::MEDIUM).child(crate::look::text(s.title.clone())))
                 .child(div().text_color(p.fg_dim).child(millis_text(s.elapsed().as_millis() as u64)))
                 .into_any_element(),
         ];
@@ -931,8 +969,8 @@ impl RunWindow {
                     .items_center()
                     .gap(px(6.))
                     .child(icon(g, 12., ink))
-                    .child(div().whitespace_nowrap().child(t.path.clone()))
-                    .children(note.map(|n| div().text_color(p.fg_dim).child(n)))
+                    .child(div().whitespace_nowrap().child(crate::look::text(t.path.clone())))
+                    .children(note.map(|n| div().text_color(p.fg_dim).child(crate::look::text(n))))
                     .children(t.millis.map(|ms| div().text_color(p.fg_dim).child(millis_text(ms))))
                     .into_any_element(),
             );
@@ -1011,10 +1049,9 @@ impl RunWindow {
             .child(step("debug-step-into", Icon::StepInto, ts!("runwin-step-into-f7"), "stepIn", paused, p.accent))
             .child(step("debug-step-out", Icon::StepOut, ts!("runwin-step-out-f8"), "stepOut", paused, p.accent))
             .child(div().flex_1())
-            .children(
-                d.and_then(|d| d.note.clone())
-                    .map(|n| div().text_size(px(12.)).text_color(p.fg_dim).whitespace_nowrap().pr(px(6.)).child(n)),
-            )
+            .children(d.and_then(|d| d.note.clone()).map(|n| {
+                div().text_size(px(12.)).text_color(p.fg_dim).whitespace_nowrap().pr(px(6.)).child(crate::look::text(n))
+            }))
             .into_any_element()
     }
 
@@ -1026,7 +1063,9 @@ impl RunWindow {
         let Some(d) = s.debug.as_ref() else { return div().into_any_element() };
         let hover = p.button_hover;
         let mono = look::mono_font(cx);
-        let note = |text: &str| div().p(px(10.)).text_color(p.fg_dim).child(text.to_owned()).into_any_element();
+        let note = |text: &str| {
+            div().p(px(10.)).text_color(p.fg_dim).child(crate::look::text(text.to_owned())).into_any_element()
+        };
         // Threads and frames.
         let mut frames: Vec<AnyElement> = Vec::new();
         if !d.paused {
@@ -1139,8 +1178,8 @@ impl RunWindow {
                     .text_size(px(12.5))
                     .flex()
                     .gap(px(6.))
-                    .child(div().text_color(p.fg_dim).child(format!("{expr} =")))
-                    .child(div().text_color(color).child(value))
+                    .child(div().text_color(p.fg_dim).child(crate::look::text(format!("{expr} ="))))
+                    .child(div().text_color(color).child(crate::look::text(value)))
                     .into_any_element(),
             );
         }

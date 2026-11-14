@@ -389,7 +389,7 @@ impl Render for EvaluateDialog {
                 .flex()
                 .flex_col()
                 .gap(px(4.))
-                .child(div().text_size(px(12.)).text_color(p.fg_dim).child(expr))
+                .child(div().text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(expr)))
                 .child(
                     div()
                         .flex()
@@ -400,7 +400,7 @@ impl Render for EvaluateDialog {
                                 .font_family(look::MONO)
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(p.fg)
-                                .child(v.value.clone()),
+                                .child(crate::look::text(v.value.clone())),
                         )
                         .when_some(v.ty.clone(), |d, ty| d.child(components::badge(ty, Tone::Neutral, &p))),
                 )

@@ -507,7 +507,7 @@ impl Workspace {
                         d.child(crate::art::drawing_on(snout_core::art::spots::jdk(), 48., 32., p.wash(p.accent)))
                     }
                 })
-                .child(div().flex_1().min_w_0().child(text))
+                .child(div().flex_1().min_w_0().child(crate::look::text(text)))
                 .when_some(prompt.progress.as_ref().and_then(|pr| pr.percent()), |d, pct| {
                     d.child(
                         div()
@@ -588,7 +588,7 @@ impl Workspace {
                         d.child(crate::art::drawing_on(snout_core::art::spots::terminal(), 48., 32., p.wash(p.accent)))
                     }
                 })
-                .child(div().flex_1().min_w_0().child(text))
+                .child(div().flex_1().min_w_0().child(crate::look::text(text)))
                 .when(busy, |d| {
                     use gpui_component::Sizable as _;
                     d.child(gpui_component::spinner::Spinner::new().xsmall())
@@ -695,7 +695,7 @@ impl Workspace {
                 .border_color(mix(p.accent, 0.4, p.panel))
                 .text_size(px(12.5))
                 .child(crate::art::drawing_on(snout_core::art::spots::no_tests(), 48., 32., p.wash(p.accent)))
-                .child(div().flex_1().min_w_0().child(text))
+                .child(div().flex_1().min_w_0().child(crate::look::text(text)))
                 .when(installing, |d| {
                     use gpui_component::Sizable as _;
                     d.child(gpui_component::spinner::Spinner::new().xsmall())
@@ -765,7 +765,7 @@ impl Workspace {
                     14.,
                     if changed { p.accent } else { p.warn },
                 ))
-                .child(div().flex_1().min_w_0().child(text))
+                .child(div().flex_1().min_w_0().child(crate::look::text(text)))
                 .child(
                     look::small_button(
                         "gradle-sync",

@@ -448,7 +448,9 @@ impl SpringWindow {
             .items_center()
             .gap(px(6.))
             .child(icon(Icon::Leaf, 13., green(&p)))
-            .child(div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-active-profiles")))
+            .child(
+                div().text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(ts!("settings-active-profiles"))),
+            )
             .child(self.chip(
                 "spring-active-profiles",
                 crate::spring::mode_label(&mode, &info),
@@ -462,7 +464,7 @@ impl SpringWindow {
                         .debug_selector(|| "spring-inactive-count".into())
                         .text_size(px(11.5))
                         .text_color(p.fg_dim)
-                        .child(t!("spring-inactive", inactive = (thousands(inactive)).to_string())),
+                        .child(crate::look::text(t!("spring-inactive", inactive = (thousands(inactive)).to_string()))),
                 )
             });
         let rows: Rc<Vec<BeanRow>> = Rc::new(self.bean_rows(cx));
@@ -1086,7 +1088,9 @@ impl Render for SpringWindow {
             .child(self.tab_button(Tab::Beans, beans, cx))
             .child(self.tab_button(Tab::Endpoints, endpoints, cx))
             .child(div().flex_1())
-            .when(loading, |d| d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(ts!("spring-reading"))));
+            .when(loading, |d| {
+                d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(ts!("spring-reading"))))
+            });
         let body = match self.tab {
             Tab::Beans => self.beans_tab(cx),
             Tab::Endpoints => self.endpoints_tab(cx),

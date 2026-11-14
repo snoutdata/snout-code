@@ -430,7 +430,7 @@ fn letter_badge(text: &'static str, color: Hsla, p: &Palette) -> AnyElement {
         .font_weight(FontWeight::BOLD)
         .text_size(px(9.))
         .line_height(px(14.))
-        .child(text)
+        .child(crate::look::text(text))
         .into_any_element()
 }
 
@@ -512,7 +512,14 @@ impl Render for ProjectView {
                             .when(playwright.is_some(), |d| {
                                 d.child(icon(if tests_icon { Icon::TestFolder } else { Icon::Package }, 13., p.fg_dim))
                             })
-                            .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(note)),
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
+                                    .child(crate::look::text(note)),
+                            ),
                     )
                 })
                 .child(div().flex_1().min_h_0().child(self.files.clone()))

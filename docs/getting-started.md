@@ -89,6 +89,16 @@ Repository (Git), Window and Help. Each item shows an icon, an SF Symbol as macO
 use, so commands are quick to spot; its shortcut, when it has one, is at the right. Items that
 cannot act now (Save with no editor open, Stage with nothing selected) are greyed out.
 
+### Select and copy text
+
+Text selects with the mouse as it does in the editor: in dialogs, messages, the status bar, a
+commit's details, diffs, run output, test results, hover cards and the settings pages. Drag across
+it, double-click a word, or triple-click a line; a drag can run across several pieces of text. ⌘C
+copies what is selected. In run output, a diff or the terminal, the drag goes on outside the panel, and
+held at an edge of run output or a diff, it scrolls that way, sideways too in run output, so you
+can select text out of view. Rows in lists, trees and tables keep their own clicks and drags instead;
+right-click one for **Copy path** or **Copy name** where it has them.
+
 ### Open files and folders from Finder
 
 - **Open With**: right-click a file, choose **Open With** and then **SnoutCode**. To make it the

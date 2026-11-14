@@ -495,9 +495,11 @@ impl EditorPanel {
                         .min_w_0()
                         .pt(px(2.))
                         .line_height(px(17.))
-                        .child(d.message.trim().to_owned())
+                        .child(crate::look::text(d.message.trim().to_owned()))
                         .when_some(source, |e, s| {
-                            e.child(div().text_size(px(11.)).text_color(p.fg_dim).child(s.to_string()))
+                            e.child(
+                                div().text_size(px(11.)).text_color(p.fg_dim).child(crate::look::text(s.to_string())),
+                            )
                         }),
                 )
         });
@@ -515,7 +517,7 @@ impl EditorPanel {
                         .gap(px(6.))
                         .text_color(p.fg_dim)
                         .child(icon(IconName::LoaderCircle, 13., p.fg_dim))
-                        .child(ts!("editor-looking-for-fixes")),
+                        .child(crate::look::text(ts!("editor-looking-for-fixes"))),
                 ),
                 Fixes::Found(list) => {
                     let main = match fixes::best_fix(list).cloned() {

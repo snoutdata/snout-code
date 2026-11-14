@@ -300,7 +300,7 @@ impl EditorPanel {
                         .text_size(px(12.))
                         .text_color(p.fg)
                         .font_family(crate::look::ui_font(cx))
-                        .children(lines.into_iter().map(|l| div().whitespace_nowrap().child(l))),
+                        .children(lines.into_iter().map(|l| div().whitespace_nowrap().child(crate::look::text(l)))),
                 ),
             )
             .with_priority(2)
@@ -358,9 +358,15 @@ impl EditorPanel {
                         .whitespace_nowrap()
                         .child(text),
                 ),
-                SpringItem::Note(text) => {
-                    col.child(div().flex_none().px(px(10.)).py(px(4.)).max_w(px(520.)).text_color(p.fg_dim).child(text))
-                }
+                SpringItem::Note(text) => col.child(
+                    div()
+                        .flex_none()
+                        .px(px(10.))
+                        .py(px(4.))
+                        .max_w(px(520.))
+                        .text_color(p.fg_dim)
+                        .child(crate::look::text(text)),
+                ),
                 SpringItem::Go { label, detail, target } => col.child(
                     row("spring-go")
                         .child(icon(if target.uri.is_some() { Icon::Leaf } else { Icon::Jar }, 13., green))
@@ -408,7 +414,13 @@ impl EditorPanel {
             };
         }
         if matching == 0 && total > 0 {
-            col = col.child(div().px(px(10.)).py(px(4.)).text_color(p.fg_dim).child(ts!("editor-nothing-matches")));
+            col = col.child(
+                div()
+                    .px(px(10.))
+                    .py(px(4.))
+                    .text_color(p.fg_dim)
+                    .child(crate::look::text(ts!("editor-nothing-matches"))),
+            );
         }
         let list = div()
             .id("spring-menu-list")

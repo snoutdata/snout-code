@@ -81,14 +81,30 @@ pub fn vseparator(p: &Palette) -> Div {
     div().flex_none().px(px(3.)).h(px(22.)).flex().items_center().child(div().w(px(1.)).h(px(20.)).bg(p.border))
 }
 
+/// Text the mouse selects, as in the editor: a drag, a double click (a word) or a triple
+/// click (a line), across the texts next to it too, and ⌘C copies it. It looks and lays out
+/// as plain text, in the style it inherits. Its id is where it is called from and what it
+/// says, so it keeps its selection from frame to frame.
+#[track_caller]
+pub fn text(text: impl Into<SharedString>) -> gpui_base::SelectableText {
+    use std::hash::{Hash as _, Hasher as _};
+    let text = text.into();
+    let at = std::panic::Location::caller();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (at.file(), at.line(), at.column(), text.as_ref()).hash(&mut h);
+    gpui_base::SelectableText::new(ElementId::NamedInteger("text".into(), h.finish()), text)
+}
+
 /// A pane's title.
-pub fn title(text: impl Into<SharedString>) -> Div {
-    div().flex_none().whitespace_nowrap().child(text.into())
+#[track_caller]
+pub fn title(s: impl Into<SharedString>) -> Div {
+    div().flex_none().whitespace_nowrap().child(text(s))
 }
 
 /// Weak (dimmed) text.
-pub fn weak(text: impl Into<SharedString>, p: &Palette) -> Div {
-    div().whitespace_nowrap().text_color(p.weak()).child(text.into())
+#[track_caller]
+pub fn weak(s: impl Into<SharedString>, p: &Palette) -> Div {
+    div().whitespace_nowrap().text_color(p.weak()).child(text(s))
 }
 
 fn tip(text: SharedString) -> impl Fn(&mut gpui::Window, &mut App) -> gpui::AnyView {

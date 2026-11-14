@@ -454,20 +454,17 @@ impl NewProjectView {
                     ),
                 &p,
             ))
-            .child(
-                div()
-                    .pl(px(162.))
-                    .text_size(px(12.))
-                    .text_color(p.fg_dim)
-                    .child(t!("newproject-the-project-goes-in", target = (target.display()).to_string())),
-            );
+            .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(t!(
+                "newproject-the-project-goes-in",
+                target = (target.display()).to_string()
+            ))));
         if self.kind == Kind::SpringBoot && self.catalog.is_none() {
             return body
                 .child(
                     div()
                         .pt(px(24.))
                         .text_color(p.fg_dim)
-                        .child(ts!("newproject-asking-start-spring-io-what-it-offers")),
+                        .child(crate::look::text(ts!("newproject-asking-start-spring-io-what-it-offers"))),
                 )
                 .into_any_element();
         }
@@ -613,8 +610,12 @@ impl NewProjectView {
         let hover = p.button_hover;
         let mut chosen = div().flex().flex_wrap().gap(px(4.)).min_h(px(22.));
         if self.deps.is_empty() {
-            chosen =
-                chosen.child(div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("newproject-none-chosen-yet")));
+            chosen = chosen.child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(crate::look::text(ts!("newproject-none-chosen-yet"))),
+            );
         }
         for (i, id) in self.deps.iter().enumerate() {
             let name = catalog.dependency(id).map(|d| d.name.clone()).unwrap_or_else(|| id.clone());
@@ -662,7 +663,7 @@ impl NewProjectView {
                     .text_size(px(11.5))
                     .text_color(p.fg_dim)
                     .font_weight(FontWeight::MEDIUM)
-                    .child(group.clone()),
+                    .child(crate::look::text(group.clone())),
             );
             for d in shown {
                 let on = self.deps.contains(&d.id);
@@ -712,7 +713,9 @@ impl NewProjectView {
             }
         }
         if !any {
-            list = list.child(div().p(px(6.)).text_color(p.fg_dim).child(ts!("newproject-no-dependency-matches")));
+            list = list.child(
+                div().p(px(6.)).text_color(p.fg_dim).child(crate::look::text(ts!("newproject-no-dependency-matches"))),
+            );
         }
         let mut out = div().flex().flex_col().gap(px(6.)).child(section(ts!("newproject-dependencies"), &p)).child(
             div().text_size(px(12.)).text_color(p.fg_dim).child(t!(
@@ -729,7 +732,7 @@ impl NewProjectView {
                     .gap(px(8.))
                     .text_size(px(12.))
                     .text_color(p.warn)
-                    .child(t!("newproject-offline-fallback", why = why.to_string()))
+                    .child(crate::look::text(t!("newproject-offline-fallback", why = why.to_string())))
                     .child(
                         look::small_button(
                             "new-project-retry",
@@ -915,7 +918,7 @@ impl Render for NewProjectView {
                             .whitespace_nowrap()
                             .overflow_hidden()
                             .text_ellipsis()
-                            .children(status.map(|(t, c)| div().text_color(c).child(t))),
+                            .children(status.map(|(t, c)| div().text_color(c).child(crate::look::text(t)))),
                     )
                     .when(self.offer_offline && !self.creating, |d| {
                         d.child(

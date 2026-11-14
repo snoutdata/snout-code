@@ -208,7 +208,7 @@ pub fn view(
             .pb(px(4.))
             .text_color(p.weak())
             .child(icon(IconName::Lightbulb, 13., p.fg_dim))
-            .child(ts!("editor-context-actions")),
+            .child(crate::look::text(ts!("editor-context-actions"))),
     };
     let mut rows: Vec<AnyElement> = Vec::new();
     let mut first_fix = true;
@@ -276,7 +276,7 @@ pub fn view(
                 .gap(px(8.))
                 .text_color(p.fg_dim)
                 .child(icon(IconName::LoaderCircle, 14., p.fg_dim))
-                .child(ts!("editor-looking-for-fixes"))
+                .child(crate::look::text(ts!("editor-looking-for-fixes")))
                 .into_any_element(),
         );
     }

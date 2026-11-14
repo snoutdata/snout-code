@@ -316,7 +316,9 @@ impl Render for HierarchyWindow {
             .child(switch(first, cx))
             .child(switch(second, cx))
             .child(div().flex_1())
-            .when_some(title, |d, t| d.child(div().text_color(p.weak()).whitespace_nowrap().child(t)));
+            .when_some(title, |d, t| {
+                d.child(div().text_color(p.weak()).whitespace_nowrap().child(crate::look::text(t)))
+            });
         let rows = Rc::new(self.visible());
         let nodes = Rc::new(self.nodes.clone());
         let selected = self.selected;

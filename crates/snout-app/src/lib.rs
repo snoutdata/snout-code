@@ -13,6 +13,7 @@ pub mod components;
 pub mod console;
 pub mod core_text;
 pub mod dialogs;
+pub mod drag_select;
 pub mod editing;
 pub mod editor;
 pub mod external_terminal;

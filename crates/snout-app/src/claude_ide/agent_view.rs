@@ -189,7 +189,7 @@ impl AgentViewPanel {
                     .px(px(8.))
                     .py(px(4.))
                     .bg(p.panel)
-                    .child(div().flex_1().min_w_0().text_color(p.fg_dim).child(language.to_owned()))
+                    .child(div().flex_1().min_w_0().text_color(p.fg_dim).child(crate::look::text(language.to_owned())))
                     .child({
                         let s = selector("copy");
                         crate::look::small_button(s.clone(), IconName::Copy, ts!("cmd-copy"), p)
@@ -217,7 +217,7 @@ impl AgentViewPanel {
                     .py(px(8.))
                     .font_family(crate::look::mono_font(cx))
                     .text_size(px(12.))
-                    .child(text.to_owned()),
+                    .child(crate::look::text(text.to_owned())),
             )
             .into_any_element()
     }
@@ -254,7 +254,7 @@ impl Render for AgentViewPanel {
                 Some(title) => t!("agents-from", title = title.to_string(), agent = (push.agent).to_string()),
                 None => t!("agents-from-2", agent = (push.agent).to_string()),
             };
-            rows.push(div().text_color(p.fg_dim).text_size(px(11.5)).child(head).into_any_element());
+            rows.push(div().text_color(p.fg_dim).text_size(px(11.5)).child(crate::look::text(head)).into_any_element());
             for (j, block) in push.blocks.iter().enumerate() {
                 rows.push(match block {
                     Block::Prose(text) => {

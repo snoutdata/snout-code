@@ -556,8 +556,8 @@ pub fn callout_with(tone: Tone, title: Option<SharedString>, text: impl Into<Sha
                 .text_color(p.fg)
                 .text_size(px(12.5))
                 .line_height(px(18.))
-                .when_some(title, |d, t| d.child(div().font_weight(FontWeight::SEMIBOLD).child(t)))
-                .child(text.into()),
+                .when_some(title, |d, t| d.child(div().font_weight(FontWeight::SEMIBOLD).child(crate::look::text(t))))
+                .child(crate::look::text(text.into())),
         )
 }
 
@@ -682,8 +682,14 @@ impl RenderOnce for FileChip {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_size(px(12.5))
-                    .child(div().flex_none().text_color(p.fg_dim).child(dir))
-                    .child(div().flex_none().text_color(p.fg).font_weight(FontWeight::MEDIUM).child(name)),
+                    .child(div().flex_none().text_color(p.fg_dim).child(crate::look::text(dir)))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(p.fg)
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(crate::look::text(name)),
+                    ),
             )
             .when_some(self.status, |d, (label, color)| {
                 d.child(
@@ -807,12 +813,13 @@ impl RenderOnce for EmptyState {
             )))
             .child(
                 div()
+                    .debug_selector(|| "empty-state-title".into())
                     .mt(px(6.))
                     .text_color(p.fg)
                     .text_size(px(14.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_center()
-                    .child(self.title),
+                    .child(crate::look::text(self.title)),
             )
             .when_some(self.hint, |d, h| {
                 d.child(
@@ -822,7 +829,7 @@ impl RenderOnce for EmptyState {
                         .text_size(px(12.5))
                         .line_height(px(18.))
                         .text_center()
-                        .child(h),
+                        .child(crate::look::text(h)),
                 )
             })
             .when(!self.actions.is_empty(), |d| {
@@ -865,8 +872,20 @@ pub fn page_header(
                 .flex()
                 .flex_col()
                 .gap(px(3.))
-                .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).text_color(p.fg).child(title.into()))
-                .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(blurb.into())),
+                .child(
+                    div()
+                        .text_size(px(16.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(p.fg)
+                        .child(crate::look::text(title.into())),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .line_height(px(18.))
+                        .text_color(p.fg_dim)
+                        .child(crate::look::text(blurb.into())),
+                ),
         )
         .child(div().flex_none().flex().flex_col().items_end().gap(px(6.)).child(controls))
 }
@@ -894,7 +913,7 @@ pub fn tips(title: impl Into<SharedString>, items: &[(IconName, &'static str)], 
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(p.fg)
                 .child(icon(IconName::Lightbulb, 15., color))
-                .child(title.into()),
+                .child(crate::look::text(title.into())),
         )
         .children(items.iter().map(|(ico, text)| {
             div()
@@ -916,7 +935,7 @@ pub fn tips(title: impl Into<SharedString>, items: &[(IconName, &'static str)], 
                         .bg(p.wash(color))
                         .child(icon(*ico, 12., color)),
                 )
-                .child(div().flex_1().min_w_0().pt(px(1.)).child(*text))
+                .child(div().flex_1().min_w_0().pt(px(1.)).child(crate::look::text(*text)))
         }))
 }
 
@@ -1001,9 +1020,15 @@ fn header(
             .gap(px(3.))
             // Clear of the close button, whatever the length of the title.
             .pr(px(16.))
-            .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).text_color(p.fg).child(title))
+            .child(
+                div()
+                    .text_size(px(16.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(p.fg)
+                    .child(crate::look::text(title)),
+            )
             .when_some(subtitle, |d, s| {
-                d.child(div().text_size(px(13.)).line_height(px(19.)).text_color(p.fg_dim).child(s))
+                d.child(div().text_size(px(13.)).line_height(px(19.)).text_color(p.fg_dim).child(crate::look::text(s)))
             }),
     )
 }
@@ -1035,7 +1060,7 @@ pub fn dialog_footer(status: Option<(String, Hsla)>, buttons: Vec<AnyElement>, p
                 .whitespace_nowrap()
                 .overflow_hidden()
                 .text_ellipsis()
-                .children(status.map(|(t, c)| div().text_color(c).child(t))),
+                .children(status.map(|(t, c)| div().text_color(c).child(crate::look::text(t)))),
         )
         .children(buttons)
 }
@@ -1096,7 +1121,7 @@ fn card(id: &'static str, w: f32, h: Option<f32>, p: &Palette) -> Stateful<Div> 
 
 /// The label over a field of a form.
 pub fn field_label(text: impl Into<SharedString>, p: &Palette) -> Div {
-    div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(p.fg_dim).child(text.into())
+    div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(p.fg_dim).child(crate::look::text(text.into()))
 }
 
 /// A choice in a dialog as a card: an icon in a tile, a title and what it does. The caller

@@ -240,7 +240,13 @@ impl Render for FolderPicker {
                 .overflow_y_scrollbar()
                 .children(rows)
                 .when(loading, |d| {
-                    d.child(div().px(px(16.)).py(px(10.)).text_color(p.fg_dim).child(ts!("spring-reading")))
+                    d.child(
+                        div()
+                            .px(px(16.))
+                            .py(px(10.))
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(ts!("spring-reading"))),
+                    )
                 })
                 .when(empty, |d| {
                     d.child(

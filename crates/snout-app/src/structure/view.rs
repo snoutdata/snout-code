@@ -44,7 +44,9 @@ fn gradle_value(text: impl Into<SharedString>, p: &Palette) -> AnyElement {
         .gap(px(6.))
         .min_w_0()
         .child(icon(IconName::Lock, 12., p.fg_dim))
-        .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(text.into()))
+        .child(
+            div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::look::text(text.into())),
+        )
         .into_any_element()
 }
 
@@ -76,7 +78,7 @@ fn card(p: &Palette) -> gpui::Div {
 
 /// A dim line under a row.
 fn hint(text: impl Into<SharedString>, p: &Palette) -> gpui::Div {
-    div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(text.into())
+    div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(text.into()))
 }
 
 /// One row of the Dependencies page's tree.
@@ -122,7 +124,7 @@ impl ProjectStructureView {
                         .text_color(p.fg_dim)
                         .font_weight(FontWeight::MEDIUM)
                         .child(crate::glyphs::icon(Icon::ChevronDown, 11., p.fg_dim))
-                        .child(page.group())
+                        .child(crate::look::text(page.group()))
                         .into_any_element(),
                 );
             }
@@ -152,7 +154,13 @@ impl ProjectStructureView {
             );
         }
         if rows.is_empty() {
-            rows.push(div().px(px(12.)).text_color(p.fg_dim).child(ts!("settings-nothing-matches")).into_any_element());
+            rows.push(
+                div()
+                    .px(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(crate::look::text(ts!("settings-nothing-matches")))
+                    .into_any_element(),
+            );
         }
         div()
             .w(px(210.))
@@ -325,7 +333,7 @@ impl ProjectStructureView {
                                 13.,
                                 p.fg_dim,
                             ))
-                            .child(div().font_weight(FontWeight::MEDIUM).child(b.id.clone()))
+                            .child(div().font_weight(FontWeight::MEDIUM).child(crate::look::text(b.id.clone())))
                             .when(!b.synced, |d| {
                                 d.child(badge_with_icon(
                                     ts!("structure-did-not-sync"),
@@ -359,9 +367,11 @@ impl ProjectStructureView {
                             .gap(px(8.))
                             .min_w_0()
                             .child(crate::glyphs::icon(Icon::Jdk, 14., p.lanes()[1]))
-                            .child(format!("JDK {v}"))
+                            .child(crate::look::text(format!("JDK {v}")))
                             .child(look::weak(short(h, &home), &p)),
-                        _ => div().text_color(p.fg_dim).child(ts!("structure-not-known-until-the-build-syncs")),
+                        _ => div()
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(ts!("structure-not-known-until-the-build-syncs"))),
                     },
                     &p,
                 ));
@@ -549,7 +559,12 @@ impl ProjectStructureView {
                                 .flex()
                                 .items_center()
                                 .gap(px(6.))
-                                .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(m.name.clone()))
+                                .child(
+                                    div()
+                                        .text_size(px(14.))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(crate::look::text(m.name.clone())),
+                                )
                                 .when_some(kind, |d, (k, t)| d.child(badge(k, t, &p)))
                                 .when(m.spring_boot.is_some(), |d| {
                                     d.child(badge_with_icon(
@@ -656,14 +671,20 @@ impl ProjectStructureView {
                     15.,
                     if set.test { green } else { blue },
                 ))
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(set.name.clone()))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(crate::look::text(set.name.clone())))
                 .when(set.test, |d| {
                     d.child(badge_with_icon(ts!("stripes-tests"), IconName::FlaskConical, Tone::Success, &p))
                 })
                 .child(div().flex_1())
                 .when(!levels.is_empty(), |d| d.child(badge_with_icon(levels, Icon::Jdk, Tone::Neutral, &p))),
         );
-        c = c.child(div().pt(px(2.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("structure-content-roots")));
+        c = c.child(
+            div()
+                .pt(px(2.))
+                .text_size(px(12.))
+                .text_color(p.fg_dim)
+                .child(crate::look::text(ts!("structure-content-roots"))),
+        );
         if set.roots.is_empty() {
             c = c.child(look::weak(ts!("settings-none"), &p));
         }
@@ -685,7 +706,13 @@ impl ProjectStructureView {
                     .child(look::weak(kind.label(), &p).text_size(px(11.5))),
             );
         }
-        c = c.child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("structure-output-folders")));
+        c = c.child(
+            div()
+                .pt(px(6.))
+                .text_size(px(12.))
+                .text_color(p.fg_dim)
+                .child(crate::look::text(ts!("structure-output-folders"))),
+        );
         for (i, out) in set.outputs.iter().enumerate() {
             let what = if i + 1 == set.outputs.len() && set.outputs.len() > 1 {
                 ts!("structure-resources")
@@ -1049,12 +1076,9 @@ impl ProjectStructureView {
     fn jdk_picker(&mut self, home: &Path, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let dir = crate::lang::java::downloads_dir(crate::host::host(cx).info());
-        let head = div()
-            .flex()
-            .items_center()
-            .gap(px(10.))
-            .child(tile(IconName::Download, p.accent, 26., &p))
-            .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(ts!("structure-download-jdk")));
+        let head = div().flex().items_center().gap(px(10.)).child(tile(IconName::Download, p.accent, 26., &p)).child(
+            div().flex_1().font_weight(FontWeight::SEMIBOLD).child(crate::look::text(ts!("structure-download-jdk"))),
+        );
         let cancel = Button::new("structure-jdk-cancel", crate::components::CANCEL_ICON)
             .debug_selector("structure-jdk-cancel")
             .compact()
@@ -1355,7 +1379,11 @@ impl ProjectStructureView {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(ts!("structure-no-jdk-there-now")))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(crate::look::text(ts!("structure-no-jdk-there-now"))),
+                            )
                             .child(look::weak(short(h, &home), &p).text_size(px(12.))),
                     )
                     .child(
@@ -1389,7 +1417,11 @@ impl ProjectStructureView {
         card(&p)
             .debug_selector(|| "structure-sdk-detail".into())
             .child(section(ts!("structure-selected-jdk"), &p).pt(px(0.)))
-            .child(row(ts!("structure-version"), div().child(format!("{} (Java {})", j.version, j.major)), &p))
+            .child(row(
+                ts!("structure-version"),
+                div().child(crate::look::text(format!("{} (Java {})", j.version, j.major))),
+                &p,
+            ))
             .child(row(ts!("structure-home"), div().child(short(&j.home, home)), &p))
             .child(row(
                 ts!("structure-kept-in"),
@@ -1439,7 +1471,7 @@ impl ProjectStructureView {
                 .gap(px(10.))
                 .pb(px(4.))
                 .child(tile(Icon::Leaf, green, 30., &p))
-                .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child("Spring"))
+                .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(crate::look::text("Spring")))
                 .child(if detected {
                     badge_with_icon(ts!("structure-detected"), IconName::CircleCheck, Tone::Success, &p)
                 } else {
@@ -1497,7 +1529,11 @@ impl ProjectStructureView {
                 ));
             }
             spring_card = spring_card.child(
-                div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("structure-configuration-files")),
+                div()
+                    .pt(px(6.))
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(crate::look::text(ts!("structure-configuration-files"))),
             );
             if self.config_files.is_empty() {
                 spring_card = spring_card
@@ -1546,7 +1582,12 @@ impl ProjectStructureView {
                     .gap(px(10.))
                     .pb(px(4.))
                     .child(tile(IconName::Sparkles, claude, 30., &p))
-                    .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child("Claude Code"))
+                    .child(
+                        div()
+                            .text_size(px(14.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(crate::look::text("Claude Code")),
+                    )
                     .child(match (clients, program.is_some()) {
                         (n, _) if n > 0 => badge_with_icon(ts!("console-connected"), IconName::Plug, Tone::Success, &p),
                         (_, true) => badge_with_icon(ts!("model-ready"), IconName::CircleCheck, Tone::Claude, &p),
@@ -1567,7 +1608,9 @@ impl ProjectStructureView {
                 ts!("settings-program"),
                 match &program {
                     Some(path) => div().child(short(path, &home)),
-                    None => div().text_color(p.fg_dim).child(ts!("structure-claude-was-not-found-on-path-or-the")),
+                    None => div()
+                        .text_color(p.fg_dim)
+                        .child(crate::look::text(ts!("structure-claude-was-not-found-on-path-or-the"))),
                 },
                 &p,
             ))
@@ -1663,7 +1706,7 @@ fn dep_row(
             .debug_selector(move || format!("structure-dep-{i}"))
             .child(div().w(px(12.)))
             .child(icon(IconName::CircleAlert, 14., p.error))
-            .child(div().text_color(p.error).child(requested.clone()))
+            .child(div().text_color(p.error).child(crate::look::text(requested.clone())))
             .child(badge(ts!("structure-unresolved-2"), Tone::Danger, &p))
             .child(look::weak(reason.clone(), &p).text_size(px(11.5)).flex_1())
             .into_any_element();
@@ -1774,7 +1817,7 @@ fn dep_row(
                     .text_ellipsis()
                     .text_color(text_ink)
                     .when(declared, |d| d.font_weight(FontWeight::MEDIUM))
-                    .child(coords),
+                    .child(crate::look::text(coords)),
             );
             match r.requested.as_deref() {
                 Some(asked) if !asked.is_empty() => {
@@ -1799,9 +1842,19 @@ fn dep_row(
                                 .flex()
                                 .items_center()
                                 .gap(px(4.))
-                                .child(div().text_color(p.fg_dim).line_through().child(asked.to_owned()))
+                                .child(
+                                    div()
+                                        .text_color(p.fg_dim)
+                                        .line_through()
+                                        .child(crate::look::text(asked.to_owned())),
+                                )
                                 .child(icon(IconName::ArrowRight, 11., p.warn))
-                                .child(div().text_color(p.warn).font_weight(FontWeight::MEDIUM).child(version))
+                                .child(
+                                    div()
+                                        .text_color(p.warn)
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(crate::look::text(version)),
+                                )
                                 .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(w, cx)),
                         )
                         .child(badge_with_icon(ts!("structure-conflict"), IconName::TriangleAlert, Tone::Warning, &p));

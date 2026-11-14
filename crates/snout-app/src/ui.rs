@@ -18,7 +18,7 @@ pub fn chip(text: impl Into<SharedString>, color: Hsla, p: &Palette) -> Div {
         .bg(p.wash(color))
         .text_color(color)
         .text_size(px(11.5))
-        .child(text.into())
+        .child(crate::look::text(text.into()))
 }
 
 /// Colour of a working-tree file's state.

@@ -209,11 +209,9 @@ impl Render for OutputPanel {
                 .py(px(6.))
                 .font_family(cx.theme_mono())
                 .text_size(px(12.))
-                .children(
-                    m.output
-                        .iter()
-                        .map(|l| div().text_color(if l.error { p.error } else { p.fg }).child(l.text.clone())),
-                ),
+                .children(m.output.iter().map(|l| {
+                    div().text_color(if l.error { p.error } else { p.fg }).child(crate::look::text(l.text.clone()))
+                })),
         )
     }
 }

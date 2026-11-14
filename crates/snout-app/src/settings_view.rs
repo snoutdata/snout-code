@@ -707,7 +707,7 @@ impl SettingsView {
                     .text_size(px(12.))
                     .text_color(p.fg_dim)
                     .child(div().flex_none().pt(px(2.)).child(crate::components::icon(ico, 12., p.fg_dim)))
-                    .child(div().flex_1().min_w_0().child(text)),
+                    .child(div().flex_1().min_w_0().child(crate::look::text(text))),
             )
             .when_some(error, |d, e| {
                 d.child(
@@ -754,7 +754,7 @@ pub(crate) fn row(label: impl Into<SharedString>, control: impl IntoElement, p: 
         .items_center()
         .gap(px(12.))
         .min_h(px(34.))
-        .child(div().w(px(150.)).flex_none().text_color(p.fg).child(label.into()))
+        .child(div().w(px(150.)).flex_none().text_color(p.fg).child(crate::look::text(label.into())))
         .child(control)
 }
 
@@ -765,7 +765,7 @@ pub(crate) fn section(text: impl Into<SharedString>, p: &Palette) -> gpui::Div {
         .text_color(p.fg_dim)
         .text_size(px(12.))
         .font_weight(FontWeight::MEDIUM)
-        .child(text.into())
+        .child(crate::look::text(text.into()))
 }
 
 /// A count with thousands apart: `10,000`.
@@ -1241,7 +1241,10 @@ impl SettingsView {
                     .when_some(dark_only, |d, name| {
                         d.child(row(
                             "",
-                            div().text_size(px(11.5)).text_color(p.fg_dim).child(t!("settings-dark-only", name = name)),
+                            div()
+                                .text_size(px(11.5))
+                                .text_color(p.fg_dim)
+                                .child(crate::look::text(t!("settings-dark-only", name = name))),
                             &p,
                         ))
                     })
@@ -1314,7 +1317,12 @@ impl SettingsView {
                             .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.confirm_quit = !s.confirm_quit))),
                         ),
                     )
-                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(t!("settings-confirm-quit-note")))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(t!("settings-confirm-quit-note"))),
+                    )
                     .child(section(t!("settings-section-updates"), &p))
                     .child(
                         div().py(px(6.)).child(
@@ -1329,7 +1337,12 @@ impl SettingsView {
                             .on_click(cx.listener(|this, _, _, cx| this.set(cx, |s| s.update_check = !s.update_check))),
                         ),
                     )
-                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(t!("settings-update-check-note")))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(t!("settings-update-check-note"))),
+                    )
                     .into_any_element()
             }
             Page::Keymap => body.child(self.keymap_page(cx)).into_any_element(),
@@ -1369,7 +1382,7 @@ impl SettingsView {
                             .pl(px(162.))
                             .text_size(px(12.))
                             .text_color(p.fg_dim)
-                            .child(ts!("settings-for-a-file-whose-own-indentation-cannot-be")),
+                            .child(crate::look::text(ts!("settings-for-a-file-whose-own-indentation-cannot-be"))),
                     )
                     .child(section(ts!("settings-display"), &p))
                     .child(check_line(
@@ -1455,7 +1468,13 @@ impl SettingsView {
                         ),
                         delay_mark,
                     ))
-                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-hover-hint")))
+                    .child(
+                        div()
+                            .pl(px(162.))
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(ts!("settings-hover-hint"))),
+                    )
                     .child(section(ts!("settings-navigation"), &p))
                     .child(row(
                         ts!("settings-click-with"),
@@ -1470,7 +1489,13 @@ impl SettingsView {
                         })),
                         &p,
                     ))
-                    .child(div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-click-hint")))
+                    .child(
+                        div()
+                            .pl(px(162.))
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(ts!("settings-click-hint"))),
+                    )
                     .child(section(ts!("settings-preview"), &p))
                     .child(editor_preview(&d, &p))
                     .into_any_element()
@@ -1509,7 +1534,7 @@ impl SettingsView {
                             .pl(px(162.))
                             .text_size(px(12.))
                             .text_color(p.fg_dim)
-                            .child(ts!("settings-the-projects-are-fetched-in-the-background-to")),
+                            .child(crate::look::text(ts!("settings-the-projects-are-fetched-in-the-background-to"))),
                     )
                     .child(section(ts!("settings-annotations"), &p))
                     .child(check_line(
@@ -1544,7 +1569,12 @@ impl SettingsView {
                         ),
                         None,
                     ))
-                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-blame-hint")))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(ts!("settings-blame-hint"))),
+                    )
                     .child(crate::components::tips(
                         ts!("settings-good-to-know"),
                         &[
@@ -1583,7 +1613,11 @@ impl SettingsView {
                         idle_mark,
                     ))
                     .child(
-                        div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-daemons-hint")),
+                        div()
+                            .pl(px(162.))
+                            .text_size(px(12.))
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(ts!("settings-daemons-hint"))),
                     )
                     .child(crate::components::tips(
                         ts!("settings-good-to-know"),
@@ -1632,7 +1666,7 @@ impl SettingsView {
                                 .flex_col()
                                 .items_start()
                                 .gap(px(8.))
-                                .child(div().text_color(p.fg_dim).child(text))
+                                .child(div().text_color(p.fg_dim).child(crate::look::text(text)))
                                 .children(open),
                         )
                         .child(tips)
@@ -1687,7 +1721,7 @@ impl SettingsView {
                             .pt(px(4.))
                             .text_size(px(12.))
                             .text_color(p.fg_dim)
-                            .child(ts!("settings-profiles-hint")),
+                            .child(crate::look::text(ts!("settings-profiles-hint"))),
                     )
                     .child(tips)
                     .into_any_element()
@@ -1811,7 +1845,7 @@ impl SettingsView {
                         )
                     }),
             )
-            .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(status));
+            .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(status)));
         row(label, control, p).into_any_element()
     }
 
@@ -1876,13 +1910,21 @@ impl SettingsView {
                 )
                 .child(div().text_size(px(11.5)).line_height(px(15.)).text_color(p.fg_dim).child(how))
         });
-        let note = |text: &'static str| div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(text);
+        let note = |text: &'static str| {
+            div().pl(px(162.)).text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(text))
+        };
         div()
             .flex()
             .flex_col()
             .child(section(ts!("settings-the-console-runs"), &p))
             .child(div().flex().flex_wrap().gap(px(8.)).children(cards))
-            .child(div().pt(px(6.)).text_size(px(12.)).text_color(p.fg_dim).child(ts!("settings-agent-colours-hint")))
+            .child(
+                div()
+                    .pt(px(6.))
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(crate::look::text(ts!("settings-agent-colours-hint"))),
+            )
             .child(section(ts!("settings-programs"), &p))
             .child(self.program_row("Claude Code", crate::agents::CLAUDE, "settings-browse-claude", d, &p, cx))
             .child(self.program_row("Codex", crate::agents::CODEX, "settings-browse-codex", d, &p, cx))
@@ -1929,7 +1971,7 @@ impl SettingsView {
                         .pt(px(14.))
                         .text_size(px(12.))
                         .text_color(p.fg_dim)
-                        .child(ts!("settings-terminal-scope-hint")),
+                        .child(crate::look::text(ts!("settings-terminal-scope-hint"))),
                 )
                 .into_any_element();
         }

@@ -110,7 +110,13 @@ fn chip(id: &'static str, label: String, on: bool, p: &Palette) -> gpui::Statefu
 }
 
 fn section(title: &'static str, p: &Palette) -> impl IntoElement {
-    div().pt(px(12.)).pb(px(4.)).text_size(px(11.)).font_weight(FontWeight::SEMIBOLD).text_color(p.fg_dim).child(title)
+    div()
+        .pt(px(12.))
+        .pb(px(4.))
+        .text_size(px(11.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(p.fg_dim)
+        .child(crate::look::text(title))
 }
 
 impl TestsWindow {
@@ -227,7 +233,7 @@ impl TestsWindow {
         let failed_any = c.failed > 0 && !running;
         let watch = t.watch;
         let count = |g: Icon, ink: Hsla, what: String| {
-            div().flex().items_center().gap(px(4.)).child(icon(g, 12., ink)).child(what)
+            div().flex().items_center().gap(px(4.)).child(icon(g, 12., ink)).child(crate::look::text(what))
         };
         let tab = t.tab;
         let tab_button = |id: &'static str, label: &'static str, which: Tab| {
@@ -254,9 +260,11 @@ impl TestsWindow {
                     .child(tab_button("tests-tab-live", ts!("tests-live-run"), Tab::Live))
                     .child(tab_button("tests-tab-history", ts!("tests-history"), Tab::History))
                     .child(div().w(px(8.)))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).text_color(ink).child(state_text))
+                    .child(div().font_weight(FontWeight::SEMIBOLD).text_color(ink).child(crate::look::text(state_text)))
                     // The detail gives way first; below this the buttons take a row of their own.
-                    .child(div().flex_1().min_w(px(120.)).text_color(p.fg_dim).truncate().child(detail))
+                    .child(
+                        div().flex_1().min_w(px(120.)).text_color(p.fg_dim).truncate().child(crate::look::text(detail)),
+                    )
                     .children(suites)
                     .children(env)
                     .when(!unit, |d| {
@@ -322,13 +330,13 @@ impl TestsWindow {
                             p.ok
                         }),
                     ))
-                    .child(div().child(format!("{} / {total}", c.done)))
+                    .child(div().child(crate::look::text(format!("{} / {total}", c.done))))
                     .child(count(Icon::Check, p.ok, t!("tests-count-passed", count = ((c.passed) as u64))))
                     .child(count(Icon::Close, p.error, t!("tests-count-failed", count = ((c.failed) as u64))))
                     .child(count(Icon::Warning, p.warn, t!("tests-count-flaky", count = ((c.flaky) as u64))))
                     .child(count(Icon::Minus, p.fg_dim, t!("tests-count-skipped", count = ((c.skipped) as u64))))
                     .child(div().flex_1())
-                    .child(div().text_color(p.fg_dim).child(time)),
+                    .child(div().text_color(p.fg_dim).child(crate::look::text(time))),
             )
             .into_any_element()
     }
@@ -402,10 +410,14 @@ impl TestsWindow {
                 .child(icon(Icon::ChevronDown, 11., p.fg_dim))
         } else {
             button(id, label, Some(Icon::Endpoint), p.accent, &p)
-                .children(
-                    detail
-                        .map(|d| div().text_color(p.fg_dim).max_w(px(180.)).overflow_hidden().text_ellipsis().child(d)),
-                )
+                .children(detail.map(|d| {
+                    div()
+                        .text_color(p.fg_dim)
+                        .max_w(px(180.))
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(crate::look::text(d))
+                }))
                 .child(icon(Icon::ChevronDown, 11., p.fg_dim))
         };
         crate::look::Trigger(trigger)
@@ -467,9 +479,18 @@ impl TestsWindow {
                         .flex()
                         .items_center()
                         .gap(px(10.))
-                        .child(div().w(px(22.)).text_color(p.fg_dim).child(format!("#{}", ix + 1)))
-                        .child(div().w(px(70.)).text_color(p.accent).overflow_hidden().child(project))
-                        .child(div().w(px(220.)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(title))
+                        .child(div().w(px(22.)).text_color(p.fg_dim).child(crate::look::text(format!("#{}", ix + 1))))
+                        .child(
+                            div().w(px(70.)).text_color(p.accent).overflow_hidden().child(crate::look::text(project)),
+                        )
+                        .child(
+                            div()
+                                .w(px(220.))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .child(crate::look::text(title)),
+                        )
                         .child(
                             div()
                                 .flex_1()
@@ -531,10 +552,10 @@ impl TestsWindow {
             .text_color(p.fg_dim)
             .border_b_1()
             .border_color(mix(p.border, 0.6, p.ground))
-            .child(div().flex_1().child(ts!("structure-test")))
-            .children(projects.iter().map(|pr| div().w(col).flex_none().child(pr.clone())))
-            .child(div().w(px(100.)).flex_none().child(ts!("tests-last-10-runs")))
-            .child(div().w(px(48.)).flex_none().child(ts!("tests-flaky-2")));
+            .child(div().flex_1().child(crate::look::text(ts!("structure-test"))))
+            .children(projects.iter().map(|pr| div().w(col).flex_none().child(crate::look::text(pr.clone()))))
+            .child(div().w(px(100.)).flex_none().child(crate::look::text(ts!("tests-last-10-runs"))))
+            .child(div().w(px(48.)).flex_none().child(crate::look::text(ts!("tests-flaky-2"))));
         let mut list: Vec<AnyElement> = Vec::new();
         let mut file = String::new();
         for (i, row) in rows.iter().enumerate() {
@@ -549,9 +570,11 @@ impl TestsWindow {
                         .flex()
                         .gap(px(8.))
                         .text_size(px(12.))
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(file.clone()))
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(crate::look::text(file.clone())))
                         .child(
-                            div().text_color(p.fg_dim).child(format!("{n} {}", if n == 1 { "test" } else { "tests" })),
+                            div()
+                                .text_color(p.fg_dim)
+                                .child(crate::look::text(format!("{n} {}", if n == 1 { "test" } else { "tests" }))),
                         )
                         .into_any_element(),
                 );
@@ -585,7 +608,7 @@ impl TestsWindow {
                             })
                         })
                         .child(icon(g, 12., ink))
-                        .child(div().text_size(px(11.)).text_color(p.fg_dim).child(time)),
+                        .child(div().text_size(px(11.)).text_color(p.fg_dim).child(crate::look::text(time))),
                 );
             }
             // Each past run's worst result over the projects, the newest last.
@@ -686,7 +709,7 @@ impl TestsWindow {
             } else {
                 ts!("tests-no-tests-yet-run-them-or-add-a").to_owned()
             };
-            list.push(div().p(px(16.)).text_color(p.fg_dim).child(note).into_any_element());
+            list.push(div().p(px(16.)).text_color(p.fg_dim).child(crate::look::text(note)).into_any_element());
         }
         div()
             .size_full()
@@ -741,7 +764,7 @@ impl TestsWindow {
                     .font_family(mono.clone())
                     .text_size(px(12.))
                     .overflow_hidden()
-                    .child(div().text_color(p.error).child(e.headline()))
+                    .child(div().text_color(p.error).child(crate::look::text(e.headline())))
                     .children((!e.snippet.is_empty()).then(|| {
                         let snippet = super::report::strip_ansi(&e.snippet);
                         div().mt(px(6.)).flex().flex_col().children(snippet.lines().map(|l| {
@@ -750,7 +773,7 @@ impl TestsWindow {
                                 .whitespace_nowrap()
                                 .text_color(if hit { p.fg } else { p.fg_dim })
                                 .when(hit, |d| d.bg(p.wash(p.error)))
-                                .child(l.to_owned())
+                                .child(crate::look::text(l.to_owned()))
                         }))
                     }))
                     .into_any_element(),
@@ -765,7 +788,7 @@ impl TestsWindow {
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    .child(div().text_size(px(11.)).text_color(p.fg_dim).child(label))
+                    .child(div().text_size(px(11.)).text_color(p.fg_dim).child(crate::look::text(label)))
                     .child(
                         div()
                             .h(px(120.))
@@ -809,7 +832,7 @@ impl TestsWindow {
                         })
                         .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.accept_screenshots(cx))),
                     )
-                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(cmp.name.clone()))
+                    .child(div().text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(cmp.name.clone())))
                     .into_any_element(),
             );
         }
@@ -837,7 +860,7 @@ impl TestsWindow {
                                     .overflow_hidden()
                                     .text_ellipsis()
                                     .whitespace_nowrap()
-                                    .child(s.title.clone()),
+                                    .child(crate::look::text(s.title.clone())),
                             )
                             .child(div().text_color(p.fg_dim).child(duration_text(s.duration.max(0.) as u64)))
                     }))
@@ -893,8 +916,8 @@ impl TestsWindow {
                                 .gap(px(8.))
                                 .font_family(mono.clone())
                                 .text_size(px(12.))
-                                .child(div().text_color(p.error).child(status))
-                                .child(div().child(r.method.clone()))
+                                .child(div().text_color(p.error).child(crate::look::text(status)))
+                                .child(div().child(crate::look::text(r.method.clone())))
                                 .child(
                                     div()
                                         .flex_1()
@@ -902,7 +925,7 @@ impl TestsWindow {
                                         .overflow_hidden()
                                         .text_ellipsis()
                                         .whitespace_nowrap()
-                                        .child(r.url.clone()),
+                                        .child(crate::look::text(r.url.clone())),
                                 )
                                 .children(r.millis.map(|m| div().text_color(p.fg_dim).child(duration_text(m))))
                                 .into_any_element(),
@@ -916,8 +939,8 @@ impl TestsWindow {
                                 .gap(px(8.))
                                 .font_family(mono.clone())
                                 .text_size(px(12.))
-                                .child(div().text_color(p.error).child(ts!("tests-console-error")))
-                                .child(div().flex_1().min_w_0().child(e.clone()))
+                                .child(div().text_color(p.error).child(crate::look::text(ts!("tests-console-error"))))
+                                .child(div().flex_1().min_w_0().child(crate::look::text(e.clone())))
                                 .into_any_element(),
                         );
                     }
@@ -939,14 +962,18 @@ impl TestsWindow {
                     div()
                         .text_size(px(12.))
                         .text_color(p.fg_dim)
-                        .child(t!("tests-the-trace-could-not-be-read", why = why.to_string()))
+                        .child(crate::look::text(t!("tests-the-trace-could-not-be-read", why = why.to_string())))
                         .into_any_element(),
                 ),
             }
         } else if trace_path.is_some() {
             body.push(section(ts!("tests-from-the-trace"), &p).into_any_element());
             body.push(
-                div().text_size(px(12.)).text_color(p.fg_dim).child(ts!("tests-reading-the-trace")).into_any_element(),
+                div()
+                    .text_size(px(12.))
+                    .text_color(p.fg_dim)
+                    .child(crate::look::text(ts!("tests-reading-the-trace")))
+                    .into_any_element(),
             );
         }
         // What it printed.
@@ -958,7 +985,12 @@ impl TestsWindow {
                     .text_size(px(12.))
                     .flex()
                     .flex_col()
-                    .children(super::report::strip_ansi(out).lines().take(200).map(|l| div().child(l.to_owned())))
+                    .children(
+                        super::report::strip_ansi(out)
+                            .lines()
+                            .take(200)
+                            .map(|l| div().child(crate::look::text(l.to_owned()))),
+                    )
                     .into_any_element(),
             );
         }
@@ -1028,15 +1060,16 @@ impl TestsWindow {
             .p(px(12.))
             .overflow_y_scrollbar()
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(icon(g, 14., ink))
-                    .child(div().text_size(px(11.)).text_color(ink).font_weight(FontWeight::SEMIBOLD).child(badge)),
+                div().flex().items_center().gap(px(8.)).child(icon(g, 14., ink)).child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(ink)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(crate::look::text(badge)),
+                ),
             )
             .child(div().pt(px(4.)).font_weight(FontWeight::SEMIBOLD).child(test.path.join(" › ")))
-            .child(div().text_size(px(12.)).text_color(p.fg_dim).child(where_text))
+            .child(div().text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(where_text)))
             .children(body)
             .child(div().pt(px(14.)).flex().flex_wrap().gap(px(6.)).children(actions))
             .into_any_element()
@@ -1069,7 +1102,7 @@ impl TestsWindow {
             .border_b_1()
             .border_color(p.border)
             .children(cols.iter().map(|(n, w)| div().w(px(*w)).flex_none().child(*n)))
-            .child(div().flex_1().child(ts!("tests-new-since-the-run-before")));
+            .child(div().flex_1().child(crate::look::text(ts!("tests-new-since-the-run-before"))));
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let rows = runs.iter().enumerate().rev().map(|(i, r)| {
             let before = i.checked_sub(1).and_then(|j| runs.get(j));
@@ -1087,7 +1120,7 @@ impl TestsWindow {
                     .text_ellipsis()
                     .whitespace_nowrap()
                     .text_color(ink)
-                    .child(text)
+                    .child(crate::look::text(text))
             };
             div()
                 .px(px(12.))
@@ -1117,7 +1150,7 @@ impl TestsWindow {
                         .text_ellipsis()
                         .whitespace_nowrap()
                         .text_color(p.error)
-                        .child(fresh_text),
+                        .child(crate::look::text(fresh_text)),
                 )
                 .into_any_element()
         });
@@ -1132,8 +1165,16 @@ impl TestsWindow {
                     .pt(px(8.))
                     .flex()
                     .gap(px(8.))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(ts!("tests-runs-of-this-project")))
-                    .child(div().text_color(p.fg_dim).child(ts!("tests-kept-on-this-machine-outside-the-repository"))),
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(crate::look::text(ts!("tests-runs-of-this-project"))),
+                    )
+                    .child(
+                        div()
+                            .text_color(p.fg_dim)
+                            .child(crate::look::text(ts!("tests-kept-on-this-machine-outside-the-repository"))),
+                    ),
             )
             .child(header)
             .child(
@@ -1144,7 +1185,12 @@ impl TestsWindow {
                     .min_h_0()
                     .overflow_y_scrollbar()
                     .when(rows.is_empty(), |d| {
-                        d.child(div().p(px(16.)).text_color(p.fg_dim).child(ts!("tests-no-runs-kept-yet")))
+                        d.child(
+                            div()
+                                .p(px(16.))
+                                .text_color(p.fg_dim)
+                                .child(crate::look::text(ts!("tests-no-runs-kept-yet"))),
+                        )
                     })
                     .children(rows),
             )

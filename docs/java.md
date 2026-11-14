@@ -271,5 +271,6 @@ The Java engine cannot read Scala source. So in a build with Scala, the engine c
 - A Scala folder that several builds compile is compiled once.
 - When you save a `.scala` file, the engine compiles the changed Scala again, incrementally, and the Java that uses it is checked again. The background tasks show `Compiling the changed Scala`.
 - If the compile fails, the status bar says `The Scala compile failed: see Problems`, and its errors are in the Problems window.
+- Running a main class compiles the Scala first when it changed since the last compile. If the Scala does not compile, the run does not start: its window shows Gradle's reason. Java that uses Scala classes cannot load without them.
 
 Scala files themselves open as plain text, without these features.

@@ -16,6 +16,7 @@ use gpui_component::scroll::ScrollableElement as _;
 use snout_core::Tracking;
 use snout_core::groups::{arrange, dir_name, short};
 
+use crate::components::RowState;
 use crate::model::{Action, Model};
 use crate::theme::{Palette, palette};
 use snout_core::art::Glyph;
@@ -58,6 +59,8 @@ pub struct ProjectsView {
     toggled: HashSet<String>,
     /// Which listed repositories are still there, as the host says.
     present: crate::host::Facts<bool>,
+    /// The repository a single click picked out: a double click shows it in the panel.
+    picked: Option<PathBuf>,
 }
 
 impl ProjectsView {
@@ -74,7 +77,7 @@ impl ProjectsView {
         })
         .detach();
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
-        Self { model, filter, toggled: HashSet::new(), present: Default::default() }
+        Self { model, filter, toggled: HashSet::new(), present: Default::default(), picked: None }
     }
 
     fn is_open(&self, key: &str, default: bool) -> bool {
@@ -100,9 +103,9 @@ fn send(model: &Entity<Model>, action: Action) -> impl Fn(&ClickEvent, &mut Wind
 /// The items to open or find repositories, in the + menu and on the welcome page.
 pub fn open_items(menu: PopupMenu, model: &Entity<Model>) -> PopupMenu {
     menu.item(
-        PopupMenuItem::new(ts!("projects-open-local-repository"))
+        PopupMenuItem::new(ts!("projects-add-local-repository"))
             .icon(crate::components::menu_icon(crate::components::IconName::FolderOpen))
-            .on_click(send(model, Action::PickFolder)),
+            .on_click(send(model, Action::PickRepo)),
     )
     .item(
         PopupMenuItem::new(ts!("projects-find-repositories-in-folder"))
@@ -162,7 +165,7 @@ impl Render for ProjectsView {
                     &g.name,
                     0,
                     Some(open),
-                    false,
+                    RowState::current(false),
                     false,
                     &chips,
                     None,
@@ -308,6 +311,7 @@ impl ProjectsView {
         let model = self.model.clone();
         let name = dir_name(path);
         let current = m.repo.as_ref().is_some_and(|r| r.root() == path);
+        let is_project = m.project.as_deref() == Some(path);
         let mut chips = Vec::new();
         if missing {
             chips.push(("missing".to_owned(), p.error));
@@ -334,20 +338,30 @@ impl ProjectsView {
         let key = format!("repo:{}", path.display());
         let has_dirs = tree.as_ref().is_some_and(|(children, _)| children.contains_key(""));
         let open = has_dirs.then(|| self.is_open(&key, true));
-        let selected = current && m.dir_filter.is_none();
+        let state = if current {
+            RowState::current(m.dir_filter.is_none())
+        } else {
+            RowState::new(self.picked.as_deref() == Some(path), false)
+        };
         let g = if missing { Glyph::Alert } else { Glyph::Repo };
         let id = SharedString::from(key.clone());
         let path_buf = path.to_owned();
         let chevron = chevron_click(&key, cx);
-        let row = list_row(id, g, &name, depth, open, selected, missing, &chips, Some(chevron), &p)
+        let row = list_row(id, g, &name, depth, open, state, missing, &chips, Some(chevron), &p)
+            // The repository the panel shows takes one click (all its files again); another
+            // takes a double click, so a click on the way to its menu or a drag shows nothing.
             .on_click(cx.listener({
                 let path = path_buf.clone();
-                move |this, _: &ClickEvent, _, cx| {
+                move |this, e: &ClickEvent, _, cx| {
                     if current {
                         this.model.update(cx, |m, cx| m.handle(Action::FilterDir(None), cx));
-                    } else {
+                    } else if e.click_count() >= 2 || matches!(e, ClickEvent::Keyboard(_)) {
+                        this.picked = None;
                         let a = Action::ShowRepo(path.clone());
                         this.model.update(cx, |m, cx| m.handle(a, cx));
+                    } else {
+                        this.picked = Some(path.clone());
+                        cx.notify();
                     }
                 }
             }))
@@ -367,7 +381,9 @@ impl ProjectsView {
             .context_menu({
                 let (model, path, group, names) =
                     (model.clone(), path_buf.clone(), group.map(str::to_owned), names.to_vec());
-                move |menu, window, cx| repo_menu(menu, &model, &path, group.as_deref(), &names, !current, window, cx)
+                move |menu, window, cx| {
+                    repo_menu(menu, &model, &path, group.as_deref(), &names, !is_project, window, cx)
+                }
             });
         rows.push(row.into_any_element());
         if let (Some((children, changed)), Some(true)) = (tree, open) {
@@ -403,7 +419,7 @@ impl ProjectsView {
                 name,
                 depth,
                 open,
-                selected,
+                RowState::current(selected),
                 false,
                 &chips,
                 Some(chevron_click(&key, cx)),
@@ -545,7 +561,7 @@ fn list_row(
     name: &str,
     depth: u8,
     open: Option<bool>,
-    selected: bool,
+    state: RowState,
     dim: bool,
     chips: &[(String, gpui::Hsla)],
     on_chevron: Option<ChevronClick>,
@@ -565,11 +581,12 @@ fn list_row(
         .flex_none()
         .when_some(open, |d, open| d.child(look::chevron(open, p.fg_dim)))
         .when_some(on_chevron.filter(|_| open.is_some()), |d, f| d.on_click(f));
-    crate::components::tree_row(id.clone(), crate::components::RowState::current(selected), p)
+    crate::components::tree_row(id.clone(), state, p)
         .debug_selector(move || format!("row:{id}"))
         .gap_0()
         .pl(px(2. + f32::from(depth) * INDENT))
         .pr(px(3.))
+        .cursor_pointer()
         .text_color(ink)
         .child(chevron)
         .child(div().w(px(1.)))

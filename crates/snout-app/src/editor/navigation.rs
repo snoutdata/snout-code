@@ -475,13 +475,13 @@ impl EditorPanel {
                     .px(px(6.))
                     .py(px(4.))
                     .child(crate::components::icon(crate::components::IconName::Search, 13., p.accent))
-                    .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(popup.title.clone()))
+                    .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(crate::look::text(popup.title.clone())))
                     .child(div().flex_1())
                     .child(
                         div()
                             .text_size(px(11.5))
                             .text_color(p.fg_dim)
-                            .child(t!("editor-found", count = (items.len()).to_string())),
+                            .child(crate::look::text(t!("editor-found", count = (items.len()).to_string()))),
                     ),
             )
             .child(div().id("nav-popup-list").flex().flex_col().overflow_y_scroll().children(

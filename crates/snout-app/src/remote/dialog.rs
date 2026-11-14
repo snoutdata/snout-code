@@ -147,7 +147,7 @@ fn heading(text: &'static str, cx: &App) -> AnyElement {
         .text_size(px(11.5))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(p.fg_dim)
-        .child(text)
+        .child(crate::look::text(text))
         .into_any_element()
 }
 
@@ -218,7 +218,7 @@ impl Render for ConnectDialog {
                             .gap(px(8.))
                             .text_color(p.fg_dim)
                             .child(ico(IconName::Info, 14., p.fg_dim))
-                            .child(ts!("remote-no-hosts-in-your-ssh-config-type-one")),
+                            .child(crate::look::text(ts!("remote-no-hosts-in-your-ssh-config-type-one"))),
                     )
                 })
                 .into_any_element(),

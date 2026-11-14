@@ -313,8 +313,8 @@ fn counts(added: usize, removed: usize, p: &Palette, cx: &App) -> gpui::Div {
         .gap(px(5.))
         .font_family(look::mono_font(cx))
         .text_size(px(11.5))
-        .child(div().text_color(c.added).child(format!("+{added}")))
-        .child(div().text_color(c.removed).child(format!("−{removed}")))
+        .child(div().text_color(c.added).child(crate::look::text(format!("+{added}"))))
+        .child(div().text_color(c.removed).child(crate::look::text(format!("−{removed}"))))
 }
 
 /// An action of a row: its label in a quiet button, filled under the pointer.
@@ -357,7 +357,7 @@ impl Render for ChangesPanel {
                     .rounded(px(6.))
                     .bg(p.wash(mark))
                     .child(super::bridge::pulse_dot(mark, "claude-activity-dot"))
-                    .child(div().text_color(p.fg_dim).child(ts!("agents-editing")))
+                    .child(div().text_color(p.fg_dim).child(crate::look::text(ts!("agents-editing"))))
                     .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
                     .child(div().flex_1())
                     .child(look::chip(a.tool.clone(), mark, &p))
@@ -498,7 +498,7 @@ impl Render for ChangesPanel {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(div().font_weight(gpui::FontWeight::MEDIUM).child(what))
+                    .child(div().font_weight(gpui::FontWeight::MEDIUM).child(crate::look::text(what)))
                     .child(counts(added, removed, &p, cx))
                     .into_any_element(),
             );
@@ -774,5 +774,5 @@ fn section(text: &'static str, p: &Palette) -> gpui::Div {
         .text_size(px(11.))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(p.fg_dim)
-        .child(text)
+        .child(crate::look::text(text))
 }

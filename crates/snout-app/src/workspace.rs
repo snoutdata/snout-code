@@ -168,6 +168,8 @@ pub struct Workspace {
     /// The project whose tabs show.
     shown: Option<PathBuf>,
     _save_layout: Option<Task<()>>,
+    /// The window's size as last drawn, saved with the layout.
+    viewport: gpui::Size<gpui::Pixels>,
     /// Quitting has begun: the window is going.
     pub quitting: bool,
     /// Quitting hid the window (and the app): the first thing it does.
@@ -447,7 +449,10 @@ impl Workspace {
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
         panels.push((panel_handle(claude_changes.clone()), DockPlacement::Right));
 
-        let mut saved = model.read(cx).settings.dock.clone();
+        let viewport = window.viewport_size();
+        let now = (f32::from(viewport.width), f32::from(viewport.height));
+        let saved_in = model.read(cx).settings.dock_window;
+        let mut saved = model.read(cx).settings.dock.clone().map(|s| session::scale_docks(s, saved_in, now));
         // Files on their own: the tabs of the project last open stay out of it.
         if model.read(cx).files_alone {
             saved = saved.map(|state| session::with_center(state, session::empty_tabs()));
@@ -570,6 +575,7 @@ impl Workspace {
         status.update(cx, |s, cx| s.set_hub(hub.clone(), cx));
         let update_toast = cx.new(crate::updates::UpdateToast::new);
         let mut this = Self {
+            viewport: window.viewport_size(),
             model,
             dock,
             side,
@@ -899,7 +905,9 @@ impl Workspace {
         let Some(root) = self.model.read(cx).project_root() else { return };
         let Ok(full) = serde_json::to_value(self.dock.read(cx).dump(cx)) else { return };
         let center = full.get("center").cloned().unwrap_or_else(session::empty_tabs);
+        let size = (f32::from(self.viewport.width), f32::from(self.viewport.height));
         self.model.update(cx, |m, _| {
+            m.settings.dock_window = Some(size);
             let recent = m.recent_projects();
             m.settings.sessions.insert(root.clone(), center);
             m.settings.sessions.retain(|p, _| *p == root || recent.contains(p));
@@ -918,8 +926,10 @@ impl Workspace {
             .unwrap_or_else(session::empty_tabs);
         // The panels collapsed for files on their own open again as they were saved.
         let saved = std::mem::take(&mut self.collapsed_for_files).then(|| self.model.read(cx).settings.dock.clone());
+        let size = (f32::from(window.viewport_size().width), f32::from(window.viewport_size().height));
+        let saved_in = self.model.read(cx).settings.dock_window;
         let full = match saved.flatten() {
-            Some(saved) => saved,
+            Some(saved) => session::scale_docks(saved, saved_in, size),
             None => {
                 let Ok(full) = serde_json::to_value(self.dock.read(cx).dump(cx)) else { return };
                 full
@@ -2065,8 +2075,10 @@ impl Workspace {
         let state = self.dock.read(cx).dump(cx);
         let activity = self.side.read(cx).activity;
         let Ok(value) = serde_json::to_value(state) else { return };
+        let size = (f32::from(self.viewport.width), f32::from(self.viewport.height));
         self.model.update(cx, |m, _| {
             m.settings.dock = Some(value);
+            m.settings.dock_window = Some(size);
             m.settings.activity = Some(activity);
             m.persist();
         });
@@ -2102,6 +2114,7 @@ impl Workspace {
     }
 
     fn sync_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.viewport = window.viewport_size();
         self.fit_docks(window, cx);
         let m = self.model.read(cx);
         // The window's title names the remote machine the project is on.
@@ -2538,7 +2551,7 @@ impl Render for Workspace {
             .text_size(px(24.))
             .text_color(gpui::transparent_black())
             .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(veil).text_color(on_veil))
-            .child(ts!("workspace-drop-a-folder-to-open-it"));
+            .child(crate::look::text(ts!("workspace-drop-a-folder-to-open-it")));
 
         let git = self.side.read(cx).activity == Activity::Git;
         if self.status.read(cx).git != git {

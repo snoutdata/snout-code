@@ -103,6 +103,9 @@ pub struct Settings {
     pub language: crate::i18n::Language,
     /// The dock layout as GPUI Kit's dock writes it: panels, sizes, open docks.
     pub dock: Option<serde_json::Value>,
+    /// The window's size (width, height) when the layout was saved: the docks keep their
+    /// share of a window of another size.
+    pub dock_window: Option<(f32, f32)>,
     /// The editors' font size (⌘+ and ⌘-).
     pub editor_font_size: f32,
     /// The activity the window showed last, to open on it again (the Project view when
@@ -329,6 +332,7 @@ impl Default for Settings {
             colors: ColorTheme::default(),
             language: Default::default(),
             dock: None,
+            dock_window: None,
             editor_font_size: crate::look::MONO_SIZE,
             activity: None,
             recent: None,

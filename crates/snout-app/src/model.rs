@@ -14,7 +14,7 @@ use snout_core::graph::{GraphRow, journal_matches};
 use snout_core::groups::{RepoGroup, dir_name, move_to_group, save_group};
 use snout_core::{
     Branch, BranchKind, CheckoutTarget, Commit, CommitDetails, CommitFile, FileEntry, LocalChanges, PullMode,
-    PullProblem, Repo, Scope, SignInProblem, Status, Tag, Tracking, on_disk,
+    PullProblem, Repo, ResetMode, Scope, SignInProblem, Status, Tag, Tracking, on_disk,
 };
 
 use crate::settings::{Settings, Store, ThemeChoice};
@@ -115,6 +115,14 @@ pub enum Dialog {
         upstream: Option<RemoteRef>,
     },
     DeleteRemoteBranch(RemoteRef),
+    /// Reset the current branch to this point: how far?
+    Reset(StartPoint),
+    /// A new name for this local branch.
+    RenameBranch(String),
+    /// Push this local branch to a remote branch of the user's choosing.
+    PushTo(String),
+    /// The remote branch this local branch should track.
+    SetUpstream(String),
     ConfirmDeleteFiles(Vec<FileEntry>),
     PullProblem {
         problem: PullProblem,
@@ -179,6 +187,8 @@ pub enum Action {
     /// status bar), whichever one the Git panel shows.
     OnProject(Box<Action>),
     PickFolder,
+    /// Pick a repository to add to the Git panel's list and show there, the project as it is.
+    PickRepo,
     OpenPath(PathBuf),
     InitRepo(PathBuf),
     PickScanFolder,
@@ -225,6 +235,37 @@ pub enum Action {
         upstream: Option<RemoteRef>,
     },
     DeleteRemoteBranch(RemoteRef),
+    /// Merge this branch (or any commit) into the current branch.
+    Merge(String),
+    /// Rebase the current branch onto this branch.
+    Rebase(String),
+    /// Move this local branch forward to its upstream.
+    FastForward(String),
+    /// Push this local branch to its upstream (or a new one of its name).
+    PushBranch(String),
+    ShowPushTo(String),
+    PushTo {
+        name: String,
+        remote: String,
+        branch: String,
+        track: bool,
+    },
+    AskReset(StartPoint),
+    Reset {
+        rev: String,
+        mode: ResetMode,
+    },
+    ShowRenameBranch(String),
+    RenameBranch {
+        old: String,
+        new: String,
+    },
+    ShowSetUpstream(String),
+    SetUpstream {
+        name: String,
+        upstream: String,
+    },
+    UnsetUpstream(String),
     Fetch,
     Pull(PullMode),
     ResetToUpstream,
@@ -461,6 +502,9 @@ type Then = Box<dyn FnOnce(&mut Model, &mut Context<Model>) + Send>;
 
 /// A change to the open repository, made off the UI thread.
 type Change = Box<dyn FnOnce(&Repo) -> snout_core::Result<()> + Send>;
+
+/// A change to the open repository whose Git output is worth keeping.
+type Said = Box<dyn FnOnce(&Repo) -> snout_core::Result<String> + Send>;
 
 /// Work on the open repository, off the UI thread; jobs run one at a time, in order.
 struct GitJob {
@@ -1920,7 +1964,8 @@ impl Model {
             Ok(Outcome::Cloned(repo, text)) => {
                 self.log_output(text, false);
                 let root = repo.root().to_owned();
-                self.open_repo(&root, cx);
+                // In the list and the Git panel; Open as Project in its menu makes it the project.
+                self.show_repo(&root, cx);
                 self.message = t!("model-cloned-into", root = (root.display()).to_string());
             }
             Ok(Outcome::Found { root, repos }) => self.add_found(&root, repos, cx),
@@ -2176,6 +2221,20 @@ impl Model {
             });
             m.refresh(cx);
         };
+        // A change whose Git output goes to the log.
+        let said = |m: &mut Self, label: String, op: Said, cx: &mut Context<Self>| {
+            m.queue(cx, move |repo| {
+                let r = op(repo).map_err(|e| e.to_string());
+                Box::new(move |m, cx| match r {
+                    Ok(text) => {
+                        m.log_output(text, false);
+                        m.done(label);
+                    }
+                    Err(e) => m.fail(e, cx),
+                })
+            });
+            m.refresh(cx);
+        };
         match action {
             Action::Refresh => {
                 self.refresh(cx);
@@ -2200,6 +2259,7 @@ impl Model {
             Action::AgentAnswer(how) => cx.emit(ModelEvent::AgentAnswer(how)),
             Action::AskAgent { root, prompt } => cx.emit(ModelEvent::AskAgent { root, prompt }),
             Action::PickFolder => self.pick_folder(ts!("model-open-project"), Action::OpenPath, cx),
+            Action::PickRepo => self.pick_folder(ts!("model-add-repository"), Action::ShowRepo, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
             Action::InitRepo(path) => {
                 let init = cx.background_executor().spawn(async move {
@@ -2428,6 +2488,51 @@ impl Model {
                 self.spawn(&t!("model-delete", r = (r.label()).to_string()), cx, move || {
                     repo.delete_remote_branch(&r.remote, &r.branch).map(Outcome::Done)
                 });
+            }
+            Action::Merge(rev) => {
+                let head = self.status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
+                let label = t!("model-merged-into", rev = rev.to_string(), head = head.to_string());
+                said(self, label, Box::new(move |r| r.merge(&rev)), cx);
+            }
+            Action::Rebase(rev) => {
+                let head = self.status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
+                let label = t!("model-rebased-onto", head = head.to_string(), rev = rev.to_string());
+                said(self, label, Box::new(move |r| r.rebase(&rev)), cx);
+            }
+            Action::FastForward(name) => {
+                let label = t!("model-fast-forwarded", name = name.to_string());
+                said(self, label, Box::new(move |r| r.fast_forward(&name)), cx);
+            }
+            Action::PushBranch(name) => {
+                let repo = repo.unwrap();
+                let label = t!("model-push-branch", name = name.to_string());
+                self.spawn(&label, cx, move || repo.push_branch(&name).map(Outcome::Done));
+            }
+            Action::ShowPushTo(name) => self.ask(Dialog::PushTo(name), cx),
+            Action::PushTo { name, remote, branch, track } => {
+                let repo = repo.unwrap();
+                let label = t!("model-push-branch-to", name = name.to_string(), to = format!("{remote}/{branch}"));
+                self.spawn(&label, cx, move || repo.push_to(&name, &remote, &branch, track).map(Outcome::Done));
+            }
+            Action::AskReset(start) => self.ask(Dialog::Reset(start), cx),
+            Action::Reset { rev, mode } => {
+                let head = self.status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
+                let label = t!("model-reset-to", head = head.to_string(), upstream = rev.to_string());
+                local(self, label, Box::new(move |r| r.reset(&rev, mode)), cx);
+            }
+            Action::ShowRenameBranch(name) => self.ask(Dialog::RenameBranch(name), cx),
+            Action::RenameBranch { old, new } => {
+                let label = t!("model-renamed-branch", old = old.to_string(), new = new.to_string());
+                local(self, label, Box::new(move |r| r.rename_branch(&old, &new)), cx);
+            }
+            Action::ShowSetUpstream(name) => self.ask(Dialog::SetUpstream(name), cx),
+            Action::SetUpstream { name, upstream } => {
+                let label = t!("model-now-tracks", name = name.to_string(), upstream = upstream.to_string());
+                local(self, label, Box::new(move |r| r.set_upstream(&name, &upstream)), cx);
+            }
+            Action::UnsetUpstream(name) => {
+                let label = t!("model-tracks-nothing", name = name.to_string());
+                local(self, label, Box::new(move |r| r.unset_upstream(&name)), cx);
             }
             Action::Fetch => {
                 let repo = repo.unwrap();

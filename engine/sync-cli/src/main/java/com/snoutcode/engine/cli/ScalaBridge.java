@@ -989,6 +989,15 @@ public final class ScalaBridge {
                 return result;
             }
             gradle(work, work.plans.get(buildId), result.tasks, spec, output.apply(buildId), result);
+            if (result.error != null && result.error.contains("classfileBackup")) {
+                // Zinc lost a file of its backup of the classes it recompiles (a compile cut off, or
+                // two at once): with the backup gone, the compile starts clean and goes through.
+                long first = result.compileMillis;
+                compiles.forEach(c -> deleteTree(c.compiledDir.getParent().getParent().getParent().resolve("tmp/scala/classfileBackup")));
+                result.error = null;
+                gradle(work, work.plans.get(buildId), result.tasks, spec, output.apply(buildId), result);
+                result.compileMillis += first;
+            }
             work.record("builds", buildId, result.error == null ? fingerprint : null, result.error == null, result.compileMillis);
         }
         try {
@@ -1316,6 +1325,24 @@ public final class ScalaBridge {
             }
         }
         return false;
+    }
+
+    /** Deletes a folder and what it holds, quietly: what cannot go stays. */
+    private static void deleteTree(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        try (Stream<Path> walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException e) {
+                    // left behind
+                }
+            });
+        } catch (IOException | UncheckedIOException e) {
+            // left behind
+        }
     }
 
     private static boolean hasClasses(Path dir) {

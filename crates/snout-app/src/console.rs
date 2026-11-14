@@ -19,10 +19,9 @@ use std::time::{Duration, Instant};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, FocusHandle, Font, FontStyle, FontWeight, Global,
-    Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString, StatefulInteractiveElement as _,
-    StrikethroughStyle, Styled as _, Subscription, TextAlign, TextRun, UnderlineStyle, Window, canvas, div, font,
-    point, px, size,
+    Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement as _, Pixels,
+    Point, Render, ScrollEvent, SharedString, StatefulInteractiveElement as _, StrikethroughStyle, Styled as _,
+    Subscription, TextAlign, TextRun, UnderlineStyle, Window, canvas, div, font, point, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{BasePanelView, panel_handle};
@@ -782,7 +781,7 @@ impl ConsolePanel {
                         .text_size(px(12.))
                         .text_color(p.fg)
                         .child(crate::components::icon(crate::components::IconName::Send, 13., mark))
-                        .child(div().whitespace_nowrap().child(text)),
+                        .child(div().whitespace_nowrap().child(crate::look::text(text))),
                 )
                 .into_any_element(),
         )
@@ -1306,6 +1305,15 @@ impl ConsolePanel {
         Some((y, x))
     }
 
+    /// The cell under `pos`, or the nearest one on the grid's edge when it is outside.
+    fn cell_within(&self, pos: Point<Pixels>) -> Option<(u16, u16)> {
+        let (b, cell) = self.grid?;
+        let cols = ((b.size.width / cell.width).floor() as u16).max(1);
+        let rows = ((b.size.height / cell.height).floor() as u16).max(1);
+        let (row, col) = self.cell_at(pos)?;
+        Some((row.min(rows - 1), col.min(cols)))
+    }
+
     /// What is selected in `root`'s terminal, if anything is.
     fn selected_text(&self, root: &Path) -> Option<String> {
         let sel = self.selection.filter(|(a, b)| a != b)?;
@@ -1522,7 +1530,7 @@ impl ConsolePanel {
                 .border_b_1()
                 .border_color(p.border)
                 .child(look::field(&f.input, true, Some(260.), p))
-                .child(div().min_w(px(70.)).text_size(px(12.)).text_color(p.fg_dim).child(count))
+                .child(div().min_w(px(70.)).text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(count)))
                 .child(
                     IconButton::new("terminal-find-prev", IconName::ChevronUp, ts!("console-previous-match-return"))
                         .size(22.)
@@ -1720,7 +1728,7 @@ impl ConsolePanel {
                     .items_center()
                     .gap(px(6.))
                     .child(crate::components::icon(IconName::SquareTerminal, 14., p.fg_dim))
-                    .child(div().font_weight(gpui::FontWeight::MEDIUM).child(name))
+                    .child(div().font_weight(gpui::FontWeight::MEDIUM).child(crate::look::text(name)))
                     .into_any_element()
             }
         };
@@ -1753,7 +1761,7 @@ impl ConsolePanel {
             } else {
                 div().flex_none().size(px(7.)).rounded_full().bg(pill_color).into_any_element()
             })
-            .child(status.label());
+            .child(crate::look::text(status.label()));
         let mut buttons: Vec<gpui::AnyElement> = Vec::new();
         if kind == Kind::Claude {
             let follow = self.model.read(cx).settings.follow_claude;
@@ -1864,7 +1872,7 @@ impl ConsolePanel {
                         .overflow_hidden()
                         .text_ellipsis()
                         .whitespace_nowrap()
-                        .child(title),
+                        .child(crate::look::text(title)),
                 )
             })
             .when(!show_title, |d| d.child(div().flex_1().min_w_0()))
@@ -2000,7 +2008,7 @@ impl ConsolePanel {
             .gap(px(8.))
             .px(px(16.))
             .child(gpui_component::Sizable::xsmall(gpui_component::spinner::Spinner::new()))
-            .child(div().min_w_0().text_size(px(12.5)).text_color(p.fg_dim).child(what))
+            .child(div().min_w_0().text_size(px(12.5)).text_color(p.fg_dim).child(crate::look::text(what)))
             .into_any_element()
     }
 
@@ -2080,8 +2088,19 @@ impl ConsolePanel {
                             .max_w(px(420.))
                             .min_w_0()
                             .when(self.stacked(), |d| d.w_full())
-                            .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
-                            .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
+                            .child(
+                                div()
+                                    .text_size(px(14.))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .child(crate::look::text(title)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.5))
+                                    .line_height(px(18.))
+                                    .text_color(p.fg_dim)
+                                    .child(crate::look::text(hint)),
+                            )
                             .child(
                                 div()
                                     .mt(px(10.))
@@ -2300,7 +2319,9 @@ impl ConsolePanel {
                 .flex()
                 .flex_col()
                 .gap(px(3.))
-                .when_some(label, |d, l| d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(l)))
+                .when_some(label, |d, l| {
+                    d.child(div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(l)))
+                })
                 .child(
                     div()
                         .px(px(8.))
@@ -2309,7 +2330,7 @@ impl ConsolePanel {
                         .bg(p.wash(p.fg_dim))
                         .font_family(mono.clone())
                         .text_size(px(11.5))
-                        .child(line),
+                        .child(crate::look::text(line)),
                 )
         });
         div()
@@ -2342,8 +2363,19 @@ impl ConsolePanel {
                             .max_w(px(420.))
                             .min_w_0()
                             .when(self.stacked(), |d| d.w_full())
-                            .child(div().text_size(px(14.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
-                            .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(p.fg_dim).child(hint))
+                            .child(
+                                div()
+                                    .text_size(px(14.))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .child(crate::look::text(title)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.5))
+                                    .line_height(px(18.))
+                                    .text_color(p.fg_dim)
+                                    .child(crate::look::text(hint)),
+                            )
                             .children(lines)
                             .child(div().mt(px(10.)).flex().flex_wrap().gap(px(8.)).children(buttons)),
                     ),
@@ -2399,7 +2431,7 @@ impl ConsolePanel {
                         .gap(px(6.))
                         .px(px(8.))
                         .text_color(p.fg_dim)
-                        .child(format!("{ended} {how}."))
+                        .child(crate::look::text(format!("{ended} {how}.")))
                         .child(
                             Button::new("again")
                                 .link()
@@ -2459,31 +2491,37 @@ impl ConsolePanel {
                     cx.notify();
                 })
             })
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
-                if this.selecting
-                    && e.pressed_button == Some(MouseButton::Left)
-                    && let (Some(c), Some((_, end))) = (this.cell_at(e.position), this.selection.as_mut())
-                {
-                    *end = c;
-                    cx.notify();
-                }
-            }))
-            .on_mouse_up(MouseButton::Left, {
-                let root = root.to_owned();
-                cx.listener(move |this, _, _, cx| {
-                    this.selecting = false;
-                    // Copy on select: the text selected goes to the clipboard at once.
-                    if this.model.read(cx).settings.terminal_copy_on_select
-                        && let Some(text) = this
-                            .selection
-                            .filter(|(a, b)| a != b)
-                            .zip(this.sessions.get(&root))
-                            .and_then(|(sel, s)| s.pty.frame().selected_text(sel))
+            // The drag goes on outside the terminal, held to its edges.
+            .child(crate::drag_select::follow_mouse(
+                cx.entity().downgrade(),
+                |this: &mut Self, at, cx| {
+                    if this.selecting
+                        && let (Some(c), Some((_, end))) = (this.cell_within(at), this.selection.as_mut())
+                        && *end != c
                     {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        *end = c;
+                        cx.notify();
                     }
-                })
-            })
+                },
+                {
+                    let root = root.to_owned();
+                    move |this: &mut Self, cx| {
+                        if !std::mem::take(&mut this.selecting) {
+                            return;
+                        }
+                        // Copy on select: the text selected goes to the clipboard at once.
+                        if this.model.read(cx).settings.terminal_copy_on_select
+                            && let Some(text) = this
+                                .selection
+                                .filter(|(a, b)| a != b)
+                                .zip(this.sessions.get(&root))
+                                .and_then(|(sel, s)| s.pty.frame().selected_text(sel))
+                        {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        }
+                    }
+                },
+            ))
             .child(
                 canvas(|_, _, _| {}, {
                     let root = root.to_owned();

@@ -1318,7 +1318,7 @@ impl EditorPanel {
             .border_1()
             .border_color(mix(p.warn, 0.4, p.panel))
             .child(crate::art::glyph(snout_core::art::Glyph::Alert, 14., p.warn))
-            .child(div().flex_1().child(ts!("editor-this-file-changed-on-disk-and-this-tab")))
+            .child(div().flex_1().child(crate::look::text(ts!("editor-this-file-changed-on-disk-and-this-tab"))))
             .child(
                 look::small_button(
                     "conflict-reload",
@@ -1631,7 +1631,9 @@ impl Render for EditorPanel {
                     )
                     .on_action(cx.listener(|this, _: &Inline, w, cx| this.refactor(Refactoring::Inline, w, cx)))
             })
-            .when_some(self.error.clone(), |d, e| d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(e)))
+            .when_some(self.error.clone(), |d, e| {
+                d.child(div().px(px(12.)).py(px(4.)).text_color(p.error).child(crate::look::text(e)))
+            })
             .when(self.conflict, |d| d.child(self.conflict_bar(cx)))
             .children(self.review_bar(cx))
             .children(self.claude_bar(cx))

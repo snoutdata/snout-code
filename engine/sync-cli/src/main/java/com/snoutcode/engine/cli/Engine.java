@@ -494,6 +494,9 @@ final class Engine implements GradleRuns.Client {
         String kind = string(config, "kind");
         switch (String.valueOf(kind)) {
             case "main" -> {
+                if (!dryRun) {
+                    scalaBeforeLaunch(string(config, "build"));
+                }
                 return Launches.main(this, config, debug, dryRun);
             }
             case "maven" -> {
@@ -921,6 +924,41 @@ final class Engine implements GradleRuns.Client {
             return done.get();
         } catch (ExecutionException e) {
             throw e.getCause() instanceof Exception x ? x : new IOException(e.getCause());
+        }
+    }
+
+    /**
+     * Before a launch from build {@code buildId}: compiles its Scala when it is not up to date
+     * (a no-op when it is), and refuses the launch when it does not compile. jdtls compiles the
+     * Java against the Scala classes; without them it writes class files that cannot load
+     * (a {@code ClassFormatError} at run time, far from the cause).
+     */
+    private void scalaBeforeLaunch(String buildId) throws Exception {
+        ScalaBridge.Work work = bridge;
+        if (work == null || buildId == null || !work.builds().contains(buildId)) {
+            return;
+        }
+        CompletableFuture<JsonObject> done = new CompletableFuture<>();
+        scalaQueue.submit(() -> {
+            try {
+                Set<String> builds = Set.of(buildId);
+                done.complete(compileScala(new ScalaBridge.Selection(builds, Set.of(), Set.of()), ProjectSync.defaultParallelism(), null));
+            } catch (Exception | LinkageError e) {
+                done.completeExceptionally(e);
+            }
+        });
+        JsonObject result;
+        try {
+            result = done.get();
+        } catch (ExecutionException e) {
+            throw e.getCause() instanceof Exception x ? x : new IOException(e.getCause());
+        }
+        for (JsonElement b : array(result, "builds")) {
+            String error = string(b.getAsJsonObject(), "error");
+            if (error != null) {
+                throw new RequestError(-32603, "The Scala code of " + buildId + " did not compile, and the Java code that uses it"
+                    + " cannot run without it. Fix the Scala (see Problems) or build with Gradle, then run again.\n\n" + error);
+            }
         }
     }
 

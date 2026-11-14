@@ -241,14 +241,14 @@ impl WelcomePanel {
                     .mt(px(4.))
                     .text_size(px(15.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(ts!("welcome-no-files-open")),
+                    .child(crate::look::text(ts!("welcome-no-files-open"))),
             )
             .child(
                 div()
                     .mb(px(10.))
                     .text_size(px(12.5))
                     .text_color(p.fg_dim)
-                    .child(ts!("welcome-open-one-from-the-project-tree-or")),
+                    .child(crate::look::text(ts!("welcome-open-one-from-the-project-tree-or"))),
             )
             .children(rows)
             .when(!files.is_empty(), |d| {
@@ -261,7 +261,7 @@ impl WelcomePanel {
                         .text_size(px(11.5))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(p.fg_dim)
-                        .child(ts!("welcome-recent-files-2")),
+                        .child(crate::look::text(ts!("welcome-recent-files-2"))),
                 )
                 .children(files)
             })
@@ -356,15 +356,12 @@ impl Render for WelcomePanel {
             .items_center()
             .gap(px(20.))
             .when(!narrow, |d| d.child(crate::art::drawing(snout_core::art::welcome(), 165., 110., None)))
-            .child(
-                div().flex().flex_col().gap(px(2.)).child(crate::git_view::wordmark(&p)).child(
-                    div()
-                        .pl(px(62.))
-                        .text_size(px(12.5))
-                        .text_color(p.fg_dim)
-                        .child(t!("dialogs-version", cargo_pkg_version = (env!("CARGO_PKG_VERSION")).to_string())),
-                ),
-            );
+            .child(div().flex().flex_col().gap(px(2.)).child(crate::git_view::wordmark(&p)).child(
+                div().pl(px(62.)).text_size(px(12.5)).text_color(p.fg_dim).child(crate::look::text(t!(
+                    "dialogs-version",
+                    cargo_pkg_version = (env!("CARGO_PKG_VERSION")).to_string()
+                ))),
+            ));
 
         let actions = div()
             .flex()
@@ -478,7 +475,7 @@ impl Render for WelcomePanel {
             } else {
                 ts!("welcome-no-recent-projects-yet-open-a-folder-to")
             };
-            div().py(px(18.)).text_color(p.fg_dim).text_center().child(text).into_any_element()
+            div().py(px(18.)).text_color(p.fg_dim).text_center().child(crate::look::text(text)).into_any_element()
         } else {
             div().flex().flex_col().children(rows).into_any_element()
         };
@@ -542,7 +539,7 @@ impl Render for WelcomePanel {
                                                     .flex_none()
                                                     .whitespace_nowrap()
                                                     .font_weight(FontWeight::MEDIUM)
-                                                    .child(ts!("welcome-recent-projects")),
+                                                    .child(crate::look::text(ts!("welcome-recent-projects"))),
                                             )
                                             .child(div().flex_1())
                                             .child(

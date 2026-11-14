@@ -102,7 +102,7 @@ impl EditorPanel {
                 .border_1()
                 .border_color(mix(red, 0.4, p.panel))
                 .child(div().flex_none().size(px(9.)).rounded_full().bg(red))
-                .child(div().flex_1().min_w_0().child(text))
+                .child(div().flex_1().min_w_0().child(crate::look::text(text)))
                 .child(
                     look::small_button("record-stop", crate::components::IconName::Square, ts!("cmd-stop"), &p)
                         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::StopRecording), cx)),

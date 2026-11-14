@@ -1218,9 +1218,18 @@ impl EditorPanel {
                                 .flex()
                                 .flex_col()
                                 .gap(px(1.))
-                                .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(commit.author.clone()))
-                                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(commit.email.clone()))
-                                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(when)),
+                                .child(
+                                    div()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(crate::look::text(commit.author.clone())),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(11.5))
+                                        .text_color(p.fg_dim)
+                                        .child(crate::look::text(commit.email.clone())),
+                                )
+                                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(when))),
                         )
                         .child(
                             div()
@@ -1236,7 +1245,7 @@ impl EditorPanel {
                                 .font_family(look::mono_font(cx))
                                 .text_size(px(11.))
                                 .child(crate::components::icon(IconName::GitCommitHorizontal, 12., p.accent))
-                                .child(commit.short_id().to_owned()),
+                                .child(crate::look::text(commit.short_id().to_owned())),
                         ),
                 )
                 .child(
@@ -1251,7 +1260,12 @@ impl EditorPanel {
                         .text_size(px(12.))
                         .line_height(px(17.))
                         .whitespace_normal()
-                        .children(commit.full_message().lines().map(|l| div().min_h(px(8.)).child(l.to_owned()))),
+                        .children(
+                            commit
+                                .full_message()
+                                .lines()
+                                .map(|l| div().min_h(px(8.)).child(crate::look::text(l.to_owned()))),
+                        ),
                 )
                 .child(
                     div()
@@ -1309,35 +1323,38 @@ impl EditorPanel {
                         ),
                 )
             }
-            Row::Uncommitted => body.child(
-                div()
-                    .flex()
-                    .gap(px(10.))
-                    .items_center()
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(px(34.))
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(mix(p.modified, 0.2, p.card))
-                            .child(crate::components::icon(IconName::Pencil, 15., p.modified)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(ts!("editor-not-committed-yet")))
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .text_color(p.fg_dim)
-                                    .child(ts!("editor-you-changed-this-line-since-the-last-commit")),
-                            ),
-                    ),
-            ),
+            Row::Uncommitted => {
+                body.child(
+                    div()
+                        .flex()
+                        .gap(px(10.))
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_none()
+                                .size(px(34.))
+                                .rounded_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(mix(p.modified, 0.2, p.card))
+                                .child(crate::components::icon(IconName::Pencil, 15., p.modified)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(crate::look::text(ts!("editor-not-committed-yet"))),
+                                )
+                                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(ts!(
+                                    "editor-you-changed-this-line-since-the-last-commit"
+                                )))),
+                        ),
+                )
+            }
             _ => return None,
         };
         Some(
@@ -1387,14 +1404,14 @@ impl EditorPanel {
                     .child(
                         div()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(t!("editor-authors-of", decl = (card.decl.name).to_string())),
+                            .child(crate::look::text(t!("editor-authors-of", decl = (card.decl.name).to_string()))),
                     )
                     .child(div().flex_1())
                     .child(
                         div()
                             .text_size(px(11.5))
                             .text_color(p.fg_dim)
-                            .child(t!("editor-committed-lines", total = total.to_string())),
+                            .child(crate::look::text(t!("editor-committed-lines", total = total.to_string()))),
                     ),
             )
             .children(authors.into_iter().map(|a| {
@@ -1524,7 +1541,7 @@ impl EditorPanel {
                         .hover(move |s| s.bg(p.button_hover))
                         .on_click(cx.listener(move |this, _, _, cx| this.revision_back(to, cx)))
                 })
-                .child(label)
+                .child(crate::look::text(label))
         };
         let mut crumbs: Vec<AnyElement> =
             vec![crumb("blame-crumb-0".into(), ts!("editor-now").into(), 0, false, cx).into_any_element()];
@@ -1557,11 +1574,11 @@ impl EditorPanel {
                 .border_1()
                 .border_color(mix(p.accent, 0.35, p.panel))
                 .child(crate::components::icon(IconName::FileClock, 14., p.accent))
-                .child(div().child(format!("{name}:")))
+                .child(div().child(crate::look::text(format!("{name}:"))))
                 .children(crumbs)
-                .children(status.map(|s| div().text_size(px(11.5)).text_color(p.fg_dim).child(s)))
+                .children(status.map(|s| div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(s))))
                 .child(div().flex_1())
-                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(ts!("status-read-only")))
+                .child(div().text_size(px(11.5)).text_color(p.fg_dim).child(crate::look::text(ts!("status-read-only"))))
                 .child(
                     Button::new("blame-revision-back", IconName::ArrowLeft)
                         .compact()
@@ -1762,7 +1779,7 @@ fn avatar(text: &str, color: Hsla, d: f32, p: &Palette) -> gpui::Div {
         .text_color(p.on_badge)
         .text_size(px(d * 0.4))
         .font_weight(gpui::FontWeight::BOLD)
-        .child(text.to_owned())
+        .child(crate::look::text(text.to_owned()))
 }
 
 #[cfg(test)]

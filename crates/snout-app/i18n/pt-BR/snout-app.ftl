@@ -554,6 +554,27 @@ dialogs-allow-to = Permitir que { $agent } { $what }?
 dialogs-its-upstream = a branch upstream dela
 dialogs-delete-from = Excluir de { $remote }
 dialogs-allow-for-this-session-lets-it-use-again = Permitir nesta sessão deixa ele usar { $tool } de novo sem perguntar.
+dialogs-reset-subtitle = Mover o branch atual para outro commit
+dialogs-reset-branch-to = Redefinir { $head } para { $to }
+dialogs-reset-soft = Suave
+dialogs-reset-soft-detail = Move só o branch. As mudanças desde então continuam preparadas.
+dialogs-reset-mixed = Misto
+dialogs-reset-mixed-detail = Move o branch e tira do stage. As mudanças continuam nos seus arquivos.
+dialogs-reset-hard = Forte
+dialogs-reset-hard-detail = O branch e seus arquivos ficam iguais a esse ponto. Mudanças não commitadas se perdem.
+dialogs-reset-hard-loses-changes = Você tem mudanças não commitadas: Forte as descarta de vez.
+dialogs-rename-branch = Renomear branch
+dialogs-renaming-branch = Renomeando
+dialogs-push-branch-to = Enviar { $name } para
+dialogs-push-to-subtitle = Escolha o remoto e o nome do branch lá
+dialogs-remote = Remoto
+dialogs-no-remote = Este repositório ainda não tem remoto.
+dialogs-remote-branch = Branch no remoto
+dialogs-track-the-pushed-branch = Rastrear: pull e push vão para lá daqui em diante
+dialogs-set-upstream-of = Branch rastreado por { $name }
+dialogs-set-upstream-subtitle = Pull e push vão para o branch escolhido aqui
+dialogs-no-matching-remote-branch = Nenhum branch remoto corresponde
+dialogs-track = Rastrear
 
 ## welcome
 
@@ -623,7 +644,7 @@ tabs-hide = Ocultar
 ## projects
 
 projects-filter = Filtrar
-projects-open-local-repository = Abrir repositório local…
+projects-add-local-repository = Adicionar repositório local…
 projects-find-repositories-in-folder = Localizar repositórios em uma pasta…
 projects-no-matches = Nenhum resultado
 projects-rename = Renomear…
@@ -780,6 +801,7 @@ model-no-commit-message-yet = Ainda não há mensagem de commit
 model-drafted-the-commit-message = { $name } redigiu a mensagem de commit
 model-refreshed = Atualizado
 model-open-project = Abrir projeto
+model-add-repository = Adicionar repositório
 model-initialized-repository-in = Repositório inicializado em { $root }
 model-find-repositories-in-folder = Localizar repositórios em uma pasta
 model-searching-for-repositories = Procurando repositórios
@@ -823,6 +845,14 @@ model-generated-sources = Fontes geradas
 model-the-build-did-not-sync = O build não sincronizou
 model-sync = Sincronização: { $root }
 model-the-gradle-sync-failed = A sincronização Gradle falhou
+model-merged-into = { $rev } mesclado em { $head }
+model-rebased-onto = { $head } rebaseado sobre { $rev }
+model-fast-forwarded = { $name } avançado (fast-forward)
+model-push-branch = Enviar { $name }
+model-push-branch-to = Enviar { $name } para { $to }
+model-renamed-branch = { $old } renomeado para { $new }
+model-now-tracks = { $name } agora rastreia { $upstream }
+model-tracks-nothing = { $name } não rastreia mais nada
 
 ## branch
 
@@ -984,6 +1014,15 @@ git-changed-staged = { $count ->
     [one] { $staged_count } preparado
    *[other] { $staged_count } preparados
     }
+git-merge-into = Mesclar em { $head }
+git-rebase-onto-here = Rebasear { $head } sobre este
+git-fast-forward-to-upstream = Avançar até o upstream
+git-push-to = Enviar para…
+git-reset-to-here = Redefinir { $head } para aqui…
+git-rename = Renomear…
+git-set-tracked-branch = Definir branch rastreado…
+git-stop-tracking = Parar de rastrear
+git-show-last-commit = Mostrar o último commit
 
 ## console
 

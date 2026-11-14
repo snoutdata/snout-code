@@ -260,7 +260,7 @@ impl EditorPanel {
                     .text_color(p.fg_dim)
                     .font_family(look::ui_font(cx))
                     .child(icon(Icon::Refresh, 12., p.accent))
-                    .child(text)
+                    .child(crate::look::text(text))
                     .child(crate::status::progress_bar(ready.percent, 48., &p))
                     .into_any_element(),
             );
@@ -282,7 +282,7 @@ impl EditorPanel {
                 .on_click(cx.listener(move |this, _, w, cx| this.jump_problem(forward, w, cx)))
         };
         let count = |g: Icon, n: usize, color: gpui::Hsla| {
-            div().flex().items_center().gap(px(3.)).child(icon(g, 13., color)).child(n.to_string())
+            div().flex().items_center().gap(px(3.)).child(icon(g, 13., color)).child(crate::look::text(n.to_string()))
         };
         Some(
             div()
@@ -575,7 +575,7 @@ impl EditorPanel {
                     .into_any_element(),
                 div().child(label[s.end..].to_owned()).into_any_element(),
             ],
-            None => vec![div().child(label).into_any_element()],
+            None => vec![div().child(crate::look::text(label)).into_any_element()],
         };
         let popup = div()
             .id("signature-help")
@@ -621,7 +621,9 @@ impl EditorPanel {
             .border_color(p.border)
             .shadow_lg()
             .text_size(px(12.))
-            .child(div().text_color(p.weak()).child(ts!("editor-rename-to-enter-renames-everywhere")))
+            .child(
+                div().text_color(p.weak()).child(crate::look::text(ts!("editor-rename-to-enter-renames-everywhere"))),
+            )
             .child(look::field(input, false, None, &p));
         Some(
             gpui::deferred(gpui::anchored().position(b.bottom_left()).child(field)).with_priority(1).into_any_element(),

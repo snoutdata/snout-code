@@ -56,8 +56,10 @@ On a remote machine, Open Project… browses that machine's folders instead. See
 ## Clone a repository
 
 Click **Clone Repository…** on the Welcome page. Enter the **Repository URL**, and under
-**Into folder** the folder to clone it in; the dialog shows where it lands. **Clone** copies the repository and opens
-it. File ▸ Clone from GitHub… opens the same dialog.
+**Into folder** the folder to clone it in; the dialog shows where it lands. **Clone** copies the repository and adds it
+to the Git view's list. With no project open, it opens as the project; with one open, the Git view
+shows the clone and the project stays (**Open as Project** in its context menu opens it). File ▸
+Clone from GitHub… opens the same dialog.
 
 **Into folder** starts at the folder of the open project. Under it, **Recent** lists the folders
 your recent projects are in, the latest first: click one to clone there. **Browse…** picks any
@@ -161,6 +163,8 @@ SnoutCode remembers which one you chose. The buttons on the right of its header:
 - **Hide** hides the tool window.
 
 All three are also in View ▸ Tool Window Actions and the command palette (**Select Opened File**, **Collapse the Project Tree**, **Hide the Side Panel**).
+
+The tool windows open as you left them, each keeping its share of the window: a panel that took a third of the window's width takes a third again, in a window of any size.
 
 ### The Project view
 

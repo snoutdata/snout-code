@@ -31,15 +31,18 @@ impl Render for Splash {
             .font_family(crate::look::ui_font(cx))
             .text_color(p.fg)
             .child(crate::art::drawing(snout_core::art::building(), 300., 200., None))
-            .child(div().text_size(px(26.)).font_weight(FontWeight::SEMIBOLD).child("SnoutCode"))
+            .child(div().text_size(px(26.)).font_weight(FontWeight::SEMIBOLD).child(crate::look::text("SnoutCode")))
+            .child(div().text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(t!(
+                "dialogs-version",
+                cargo_pkg_version = (env!("CARGO_PKG_VERSION")).to_string()
+            ))))
+            .child(div().h(px(10.)))
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(px(12.5))
                     .text_color(p.fg_dim)
-                    .child(t!("dialogs-version", cargo_pkg_version = (env!("CARGO_PKG_VERSION")).to_string())),
+                    .child(crate::look::text(ts!("splash-starting-snoutcode"))),
             )
-            .child(div().h(px(10.)))
-            .child(div().text_size(px(12.5)).text_color(p.fg_dim).child(ts!("splash-starting-snoutcode")))
             .child(crate::status::progress_bar(None, 180., &p))
     }
 }

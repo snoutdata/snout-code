@@ -609,7 +609,7 @@ impl Render for ProblemsPanel {
                                     .gap(px(3.))
                                     .text_color(p.fg_dim)
                                     .child(icon(ico, 12., color))
-                                    .child(n.to_string())
+                                    .child(crate::look::text(n.to_string()))
                             });
                             base.child(icon(
                                 if open { IconName::ChevronDown } else { IconName::ChevronRight },

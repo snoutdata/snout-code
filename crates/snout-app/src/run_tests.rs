@@ -240,6 +240,31 @@ fn the_console_selects_copies_and_scrolls_sideways(cx: &mut TestAppContext) {
     let word = clicks(long_row, 2., 2, cx);
     assert!(word.starts_with('w') && word != "w000", "the console scrolled sideways: {word:?}");
 
+    // A drag held past the right edge scrolls the console on and selects the rest of the line.
+    let b = cx.debug_bounds("run-console").unwrap();
+    let y = b.top() + gpui::px(4. + 18. * long_row as f32 + 9.);
+    let (button, none) = (gpui::MouseButton::Left, gpui::Modifiers::none());
+    let start = gpui::point(b.left() + gpui::px(10.), y);
+    let past = gpui::point(b.right() + gpui::px(80.), y);
+    cx.simulate_event(gpui::MouseDownEvent {
+        button,
+        position: start,
+        modifiers: none,
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseMoveEvent { position: past, pressed_button: Some(button), modifiers: none });
+    for _ in 0..200 {
+        cx.executor().advance_clock(std::time::Duration::from_millis(16));
+        cx.run_until_parked();
+    }
+    cx.simulate_event(gpui::MouseUpEvent { button, position: past, modifiers: none, click_count: 1 });
+    cx.run_until_parked();
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" });
+    cx.run_until_parked();
+    let dragged = cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text())).unwrap_or_default();
+    assert!(dragged.ends_with("w119"), "the drag reached the end of the hidden line: {dragged:?}");
+
     // Failed, the run offers its fix to the agent, and the prompt points it at the output.
     assert!(cx.debug_bounds("run-fix-with-agent").is_none(), "not while it runs");
     cx.update(|_, cx| {

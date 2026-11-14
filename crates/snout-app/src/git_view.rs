@@ -223,6 +223,16 @@ pub struct GitView {
     /// annotations, say).
     journal_scroll: gpui::UniformListScrollHandle,
     journal_shown: Option<String>,
+    /// The diffs' scroll (the working tree's, the commit's), their focus for ⌘C, and what is
+    /// selected in one, with whether the mouse is still selecting.
+    diff_scroll: gpui::UniformListScrollHandle,
+    commit_diff_scroll: gpui::UniformListScrollHandle,
+    diff_focus: FocusHandle,
+    diff_sel: Option<DiffSel>,
+    diff_selecting: bool,
+    /// Where the mouse is while it selects in a diff, and the scrolling it does at an edge.
+    diff_drag_at: Point<Pixels>,
+    diff_autoscroll: Option<gpui::Task<()>>,
 }
 
 fn file_columns(state_w: f32) -> Vec<Column> {
@@ -330,6 +340,13 @@ impl GitView {
             focused: (false, false, false),
             journal_scroll: gpui::UniformListScrollHandle::new(),
             journal_shown: None,
+            diff_scroll: gpui::UniformListScrollHandle::new(),
+            commit_diff_scroll: gpui::UniformListScrollHandle::new(),
+            diff_focus: cx.focus_handle(),
+            diff_sel: None,
+            diff_selecting: false,
+            diff_drag_at: Point::default(),
+            diff_autoscroll: None,
         }
     }
 
@@ -732,6 +749,14 @@ impl GitView {
             if b.kind == BranchKind::Local { ts!("git-delete-branch") } else { ts!("git-delete-from-the-remote") };
         let head_ink = if b.is_head { p.fg } else { mix(p.fg, 0.8, p.fg_dim) };
         let (ahead, behind, gone) = (b.ahead, b.behind, b.upstream_gone);
+        // Where a local branch pushes and pulls: just the remote when the names match.
+        let tracks =
+            b.upstream.as_ref().filter(|_| b.kind == BranchKind::Local && !gone).map(|u| match u.split_once('/') {
+                Some((remote, name)) if name == b.name => remote.to_owned(),
+                _ => u.clone(),
+            });
+        let current = self.model.read(cx).status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
+        let can_fast_forward = tracks.is_some() && behind > 0 && ahead == 0;
         crate::components::tree_row(SharedString::from(format!("branch-{key}")), RowState::default(), p)
             .pl(px(20.))
             .on_hover(cx.listener(move |this, on: &bool, _, cx| {
@@ -766,6 +791,18 @@ impl GitView {
                             .when(b.is_head, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .child(label),
                     )
+                    .when_some(tracks, |d, to| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(3.))
+                                .debug_selector(|| "branch-upstream".into())
+                                .child(crate::components::icon(crate::components::IconName::Cloud, 11., p.fg_dim))
+                                .child(crate::components::dim(to, p)),
+                        )
+                    })
                     .when(ahead > 0, |d| d.child(crate::components::dim(format!("↑{ahead}"), p)))
                     .when(behind > 0, |d| d.child(crate::components::dim(format!("↓{behind}"), p)))
                     .when(gone, |d| d.child(crate::components::badge("gone", crate::components::Tone::Warning, p)))
@@ -786,32 +823,102 @@ impl GitView {
                                 model.update(cx, |m, cx| m.handle(a, cx))
                             }
                         };
-                        menu.item(
-                            PopupMenuItem::new(checkout_label.clone())
-                                .icon(crate::components::menu_icon(crate::components::IconName::ArrowRightLeft))
-                                .disabled(b.is_head)
-                                .on_click(send(Action::RequestCheckout((&b).into()))),
-                        )
-                        .item(
-                            PopupMenuItem::new(ts!("git-create-branch-from-here"))
-                                .icon(crate::components::menu_icon(crate::components::IconName::GitBranch))
-                                .on_click(send(Action::ShowNewBranch(Some(StartPoint {
-                                    label: b.name.clone(),
-                                    rev: b.name.clone(),
-                                })))),
-                        )
-                        .item(
-                            PopupMenuItem::new(delete_label.clone())
-                                .icon(crate::components::menu_icon(crate::components::IconName::Trash))
-                                .disabled(b.is_head)
-                                .on_click(send(Action::AskDeleteBranch(b.clone()))),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new(ts!("git-copy-name"))
-                                .icon(crate::components::menu_icon(crate::components::IconName::Copy))
-                                .on_click(send(Action::Copy(b.name.clone()))),
-                        )
+                        use crate::components::{IconName as I, menu_icon};
+                        let item = |label: String, icon: I, enabled: bool, a: Action| {
+                            PopupMenuItem::new(label).icon(menu_icon(icon)).disabled(!enabled).on_click(send(a))
+                        };
+                        let local = b.kind == BranchKind::Local;
+                        let here = StartPoint { label: b.name.clone(), rev: b.name.clone() };
+                        let head = current.clone();
+                        let mut menu = menu
+                            .item(item(
+                                checkout_label.clone(),
+                                I::ArrowRightLeft,
+                                !b.is_head,
+                                Action::RequestCheckout((&b).into()),
+                            ))
+                            .item(item(
+                                ts!("git-create-branch-from-here").into(),
+                                I::GitBranch,
+                                true,
+                                Action::ShowNewBranch(Some(here.clone())),
+                            ))
+                            .separator()
+                            .item(item(
+                                t!("git-merge-into", head = head.clone()),
+                                I::GitMerge,
+                                !b.is_head,
+                                Action::Merge(b.name.clone()),
+                            ))
+                            .item(item(
+                                t!("git-rebase-onto-here", head = head.clone()),
+                                I::GitCompare,
+                                !b.is_head,
+                                Action::Rebase(b.name.clone()),
+                            ));
+                        if local {
+                            menu = menu
+                                .item(item(
+                                    ts!("git-fast-forward-to-upstream").into(),
+                                    I::ArrowDownToLine,
+                                    can_fast_forward,
+                                    Action::FastForward(b.name.clone()),
+                                ))
+                                .separator()
+                                .item(item(
+                                    ts!("cmd-push").into(),
+                                    I::ArrowUp,
+                                    true,
+                                    Action::PushBranch(b.name.clone()),
+                                ))
+                                .item(item(
+                                    ts!("git-push-to").into(),
+                                    I::Send,
+                                    true,
+                                    Action::ShowPushTo(b.name.clone()),
+                                ));
+                        }
+                        menu = menu
+                            .separator()
+                            .item(item(
+                                t!("git-reset-to-here", head = head.clone()),
+                                I::RotateCcw,
+                                !b.is_head,
+                                Action::AskReset(here.clone()),
+                            ))
+                            .when(local, |m| {
+                                m.item(item(
+                                    ts!("git-rename").into(),
+                                    I::Pencil,
+                                    true,
+                                    Action::ShowRenameBranch(b.name.clone()),
+                                ))
+                            })
+                            .item(item(delete_label.clone(), I::Trash, !b.is_head, Action::AskDeleteBranch(b.clone())));
+                        if local {
+                            menu = menu
+                                .separator()
+                                .item(item(
+                                    ts!("git-set-tracked-branch").into(),
+                                    I::Link,
+                                    true,
+                                    Action::ShowSetUpstream(b.name.clone()),
+                                ))
+                                .item(item(
+                                    ts!("git-stop-tracking").into(),
+                                    I::Unlink,
+                                    b.upstream.is_some(),
+                                    Action::UnsetUpstream(b.name.clone()),
+                                ));
+                        }
+                        menu.separator()
+                            .item(item(
+                                ts!("git-show-last-commit").into(),
+                                I::GitCommitHorizontal,
+                                true,
+                                Action::ShowCommit(b.full_ref.clone()),
+                            ))
+                            .item(item(ts!("git-copy-name").into(), I::Copy, true, Action::Copy(b.name.clone())))
                     }),
             )
             .child(div().flex_1())
@@ -1278,15 +1385,20 @@ impl GitView {
                 cx,
             )
         } else {
-            diff_body(
+            let sbs = m.settings.side_by_side;
+            let layout = shown_layout(m.diff.as_ref());
+            let raw = diff_body(
                 "diff-lines",
                 m.diff.as_ref(),
                 crate::core_text::diff_sides(base),
-                m.settings.side_by_side,
+                sbs,
                 &empty,
                 short,
+                self.diff_sel_for("diff-lines", layout.as_ref(), sbs),
+                &self.diff_scroll,
                 cx,
-            )
+            );
+            self.diff_area("diff-lines", layout, sbs, raw, cx)
         };
         pane(&p).child(header).child(separator(&p)).child(body).into_any_element()
     }
@@ -1366,19 +1478,19 @@ impl GitView {
                 )
             });
         let body = match tab {
-            BottomTab::Output => div()
-                .id("output")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scrollbar()
-                .font_family(MONO)
-                .text_size(px(MONO_SIZE))
-                .children(
-                    m.output
-                        .iter()
-                        .map(|l| div().text_color(if l.error { p.error } else { p.fg }).child(l.text.clone())),
-                )
-                .into_any_element(),
+            BottomTab::Output => {
+                div()
+                    .id("output")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .font_family(MONO)
+                    .text_size(px(MONO_SIZE))
+                    .children(m.output.iter().map(|l| {
+                        div().text_color(if l.error { p.error } else { p.fg }).child(look::text(l.text.clone()))
+                    }))
+                    .into_any_element()
+            }
             BottomTab::Journal if history.as_ref().is_some_and(|h| !h.loading && h.commits.is_empty()) => pane_note(
                 self.rows.is_some_and(|r| r.journal < ART_LEAST_H),
                 snout_core::art::seed(),
@@ -1717,7 +1829,9 @@ impl GitView {
         let differs = (&d.committer, &d.committer_email) != (&d.author, &d.email) || d.committer_date != d.date;
         // egui's grid: the keys' column is as wide as its widest key.
         let key_w = if differs { 72. } else { 46. };
-        let key = |k: &str| div().w(px(key_w)).flex_none().whitespace_nowrap().text_color(p.fg_dim).child(k.to_owned());
+        let key = |k: &str| {
+            div().w(px(key_w)).flex_none().whitespace_nowrap().text_color(p.fg_dim).child(look::text(k.to_owned()))
+        };
         let fact = |k: &str, v: AnyElement| div().h(px(22.)).flex().items_center().gap(px(14.)).child(key(k)).child(v);
         let parents: Vec<AnyElement> = d
             .parents
@@ -1761,8 +1875,8 @@ impl GitView {
                                 .children(d.refs.iter().map(|r| look::ref_badge(r, &p))),
                         )
                     })
-                    .child(div().text_size(px(16.)).child(d.summary().to_owned()))
-                    .when(!d.body().is_empty(), |e| e.child(div().mt(px(9.)).child(d.body().to_owned())))
+                    .child(div().text_size(px(16.)).child(look::text(d.summary().to_owned())))
+                    .when(!d.body().is_empty(), |e| e.child(div().mt(px(9.)).child(look::text(d.body().to_owned()))))
                     .child(div().h(px(13.)))
                     .child(
                         div()
@@ -1771,17 +1885,19 @@ impl GitView {
                             .gap(px(6.))
                             .child(fact(
                                 ts!("git-author"),
-                                div().child(format!("{} <{}>", d.author, d.email)).into_any_element(),
+                                div().child(look::text(format!("{} <{}>", d.author, d.email))).into_any_element(),
                             ))
-                            .child(fact(ts!("git-date"), div().child(d.date.clone()).into_any_element()))
+                            .child(fact(ts!("git-date"), div().child(look::text(d.date.clone())).into_any_element()))
                             .when(differs, |e| {
                                 e.child(fact(
                                     ts!("git-committer"),
-                                    div().child(format!("{} <{}>", d.committer, d.committer_email)).into_any_element(),
+                                    div()
+                                        .child(look::text(format!("{} <{}>", d.committer, d.committer_email)))
+                                        .into_any_element(),
                                 ))
                                 .child(fact(
                                     ts!("git-committed"),
-                                    div().child(d.committer_date.clone()).into_any_element(),
+                                    div().child(look::text(d.committer_date.clone())).into_any_element(),
                                 ))
                             })
                             .child(fact(
@@ -1797,7 +1913,7 @@ impl GitView {
                                             .truncate()
                                             .font_family(MONO)
                                             .text_size(px(look::SMALL))
-                                            .child(d.id.clone()),
+                                            .child(look::text(d.id.clone())),
                                     )
                                     .child(
                                         look::small_button(
@@ -1824,29 +1940,31 @@ impl GitView {
 
         let empty = if d.files.is_empty() { ts!("git-this-commit-changes-no-files") } else { ts!("git-select-a-file") };
         let parent = if d.parents.is_empty() { ts!("git-nothing") } else { ts!("git-parent") };
-        let diff = pane(&p)
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(22.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(title(ts!("git-changes")))
-                    .child(diff_title(view.diff.as_ref(), &p))
-                    .child(div().flex_1())
-                    .child(diff_controls(&self.model, self.middle_w < DIFF_WORDS_W, cx)),
-            )
-            .child(separator(&p))
-            .child(diff_body(
-                "commit-diff",
-                view.diff.as_ref(),
-                (parent, ts!("git-this-commit")),
-                m.settings.side_by_side,
-                empty,
-                self.rows.is_some_and(|r| r.commit_changes < ART_LEAST_H),
-                cx,
-            ));
+        let sbs = m.settings.side_by_side;
+        let layout = shown_layout(view.diff.as_ref());
+        let header = div()
+            .flex_none()
+            .h(px(22.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(title(ts!("git-changes")))
+            .child(diff_title(view.diff.as_ref(), &p))
+            .child(div().flex_1())
+            .child(diff_controls(&self.model, self.middle_w < DIFF_WORDS_W, cx));
+        let raw = diff_body(
+            "commit-diff",
+            view.diff.as_ref(),
+            (parent, ts!("git-this-commit")),
+            sbs,
+            empty,
+            self.rows.is_some_and(|r| r.commit_changes < ART_LEAST_H),
+            self.diff_sel_for("commit-diff", layout.as_ref(), sbs),
+            &self.commit_diff_scroll,
+            cx,
+        );
+        let body = self.diff_area("commit-diff", layout, sbs, raw, cx);
+        let diff = pane(&p).child(header).child(separator(&p)).child(body);
 
         let s = &self.sizes;
         let changes_h = self.rows.map_or(s.commit_changes, |r| r.commit_changes);
@@ -1907,8 +2025,8 @@ impl GitView {
                     .justify_center()
                     .gap(px(6.))
                     .child(drawing(snout_core::art::welcome(), 240., 152., None))
-                    .child(div().mt(px(6.)).text_size(px(16.)).child(title))
-                    .child(div().text_color(p.fg_dim).child(line))
+                    .child(div().mt(px(6.)).text_size(px(16.)).child(look::text(title)))
+                    .child(div().text_color(p.fg_dim).child(look::text(line)))
                     .when_some(trouble, |d, said| {
                         d.child(
                             div()
@@ -1922,7 +2040,7 @@ impl GitView {
                                 .border_color(p.border)
                                 .font_family(crate::look::MONO)
                                 .text_size(px(12.))
-                                .child(said),
+                                .child(look::text(said)),
                         )
                     })
                     .child(div().h(px(10.)))
@@ -1971,8 +2089,12 @@ impl GitView {
                     .justify_center()
                     .gap(px(6.))
                     .child(drawing(snout_core::art::welcome(), 240., 152., None))
-                    .child(div().mt(px(6.)).text_size(px(16.)).child(ts!("files-no-project-open")))
-                    .child(div().text_color(p.fg_dim).child(ts!("git-open-a-project-to-see-its-changes-branches")))
+                    .child(div().mt(px(6.)).text_size(px(16.)).child(look::text(ts!("files-no-project-open"))))
+                    .child(
+                        div()
+                            .text_color(p.fg_dim)
+                            .child(look::text(ts!("git-open-a-project-to-see-its-changes-branches"))),
+                    )
                     .child(div().h(px(10.)))
                     .child(button("git-empty-open", Glyph::Open, ts!("git-open-project-o"), Action::PickFolder))
                     .child(button("git-empty-clone", Glyph::Pull, ts!("welcome-clone-repository"), Action::ShowClone)),
@@ -2117,10 +2239,10 @@ fn diff_title(diff: Option<&Result<Rc<DiffLayout>, String>>, p: &Palette) -> Any
         .min_w_0()
         .overflow_hidden()
         .whitespace_nowrap()
-        .child(div().min_w_0().truncate().font_family(MONO).text_size(px(MONO_SIZE)).child(d.path.clone()))
+        .child(div().min_w_0().truncate().font_family(MONO).text_size(px(MONO_SIZE)).child(look::text(d.path.clone())))
         .when(!d.binary && !d.too_large, |e| {
-            e.child(div().flex_none().text_color(p.added).child(format!("+{}", d.additions)))
-                .child(div().flex_none().text_color(p.removed).child(format!("−{}", d.deletions)))
+            e.child(div().flex_none().text_color(p.added).child(look::text(format!("+{}", d.additions))))
+                .child(div().flex_none().text_color(p.removed).child(look::text(format!("−{}", d.deletions))))
         })
         .into_any_element()
 }
@@ -2185,6 +2307,7 @@ fn diff_controls(model: &Entity<Model>, narrow: bool, cx: &App) -> AnyElement {
 }
 
 /// The diff itself, or a note saying why there is none.
+#[allow(clippy::too_many_arguments)]
 fn diff_body(
     id: &'static str,
     diff: Option<&Result<Rc<DiffLayout>, String>>,
@@ -2192,6 +2315,8 @@ fn diff_body(
     side_by_side: bool,
     empty: &str,
     short: bool,
+    sel: Option<DiffSel>,
+    scroll: &gpui::UniformListScrollHandle,
     cx: &App,
 ) -> AnyElement {
     let p = palette(cx);
@@ -2231,8 +2356,9 @@ fn diff_body(
     let count = view.len(side_by_side);
     let digits = view.number_digits;
     let list = uniform_list(id, count, move |range, _, _| {
-        range.map(|i| diff_line(&view, i, side_by_side, digits, &p)).collect()
+        range.map(|i| diff_line(&view, i, side_by_side, digits, sel.as_ref(), &p)).collect()
     })
+    .track_scroll(scroll)
     .flex_1()
     .font_family(MONO)
     .text_size(px(MONO_SIZE));
@@ -2266,6 +2392,7 @@ fn cell(
     marker: &str,
     text: Option<&str>,
     digits: usize,
+    selected: Option<(usize, usize)>,
     p: &Palette,
 ) -> Div {
     let num_w = (digits as f32 + 1.0) * CHAR_W;
@@ -2293,11 +2420,39 @@ fn cell(
     if !marker.is_empty() {
         row = row.child(div().flex_none().w(px(CHAR_W * 1.5)).text_color(p.weak()).child(marker.to_owned()));
     }
-    row.child(div().whitespace_nowrap().child(text.unwrap_or_default().replace('\t', "    ")))
+    let shown = shown_text(text.unwrap_or_default());
+    row.child(
+        div()
+            .relative()
+            .whitespace_nowrap()
+            .when_some(selected, |d, (from, to)| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(CHAR_W * from as f32))
+                        .w(px(CHAR_W * (to - from) as f32))
+                        .bg(p.selection()),
+                )
+            })
+            .child(shown),
+    )
 }
 
-fn diff_line(view: &DiffLayout, i: usize, side_by_side: bool, digits: usize, p: &Palette) -> AnyElement {
+fn diff_line(
+    view: &DiffLayout,
+    i: usize,
+    side_by_side: bool,
+    digits: usize,
+    sel: Option<&DiffSel>,
+    p: &Palette,
+) -> AnyElement {
     let rows = &view.diff.rows;
+    let cols = |side: DiffSide, text: Option<&str>| {
+        let sel = sel.filter(|s| s.side == side)?;
+        sel.cols(i, shown_text(text?).chars().count())
+    };
     let gap = |n: usize| {
         div()
             .h(px(DIFF_ROW))
@@ -2324,36 +2479,312 @@ fn diff_line(view: &DiffLayout, i: usize, side_by_side: bool, digits: usize, p: 
         };
         let old_bg = if row.old.is_none() { Some(p.stripe) } else { old_bg };
         let new_bg = if row.new.is_none() { Some(p.stripe) } else { new_bg };
-        line.child(cell(
-            old_bg,
-            &[row.old.as_ref().map(|l| l.0)],
-            "",
-            row.old.as_ref().map(|l| l.1.as_str()),
-            digits,
-            p,
-        ))
-        .child(
-            div().flex_none().w(px(2.)).h_full().flex().justify_center().child(div().w(px(1.)).h_full().bg(p.border)),
-        )
-        .child(cell(new_bg, &[row.new.as_ref().map(|l| l.0)], "", row.new.as_ref().map(|l| l.1.as_str()), digits, p))
-        .into_any_element()
+        let (old, new) = (row.old.as_ref().map(|l| l.1.as_str()), row.new.as_ref().map(|l| l.1.as_str()));
+        line.child(cell(old_bg, &[row.old.as_ref().map(|l| l.0)], "", old, digits, cols(DiffSide::Old, old), p))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(2.))
+                    .h_full()
+                    .flex()
+                    .justify_center()
+                    .child(div().w(px(1.)).h_full().bg(p.border)),
+            )
+            .child(cell(new_bg, &[row.new.as_ref().map(|l| l.0)], "", new, digits, cols(DiffSide::New, new), p))
+            .into_any_element()
     } else {
         match view.unified[i] {
             UniLine::Gap(n) => gap(n),
             UniLine::Both(i) => {
                 let r = &rows[i];
                 let (o, n) = (r.old.as_ref().unwrap(), r.new.as_ref().unwrap());
-                line.child(cell(None, &[Some(o.0), Some(n.0)], " ", Some(&n.1), digits, p)).into_any_element()
+                let c = cols(DiffSide::Unified, Some(&n.1));
+                line.child(cell(None, &[Some(o.0), Some(n.0)], " ", Some(&n.1), digits, c, p)).into_any_element()
             }
             UniLine::Old(i) => {
                 let o = rows[i].old.as_ref().unwrap();
-                line.child(cell(Some(p.diff_del()), &[Some(o.0), None], "-", Some(&o.1), digits, p)).into_any_element()
+                let c = cols(DiffSide::Unified, Some(&o.1));
+                line.child(cell(Some(p.diff_del()), &[Some(o.0), None], "-", Some(&o.1), digits, c, p))
+                    .into_any_element()
             }
             UniLine::New(i) => {
                 let n = rows[i].new.as_ref().unwrap();
-                line.child(cell(Some(p.diff_add()), &[None, Some(n.0)], "+", Some(&n.1), digits, p)).into_any_element()
+                let c = cols(DiffSide::Unified, Some(&n.1));
+                line.child(cell(Some(p.diff_add()), &[None, Some(n.0)], "+", Some(&n.1), digits, c, p))
+                    .into_any_element()
             }
         }
+    }
+}
+
+/// Which column of a diff a selection is in: a side of the side by side view, or the one
+/// column of the unified view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiffSide {
+    Old,
+    New,
+    Unified,
+}
+
+/// A place in a diff: (line of the view, character as shown, a tab as four).
+type DiffPos = (usize, usize);
+
+/// A selection in a diff, from where the mouse went down to where it is. It holds the layout
+/// it was made on, so a new diff or the other view drops it.
+#[derive(Clone)]
+struct DiffSel {
+    list: &'static str,
+    layout: Rc<DiffLayout>,
+    side_by_side: bool,
+    side: DiffSide,
+    anchor: DiffPos,
+    head: DiffPos,
+}
+
+impl DiffSel {
+    fn ordered(&self) -> (DiffPos, DiffPos) {
+        if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.anchor == self.head
+    }
+
+    /// The shown characters of line `line` (of `len`) it covers, the end past the last when
+    /// it goes on to the next line.
+    fn cols(&self, line: usize, len: usize) -> Option<(usize, usize)> {
+        let (a, b) = self.ordered();
+        if self.is_empty() || line < a.0 || line > b.0 {
+            return None;
+        }
+        let from = if line == a.0 { a.1.min(len) } else { 0 };
+        let to = if line == b.0 { b.1.min(len) } else { len + 1 };
+        (to > from).then_some((from, to))
+    }
+
+    /// The text it covers, tabs as they are in the file. The lines its side does not have (the
+    /// other side's additions, the unchanged lines left out) are not in it.
+    fn text(&self) -> String {
+        let (a, b) = self.ordered();
+        let mut out = Vec::new();
+        for line in a.0..=b.0 {
+            let Some(t) = diff_text(&self.layout, self.side_by_side, self.side, line) else { continue };
+            let from = if line == a.0 { char_at_shown(t, a.1) } else { 0 };
+            let to = if line == b.0 { char_at_shown(t, b.1) } else { t.chars().count() };
+            out.push(t.chars().skip(from).take(to.saturating_sub(from)).collect::<String>());
+        }
+        out.join("\n")
+    }
+}
+
+/// A diff line as it shows: a tab as four spaces.
+fn shown_text(text: &str) -> String {
+    text.replace('\t', "    ")
+}
+
+/// The character of `text` at shown column `col` (a tab four wide).
+fn char_at_shown(text: &str, col: usize) -> usize {
+    let mut w = 0;
+    for (i, c) in text.chars().enumerate() {
+        if w >= col {
+            return i;
+        }
+        w += if c == '\t' { 4 } else { 1 };
+    }
+    text.chars().count()
+}
+
+/// The text line `i` of the view has in column `side`, if any.
+fn diff_text(view: &DiffLayout, side_by_side: bool, side: DiffSide, i: usize) -> Option<&str> {
+    let rows = &view.diff.rows;
+    let line = if side_by_side {
+        let SbsLine::Row(r) = *view.sbs.get(i)? else { return None };
+        if side == DiffSide::Old { rows[r].old.as_ref() } else { rows[r].new.as_ref() }
+    } else {
+        match *view.unified.get(i)? {
+            UniLine::Gap(_) => None,
+            UniLine::Both(r) | UniLine::New(r) => rows[r].new.as_ref(),
+            UniLine::Old(r) => rows[r].old.as_ref(),
+        }
+    };
+    line.map(|l| l.1.as_str())
+}
+
+/// The diff's layout when it shows lines, for selecting in them.
+fn shown_layout(diff: Option<&Result<Rc<DiffLayout>, String>>) -> Option<Rc<DiffLayout>> {
+    let view = diff?.as_ref().ok()?;
+    (!view.diff.binary && !view.diff.too_large && !view.diff.is_identical()).then(|| view.clone())
+}
+
+/// The column and place under the window point `at` in a diff list scrolled by `scroll`:
+/// the rows are [`DIFF_ROW`] high, the text starts after the gutter [`cell`] draws. `side`
+/// keeps a drag in the column it began in. None above the list.
+fn diff_pos(
+    scroll: &gpui::UniformListScrollHandle,
+    at: Point<Pixels>,
+    side_by_side: bool,
+    digits: usize,
+    side: Option<DiffSide>,
+) -> Option<(DiffSide, DiffPos)> {
+    let state = scroll.0.borrow();
+    let (bounds, offset) = (state.base_handle.bounds(), state.base_handle.offset());
+    if at.y < bounds.top() && side.is_none() {
+        return None;
+    }
+    let x = f32::from(at.x - bounds.left());
+    let y = f32::from(at.y - bounds.top() - offset.y);
+    let num_w = (digits as f32 + 1.0) * CHAR_W;
+    let (side, text_x) = if side_by_side {
+        let half = (f32::from(bounds.size.width) - 2.) / 2.;
+        let side = side.unwrap_or(if x < half + 1. { DiffSide::Old } else { DiffSide::New });
+        let left = if side == DiffSide::Old { 0. } else { half + 2. };
+        (side, left + 4. + num_w + CHAR_W * 0.5)
+    } else {
+        (DiffSide::Unified, 4. + 2. * num_w + CHAR_W * 2.)
+    };
+    let line = (y / DIFF_ROW).floor().max(0.) as usize;
+    let col = ((x - text_x) / CHAR_W).round().max(0.) as usize;
+    Some((side, (line, col)))
+}
+
+impl GitView {
+    /// Move the end of the selection in diff `list` to where the mouse is, in its column.
+    fn diff_drag_select(&mut self, list: &'static str, side_by_side: bool, digits: usize, cx: &mut Context<Self>) {
+        let Some(side) = self.diff_sel.as_ref().filter(|s| s.list == list).map(|s| s.side) else { return };
+        let at = self.diff_drag_at;
+        let Some((_, head)) = diff_pos(self.diff_scroll(list), at, side_by_side, digits, Some(side)) else { return };
+        if let Some(sel) = self.diff_sel.as_mut().filter(|s| s.head != head) {
+            sel.head = head;
+            cx.notify();
+        }
+    }
+
+    fn diff_scroll(&self, list: &str) -> &gpui::UniformListScrollHandle {
+        if list == "commit-diff" { &self.commit_diff_scroll } else { &self.diff_scroll }
+    }
+
+    /// The selection in diff `list`, if it was made on `layout` in this view.
+    fn diff_sel_for(&self, list: &str, layout: Option<&Rc<DiffLayout>>, side_by_side: bool) -> Option<DiffSel> {
+        let layout = layout?;
+        self.diff_sel
+            .clone()
+            .filter(|s| s.list == list && s.side_by_side == side_by_side && Rc::ptr_eq(&s.layout, layout))
+    }
+
+    /// `body`, a diff, with the mouse selecting in it: a drag selects, a double click a word,
+    /// a triple click a line, and ⌘C or the menu's Copy copies.
+    fn diff_area(
+        &self,
+        list: &'static str,
+        layout: Option<Rc<DiffLayout>>,
+        side_by_side: bool,
+        body: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(layout) = layout else { return body };
+        let this = cx.entity().downgrade();
+        let copy_text = {
+            let layout = layout.clone();
+            move |cx: &App| -> Option<String> {
+                let view = this.upgrade()?;
+                let sel = view.read(cx).diff_sel_for(list, Some(&layout), side_by_side).filter(|s| !s.is_empty())?;
+                Some(sel.text())
+            }
+        };
+        let digits = layout.number_digits;
+        let menu = {
+            move |menu: gpui_component::menu::PopupMenu,
+                  _: &mut Window,
+                  cx: &mut Context<gpui_component::menu::PopupMenu>| {
+                let text = copy_text(cx);
+                menu.item(
+                    PopupMenuItem::new(ts!("cmd-copy"))
+                        .icon(crate::components::menu_icon(crate::components::IconName::Copy))
+                        .disabled(text.is_none())
+                        .on_click(move |_, _, cx| {
+                            if let Some(text) = text.clone() {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                            }
+                        }),
+                )
+            }
+        };
+        div()
+            .id(SharedString::from(format!("{list}-area")))
+            .debug_selector(move || format!("{list}-area"))
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .cursor_text()
+            .track_focus(&self.diff_focus)
+            .key_context("GitDiff")
+            .on_action(cx.listener({
+                let layout = layout.clone();
+                move |this, _: &gpui_component::input::Copy, _, cx| {
+                    let sel = this.diff_sel_for(list, Some(&layout), side_by_side).filter(|s| !s.is_empty());
+                    if let Some(sel) = sel {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(sel.text()));
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    window.focus(&this.diff_focus, cx);
+                    let Some((side, at)) = diff_pos(this.diff_scroll(list), e.position, side_by_side, digits, None)
+                    else {
+                        return;
+                    };
+                    let shown = diff_text(&layout, side_by_side, side, at.0).map(shown_text).unwrap_or_default();
+                    let (anchor, head) = match e.click_count {
+                        1 => match this.diff_sel_for(list, Some(&layout), side_by_side) {
+                            // Shift extends what is selected, in its column.
+                            Some(s) if e.modifiers.shift && s.side == side => (s.anchor, at),
+                            _ => (at, at),
+                        },
+                        2 => match crate::run::windows::word_at(&shown, at.1) {
+                            Some((from, to)) => ((at.0, from), (at.0, to)),
+                            None => (at, at),
+                        },
+                        _ => ((at.0, 0), (at.0, shown.chars().count())),
+                    };
+                    this.diff_sel = Some(DiffSel { list, layout: layout.clone(), side_by_side, side, anchor, head });
+                    this.diff_selecting = e.click_count == 1;
+                    cx.notify();
+                }),
+            )
+            // The drag goes on outside the diff, which scrolls when the mouse is at its top or bottom.
+            .child(crate::drag_select::follow_mouse(
+                cx.entity().downgrade(),
+                move |this: &mut Self, at, cx| {
+                    if !this.diff_selecting || this.diff_sel.as_ref().is_none_or(|s| s.list != list) {
+                        return;
+                    }
+                    this.diff_drag_at = at;
+                    this.diff_drag_select(list, side_by_side, digits, cx);
+                    let handle = this.diff_scroll(list).0.borrow().base_handle.clone();
+                    if this.diff_autoscroll.is_none() && crate::drag_select::edge_scroll(&handle, at, false, false) {
+                        this.diff_autoscroll = Some(crate::drag_select::autoscroll(cx, move |this: &mut Self, cx| {
+                            let at = this.diff_drag_at;
+                            if !this.diff_selecting || !crate::drag_select::edge_scroll(&handle, at, false, true) {
+                                this.diff_autoscroll = None;
+                                return false;
+                            }
+                            this.diff_drag_select(list, side_by_side, digits, cx);
+                            cx.notify();
+                            true
+                        }));
+                    }
+                },
+                |this: &mut Self, _| {
+                    this.diff_selecting = false;
+                    this.diff_autoscroll = None;
+                },
+            ))
+            .context_menu(menu)
+            .child(body)
+            .into_any_element()
     }
 }
 

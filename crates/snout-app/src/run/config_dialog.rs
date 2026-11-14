@@ -277,10 +277,11 @@ impl ConfigDialog {
                 .items_center()
                 .justify_center()
                 .text_color(p.fg_dim)
-                .child(ts!("config-no-configuration-add-one-with"))
+                .child(crate::look::text(ts!("config-no-configuration-add-one-with")))
                 .into_any_element();
         };
-        let label = |text: &'static str| div().flex_none().w(px(150.)).text_color(p.fg_dim).child(text);
+        let label =
+            |text: &'static str| div().flex_none().w(px(150.)).text_color(p.fg_dim).child(crate::look::text(text));
         let row = |text: &'static str, field: AnyElement| {
             div().flex().items_center().gap(px(10.)).child(label(text)).child(div().flex_1().min_w_0().child(field))
         };
@@ -406,7 +407,7 @@ impl Render for ConfigDialog {
                         .pb(px(2.))
                         .text_size(px(11.))
                         .text_color(p.fg_dim)
-                        .child(group)
+                        .child(crate::look::text(group))
                         .into_any_element(),
                 );
             }

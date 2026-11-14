@@ -25,11 +25,11 @@ SnoutCode reads the repository again when the window comes forward, when you pre
 
 The Repositories list holds the repositories you have opened, and lets you file them in groups.
 
-- **Show** a repository: click it. The Git view shows it, and everything in the Git view acts on it. The project stays as it is: the title bar's branch menu, the status bar's branch and the project's trees keep showing, and acting on, the project's own repository. Click the project's repository to show it in the Git view again, as you left it.
+- **Show** a repository: double-click it (one click only picks it out). The Git view shows it, and everything in the Git view acts on it. The project stays as it is: the title bar's branch menu, the status bar's branch and the project's trees keep showing, and acting on, the project's own repository. Double-click the project's repository to show it in the Git view again, as you left it.
 - **See its state:** the open repository shows its branch with ↑ and ↓ counts and its number of changed files. Others show what there is to pull, once the background fetch has counted it. A repository that is no longer on disk is marked **missing**.
 - **Narrow the files to a folder:** the open repository expands into its folders, each with its number of changed files. Click a folder to show only the changes under it; click the repository, or the `in folder/ ✕` chip in Files, to show them all again.
 - **Filter** the list: the field appears once you have more than 6 repositories. It matches repository and group names.
-- **Right-click** a repository for **Open as Project**, **Move to group** (a group, **No group**, or **New group…**), **Reveal in Finder**, **Open in External Terminal**, **Copy path** and **Remove from list**. Removing the project's repository closes the project; removing another one that is shown takes the Git view back to the project's.
+- **Right-click** a repository for **Open as Project** (any repository but the project's own: it becomes the project), **Move to group** (a group, **No group**, or **New group…**), **Reveal in Finder**, **Open in External Terminal**, **Copy path** and **Remove from list**. Removing the project's repository closes the project; removing another one that is shown takes the Git view back to the project's.
 
 ### Groups
 
@@ -44,9 +44,9 @@ A closed group still shows when one of its repositories has commits to pull.
 
 The **+** button above the list has:
 
-- **Open local repository…** (⌘O, or **File ▸ Open Project…**): pick a folder. When the folder is not in a Git repository, SnoutCode asks what to do: **Find repositories inside** looks through its subfolders and adds every repository it finds, and **Initialize a repository here** runs `git init`.
+- **Add local repository…**: pick a repository's folder. It joins the list and the Git view shows it; the project stays as it is. To make it the project, use **Open as Project** in its context menu, or **File ▸ Open Project…** (⌘O). When a folder opened as the project is not in a Git repository, SnoutCode asks what to do: **Find repositories inside** looks through its subfolders and adds every repository it finds, and **Initialize a repository here** runs `git init`.
 - **Find repositories in folder…** (also **File ▸ Find Repositories in Folder…**): adds every repository up to 4 levels below the folder you pick.
-- **Clone from GitHub…** (also **File ▸ Clone from GitHub…**): enter the URL and the folder to clone into. The dialog shows where the clone lands, then clones it and opens it. Any Git URL works.
+- **Clone from GitHub…** (also **File ▸ Clone from GitHub…**): enter the URL and the folder to clone into. The dialog shows where the clone lands, then clones it, adds it to the list and shows it in the Git view; the project stays as it is (with no project open, the clone opens as the project). Any Git URL works.
 - **New group…**
 
 You can also drag a folder from Finder onto the window to open it.
@@ -56,13 +56,27 @@ You can also drag a folder from Finder onto the window to open it.
 Below the Repositories list:
 
 - **Local Branches**, then one section per remote, then **Tags** (with their count). Click a section's title to fold it.
-- The current branch is in bold with a **HEAD** badge. Branches show how far ahead (↑) and behind (↓) of their upstream they are, and a **gone** badge when the upstream was deleted. When HEAD is detached, a `HEAD (detached at …)` line says so.
+- The current branch is in bold with a **HEAD** badge. A local branch that tracks a remote branch shows it after its name, beside a cloud: just the remote (`origin`) when the names match, else the whole name (`origin/main`). Branches show how far ahead (↑) and behind (↓) of their upstream they are, and a **gone** badge when the upstream was deleted. When HEAD is detached, a `HEAD (detached at …)` line says so.
 - Hover a branch or tag to see its upstream and its last commit.
 - **Double-click** a branch to check it out, or a tag to check it out detached. A remote branch checks out as a local branch of the same name.
-- **Right-click** a branch for **Check out**, **Create branch from here…**, **Delete…** (for a remote branch, **Delete from** the remote) and **Copy name**. A tag has **Check out (detached)**, **Create branch from tag…** and **Copy name**.
+- **Right-click** a branch for its menu (see below). A tag has **Check out (detached)**, **Create branch from tag…** and **Copy name**.
 - **Delete a branch** with the trash can that appears when you hover its row.
 
 The buttons at the top of this pane check out (⇧⌘O), create a branch and fetch.
+
+### The branch menu
+
+Right-click a branch in the pane. Where an item names the current branch, it acts on that branch.
+
+- **Check out** (a remote branch: **Check out as** a local branch) and **Create branch from here…**
+- **Merge into** the current branch, and **Rebase** the current branch **onto this**. Both run straight away. When they stop on conflicts, SnoutCode undoes them, so your branch and files are as they were, and shows Git's message with the files that clashed.
+- **Fast-forward to upstream** (local branches): moves the branch to its upstream when it is only behind, with no commits of its own. It works on any local branch, checked out or not, so you can bring a branch up to date without switching to it.
+- **Push** (local branches): pushes this branch, checked out or not, to its upstream. A branch with no upstream goes to a branch of its own name on `origin` and tracks it from then on.
+- **Push to…** (local branches): pick the remote and the branch name there, and whether the branch should track it.
+- **Reset** the current branch **to here…**: **Soft** moves the branch only and keeps the changes since staged; **Mixed** also unstages them, keeping them in your files; **Hard** makes your files match too, and discards uncommitted changes (the dialog warns you when you have some).
+- **Rename…** (local branches) and **Delete…** (a remote branch: **Delete from** the remote).
+- **Set tracked branch…** (local branches): pick the remote branch it pulls from and pushes to. **Stop tracking** removes that link; the remote branch stays.
+- **Show last commit** opens the branch's tip commit, and **Copy name** copies the branch's name.
 
 ### Deleting a branch
 
@@ -100,6 +114,7 @@ Changes shows the diff of the selected file.
 - **Compare:** the menu in the header picks what to compare: **HEAD ↔ Working tree**, **Index ↔ Working tree** or **HEAD ↔ Index**.
 - **Layout:** **Unified** or **Side by Side**.
 - **Compact** hides unchanged lines away from the changes, keeping 3 lines of context around each.
+- **Select and copy:** drag across the text to select it, double-click a word, triple-click a line, ⇧-click to extend. Side by side, a selection stays in the side it began in. ⌘C, or **Copy** in the context menu, copies it, with tabs as they are in the file. The lines the side does not have, and the unchanged lines left out, are not copied.
 
 The same choices are in **View ▸ Side by Side Diff**, **Unified Diff** and **Compact Diff**. A binary file, or one too large to show, says so instead.
 

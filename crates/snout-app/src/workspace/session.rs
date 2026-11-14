@@ -143,6 +143,19 @@ pub fn editor_files(state: &Value, editor: &str) -> Vec<PathBuf> {
     out
 }
 
+/// The layout `state`, saved in a window `saved` big (width, height), for a window `now`
+/// big: the side docks keep their share of its width and the bottom dock of its height.
+pub fn scale_docks(mut state: Value, saved: Option<(f32, f32)>, now: (f32, f32)) -> Value {
+    let Some((w, h)) = saved.filter(|(w, h)| *w > 0. && *h > 0.) else { return state };
+    let (wide, high) = (f64::from(now.0) / f64::from(w), f64::from(now.1) / f64::from(h));
+    for (dock, ratio) in [("left_dock", wide), ("right_dock", wide), ("bottom_dock", high)] {
+        if let Some(size) = state.get(dock).and_then(|d| d.get("size")).and_then(Value::as_f64) {
+            state[dock]["size"] = json!(size * ratio);
+        }
+    }
+    state
+}
+
 /// The layout `full` with its center replaced by `center`.
 pub fn with_center(mut full: Value, center: Value) -> Value {
     full["center"] = center;
@@ -159,6 +172,16 @@ mod tests {
 
     fn tabs(children: Vec<Value>, active: usize) -> Value {
         json!({ "panel_name": "TabPanel", "children": children, "info": { "tabs": { "active_index": active } } })
+    }
+
+    #[test]
+    fn docks_keep_their_share_of_the_window() {
+        let state = json!({ "left_dock": { "size": 200.0 }, "right_dock": { "size": 300.0 }, "bottom_dock": { "size": 250.0 } });
+        let scaled = scale_docks(state.clone(), Some((2000., 1000.)), (1000., 800.));
+        assert_eq!(scaled["left_dock"]["size"], json!(100.0));
+        assert_eq!(scaled["right_dock"]["size"], json!(150.0));
+        assert_eq!(scaled["bottom_dock"]["size"], json!(200.0));
+        assert_eq!(scale_docks(state.clone(), None, (1000., 800.)), state, "a layout saved without its window stays");
     }
 
     #[test]

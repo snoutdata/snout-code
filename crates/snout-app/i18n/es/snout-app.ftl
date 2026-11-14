@@ -554,6 +554,27 @@ dialogs-allow-to = ¿Permitir que { $agent } { $what }?
 dialogs-its-upstream = su rama upstream
 dialogs-delete-from = Eliminar de { $remote }
 dialogs-allow-for-this-session-lets-it-use-again = Permitir en esta sesión le deja volver a usar { $tool } sin preguntar.
+dialogs-reset-subtitle = Mover la rama actual a otro commit
+dialogs-reset-branch-to = Restablecer { $head } a { $to }
+dialogs-reset-soft = Suave
+dialogs-reset-soft-detail = Mueve solo la rama. Los cambios desde entonces siguen preparados.
+dialogs-reset-mixed = Mixto
+dialogs-reset-mixed-detail = Mueve la rama y quita del área de preparación. Los cambios siguen en tus archivos.
+dialogs-reset-hard = Duro
+dialogs-reset-hard-detail = La rama y tus archivos quedan iguales a ese punto. Los cambios sin confirmar se pierden.
+dialogs-reset-hard-loses-changes = Tienes cambios sin confirmar: Duro los descarta para siempre.
+dialogs-rename-branch = Renombrar rama
+dialogs-renaming-branch = Renombrando
+dialogs-push-branch-to = Enviar { $name } a
+dialogs-push-to-subtitle = Elige el remoto y el nombre de la rama allí
+dialogs-remote = Remoto
+dialogs-no-remote = Este repositorio aún no tiene remoto.
+dialogs-remote-branch = Rama en el remoto
+dialogs-track-the-pushed-branch = Seguirla: pull y push van allí desde ahora
+dialogs-set-upstream-of = Rama seguida por { $name }
+dialogs-set-upstream-subtitle = Pull y push van a la rama elegida aquí
+dialogs-no-matching-remote-branch = Ninguna rama remota coincide
+dialogs-track = Seguir
 
 ## welcome
 
@@ -623,7 +644,7 @@ tabs-hide = Ocultar
 ## projects
 
 projects-filter = Filtrar
-projects-open-local-repository = Abrir repositorio local…
+projects-add-local-repository = Añadir repositorio local…
 projects-find-repositories-in-folder = Buscar repositorios en una carpeta…
 projects-no-matches = Sin coincidencias
 projects-rename = Cambiar nombre…
@@ -780,6 +801,7 @@ model-no-commit-message-yet = Aún no hay mensaje de commit
 model-drafted-the-commit-message = { $name } redactó el mensaje de commit
 model-refreshed = Actualizado
 model-open-project = Abrir proyecto
+model-add-repository = Añadir repositorio
 model-initialized-repository-in = Repositorio inicializado en { $root }
 model-find-repositories-in-folder = Buscar repositorios en una carpeta
 model-searching-for-repositories = Buscando repositorios
@@ -823,6 +845,14 @@ model-generated-sources = Fuentes generadas
 model-the-build-did-not-sync = La compilación no se sincronizó
 model-sync = Sincronización: { $root }
 model-the-gradle-sync-failed = La sincronización de Gradle falló
+model-merged-into = { $rev } fusionada en { $head }
+model-rebased-onto = { $head } rebasada sobre { $rev }
+model-fast-forwarded = { $name } avanzada (fast-forward)
+model-push-branch = Enviar { $name }
+model-push-branch-to = Enviar { $name } a { $to }
+model-renamed-branch = { $old } renombrada a { $new }
+model-now-tracks = { $name } ahora sigue a { $upstream }
+model-tracks-nothing = { $name } ya no sigue nada
 
 ## branch
 
@@ -984,6 +1014,15 @@ git-changed-staged = { $count ->
     [one] { $staged_count } preparado
    *[other] { $staged_count } preparados
     }
+git-merge-into = Fusionar en { $head }
+git-rebase-onto-here = Rebasar { $head } sobre esta
+git-fast-forward-to-upstream = Avanzar hasta el upstream
+git-push-to = Enviar a…
+git-reset-to-here = Restablecer { $head } aquí…
+git-rename = Renombrar…
+git-set-tracked-branch = Definir rama seguida…
+git-stop-tracking = Dejar de seguir
+git-show-last-commit = Mostrar el último commit
 
 ## console
 

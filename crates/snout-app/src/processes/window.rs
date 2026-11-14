@@ -162,12 +162,16 @@ impl Render for ProcessesWindow {
             .text_size(px(crate::components::HEAD_TEXT))
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.fg_dim)
-            .child(div().flex_1().min_w_0().child(ts!("processes-process")))
-            .when(columns.pid, |d| d.child(cell(PID_W).text_right().child("PID")))
-            .when(columns.memory, |d| d.child(cell(MEMORY_W).text_right().child(ts!("processes-memory"))))
-            .when(columns.cpu, |d| d.child(cell(CPU_W).text_right().child("CPU")))
-            .when(columns.uptime, |d| d.child(cell(UPTIME_W).text_right().child(ts!("processes-uptime"))))
-            .child(cell(state_w).pl(px(12.)).child(ts!("git-state")))
+            .child(div().flex_1().min_w_0().child(crate::look::text(ts!("processes-process"))))
+            .when(columns.pid, |d| d.child(cell(PID_W).text_right().child(crate::look::text("PID"))))
+            .when(columns.memory, |d| {
+                d.child(cell(MEMORY_W).text_right().child(crate::look::text(ts!("processes-memory"))))
+            })
+            .when(columns.cpu, |d| d.child(cell(CPU_W).text_right().child(crate::look::text("CPU"))))
+            .when(columns.uptime, |d| {
+                d.child(cell(UPTIME_W).text_right().child(crate::look::text(ts!("processes-uptime"))))
+            })
+            .child(cell(state_w).pl(px(12.)).child(crate::look::text(ts!("git-state"))))
             .child(div().w(px(ACTIONS_W)).flex_none());
         let entity = self.processes.clone();
         let n = rows.len();
@@ -304,7 +308,7 @@ impl Render for ProcessesWindow {
             .border_color(p.border)
             .text_size(px(12.))
             .text_color(p.fg_dim)
-            .child(div().debug_selector(|| "processes-totals".into()).child(summary))
+            .child(div().debug_selector(|| "processes-totals".into()).child(crate::look::text(summary)))
             .when_some(notice, |d, n| {
                 d.child(
                     div()
@@ -313,10 +317,10 @@ impl Render for ProcessesWindow {
                         .gap(px(6.))
                         .text_color(p.fg)
                         .child(crate::components::icon(crate::components::IconName::Info, 13., p.info()))
-                        .child(n),
+                        .child(crate::look::text(n)),
                 )
             })
-            .when(idle > 0, |d| d.child(t!("processes-idle", idle = idle.to_string())));
+            .when(idle > 0, |d| d.child(crate::look::text(t!("processes-idle", idle = idle.to_string()))));
         base.child(header).child(list).child(foot)
     }
 }

@@ -225,7 +225,7 @@ impl Render for ReferencesPanel {
                 .text_color(p.weak())
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .child(self.title.clone()),
+                .child(crate::look::text(self.title.clone())),
         )
         .child(rows_view("reference", self.rows.clone(), self.hub.clone(), cx))
     }
