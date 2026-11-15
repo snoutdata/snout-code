@@ -257,11 +257,13 @@ fn setting(section: &str) -> Value {
     at
 }
 
-fn initialize_params(root: &Path) -> Value {
+/// `initialize` for vtsls. Like jdtls, it exits when the process it is given (`pid`, the
+/// program serving the host) stops running.
+pub(crate) fn initialize_params(root: &Path, pid: u32) -> Value {
     let uri = snout_lang::uri::from_path(root);
     let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     json!({
-        "processId": std::process::id(),
+        "processId": pid,
         "clientInfo": { "name": "SnoutCode" },
         "rootUri": uri.as_str(),
         "rootPath": root,
@@ -458,7 +460,7 @@ impl LangHub {
                 }
             }
         });
-        let init = client.request_raw("initialize", initialize_params(root));
+        let init = client.request_raw("initialize", initialize_params(root, self.host.info().pid));
         let root_buf = root.to_owned();
         let initialize = cx.spawn(async move |this, cx| {
             let result = init.await;
