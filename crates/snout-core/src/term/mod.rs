@@ -152,14 +152,29 @@ pub struct Modes {
     pub app_cursor: bool,
     /// The alternate screen is showing (full-screen programs).
     pub alt_screen: bool,
-    /// The child asked for mouse events (modes 9, 1000, 1002, 1003).
-    pub mouse: bool,
+    /// The mouse events the child asked for.
+    pub mouse: MouseTracking,
     /// ...in the SGR encoding (mode 1006).
     pub mouse_sgr: bool,
     /// The kitty keyboard protocol flags the child pushed (0: off).
     pub kitty_keyboard: u8,
     /// The child is drawing a synchronized update (mode 2026): wait for its end.
     pub sync_output: bool,
+}
+
+/// The mouse events a child asked for: each level reports what the one before it does, and more.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MouseTracking {
+    #[default]
+    Off,
+    /// Presses, without modifiers (mode 9).
+    Press,
+    /// Presses and releases (mode 1000).
+    Click,
+    /// ...and moves while a button is down (mode 1002).
+    Drag,
+    /// ...and every move (mode 1003).
+    Motion,
 }
 
 /// A colour as the child set it.

@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use snout_host::{Cmd, Host, PtyProcess};
 
 use crate::term::{Color, Engine};
-pub use crate::term::{EngineKind, Frame};
+pub use crate::term::{EngineKind, Frame, Modes, MouseTracking};
 
 pub type Rgb = (u8, u8, u8);
 
@@ -262,10 +262,11 @@ impl Pty {
         }
     }
 
-    /// Wheel `lines` (up when positive): report it if the app asked for mouse events, move
-    /// through its history with the arrow keys in the alternate screen, scroll our own
-    /// scrollback otherwise. Whether our scrollback moved (a selection no longer holds).
-    pub fn scroll(&self, lines: f32) -> bool {
+    /// Wheel `lines` (up when positive) over the cell `at` (row, col): report it if the app
+    /// asked for mouse events, move through its history with the arrow keys in the alternate
+    /// screen, scroll our own scrollback otherwise. Whether our scrollback moved (a selection
+    /// no longer holds).
+    pub fn scroll(&self, lines: f32, at: (u16, u16), mods: Mods) -> bool {
         let n = lines.abs().round() as usize;
         if n == 0 {
             return false;
@@ -273,15 +274,9 @@ impl Pty {
         let up = lines > 0.0;
         let modes = self.frame().modes;
         let mut out = Vec::new();
-        if modes.mouse {
-            let button = if up { 64 } else { 65 };
-            for _ in 0..n {
-                if modes.mouse_sgr {
-                    out.extend_from_slice(format!("\x1b[<{button};1;1M").as_bytes());
-                } else {
-                    out.extend_from_slice(&[0x1b, b'[', b'M', 32 + button, 33, 33]);
-                }
-            }
+        if modes.mouse != MouseTracking::Off {
+            let wheel = if up { MouseEvent::WheelUp } else { MouseEvent::WheelDown };
+            out.extend(encode_mouse(wheel, at, mods, modes).repeat(n));
         } else if modes.alt_screen {
             let key: &[u8] = match (up, modes.app_cursor) {
                 (true, true) => b"\x1bOA",
@@ -297,6 +292,17 @@ impl Pty {
         }
         self.write(&out);
         false
+    }
+
+    /// Report a mouse `event` over the cell `at` (row, col), if the app asked for it. Whether
+    /// the app has the mouse: when it has not, the front end selects text as usual.
+    pub fn mouse(&self, event: MouseEvent, at: (u16, u16), mods: Mods) -> bool {
+        let modes = self.frame().modes;
+        if modes.mouse == MouseTracking::Off {
+            return false;
+        }
+        self.write(&encode_mouse(event, at, mods, modes));
+        true
     }
 
     /// Show the line `offset` lines back from the live screen (0: the live screen).
@@ -540,6 +546,67 @@ fn ctrl_byte(key: Key) -> Option<u8> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
+}
+
+/// A mouse event as the front end has it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseEvent {
+    Press(MouseButton),
+    Release(MouseButton),
+    /// The pointer moved to another cell, with this button down (or none).
+    Move(Option<MouseButton>),
+    WheelUp,
+    WheelDown,
+}
+
+/// The bytes an xterm sends for a mouse `event` over the cell `at` (row, col, from 0); empty
+/// when the app did not ask for it, or when the legacy encoding cannot say where it was.
+pub fn encode_mouse(event: MouseEvent, at: (u16, u16), m: Mods, modes: Modes) -> Vec<u8> {
+    use MouseEvent::{Move, Press, Release, WheelDown, WheelUp};
+    let wanted = match event {
+        Press(_) | WheelUp | WheelDown => MouseTracking::Press,
+        Release(_) => MouseTracking::Click,
+        Move(Some(_)) => MouseTracking::Drag,
+        Move(None) => MouseTracking::Motion,
+    };
+    if modes.mouse == MouseTracking::Off || modes.mouse < wanted {
+        return Vec::new();
+    }
+    let button = |b: MouseButton| match b {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    let mut code: u16 = match event {
+        Press(b) => button(b),
+        // The legacy encoding cannot tell which button went up.
+        Release(b) if modes.mouse_sgr => button(b),
+        Release(_) => 3,
+        Move(b) => 32 + b.map_or(3, button),
+        WheelUp => 64,
+        WheelDown => 65,
+    };
+    // Mode 9 reports no modifiers.
+    if modes.mouse != MouseTracking::Press {
+        code += 4 * u16::from(m.shift) + 8 * u16::from(m.alt) + 16 * u16::from(m.ctrl);
+    }
+    let (row, col) = (at.0 + 1, at.1 + 1);
+    if modes.mouse_sgr {
+        let end = if matches!(event, Release(_)) { 'm' } else { 'M' };
+        return format!("\x1b[<{code};{col};{row}{end}").into_bytes();
+    }
+    // One byte each, offset by 32: nothing past 223.
+    match [code, col, row].map(|n| u8::try_from(n + 32)) {
+        [Ok(code), Ok(col), Ok(row)] => vec![0x1b, b'[', b'M', code, col, row],
+        _ => Vec::new(),
+    }
+}
+
 /// What a paste sends: bracketed when the app asked for it, else with CR line ends.
 pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     if bracketed {
@@ -628,6 +695,45 @@ mod tests {
         assert!(encode_key(Key::Char('c'), with(|m| m.cmd = true), false).is_empty());
         assert_eq!(paste_bytes("a\nb", true), b"\x1b[200~a\nb\x1b[201~");
         assert_eq!(paste_bytes("a\nb", false), b"a\rb");
+    }
+
+    #[test]
+    fn mouse_events_encode_like_xterm() {
+        use MouseButton::{Left, Middle, Right};
+        use MouseEvent::{Move, Press, Release, WheelDown, WheelUp};
+        let none = Mods::default();
+        let modes = |mouse, sgr| Modes { mouse, mouse_sgr: sgr, ..Modes::default() };
+        let sgr = modes(MouseTracking::Click, true);
+        let at = |e, row, col, m, modes| String::from_utf8(encode_mouse(e, (row, col), m, modes)).unwrap();
+        // SGR: 1-based column then row; a release keeps its button and ends in `m`.
+        assert_eq!(at(Press(Left), 4, 9, none, sgr), "\x1b[<0;10;5M");
+        assert_eq!(at(Release(Left), 4, 9, none, sgr), "\x1b[<0;10;5m");
+        assert_eq!(at(Press(Middle), 0, 0, none, sgr), "\x1b[<1;1;1M");
+        assert_eq!(at(Press(Right), 0, 0, none, sgr), "\x1b[<2;1;1M");
+        assert_eq!(at(WheelUp, 2, 3, none, sgr), "\x1b[<64;4;3M", "the wheel where the pointer is");
+        assert_eq!(at(WheelDown, 2, 3, none, sgr), "\x1b[<65;4;3M");
+        // Shift 4, Alt 8, Ctrl 16; ⌘ is the app's.
+        let mods = Mods { shift: true, alt: true, ctrl: true, cmd: true };
+        assert_eq!(at(Press(Left), 0, 0, mods, sgr), "\x1b[<28;1;1M");
+        // The legacy encoding: 32 + button, 33 + column, 33 + row; a release is button 3.
+        let x11 = modes(MouseTracking::Click, false);
+        assert_eq!(encode_mouse(Press(Left), (4, 9), none, x11), [0x1b, b'[', b'M', 32, 42, 37]);
+        assert_eq!(encode_mouse(Release(Right), (4, 9), none, x11), [0x1b, b'[', b'M', 35, 42, 37]);
+        assert_eq!(encode_mouse(WheelUp, (0, 0), none, x11), [0x1b, b'[', b'M', 96, 33, 33]);
+        assert!(encode_mouse(Press(Left), (0, 223), none, x11).is_empty(), "past column 223 it cannot say where");
+        assert_eq!(at(Press(Left), 0, 223, none, sgr), "\x1b[<0;224;1M", "SGR can");
+        // Only what the child asked for.
+        assert!(encode_mouse(Press(Left), (0, 0), none, Modes::default()).is_empty());
+        let x10 = modes(MouseTracking::Press, true);
+        assert_eq!(at(Press(Left), 0, 0, mods, x10), "\x1b[<0;1;1M", "mode 9 has no modifiers");
+        assert!(encode_mouse(Release(Left), (0, 0), none, x10).is_empty(), "mode 9: presses only");
+        assert!(encode_mouse(Move(Some(Left)), (0, 0), none, sgr).is_empty(), "mode 1000: no moves");
+        let drag = modes(MouseTracking::Drag, true);
+        assert_eq!(at(Move(Some(Left)), 1, 1, none, drag), "\x1b[<32;2;2M", "mode 1002: moves with a button down");
+        assert!(encode_mouse(Move(None), (1, 1), none, drag).is_empty());
+        let motion = modes(MouseTracking::Motion, true);
+        assert_eq!(at(Move(None), 1, 1, none, motion), "\x1b[<35;2;2M", "mode 1003: every move");
+        assert_eq!(at(Move(Some(Right)), 1, 1, none, motion), "\x1b[<34;2;2M");
     }
 
     #[test]
