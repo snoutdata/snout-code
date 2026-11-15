@@ -18,6 +18,18 @@ pub fn this_machine() -> &'static str {
     ts!("machine-linux")
 }
 
+/// This machine's name on the network, without its domain.
+pub fn machine_name() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: gethostname writes at most `buf.len()` bytes into `buf`.
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    let name = String::from_utf8_lossy(&buf[..end]);
+    name.split('.').next().filter(|n| !n.is_empty()).map(str::to_owned)
+}
+
 /// The app draws the title bar, its buttons and the window's edges (a compositor that
 /// decorates windows itself still may: the title bar then leaves the buttons out).
 pub fn window_decorations() -> Option<gpui::WindowDecorations> {

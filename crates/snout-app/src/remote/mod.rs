@@ -107,6 +107,9 @@ impl RemoteProject {
 pub struct Recents {
     pub hosts: Vec<String>,
     pub projects: Vec<RemoteProject>,
+    /// The remote project the window was on when the app last left it: the next start opens
+    /// it again. Closing the connection forgets it.
+    pub last: Option<RemoteProject>,
 }
 
 const RECENT_MAX: usize = 10;
@@ -168,6 +171,15 @@ pub struct Remote {
 }
 
 impl Global for Remote {}
+
+impl Remote {
+    /// Keep the recents in the app's own folder.
+    fn save_recents(&self) {
+        if let Some(store) = &self.main_store {
+            self.recents.save(&store.dir());
+        }
+    }
+}
 
 /// Keep the Mac's host and store to come back to, read the recent remote projects, and
 /// follow the connection's state.
@@ -419,38 +431,66 @@ fn as_workspace_host(host: Arc<RemoteHost>) -> HostRef {
 }
 
 /// Open the window again on `folder` of the remote machine `host` (reached as `name`), in
-/// place of `old` (whose model `from` records it among the recent projects).
+/// place of `old` (whose model `from` records it among the recent projects). Coming from
+/// another host, its connection closes after `before` (which runs off the UI thread, while
+/// it is still there).
 pub fn open_project(
     name: String,
     host: Arc<RemoteHost>,
     folder: PathBuf,
     from: &Entity<Model>,
     old: AnyWindowHandle,
+    before: Option<Box<dyn FnOnce() + Send>>,
     cx: &mut App,
 ) {
     let base = from.read(cx).settings.clone();
     let main = cx.try_global::<Remote>().and_then(|r| r.main_store.clone());
     if cx.has_global::<Remote>() {
         let r = cx.global_mut::<Remote>();
-        r.recents.add_project(RemoteProject { host: name.clone(), path: folder.clone() });
-        if let Some(store) = &r.main_store {
-            r.recents.save(&store.dir());
-        }
+        let p = RemoteProject { host: name.clone(), path: folder.clone() };
+        r.recents.add_project(p.clone());
+        r.recents.last = Some(p);
+        r.save_recents();
         r.pending = None;
     }
     let store = store_for(&name, main.as_ref(), &base);
     cx.set_global(crate::host::HostGlobal(as_workspace_host(host.clone())));
-    cx.global_mut::<Remote>().connection = Some(Connection { name, host: Some(host), status: Status::Connected });
+    let left = cx.global_mut::<Remote>().connection.replace(Connection {
+        name: name.clone(),
+        host: Some(host),
+        status: Status::Connected,
+    });
+    // From another host: close its connection, once `before` has cleaned up there.
+    if let Some(old_host) = left.filter(|c| c.name != name).and_then(|c| c.host) {
+        cx.background_executor()
+            .spawn(async move {
+                if let Some(before) = before {
+                    before();
+                }
+                old_host.close();
+            })
+            .detach();
+    }
     switch_window(store, Some(folder), old, cx);
 }
 
-/// Close the connection and open the window again on this Mac, in place of `old`. `before`
-/// runs first (off the UI thread), while the connection is still there.
-pub fn disconnect(old: AnyWindowHandle, before: Option<Box<dyn FnOnce() + Send>>, cx: &mut App) {
+/// Close the connection and open the window again on this Mac, in place of `old`, on `folder`
+/// if there is one. `before` runs first (off the UI thread), while the connection is still
+/// there.
+pub fn disconnect(
+    old: AnyWindowHandle,
+    folder: Option<PathBuf>,
+    before: Option<Box<dyn FnOnce() + Send>>,
+    cx: &mut App,
+) {
     let Some(r) = cx.try_global::<Remote>() else { return };
     let local = r.local.clone().unwrap_or_else(snout_host::local);
     let store = r.main_store.clone();
-    let conn = cx.global_mut::<Remote>().connection.take();
+    let r = cx.global_mut::<Remote>();
+    // Closed on purpose: the next start stays on this Mac.
+    r.recents.last = None;
+    r.save_recents();
+    let conn = r.connection.take();
     if let Some(host) = conn.and_then(|c| c.host) {
         cx.background_executor()
             .spawn(async move {
@@ -463,7 +503,7 @@ pub fn disconnect(old: AnyWindowHandle, before: Option<Box<dyn FnOnce() + Send>>
     }
     cx.global_mut::<Remote>().tasks.clear();
     cx.set_global(crate::host::HostGlobal(local));
-    switch_window(store, None, old, cx);
+    switch_window(store, folder, old, cx);
 }
 
 /// A new window over a new model from `store` (opening `folder`), then `old` closes.
@@ -475,10 +515,56 @@ fn switch_window(store: Option<Store>, folder: Option<PathBuf>, old: AnyWindowHa
     cx.refresh_windows();
 }
 
+/// The remote project to open again at this start: the one the app was on when it last quit,
+/// unless the start was asked to open something else.
+pub fn to_restore(asked: bool, cx: &App) -> Option<RemoteProject> {
+    if asked {
+        return None;
+    }
+    cx.try_global::<Remote>()?.recents.last.clone()
+}
+
+/// A remote project could not be opened: if it was the one to open again at start, stop
+/// trying, so the next start opens this machine's project.
+pub fn forget_last(p: &RemoteProject, cx: &mut App) {
+    let Some(r) = cx.try_global::<Remote>() else { return };
+    if r.recents.last.as_ref() != Some(p) {
+        return;
+    }
+    let r = cx.global_mut::<Remote>();
+    r.recents.last = None;
+    r.save_recents();
+}
+
 /// Forget a connection made for a folder that was not picked.
 pub fn drop_pending(cx: &mut App) {
     if let Some((_, host)) = cx.try_global::<Remote>().and_then(|r| r.pending.clone()) {
         host.close();
         cx.global_mut::<Remote>().pending = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn a_project_that_could_not_be_opened_again_is_not_tried_at_the_next_start(cx: &mut gpui::TestAppContext) {
+        let dir = crate::tests::scratch_dir("forget-last");
+        let shop = RemoteProject { host: "devbox".into(), path: "/home/me/shop".into() };
+        let other = RemoteProject { host: "nas".into(), path: "/srv/media".into() };
+        cx.update(|cx| {
+            let mut r = Remote { main_store: Some(Store::at(dir.join("settings.json"))), ..Default::default() };
+            r.recents.last = Some(shop.clone());
+            cx.set_global(r);
+            // Another project failing leaves the one to open again.
+            forget_last(&other, cx);
+            assert_eq!(cx.global::<Remote>().recents.last.as_ref(), Some(&shop));
+            forget_last(&shop, cx);
+            assert_eq!(cx.global::<Remote>().recents.last, None);
+            assert_eq!(Recents::load(&dir).last, None, "and the file says so");
+            assert_eq!(to_restore(false, cx), None);
+        });
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
