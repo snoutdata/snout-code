@@ -18,10 +18,11 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Bounds, ClipboardItem, Context, Entity, FocusHandle, Font, FontStyle, FontWeight, Global,
-    Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement as _, Pixels,
-    Point, Render, ScrollEvent, SharedString, StatefulInteractiveElement as _, StrikethroughStyle, Styled as _,
-    Subscription, TextAlign, TextRun, UnderlineStyle, Window, canvas, div, font, point, px, size,
+    App, AppContext as _, Bounds, ClipboardItem, Context, DispatchPhase, Entity, FocusHandle, Font, FontStyle,
+    FontWeight, Global, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString,
+    StatefulInteractiveElement as _, StrikethroughStyle, Styled as _, Subscription, TextAlign, TextRun, UnderlineStyle,
+    WeakEntity, Window, canvas, div, font, point, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dock::{BasePanelView, panel_handle};
@@ -237,6 +238,9 @@ pub struct ConsolePanel {
     /// Anchor and end of a mouse selection, in cells (row, col).
     selection: Option<((u16, u16), (u16, u16))>,
     selecting: bool,
+    /// The buttons pressed for the program that has the mouse, and the cell it last heard of.
+    mouse_held: Vec<pty::MouseButton>,
+    mouse_cell: Option<(u16, u16)>,
     /// Where the grid was last painted, and its cell size, for the pointer.
     grid: Option<(Bounds<Pixels>, gpui::Size<Pixels>)>,
     shown_gen: u64,
@@ -398,6 +402,8 @@ impl ConsolePanel {
             selection: None,
             menu_link: None,
             selecting: false,
+            mouse_held: Vec::new(),
+            mouse_cell: None,
             grid: None,
             shown_gen: 0,
             starting: Default::default(),
@@ -1312,6 +1318,58 @@ impl ConsolePanel {
         let rows = ((b.size.height / cell.height).floor() as u16).max(1);
         let (row, col) = self.cell_at(pos)?;
         Some((row.min(rows - 1), col.min(cols)))
+    }
+
+    /// The cell under `pos` held to `root`'s grid, for the program that has the mouse.
+    fn mouse_cell_at(&self, root: &Path, pos: Point<Pixels>) -> Option<(u16, u16)> {
+        let (row, col) = self.cell_at(pos)?;
+        let (rows, cols) = self.sessions.get(root)?.pty.size();
+        Some((row.min(rows.saturating_sub(1)), col.min(cols.saturating_sub(1))))
+    }
+
+    /// Hand a press to the program in `root`'s terminal if it has the mouse. Shift keeps the
+    /// press here, so text can still be selected. Whether the program took it.
+    fn press_to_child(&mut self, root: &Path, e: &MouseDownEvent) -> bool {
+        let (Some(button), false) = (pty_button(e.button), e.modifiers.shift) else { return false };
+        let Some(cell) = self.mouse_cell_at(root, e.position) else { return false };
+        let Some(s) = self.sessions.get(root) else { return false };
+        if !s.pty.mouse(pty::MouseEvent::Press(button), cell, pty_mods(&e.modifiers)) {
+            return false;
+        }
+        self.mouse_held.push(button);
+        self.mouse_cell = Some(cell);
+        self.selection = None;
+        true
+    }
+
+    /// A button pressed for the program went up, wherever the pointer is.
+    fn mouse_released(&mut self, root: &Path, e: &MouseUpEvent) {
+        let Some(button) = pty_button(e.button) else { return };
+        let Some(i) = self.mouse_held.iter().position(|b| *b == button) else { return };
+        self.mouse_held.remove(i);
+        if let Some(cell) = self.mouse_cell_at(root, e.position)
+            && let Some(s) = self.sessions.get(root)
+        {
+            s.pty.mouse(pty::MouseEvent::Release(button), cell, pty_mods(&e.modifiers));
+        }
+    }
+
+    /// The pointer moved: a drag goes on outside the grid, held to its edges; a move with no
+    /// button down counts only over the grid. Once per cell.
+    fn mouse_moved(&mut self, root: &Path, e: &MouseMoveEvent) {
+        if self.selecting {
+            return;
+        }
+        let held = self.mouse_held.first().copied();
+        let over = self.grid.is_some_and(|(b, _)| b.contains(&e.position));
+        let Some(cell) = self.mouse_cell_at(root, e.position).filter(|_| held.is_some() || over) else { return };
+        if self.mouse_cell == Some(cell) {
+            return;
+        }
+        self.mouse_cell = Some(cell);
+        if let Some(s) = self.sessions.get(root) {
+            s.pty.mouse(pty::MouseEvent::Move(held), cell, pty_mods(&e.modifiers));
+        }
     }
 
     /// What is selected in `root`'s terminal, if anything is.
@@ -2454,6 +2512,11 @@ impl ConsolePanel {
                 let root = root.to_owned();
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus, cx);
+                    // A program that has the mouse gets the right button; Shift keeps the menu.
+                    if this.press_to_child(&root, e) {
+                        cx.stop_propagation();
+                        return;
+                    }
                     this.menu_link = this
                         .cell_at(e.position)
                         .and_then(|(row, col)| this.sessions.get(&root).and_then(|s| s.pty.frame().link_at(row, col)));
@@ -2464,8 +2527,9 @@ impl ConsolePanel {
                 move |this, e: &ScrollEvent, _, cx| {
                     let cell_h = this.grid.map_or(px(16.), |(_, c)| c.height);
                     let lines = e.delta.pixel_delta(cell_h).y / cell_h;
+                    let at = this.mouse_cell_at(&root, e.position).unwrap_or_default();
                     if let Some(s) = this.sessions.get(&root)
-                        && s.pty.scroll(lines)
+                        && s.pty.scroll(lines, at, pty_mods(&e.modifiers))
                     {
                         this.selection = None;
                     }
@@ -2486,11 +2550,23 @@ impl ConsolePanel {
                         cx.open_url(&link);
                         return;
                     }
+                    if this.press_to_child(&root, e) {
+                        cx.notify();
+                        return;
+                    }
                     this.selection = cell.map(|c| (c, c));
                     this.selecting = true;
                     cx.notify();
                 })
             })
+            .on_mouse_down(MouseButton::Middle, {
+                let root = root.to_owned();
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus, cx);
+                    this.press_to_child(&root, e);
+                })
+            })
+            .child(mouse_to_child(cx.entity().downgrade(), root.to_owned()))
             // The drag goes on outside the terminal, held to its edges.
             .child(crate::drag_select::follow_mouse(
                 cx.entity().downgrade(),
@@ -2738,6 +2814,43 @@ pub fn preview(engine: EngineKind, look: TermLook) -> impl IntoElement {
     )
     .w_full()
     .h(cell_h * f32::from(PREVIEW_ROWS))
+}
+
+/// Releases and moves for the program that has the mouse, from anywhere in the window: a
+/// button pressed over the terminal can go up outside it.
+fn mouse_to_child(view: WeakEntity<ConsolePanel>, root: PathBuf) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |_, _, window, _| {
+            let (moved, at) = (view.clone(), root.clone());
+            window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble {
+                    let _ = moved.update(cx, |this, _| this.mouse_moved(&at, e));
+                }
+            });
+            let (released, at) = (view.clone(), root.clone());
+            window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble {
+                    let _ = released.update(cx, |this, _| this.mouse_released(&at, e));
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_0()
+}
+
+fn pty_button(button: MouseButton) -> Option<pty::MouseButton> {
+    match button {
+        MouseButton::Left => Some(pty::MouseButton::Left),
+        MouseButton::Middle => Some(pty::MouseButton::Middle),
+        MouseButton::Right => Some(pty::MouseButton::Right),
+        MouseButton::Navigate(_) => None,
+    }
+}
+
+fn pty_mods(m: &gpui::Modifiers) -> pty::Mods {
+    pty::Mods { shift: m.shift, alt: m.alt, ctrl: m.control, cmd: m.platform }
 }
 
 /// The colours a terminal paints with: the theme's text on its panel, and the theme's

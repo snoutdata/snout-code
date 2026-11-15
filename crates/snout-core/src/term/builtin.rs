@@ -1,7 +1,7 @@
 //! The built-in engine: the `vt100` crate, with answers to the queries TUIs send at
 //! start-up (cursor position, device attributes, colours) and the window title.
 
-use super::{Attrs, Cell, Color, Cursor, Engine, EngineKind, Frame, Modes, Underline, Width};
+use super::{Attrs, Cell, Color, Cursor, Engine, EngineKind, Frame, Modes, MouseTracking, Underline, Width};
 use crate::pty::Rgb;
 
 /// Parser callbacks: replies to the child's queries are queued here.
@@ -113,7 +113,13 @@ impl Engine for Builtin {
             bracketed_paste: s.bracketed_paste(),
             app_cursor: s.application_cursor(),
             alt_screen: s.alternate_screen(),
-            mouse: s.mouse_protocol_mode() != vt100::MouseProtocolMode::None,
+            mouse: match s.mouse_protocol_mode() {
+                vt100::MouseProtocolMode::None => MouseTracking::Off,
+                vt100::MouseProtocolMode::Press => MouseTracking::Press,
+                vt100::MouseProtocolMode::PressRelease => MouseTracking::Click,
+                vt100::MouseProtocolMode::ButtonMotion => MouseTracking::Drag,
+                vt100::MouseProtocolMode::AnyMotion => MouseTracking::Motion,
+            },
             mouse_sgr: s.mouse_protocol_encoding() == vt100::MouseProtocolEncoding::Sgr,
             kitty_keyboard: 0,
             sync_output: false,
