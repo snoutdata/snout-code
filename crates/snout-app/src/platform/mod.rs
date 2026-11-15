@@ -26,7 +26,7 @@ use windows as imp;
 /// windows under its icon.
 pub const APP_ID: &str = "snout-code";
 
-pub use imp::{IN_WINDOW_MENUS, process_start, reveal, this_machine, window_decorations};
+pub use imp::{IN_WINDOW_MENUS, machine_name, process_start, reveal, this_machine, window_decorations};
 
 /// Answer the system's "Open in SnoutCode" service, where it has one (a Mac's Services menu):
 /// what it hands over goes to `asked`, as `file://` URLs.

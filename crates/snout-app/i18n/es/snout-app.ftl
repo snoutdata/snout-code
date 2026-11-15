@@ -625,10 +625,16 @@ welcome-open-one-from-the-project-tree-or = Abre uno desde el árbol del proyect
 welcome-recent-files-2 = Archivos recientes
 welcome-clone-repository = Clonar repositorio…
 welcome-from-a-git-url = Desde una URL de Git
-welcome-java-or-spring-boot-app = Aplicación Java o Spring Boot
+welcome-remote-project = Proyecto remoto…
+welcome-on-another-machine-over-ssh = En otra máquina, por SSH
+welcome-over-ssh-or-in-wsl = Por SSH o en WSL
+welcome-new = Nuevo proyecto
 welcome-no-recent-project-matches = Ningún proyecto reciente coincide.
 welcome-no-recent-projects-yet-open-a-folder-to = Aún no hay proyectos recientes. Abre una carpeta para empezar.
 welcome-recent-projects = Proyectos recientes
+welcome-recent-on = En { $place }
+welcome-recent-here = { $machine } ({ $name })
+welcome-recent-remote = Remotos
 welcome-a-folder-on = Una carpeta en { $host }
 welcome-folder-on-machine = Una carpeta en { $machine }
 
@@ -1325,6 +1331,7 @@ record-ui-mode-opens-in-your-browser = El modo UI se abre en tu navegador
 ## remote
 
 remote-could-not-connect-to = No se pudo conectar con { $name }: { $why }
+remote-folder-gone = { $path } ya no está en { $name }.
 remote-trust-this-host = ¿Confiar en este host?
 remote-key-passphrase = Frase de contraseña de la clave
 remote-no = No
