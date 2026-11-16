@@ -1398,6 +1398,67 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(repo);
 }
 
+// A shell and `od`, as on macOS and Linux.
+#[cfg(unix)]
+#[gpui::test]
+fn tab_in_the_terminal_goes_to_the_program(cx: &mut TestAppContext) {
+    use gpui_component::dock::DockPlacement;
+    let repo = demo_repo("terminal-tab");
+    let mut settings = with_repo(&repo);
+    settings.terminal_shell = "/bin/sh".into();
+    settings.terminal_shell_args = Vec::new();
+    settings.terminal_env.insert("PS1".into(), "$ ".into());
+    let (_, ws, cx) = open(cx, settings);
+    let terminal = cx.update(|_, cx| {
+        let ws = ws.read(cx);
+        let view = ws.dock.read(cx).panel(ws.tabs.terminal).expect("the terminal is docked").clone();
+        view.view().downcast::<crate::console::ConsolePanel>().unwrap()
+    });
+    cx.update(|w, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.show_activity(Activity::Project, w, cx);
+            let id = ws.tabs.terminal;
+            ws.dock.update(cx, |d, cx| {
+                if !d.is_dock_open(DockPlacement::Bottom) {
+                    d.toggle_dock(DockPlacement::Bottom, w, cx);
+                }
+                d.select_panel(id, w, cx);
+            });
+        })
+    });
+    let wait = |cx: &mut VisualTestContext, what: &str| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            cx.executor().advance_clock(std::time::Duration::from_millis(50));
+            cx.run_until_parked();
+            if cx.update(|_, cx| terminal.read(cx).session_text(&repo)).unwrap_or_default().contains(what) {
+                return;
+            }
+        }
+        panic!("{what:?} never appeared: {:?}", cx.update(|_, cx| terminal.read(cx).session_text(&repo)));
+    };
+    wait(cx, "$");
+    // A click in the terminal gives it the keyboard, as the user would.
+    let grid = cx.debug_bounds("terminal-grid").expect("the terminal is drawn");
+    cx.simulate_click(grid.center(), gpui::Modifiers::none());
+    let focused = |cx: &mut VisualTestContext| {
+        cx.update(|w, cx| gpui::Focusable::focus_handle(terminal.read(cx), cx).contains_focused(w, cx))
+    };
+    assert!(focused(cx), "a click gives the terminal the keyboard");
+    // Tab and Shift+Tab go to the program, not to the window's next field. `od -c` shows
+    // what it got: Tab is `\t`, Shift+Tab is Esc [ Z.
+    cx.simulate_keystrokes("o d space - c enter");
+    cx.run_until_parked();
+    cx.simulate_keystrokes("tab");
+    assert!(focused(cx), "the terminal keeps the keyboard after Tab");
+    cx.simulate_keystrokes("shift-tab");
+    assert!(focused(cx), "the terminal keeps the keyboard after Shift+Tab");
+    cx.simulate_keystrokes("enter ctrl-d");
+    wait(cx, "\\t 033   [   Z");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 #[gpui::test]
 fn the_title_bar_shows_the_project_and_its_branches(cx: &mut TestAppContext) {
     let repo = demo_repo("title-bar");
