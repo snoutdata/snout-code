@@ -33,7 +33,8 @@ impl EditorPanel {
             return;
         }
         let ts = crate::lang::typescript::language_id(&self.path).is_some();
-        let served = ts || language_for(&self.path) == "java" || crate::spring::is_config_file(&self.path);
+        let scala = crate::lang::scala::is_scala(&self.path);
+        let served = ts || scala || language_for(&self.path) == "java" || crate::spring::is_config_file(&self.path);
         if self.class_file.is_some() || !served {
             return;
         }
@@ -44,6 +45,8 @@ impl EditorPanel {
         let opened = if ts {
             let Some(root) = build else { return };
             hub.update(cx, |h, cx| h.open_ts_doc(&weak, &path, &root, rope, cx))
+        } else if scala {
+            hub.update(cx, |h, cx| h.open_scala_doc(&weak, &path, build, rope, cx))
         } else {
             hub.update(cx, |h, cx| h.open_doc(&weak, &path, build, rope, cx))
         };

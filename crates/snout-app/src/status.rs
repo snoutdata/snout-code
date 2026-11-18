@@ -184,7 +184,7 @@ impl StatusBar {
     }
 
     /// What the language server of the editor in front (or of the project) is doing, and
-    /// whether it is busy: the Java engine's, or a TypeScript server's.
+    /// whether it is busy: the Java engine's, a TypeScript server's, or a Metals's.
     pub fn java_status(&self, cx: &gpui::App) -> Option<(String, bool)> {
         let hub = self.hub.as_ref()?.read(cx);
         let path = self.editor().map(|e| {
@@ -195,6 +195,12 @@ impl StatusBar {
         let ts = || hub.ts_server_for(path.as_deref()).map(|s| (s.status(), s.busy()));
         // A TypeScript file in front speaks of its TypeScript server; anything else of the
         // Java engine, else (a Playwright project) of the TypeScript server.
+        // A Scala file speaks of its Metals, once there is one.
+        if path.as_deref().is_some_and(crate::lang::scala::is_scala)
+            && let Some(s) = hub.scala_server_for(path.as_deref())
+        {
+            return Some((s.status(), s.busy()));
+        }
         if path.as_deref().and_then(crate::lang::typescript::language_id).is_some() {
             return ts().or_else(|| hub.server_for(path.as_deref()).map(|s| (s.status(), s.busy())));
         }

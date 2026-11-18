@@ -274,6 +274,30 @@ fn the_spring_window_lists_beans_and_endpoints(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn scala_files_are_highlighted_and_go_to_metals(cx: &mut TestAppContext) {
+    let repo = fixture("scala-doc");
+    let file = repo.join("src/main/java/com/example/VersionController.scala");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(
+        &file,
+        "package com.example\n\n@Controller\nclass VersionController {\n  def version(): String = \"1\"\n}\n",
+    )
+    .unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    act(&model, cx, Action::OpenFile(file.clone(), Some((0, 0))));
+    let editor = editor_of(&ws, &file, cx);
+    let uri = cx.update(|_, cx| editor.read(cx).lang.as_ref().expect("Metals serves it").uri.clone());
+    cx.update(|_, cx| {
+        let h = hub.read(cx);
+        assert_eq!(h.language_of(&uri), Some("scala"));
+        assert_eq!(h.root_of(&uri).as_deref(), Some(repo.as_path()), "the Metals of its Gradle build");
+        assert_eq!(crate::editor::language_for(&file), "scala");
+    });
+    let _ = std::fs::remove_dir_all(repo.parent().unwrap());
+}
+
+#[gpui::test]
 fn configuration_files_go_to_the_engine_as_spring_boot_files(cx: &mut TestAppContext) {
     let repo = fixture("spring-config");
     let (model, ws, cx) = open(cx, with_repo(&repo));

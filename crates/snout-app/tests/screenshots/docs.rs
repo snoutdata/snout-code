@@ -322,6 +322,9 @@ pub fn run(projects: PathBuf) {
     if wanted("tools") {
         tool_windows(&projects);
     }
+    if wanted("scala") {
+        scala(&projects);
+    }
     if wanted("structure") {
         structure(&projects);
     }
@@ -396,6 +399,56 @@ fn wizard() {
 
 /// The tool windows with nothing in them yet (Build in the bottom dock, Spring on the right),
 /// and the Settings sheet made large.
+/// A Scala controller beside the shop's Java, highlighted (no Metals: the shot is of the
+/// highlighting, which needs none).
+fn scala(projects: &Path) {
+    let shop = copy(projects, "scala", "shop");
+    let dir = shop.join("src/main/scala/com/example/shop/web");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("VersionController.scala");
+    std::fs::write(
+        &file,
+        r#"package com.example.shop.web
+
+import org.springframework.web.bind.annotation.{GetMapping, RestController}
+
+/** What the shop runs: its version and when it started. */
+@RestController
+class VersionController(clock: java.time.Clock) {
+
+  private val started = clock.instant()
+
+  @GetMapping(Array("/version"))
+  def version(): Map[String, String] = Map(
+    "version" -> VersionController.Version,
+    "started" -> started.toString
+  )
+
+  def uptime(): Long = {
+    // Seconds since the shop started.
+    val now = clock.instant()
+    if (now.isBefore(started)) 0L else now.getEpochSecond - started.getEpochSecond
+  }
+}
+
+object VersionController {
+  final val Version = "1.2.0"
+
+  def parse(text: String): Option[(Int, Int, Int)] = text.split('.') match {
+    case Array(a, b, c) => Some((a.toInt, b.toInt, c.toInt))
+    case _              => None
+  }
+}
+"#,
+    )
+    .unwrap();
+    let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);
+    w.activity(Activity::Project);
+    w.open(&file, Some((6, 0)));
+    w.pump(2, &mut |_| false);
+    w.snap("scala-highlighting-light");
+}
+
 fn tool_windows(projects: &Path) {
     let shop = copy(projects, "tools", "shop");
     let mut w = Win::new(settings(ThemeChoice::Light, vec![shop.clone()], Some(shop.clone())), false);
@@ -576,6 +629,25 @@ fn git(projects: &Path, theme: ThemeChoice, mode: &str) {
     w.pump(3, &mut |_| false);
     w.snap(&format!("git-view-{mode}"));
     if mode == "light" {
+        // A double click: the file's changes in a window of its own, both versions whole.
+        let git = w.cx.update(|cx| w.ws.read(cx).git.clone());
+        let g2 = git.clone();
+        w.with(|_, window, cx| {
+            g2.update(cx, |g, cx| {
+                g.open_diff_window("src/main/java/com/example/shop/service/PriceCalculator.java", window, cx)
+            })
+        });
+        let g3 = git.clone();
+        let ok = w.pump(10, &mut |cx| g3.read(cx).diff_window.as_ref().is_some_and(|d| d.diff.is_some()));
+        println!("docs: git diff window {ok}");
+        w.pump(2, &mut |_| false);
+        // Its own window, taken at its own size.
+        let handle = w.cx.update(|cx| git.read(cx).diff_window.as_ref().and_then(|d| d.handle)).expect("its window");
+        let image = w.cx.capture_screenshot(handle).expect("offscreen rendering must be available");
+        image.save(out_dir().join("git-diff-window-light.png")).unwrap();
+        println!("docs shot git-diff-window-light: ok");
+        w.cx.update(|cx| git.update(cx, |g, cx| g.close_diff_window(cx)));
+        w.pump(1, &mut |_| false);
         // A commit: the merge, and a file it brought.
         w.cx.update(|cx| {
             let id = model.read(cx).log.iter().find(|c| c.summary.starts_with("Merge")).unwrap().id.clone();
@@ -1637,6 +1709,30 @@ fn java_tools(projects: &Path) {
             })
         });
     }
+    w.pump(1, &mut |_| false);
+
+    // The gutter's implementation marks, on the rule and on its method.
+    let re = w.open(&pkg.join("service/PriceRule.java"), Some((6, 0)));
+    let r4 = re.clone();
+    let ok = w.pump(60, &mut |cx| snout_app::editor::impl_marks_of(r4.read(cx)).len() >= 2);
+    println!("docs: implementation marks {ok}");
+    w.pump(2, &mut |_| false);
+    w.snap("java-implementation-marks-light");
+
+    // A Markdown file with its preview beside it.
+    let notes = shop.join("NOTES.md");
+    std::fs::write(
+        &notes,
+        "# Release notes\n\nThe shop's changes, **newest first**.\n\n## 1.2\n\n- Prices take `PriceRule`s: `HalfPrice` and `RoundUp`.\n- Orders keep their tax.\n\n| Change | Kind | State |\n|--------|------|-------|\n| Half price on Mondays | Feature | Done |\n| Round totals up | Feature | Done |\n| Tax on shipping | Fix | Open |\n\n```java\nBigDecimal total = rule.apply(price);\n```\n\n> Prices are in the shop's currency.\n",
+    )
+    .unwrap();
+    let ne = w.open(&notes, Some((0, 0)));
+    let n2 = ne.clone();
+    w.with(|_, window, cx| n2.update(cx, |e, cx| e.set_md_view(snout_app::editor::MdView::Split, window, cx)));
+    w.pump(2, &mut |_| false);
+    w.snap("editor-markdown-preview-light");
+    let n3 = ne.clone();
+    w.with(|_, window, cx| n3.update(cx, |e, cx| e.set_md_view(snout_app::editor::MdView::Editor, window, cx)));
     w.pump(1, &mut |_| false);
 
     // Go to Class: the shop's classes and the libraries' by a part of the name.

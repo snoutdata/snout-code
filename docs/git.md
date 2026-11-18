@@ -90,6 +90,7 @@ Files lists the changed files of the working tree: name (with the file type's ic
 - **Sort** by a column: click its header; click again to reverse. An arrow marks the column and the order.
 - **Resize** a column: point at the header and drag the handle that shows between two titles.
 - **Filter** by name with the field in the header.
+- **Double-click** a file to see its changes in a window of its own, both versions whole. See [A file's changes, whole](#a-files-changes-whole).
 - **Select** a file to see its diff in Changes. The selection shows in the accent colour while the table has the keyboard, and in grey once you click elsewhere. ⌘-click adds or removes a file, ⇧-click selects a range, and ⌘A selects every file shown (when no text field has the keyboard).
 - **Right-click** for **Stage**, **Unstage**, **Discard…**, **Delete…**, **Add to .gitignore**, **Reveal in Finder**, **Open in External Terminal** and **Copy path**. A right-click on a file that is not selected selects it first.
 - **Add to .gitignore** ignores the selected untracked files: by name (**src/notes.sql**, or **These 3 files**), by their folder (**db/**) when they share one, or by their extension (**All .sql files**) when they share one. The rule goes at the end of the repository's `.gitignore`, which SnoutCode makes when there is none, and the files leave the list. A tracked file stays tracked whatever `.gitignore` says, so the item is greyed out for tracked files.
@@ -117,6 +118,22 @@ Changes shows the diff of the selected file.
 - **Select and copy:** drag across the text to select it, double-click a word, triple-click a line, ⇧-click to extend. Side by side, a selection stays in the side it began in. ⌘C, or **Copy** in the context menu, copies it, with tabs as they are in the file. The lines the side does not have, and the unchanged lines left out, are not copied.
 
 The same choices are in **View ▸ Side by Side Diff**, **Unified Diff** and **Compact Diff**. A binary file, or one too large to show, says so instead.
+
+### A file's changes, whole
+
+Double-click a file in Files to see its changes in a window of its own, the whole of both versions side by side, with nothing left out. It opens at the first change. Move it, maximize it or make it full screen as any window, on another display if you have one. Double-click another file and it shows in the same window.
+
+- **↑ and ↓** in the bar, or F7 and ⇧F7, go to the next and previous change. The bar says which change you are on, such as **2 of 5**.
+- **Compare** picks what to compare, as in Changes; the window starts with what Changes compares.
+- **Unified** or **Side by Side**, as in Changes.
+- **Compact** hides unchanged lines away from the changes, in this window only.
+- **Stage** stages the file (with **HEAD ↔ Index**, **Unstage** unstages it). The window shows the file as it is afterwards.
+- **Open in Editor** opens the file at the change you are on, in the main window. This window stays open.
+- Select and copy as in Changes.
+- The window keeps its size for next time.
+- Esc, or the window's close button, closes it.
+
+![A file's changes, both versions whole](images/git-diff-window.png)
 
 ## Commit
 
@@ -255,7 +272,8 @@ In an editor, **Git ▸ Annotate with Git Blame** (or a right click in the gutte
 | ⌘⌫ | Move the selected files to the Trash, after asking |
 | F5 | Refresh |
 | ↑ ↓ | Previous or next commit, in the commit view |
-| Esc | Leave the commit view |
+| Esc | Leave the commit view, or close a file's changes |
+| F7, ⇧F7 | Next or previous change, in a file's changes |
 | ⌘J | Show or hide the agent's console |
 | ⌥⇧⌘B | Annotate with Git Blame, in an editor |
 

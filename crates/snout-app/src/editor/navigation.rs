@@ -2,7 +2,8 @@
 //! Linux and Windows; ⌥ when Settings ▸ Editor ▸ Navigation says so), the identifier under the
 //! pointer is underlined as a link, with a pointing hand, as soon as the engine says it has a
 //! definition. A click goes there; on the declaration itself, it lists its usages instead.
-//! With ⌥ too (⌥⌘-click), it goes to the implementations. ⌘B and ⌥⌘B do the same at the caret.
+//! With ⌥ too (⌥⌘-click), or with a right click (⌘-right-click), it goes to the
+//! implementations. ⌘B and ⌥⌘B do the same at the caret.
 
 use std::ops::Range;
 use std::path::PathBuf;
@@ -206,14 +207,16 @@ impl EditorPanel {
     }
 
     /// A click with the navigation modifier at `offset`: to the definition, or from the
-    /// declaration itself to its usages; with ⌥ too, to the implementations. True when the
-    /// click was navigation's.
+    /// declaration itself to its usages; with ⌥ too, to the implementations. A right click
+    /// with ⌘ (Ctrl off the Mac) goes to the implementations too, instead of the menu. True
+    /// when the click was navigation's.
     pub(super) fn nav_click(&mut self, e: &gpui::MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if e.button != gpui::MouseButton::Left {
+        let right = e.button == gpui::MouseButton::Right && e.modifiers.secondary(cx) && !e.modifiers.shift;
+        if e.button != gpui::MouseButton::Left && !right {
             return false;
         }
         let nav = EditorDefaults::now(cx).nav_modifier;
-        let implementations = implementations_held(&e.modifiers, cx);
+        let implementations = right || implementations_held(&e.modifiers, cx);
         if !implementations && !nav_held(&e.modifiers, nav, cx) {
             return false;
         }
@@ -295,13 +298,14 @@ impl EditorPanel {
 
     /// The usages of the declaration at the caret, in a popup (one: straight there).
     fn show_usages(&mut self, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        let word = {
+        let (word, caret) = {
             let s = self.state.read(cx);
             let r = s.text().word_range(s.cursor()).unwrap_or_default();
-            s.text().slice(r).to_string()
+            (s.text().slice(r).to_string(), s.cursor())
         };
         self.ask_places(
             "textDocument/references",
+            caret,
             json!({ "context": { "includeDeclaration": false } }),
             t!("editor-usages-of", word = word.to_string()),
             t!("editor-no-usages-of-found", word = word.to_string()),
@@ -314,14 +318,28 @@ impl EditorPanel {
     /// ⌥⌘B (and ⌥⌘-click): the implementations of the symbol at the caret, a class or
     /// interface's or a method's (one: straight there).
     pub fn go_to_implementations(&mut self, at: Option<Point<Pixels>>, window: &mut Window, cx: &mut Context<Self>) {
+        let caret = self.state.read(cx).cursor();
+        let at = at.unwrap_or_else(|| self.caret_point(cx));
+        self.implementations_at(caret, at, window, cx);
+    }
+
+    /// The implementations of the symbol at byte `offset`, the one straight away, or a list
+    /// of them at `at` (a gutter mark's click asks this, the caret left where it is).
+    pub fn implementations_at(
+        &mut self,
+        offset: usize,
+        at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let word = {
             let s = self.state.read(cx);
-            let r = s.text().word_range(s.cursor()).unwrap_or_default();
+            let r = s.text().word_range(offset).unwrap_or_default();
             s.text().slice(r).to_string()
         };
-        let at = at.unwrap_or_else(|| self.caret_point(cx));
         self.ask_places(
             "textDocument/implementation",
+            offset,
             json!({}),
             t!("editor-implementations-of", word = word.to_string()),
             t!("editor-no-implementations-of-found", word = word.to_string()),
@@ -331,12 +349,13 @@ impl EditorPanel {
         );
     }
 
-    /// Ask the engine for places (`method` at the caret, `extra` merged into the request),
-    /// then go to the one, or list them under `title`, or say `none`.
+    /// Ask the engine for places (`method` at byte `offset`, `extra` merged into the
+    /// request), then go to the one, or list them under `title`, or say `none`.
     #[allow(clippy::too_many_arguments)]
     fn ask_places(
         &mut self,
         method: &'static str,
+        offset: usize,
         extra: serde_json::Value,
         title: String,
         none: String,
@@ -347,11 +366,8 @@ impl EditorPanel {
         let Some(link) = self.lang.clone() else {
             return self.show_hint(ts!("editor-this-needs-the-java-engine-for-this-file"), cx);
         };
-        let (rope, caret) = {
-            let s = self.state.read(cx);
-            (s.text().clone(), s.cursor())
-        };
-        let mut params = link.at(&rope, caret);
+        let rope = self.state.read(cx).text().clone();
+        let mut params = link.at(&rope, offset);
         if let (Some(p), Some(e)) = (params.as_object_mut(), extra.as_object()) {
             p.extend(e.clone());
         }

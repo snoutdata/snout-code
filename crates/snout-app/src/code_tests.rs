@@ -1156,3 +1156,106 @@ fn reload_all_from_disk_takes_what_changed_in_the_open_tabs(cx: &mut TestAppCont
     assert!(cx.debug_bounds("status-tasks").is_none());
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// ⇧⌘V shows a Markdown file's preview in place of the text and back; the buttons at the
+/// top right show both side by side; the preview follows the text as it is typed.
+#[gpui::test]
+fn a_markdown_file_shows_its_preview_beside_or_in_place_of_the_text(cx: &mut TestAppContext) {
+    use crate::editor::MdView;
+    let text = "# Findings\n\n| Id | Severity |\n|----|----------|\n| F-14 | Medium |\n\nSome `code` here.\n";
+    let (repo, _, _, editor, cx) = open_text("findings.md", text, (0, 0), cx);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("md-view-preview").is_some(), "a Markdown tab has the view buttons");
+    assert!(cx.debug_bounds("markdown-preview").is_none(), "the text alone at first");
+    cx.simulate_keystrokes("cmd-shift-v");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(editor.read(cx).md_view, MdView::Preview));
+    assert!(cx.debug_bounds("markdown-preview").is_some(), "the preview shows");
+    assert!(cx.debug_bounds("editor-body").is_none(), "in place of the text");
+    // The keyboard is in the preview: ⇧⌘V again brings the text back.
+    cx.simulate_keystrokes("cmd-shift-v");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("markdown-preview").is_none());
+    assert!(cx.debug_bounds("editor-body").is_some());
+    // Side by side: both, the text on the left.
+    let split = cx.debug_bounds("md-view-split").unwrap().center();
+    cx.simulate_click(split, Modifiers::none());
+    cx.run_until_parked();
+    let (body, preview) = (cx.debug_bounds("editor-body").unwrap(), cx.debug_bounds("markdown-preview").unwrap());
+    assert!(body.right() <= preview.left(), "{body:?} {preview:?}");
+    // Typed text reaches the preview.
+    cx.update(|w, cx| editor.update(cx, |e, cx| e.state.update(cx, |s, cx| s.set_value("# Changed\n", w, cx))));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(editor.read(cx).md_source_now(), "# Changed\n"));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// ⌘ and a right click go to the implementations instead of opening the menu.
+#[gpui::test]
+fn a_primary_right_click_goes_to_the_implementations_not_the_menu(cx: &mut TestAppContext) {
+    let text = "class A {\n    void greet() { helper(1); }\n}\n";
+    let (repo, _, _, editor, cx) = open_text("Impl.txt", text, (0, 0), cx);
+    let probe = std::rc::Rc::new(Probe {
+        hovers: Default::default(),
+        definitions: Default::default(),
+        cache: Default::default(),
+    });
+    cx.update(|_, cx| {
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, _| s.lsp_mut().definition_provider = Some(probe.clone()));
+    });
+    cx.run_until_parked();
+    let helper = text.find("helper").unwrap();
+    let at =
+        cx.update(|_, cx| editor.read(cx).state.read(cx).range_to_bounds(&(helper + 2..helper + 3)).unwrap().center());
+    cx.simulate_mouse_down(at, MouseButton::Right, crate::tests::primary());
+    cx.simulate_mouse_up(at, MouseButton::Right, crate::tests::primary());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        assert!(!e.context.is_open(), "no menu");
+        // No engine for this file: it says so, at the name clicked.
+        assert!(e.hint.is_some(), "the implementations were asked for");
+        assert_eq!(e.state.read(cx).cursor(), helper + 2);
+    });
+    // Without ⌘, the menu as before.
+    cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(editor.read(cx).context.is_open()));
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// An implementation mark sits in the run icons' lane; a click on it asks for the
+/// implementations (and sets no breakpoint).
+#[gpui::test]
+fn a_click_on_an_implementation_mark_asks_for_the_implementations(cx: &mut TestAppContext) {
+    let text = "public interface UserService {\n    void changePassword(String user);\n}\n";
+    let (repo, _, _, editor, cx) = open_text("UserService.java", text, (0, 0), cx);
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        editor.update(cx, |e, cx| {
+            e.impls.marks = std::rc::Rc::new(crate::editor::overridables(text));
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    let lanes = cx.update(|_, cx| editor.read(cx).lanes.get());
+    let line_top = cx.update(|_, cx| {
+        let s = editor.read(cx).state.read(cx);
+        let at = text.find("changePassword").unwrap();
+        s.range_to_bounds(&(at..at)).unwrap().center().y
+    });
+    let (left, right) = lanes.run();
+    let at = gpui::point((left + right) / 2., line_top);
+    cx.update(|_, cx| assert!(editor.read(cx).impl_mark_on(1).is_some()));
+    cx.simulate_click(at, Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        assert!(e.hint.is_some(), "the implementations were asked for");
+        let bps = crate::run::runs(cx).map(|r| r.read(cx).breakpoints_in(&e.path).len()).unwrap_or(0);
+        assert_eq!(bps, 0, "no breakpoint");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}

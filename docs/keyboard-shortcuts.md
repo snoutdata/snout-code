@@ -60,6 +60,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌥⌘F | Replace in File | Editor |
 | ⌘/ | Toggle Comment | Editor |
 | ⌘D | Duplicate Line | Editor |
+| ⇧⌘V | Markdown Preview (shows or hides it) | A Markdown file |
 | ⌥↑ | Move Line Up | Editor |
 | ⌥↓ | Move Line Down | Editor |
 | ⌘] | Indent | Editor |
@@ -78,7 +79,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌘B | Go to Declaration or Usages (on a declaration: its usages) | Editor |
 | ⌥⌘B | Go to Implementations | Editor |
 | ⌘-click | Go to the declaration (on a declaration: its usages) | Editor |
-| ⌥⌘-click | Go to the implementations | Editor |
+| ⌥⌘-click, ⌘-right-click | Go to the implementations | Editor |
 | ⇧F12 | Find References | Editor |
 | F2 | Rename Symbol… | Editor |
 | Esc | Cancel the rename | In the rename box |
@@ -150,6 +151,9 @@ These have no key out of the box; the command palette and **View ▸ Tool Window
 | ⌘⌫ | Move the selected files to the Trash, after asking | Outside text fields |
 | Esc | Leave the commit view | Outside text fields |
 | ↑ ↓ | Previous or next commit, while the Journal shows | Outside text fields |
+| Double-click | A file's changes, both versions whole | In Files |
+| F7, ⇧F7 | Next or previous change | In a file's changes |
+| Esc | Close a file's changes | In a file's changes |
 | Esc | Close the popup | In the branch popup |
 | ⌥⇧⌘B | Annotate with Git Blame (again: Close Annotations) | In an editor |
 

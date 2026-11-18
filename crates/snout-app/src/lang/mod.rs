@@ -1,5 +1,5 @@
 //! Language features through language servers: Java through SnoutCode's engine (jdtls fed
-//! by the Gradle model), TypeScript and JavaScript through vtsls. The hub runs the servers; the providers answer GPUI Kit's editor;
+//! by the Gradle model), TypeScript and JavaScript through vtsls, Scala through Metals. The hub runs the servers; the providers answer GPUI Kit's editor;
 //! the panels list problems and references.
 
 pub mod classes;
@@ -14,6 +14,7 @@ pub mod panels;
 pub mod problems;
 pub mod providers;
 pub mod remote_engine;
+pub mod scala;
 pub mod structure;
 pub mod symbols;
 pub mod text;

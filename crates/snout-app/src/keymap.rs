@@ -145,6 +145,10 @@ fn mac_defaults() -> Vec<Binding> {
         ("escape", Box::new(s::SearchClose), Some("BranchPopup")),
         ("escape", Box::new(s::SearchClose), Some("Settings")),
         ("escape", Box::new(s::SearchClose), Some("ProjectStructure")),
+        // A file's changes in their sheet: Esc closes it, F7 and ⇧F7 step through the changes.
+        ("escape", Box::new(s::SearchClose), Some("GitDiffWindow")),
+        ("f7", Box::new(crate::git_view::NextChange), Some("GitDiffWindow")),
+        ("shift-f7", Box::new(crate::git_view::PreviousChange), Some("GitDiffWindow")),
         ("escape", Box::new(s::SearchClose), Some("NewProject")),
         ("cmd-shift-f", Box::new(FindInFiles), None),
         // GPUI Kit's editor takes ⇧⌘F for replace; here it stays find in files, and
@@ -159,6 +163,8 @@ fn mac_defaults() -> Vec<Binding> {
         // ⌘B and ⌥⌘B as in IntelliJ: on a declaration, ⌘B lists its usages.
         ("cmd-b", Box::new(e::GoToDeclaration), Some("EditorPanel > Input")),
         ("cmd-alt-b", Box::new(e::GoToImplementations), Some("EditorPanel > Input")),
+        // The Markdown preview, as ⇧⌘V shows it elsewhere.
+        ("cmd-shift-v", Box::new(e::ToggleMarkdownPreview), Some("EditorPanel")),
         ("shift-f12", Box::new(e::FindReferences), Some("EditorPanel")),
         ("f2", Box::new(e::RenameSymbol), Some("EditorPanel")),
         ("shift-alt-f", Box::new(e::FormatDocument), Some("EditorPanel")),

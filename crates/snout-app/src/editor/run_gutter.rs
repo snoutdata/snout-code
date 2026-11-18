@@ -337,7 +337,9 @@ impl EditorPanel {
             return false;
         };
         let line = *line as u32;
-        if e.button == gpui::MouseButton::Left && self.spring_press(e.position, window, cx) {
+        if e.button == gpui::MouseButton::Left
+            && (self.spring_press(e.position, window, cx) || self.impl_press(e.position, window, cx))
+        {
             return true;
         }
         let in_run_lane = x >= l.run().0 && x < l.run().1;

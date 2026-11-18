@@ -179,6 +179,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         // Code.
         "GoToDefinition" => sf("arrow.right.circle", L::SquareArrowRight),
         "FindReferences" => sf("link", L::Link),
+        "ToggleMarkdownPreview" => sf("eye", L::Eye),
         "ToggleCodeActions" | "ShowContextActions" => sf("lightbulb", L::Lightbulb),
         "ApplyTopFix" => sf("wand.and.stars", L::WandSparkles),
         "FormatDocument" => sf("text.alignleft", L::TextAlignJustify),

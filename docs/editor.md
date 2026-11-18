@@ -158,6 +158,18 @@ Press ⇧⌘P (File ▸ Command Palette…) and type part of a command's name. E
 
 *The command palette: the Go to commands, with their shortcuts.*
 
+## Markdown preview
+
+A Markdown file (`.md`) can show its text rendered as it reads: headings, lists, tables, code blocks, quotes, links and images.
+
+- Press ⇧⌘V (View ▸ Markdown Preview) to show the preview in place of the text, and again to go back to the text.
+- The three buttons at the top right of a Markdown tab choose **Editor only**, **Editor and preview** (side by side, the text on the left) and **Preview only**.
+- The preview follows the text as you type, before you save.
+- You can select and copy text in the preview.
+- Images given by a relative path, such as `![](images/chart.png)`, are read from beside the file.
+
+![A Markdown file and its preview, side by side](images/editor-markdown-preview.png)
+
 ## Zoom, soft wrap and whitespace
 
 - **Zoom In** (⌘= or ⌘+), **Zoom Out** (⌘-) and **Actual Size** (⌘0), in the View menu, change the font size of every editor by one point, from 8 to 32. The size is kept for next time.

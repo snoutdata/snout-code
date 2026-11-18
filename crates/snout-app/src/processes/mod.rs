@@ -399,6 +399,11 @@ pub fn rows(host: &dyn snout_host::Host, snap: &Snapshot, known: &Known) -> Vec<
                 t!("processes-java-engine-for-stopping-with-its-language-server", folder = folder.to_string()),
                 "Stopping",
             )
+        } else if child.has_arg("scala.meta.metals.Main") {
+            // Metals runs in the build's folder: name the build, as for the Java engine.
+            let root = child.cmd.iter().find_map(|a| a.strip_prefix(crate::lang::scala::ROOT_MARK));
+            let build = root.map(|r| dir_name(Path::new(r))).or(project.clone()).unwrap_or_default();
+            (Kind::Other, t!("processes-scala-language-server-for", project = build.to_string()), "Running")
         } else if SHELLS.contains(&name.as_str()) {
             (
                 Kind::Terminal,

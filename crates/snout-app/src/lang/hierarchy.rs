@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use futures::FutureExt as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Context, Entity, FocusHandle, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
@@ -114,6 +115,9 @@ pub struct HierarchyWindow {
     hub: Entity<LangHub>,
     /// The engine the items are of.
     root: Option<PathBuf>,
+    /// The document the hierarchy started in: its server (the Java engine, or a Metals for a
+    /// Scala file) answers the levels below.
+    uri: Option<Uri>,
     pub mode: Mode,
     /// Every node asked for so far; the first is the one the hierarchy is of.
     pub nodes: Vec<Node>,
@@ -131,6 +135,7 @@ impl HierarchyWindow {
         Self {
             hub,
             root: None,
+            uri: None,
             mode: Mode::Subtypes,
             nodes: Vec::new(),
             selected: None,
@@ -155,6 +160,7 @@ impl HierarchyWindow {
         let params = json!({ "textDocument": { "uri": link.uri.as_str() }, "position": text::to_lsp(rope, offset) });
         let call = link.ask(rope, prepare, params, cx);
         self.root = Some(link.root.clone());
+        self.uri = Some(link.uri.clone());
         self.mode = mode;
         self.nodes.clear();
         self.selected = None;
@@ -211,7 +217,11 @@ impl HierarchyWindow {
         }
         let Some(root) = self.root.clone() else { return };
         let (mode, depth) = (self.mode, node.depth + 1);
-        let call = self.hub.read(cx).request(&root, mode.method(), json!({ "item": node.item }));
+        let params = json!({ "item": node.item });
+        let call = match &self.uri {
+            Some(uri) => self.hub.read(cx).request_doc(uri, &root, mode.method(), params).boxed(),
+            None => self.hub.read(cx).request(&root, mode.method(), params).boxed(),
+        };
         self._tasks.push(cx.spawn(async move |this, cx| {
             let answer = call.await;
             let _ = this.update(cx, |this, cx| {

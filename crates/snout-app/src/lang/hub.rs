@@ -248,8 +248,19 @@ pub(super) struct Doc {
     /// The language the server is told it is: `java`, a Spring Boot configuration file's,
     /// or `typescript`, `typescriptreact`, `javascript`.
     pub(super) language: &'static str,
-    /// Served by a TypeScript server (of [`LangHub::ts`]) rather than a Java engine.
-    pub(super) ts: bool,
+    /// The kind of server it goes to.
+    pub(super) kind: DocKind,
+}
+
+/// The servers a document can go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DocKind {
+    /// A Java engine (of [`LangHub::servers`]).
+    Java,
+    /// A TypeScript server (of [`LangHub::ts`]).
+    Ts,
+    /// A Metals (of [`LangHub::scala`]).
+    Scala,
 }
 
 /// The bar asking to download a JDK, and how the download goes.
@@ -275,8 +286,9 @@ pub enum HubEvent {
     Changed,
     /// Show this location (a file, or a class file of a library).
     Open { root: PathBuf, uri: Uri, at: Position },
-    /// Apply this edit; answer the server's request `reply` when there is one.
-    ApplyEdit { edit: WorkspaceEdit, reply: Option<(PathBuf, Value)> },
+    /// Apply this edit; answer the server's request `reply` when there is one: which kind of
+    /// server asked, its root and the request's id.
+    ApplyEdit { edit: WorkspaceEdit, reply: Option<(DocKind, PathBuf, Value)> },
     /// Show these locations in the References panel.
     References { title: String, locations: Vec<Location> },
     /// One of the engine's own notifications (`snout/taskOutput`, `snout/testEvent`…).
@@ -292,6 +304,10 @@ pub struct LangHub {
     pub ts: HashMap<PathBuf, super::typescript::TsServer>,
     /// Where vtsls is installed, when not SnoutCode's data folder (tests).
     pub ts_install_dir: Option<PathBuf>,
+    /// The Scala servers (Metals), one per Gradle build with Scala, by its folder.
+    pub scala: HashMap<PathBuf, super::scala::ScalaServer>,
+    /// Where Metals is fetched to, when not SnoutCode's data folder (tests).
+    pub scala_install_dir: Option<PathBuf>,
     /// The bar offering to download the Node a TypeScript project needs.
     pub node_prompt: Option<super::typescript::NodePrompt>,
     pub(super) docs: HashMap<String, Doc>,
@@ -367,6 +383,8 @@ impl LangHub {
             servers: HashMap::new(),
             ts: HashMap::new(),
             ts_install_dir: None,
+            scala: HashMap::new(),
+            scala_install_dir: None,
             node_prompt: None,
             docs: HashMap::new(),
             jdk_prompt: None,
@@ -489,7 +507,16 @@ impl LangHub {
             self.stop_ts_server(root);
         }
         if !gone_ts.is_empty() {
-            self.docs.retain(|_, d| !(d.ts && gone_ts.contains(&d.root)));
+            self.docs.retain(|_, d| !(d.kind == DocKind::Ts && gone_ts.contains(&d.root)));
+            cx.emit(HubEvent::Changed);
+            cx.notify();
+        }
+        let gone_scala: Vec<PathBuf> = self.scala.keys().filter(|r| !keep(r, &self.project)).cloned().collect();
+        for root in &gone_scala {
+            self.stop_scala_server(root);
+        }
+        if !gone_scala.is_empty() {
+            self.docs.retain(|_, d| !(d.kind == DocKind::Scala && gone_scala.contains(&d.root)));
             cx.emit(HubEvent::Changed);
             cx.notify();
         }
@@ -505,7 +532,7 @@ impl LangHub {
         for root in &gone {
             self.stop_server(root);
         }
-        self.docs.retain(|_, d| d.ts || !gone.contains(&d.root));
+        self.docs.retain(|_, d| d.kind != DocKind::Java || !gone.contains(&d.root));
         self.build_problems.clear();
         cx.emit(HubEvent::Changed);
         cx.notify();
@@ -1002,7 +1029,7 @@ impl LangHub {
         let Some(client) = self.servers.get(root).and_then(|s| s.client.clone()) else { return };
         match method {
             "workspace/applyEdit" => match serde_json::from_value::<WorkspaceEdit>(params["edit"].clone()) {
-                Ok(edit) => cx.emit(HubEvent::ApplyEdit { edit, reply: Some((root.to_owned(), id)) }),
+                Ok(edit) => cx.emit(HubEvent::ApplyEdit { edit, reply: Some((DocKind::Java, root.to_owned(), id)) }),
                 Err(e) => client.respond(id, Ok(json!({ "applied": false, "failureReason": e.to_string() }))),
             },
             "window/showDocument" => {
@@ -1026,8 +1053,13 @@ impl LangHub {
     }
 
     /// The workspace applied (or could not apply) an edit the server asked for.
-    pub fn reply_apply(&self, root: &Path, id: Value, applied: bool) {
-        let client = self.servers.get(root).and_then(|s| s.client.clone()).or_else(|| self.ts_client(root));
+    pub fn reply_apply(&self, kind: DocKind, root: &Path, id: Value, applied: bool) {
+        // A Java engine, a TypeScript server and a Metals can share a root: the one that asked.
+        let client = match kind {
+            DocKind::Java => self.servers.get(root).and_then(|s| s.client.clone()),
+            DocKind::Ts => self.ts.get(root).and_then(|s| s.client.clone()),
+            DocKind::Scala => self.scala.get(root).and_then(|s| s.client.clone()),
+        };
         if let Some(client) = client {
             client.respond(id, Ok(json!({ "applied": applied })));
         }
@@ -1081,7 +1113,8 @@ impl LangHub {
     /// The process ids of the running engines.
     pub fn server_pids(&self) -> Vec<u32> {
         let ts = self.ts.values().filter_map(|s| s.client.as_ref().map(Client::pid));
-        self.servers.values().filter_map(|s| s.client.as_ref().map(Client::pid)).chain(ts).collect()
+        let scala = self.scala.values().filter_map(|s| s.client.as_ref().map(Client::pid));
+        self.servers.values().filter_map(|s| s.client.as_ref().map(Client::pid)).chain(ts).chain(scala).collect()
     }
 
     /// Stop every server: `shutdown` and `exit`, then a moment for them to go, then
@@ -1093,8 +1126,13 @@ impl LangHub {
         for s in self.ts.values_mut() {
             s.stopped = true;
         }
+        for s in self.scala.values_mut() {
+            s.stopped = true;
+        }
         let ts: Vec<Client> = self.ts.values_mut().filter_map(|s| s.client.take()).collect();
-        let clients: Vec<Client> = self.servers.values_mut().filter_map(|s| s.client.take()).chain(ts).collect();
+        let scala: Vec<Client> = self.scala.values_mut().filter_map(|s| s.client.take()).collect();
+        let clients: Vec<Client> =
+            self.servers.values_mut().filter_map(|s| s.client.take()).chain(ts).chain(scala).collect();
         for c in &clients {
             drop(c.request_raw("shutdown", Value::Null));
         }
@@ -1153,7 +1191,7 @@ impl LangHub {
                 editors: vec![editor.clone()],
                 virtual_doc: false,
                 language,
-                ts: false,
+                kind: DocKind::Java,
             },
         );
         Some((uri, root, Vec::new()))
@@ -1169,7 +1207,7 @@ impl LangHub {
             editors: Vec::new(),
             virtual_doc: true,
             language: "java",
-            ts: false,
+            kind: DocKind::Java,
         });
         if let Some(doc) = self.docs.get_mut(&uri_key(uri)) {
             doc.editors.push(editor.clone());
@@ -1187,12 +1225,8 @@ impl LangHub {
         let lsp_range = text::range_to_lsp(&doc.text, &range);
         doc.text = now.clone();
         doc.version += 1;
-        let client = if doc.ts {
-            self.ts.get(&doc.root).filter(|s| s.ready()).and_then(|s| s.client.clone())
-        } else {
-            self.servers.get(&doc.root).filter(|s| s.ready()).and_then(|s| s.client.clone())
-        };
-        if let Some(client) = client {
+        let doc = &self.docs[&uri_key(uri)];
+        if let Some(client) = self.doc_client(doc) {
             client.notify_raw(
                 "textDocument/didChange",
                 json!({
@@ -1252,12 +1286,24 @@ impl LangHub {
     pub fn diagnostics_of(&self, uri: &Uri) -> Vec<Diagnostic> {
         let key = uri_key(uri);
         let ts = self.ts.values().map(|s| &s.diagnostics);
-        self.servers.values().map(|s| &s.diagnostics).chain(ts).find_map(|d| d.get(&key)).cloned().unwrap_or_default()
+        let scala = self.scala.values().map(|s| &s.diagnostics);
+        self.servers
+            .values()
+            .map(|s| &s.diagnostics)
+            .chain(ts)
+            .chain(scala)
+            .find_map(|d| d.get(&key))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The server a document goes to, once it answers requests.
     pub(super) fn doc_client(&self, doc: &Doc) -> Option<Client> {
-        if doc.ts { self.ts_client(&doc.root) } else { self.client(&doc.root) }
+        match doc.kind {
+            DocKind::Java => self.client(&doc.root),
+            DocKind::Ts => self.ts_client(&doc.root),
+            DocKind::Scala => self.scala_client(&doc.root),
+        }
     }
 
     /// Ask the server of the document `uri`: its TypeScript server when it went to one,
@@ -1269,14 +1315,18 @@ impl LangHub {
         method: &str,
         params: Value,
     ) -> impl std::future::Future<Output = anyhow::Result<Value>> + Send + 'static + use<> {
-        let ts = self.docs.get(&uri_key(uri)).filter(|d| d.ts).map(|d| d.root.clone());
-        let client = match &ts {
-            Some(r) => self.ts_client(r),
+        let doc = self.docs.get(&uri_key(uri)).filter(|d| d.kind != DocKind::Java);
+        let client = match doc {
+            Some(d) => self.doc_client(d),
             None => self.client(root),
         };
         let call = client.map(|c| c.request_raw(method, params));
         let method = method.to_owned();
-        let what = if ts.is_some() { "TypeScript" } else { "Java" };
+        let what = match doc.map(|d| d.kind) {
+            Some(DocKind::Ts) => "TypeScript",
+            Some(DocKind::Scala) => "Scala",
+            _ => "Java",
+        };
         async move {
             match call {
                 Some(call) => call.await.map_err(|e| anyhow::anyhow!("{method}: {e}")),
@@ -1500,11 +1550,12 @@ impl LangHub {
             .values()
             .flat_map(|s| s.diagnostics.iter().map(move |(uri, list)| (s.root.clone(), uri, list)))
             .flat_map(|(root, uri, list)| list.iter().map(move |d| (uri.clone(), d.clone(), Some(root.clone()))))
-            // A TypeScript server's, with no build (its fixes are not the engine's).
+            // A TypeScript server's or a Metals's, with no build (its fixes are not the engine's).
             .chain(
                 self.ts
                     .values()
                     .flat_map(|s| s.diagnostics.iter())
+                    .chain(self.scala.values().flat_map(|s| s.diagnostics.iter()))
                     .flat_map(|(uri, list)| list.iter().map(move |d| (uri.clone(), d.clone(), None))),
             )
             .chain(self.build_problems.iter().map(|(u, d)| (u.clone(), d.clone(), None)))
@@ -1529,6 +1580,7 @@ impl LangHub {
             .values()
             .flat_map(|s| s.diagnostics.iter())
             .chain(self.ts.values().flat_map(|s| s.diagnostics.iter()))
+            .chain(self.scala.values().flat_map(|s| s.diagnostics.iter()))
             .flat_map(|(uri, list)| list.iter().map(move |d| (uri.clone(), d.clone())))
             .chain(self.build_problems.iter().cloned())
             .filter(|(_, d)| {

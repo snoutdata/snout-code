@@ -610,6 +610,9 @@ pub struct Model {
     pub sort: (SortColumn, bool),
     pub diff: Option<Result<std::rc::Rc<DiffLayout>, String>>,
     diff_key: Option<(String, snout_core::DiffBase, bool)>,
+    /// How many times the repository was read: a file's diff may change with each read,
+    /// even when its status does not.
+    pub snapshots: u64,
     pub commit_msg: String,
     pub amend: bool,
     pub draft: Option<DraftAsk>,
@@ -747,6 +750,7 @@ impl Model {
             sort: (SortColumn::Name, true),
             diff: None,
             diff_key: None,
+            snapshots: 0,
             commit_msg: String::new(),
             amend: false,
             draft: None,
@@ -1592,6 +1596,7 @@ impl Model {
     /// Show what the repository holds now.
     fn apply_snapshot(&mut self, snap: Snapshot, cx: &mut Context<Self>) {
         self.diff_key = None;
+        self.snapshots += 1;
         let Some(repo) = self.repo.clone() else { return };
         match snap.status {
             Ok(status) => {

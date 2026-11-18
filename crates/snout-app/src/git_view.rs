@@ -38,6 +38,9 @@ use crate::settings::ThemeChoice;
 use crate::theme::{Palette, mix, palette};
 use crate::ui::{change_pill, state_pills as file_pills};
 
+mod diff_window;
+pub use diff_window::{DiffWindow, DiffWindowView, NextChange, PreviousChange, change_starts};
+
 /// A pane edge the pointer can drag.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Split {
@@ -233,6 +236,11 @@ pub struct GitView {
     /// Where the mouse is while it selects in a diff, and the scrolling it does at an edge.
     diff_drag_at: Point<Pixels>,
     diff_autoscroll: Option<gpui::Task<()>>,
+    /// A file's diff in a window of its own (a double click in Files), its scroll and the
+    /// focus its ⌘C needs.
+    pub diff_window: Option<DiffWindow>,
+    window_diff_scroll: gpui::UniformListScrollHandle,
+    window_diff_focus: FocusHandle,
 }
 
 fn file_columns(state_w: f32) -> Vec<Column> {
@@ -345,6 +353,9 @@ impl GitView {
             diff_focus: cx.focus_handle(),
             diff_sel: None,
             diff_selecting: false,
+            diff_window: None,
+            window_diff_scroll: gpui::UniformListScrollHandle::new(),
+            window_diff_focus: cx.focus_handle(),
             diff_drag_at: Point::default(),
             diff_autoscroll: None,
         }
@@ -1058,6 +1069,7 @@ impl GitView {
             let no_directory = widths[2] == Some(0.);
             let focused = self.focused.0;
             let lead = m.anchor.clone();
+            let view = cx.entity().downgrade();
             let list = uniform_list("files", rows.len(), move |range, _, cx| {
                 range
                     .map(|i| {
@@ -1082,11 +1094,17 @@ impl GitView {
                         // A long name is cut short: the tooltip tells such files apart.
                         let cut_short = no_directory || f.file_name().chars().count() > 30;
                         table_row(("file", i), state, &widths, cells, &p)
+                            .debug_selector(move || format!("file-row-{i}"))
                             .when(cut_short, |r| r.tooltip(move |w, cx| Tooltip::new(full_path.clone()).build(w, cx)))
                             .on_click({
-                                let model = model.clone();
-                                move |e: &ClickEvent, _, cx| {
+                                let (model, view) = (model.clone(), view.clone());
+                                move |e: &ClickEvent, window, cx| {
                                     let mods = e.modifiers();
+                                    // A double click: the file's diff in a sheet, whole.
+                                    if e.click_count() == 2 && !mods.shift && !mods.platform {
+                                        let _ = view.update(cx, |g, cx| g.open_diff_window(&path, window, cx));
+                                        return;
+                                    }
                                     model.update(cx, |m, cx| m.click_file(&path, mods.shift, mods.platform, cx));
                                 }
                             })
@@ -2660,7 +2678,17 @@ impl GitView {
     }
 
     fn diff_scroll(&self, list: &str) -> &gpui::UniformListScrollHandle {
-        if list == "commit-diff" { &self.commit_diff_scroll } else { &self.diff_scroll }
+        match list {
+            "commit-diff" => &self.commit_diff_scroll,
+            diff_window::LIST => &self.window_diff_scroll,
+            _ => &self.diff_scroll,
+        }
+    }
+
+    /// The focus diff `list` takes for ⌘C: the sheet's diff has its own, as the panel's shows
+    /// under it.
+    fn diff_focus_of(&self, list: &str) -> &FocusHandle {
+        if list == diff_window::LIST { &self.window_diff_focus } else { &self.diff_focus }
     }
 
     /// The selection in diff `list`, if it was made on `layout` in this view.
@@ -2717,7 +2745,7 @@ impl GitView {
             .flex()
             .flex_col()
             .cursor_text()
-            .track_focus(&self.diff_focus)
+            .track_focus(self.diff_focus_of(list))
             .key_context("GitDiff")
             .on_action(cx.listener({
                 let layout = layout.clone();
@@ -2731,7 +2759,7 @@ impl GitView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                    window.focus(&this.diff_focus, cx);
+                    window.focus(this.diff_focus_of(list), cx);
                     let Some((side, at)) = diff_pos(this.diff_scroll(list), e.position, side_by_side, digits, None)
                     else {
                         return;

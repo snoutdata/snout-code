@@ -38,8 +38,8 @@ impl Workspace {
                 let reply = reply.clone();
                 cx.spawn(async move |this, cx| {
                     let applied = applied.await;
-                    if let Some((root, id)) = reply {
-                        let _ = this.update(cx, |this, cx| this.hub.read(cx).reply_apply(&root, id, applied));
+                    if let Some((kind, root, id)) = reply {
+                        let _ = this.update(cx, |this, cx| this.hub.read(cx).reply_apply(kind, &root, id, applied));
                     }
                 })
                 .detach();
@@ -898,10 +898,21 @@ fn symbols_of(hub: Entity<crate::lang::LangHub>, root: PathBuf) -> crate::search
         if query.trim().is_empty() {
             return Task::ready(Vec::new());
         }
-        let call = hub.read(cx).request(&root, "workspace/symbol", json!({ "query": query }));
+        let params = json!({ "query": query });
+        let call = hub.read(cx).request(&root, "workspace/symbol", params.clone());
+        let scala = hub.read(cx).scala_requests("workspace/symbol", &params);
         let root = root.clone();
         cx.background_executor().spawn(async move {
-            let v = call.await.unwrap_or_default();
+            let mut v = call.await.unwrap_or_default();
+            // The Scala symbols of the builds with a Metals, after the engine's.
+            for call in scala {
+                if let Ok(serde_json::Value::Array(more)) = call.await {
+                    match &mut v {
+                        serde_json::Value::Array(all) => all.extend(more),
+                        _ => v = serde_json::Value::Array(more),
+                    }
+                }
+            }
             // Ranked as every search is, the project's own before the libraries'.
             let own = |it: &Item| {
                 it.target.as_ref().is_some_and(|(_, uri, _)| snout_lang::uri::to_path(uri).is_some()) as u32

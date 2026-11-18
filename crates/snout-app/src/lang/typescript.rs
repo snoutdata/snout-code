@@ -17,7 +17,7 @@ use snout_host::{Cmd, Host};
 use snout_lang::progress::Progress;
 use snout_lang::{Client, ServerMessage};
 
-use super::hub::{Doc, HubEvent, LangHub, uri_key};
+use super::hub::{Doc, DocKind, HubEvent, LangHub, uri_key};
 use super::node::{self, Node};
 use crate::editor::EditorPanel;
 
@@ -316,7 +316,7 @@ impl LangHub {
                 editors: vec![editor.clone()],
                 virtual_doc: false,
                 language,
-                ts: true,
+                kind: DocKind::Ts,
             },
         );
         Some((uri, root.to_owned(), Vec::new()))
@@ -476,7 +476,7 @@ impl LangHub {
                 client.notify_raw("workspace/didChangeConfiguration", json!({ "settings": settings() }));
                 server.initialized = true;
                 server.stage = TsStage::Ready;
-                for doc in this.docs.values_mut().filter(|d| d.ts && d.root == root_buf) {
+                for doc in this.docs.values_mut().filter(|d| d.kind == DocKind::Ts && d.root == root_buf) {
                     doc.version = 1;
                     client.notify_raw(
                         "textDocument/didOpen",
@@ -549,7 +549,7 @@ impl LangHub {
                 client.respond(id, Ok(Value::Array(answers)));
             }
             "workspace/applyEdit" => match serde_json::from_value::<lsp_types::WorkspaceEdit>(params["edit"].clone()) {
-                Ok(edit) => cx.emit(HubEvent::ApplyEdit { edit, reply: Some((root.to_owned(), id)) }),
+                Ok(edit) => cx.emit(HubEvent::ApplyEdit { edit, reply: Some((DocKind::Ts, root.to_owned(), id)) }),
                 Err(e) => client.respond(id, Ok(json!({ "applied": false, "failureReason": e.to_string() }))),
             },
             "window/workDoneProgress/create" => {}
@@ -588,7 +588,7 @@ impl LangHub {
             }));
         }
         let uris: Vec<String> =
-            self.docs.iter().filter(|(_, d)| d.ts && d.root == root).map(|(k, _)| k.clone()).collect();
+            self.docs.iter().filter(|(_, d)| d.kind == DocKind::Ts && d.root == root).map(|(k, _)| k.clone()).collect();
         for uri in uris {
             if let Some(doc) = self.docs.get(&uri) {
                 for editor in doc.editors.iter().filter_map(|e| e.upgrade()) {

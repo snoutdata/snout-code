@@ -87,6 +87,8 @@ pub enum Icon {
     Inject,
     /// An endpoint: a globe.
     Endpoint,
+    /// Has implementations: an arrow down (drawn on a disc in the gutter).
+    Implemented,
     /// Copy: two sheets, one over the other.
     Copy,
     /// Claude's changes: a page with a plus and a minus on it.
@@ -374,6 +376,7 @@ impl Icon {
                 Circle(11.3, 8., 3.2, false),
                 Circle(11.3, 8., 1.2, true),
             ],
+            Icon::Implemented => &[Line(&[(8., 3.5), (8., 9.5)], false), Fill(&[(4.6, 8.), (8., 12.5), (11.4, 8.)])],
             Icon::Endpoint => &[
                 Circle(8., 8., 6., false),
                 Curve((8., 2.), (3.6, 8.), (8., 14.)),

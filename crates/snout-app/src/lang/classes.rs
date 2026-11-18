@@ -102,15 +102,22 @@ pub fn rank(found: Vec<SymbolInformation>, typed: &str, root: &Path) -> Vec<Item
         .collect()
 }
 
-/// The classes of the build at `root` that match what is typed, from its engine.
+/// The classes of the build at `root` that match what is typed, from its engine (and the
+/// Scala ones, from the builds' Metals).
 pub fn source(hub: Entity<LangHub>, root: PathBuf) -> SymbolSource {
     Rc::new(move |typed: String, cx: &mut App| {
         if typed.trim().is_empty() {
             return Task::ready(Vec::new());
         }
+        use futures::FutureExt as _;
         let calls: Vec<_> = queries(&typed)
             .into_iter()
-            .map(|q| hub.read(cx).request(&root, "workspace/symbol", json!({ "query": q })))
+            .flat_map(|q| {
+                let params = json!({ "query": q });
+                let h = hub.read(cx);
+                let java = h.request(&root, "workspace/symbol", params.clone()).boxed();
+                std::iter::once(java).chain(h.scala_requests("workspace/symbol", &params))
+            })
             .collect();
         let root = root.clone();
         cx.background_executor().spawn(async move {

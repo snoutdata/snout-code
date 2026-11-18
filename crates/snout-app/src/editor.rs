@@ -32,8 +32,10 @@ use crate::lang::providers::DocLink;
 pub mod blame;
 mod claude;
 pub mod context_actions;
+mod impl_gutter;
 mod inlay;
 mod lang_features;
+pub mod markdown_preview;
 pub mod navigation;
 pub mod pom_lang;
 pub mod problem_hover;
@@ -48,8 +50,10 @@ pub use blame::{GitRequest, Row};
 pub use claude::{
     AgentCard, Answer, ClaudeRequest, LIVE_TICK, LaneRun, Outcome, Presence, Proposal, Review, STREAM_TICK, Writer,
 };
+pub use impl_gutter::{Overridable, impl_marks_of, overridables};
 pub use inlay::{ParamHint, argument_at, hint_label, is_param_hint};
 pub use lang_features::{class_file_name, is_class_file_path};
+pub use markdown_preview::{MdView, is_markdown};
 pub use problem_hover::{Bulb, CannedLang, Fixes, HoverCard, Spot};
 pub use refactor::{Refactoring, new_name};
 pub use run_gutter::{CODE_PAD, GutterMenu, Lanes, PLAIN_PAD, runnables_of};
@@ -84,6 +88,7 @@ actions!(
         AnnotateWithGitBlame,
         GoToDeclaration,
         GoToImplementations,
+        ToggleMarkdownPreview,
     ]
 );
 
@@ -180,6 +185,33 @@ pub fn register_languages() {
         "properties",
         &LanguageConfig::new("properties", properties, vec![], tree_sitter_properties::HIGHLIGHTS_QUERY, "", ""),
     );
+    let scala = tree_sitter::Language::new(tree_sitter_scala::LANGUAGE);
+    let highlights = scala_highlights();
+    registry.register("scala", &LanguageConfig::new("scala", scala, vec![], &highlights, "", ""));
+}
+
+/// The Scala grammar's highlights, its captures named as the theme names them: the grammar
+/// writes Neovim's older names (`@conditional`, `@method`, `@parameter`), which the theme
+/// does not color.
+fn scala_highlights() -> String {
+    const NAMES: &[(&str, &str)] = &[
+        ("@conditional", "@keyword"),
+        ("@repeat", "@keyword"),
+        ("@include", "@keyword"),
+        ("@exception", "@keyword"),
+        ("@storageclass", "@keyword"),
+        ("@type.qualifier", "@keyword"),
+        ("@method.call", "@function"),
+        ("@method", "@function"),
+        ("@parameter", "@variable"),
+        ("@float", "@number"),
+        ("@namespace", "@variable"),
+    ];
+    let mut q = tree_sitter_scala::HIGHLIGHTS_QUERY.to_owned();
+    for (from, to) in NAMES {
+        q = q.replace(from, to);
+    }
+    q
 }
 
 /// The highlighter for `path`, by its name.
@@ -189,6 +221,7 @@ pub fn language_for(path: &Path) -> &'static str {
     match ext.as_str() {
         "java" => "java",
         "kt" | "kts" => "kotlin",
+        "scala" | "sc" | "sbt" => "scala",
         "groovy" | "gradle" | "gvy" => "groovy",
         "yml" | "yaml" => "yaml",
         "properties" => "properties",
@@ -404,6 +437,12 @@ pub struct EditorPanel {
     spring_seen: u64,
     _spring: Option<Task<()>>,
     _spring_settle: Option<Task<()>>,
+    /// The declarations something implements, for the gutter.
+    pub impls: impl_gutter::ImplMarks,
+    /// What a Markdown tab shows: the text, the preview, or both.
+    pub md_view: MdView,
+    /// The text the preview renders.
+    md_text: SharedString,
     /// The resolved values of `@Value` placeholders, by line.
     pub hints: Rc<Vec<(u32, String)>>,
     _hints: Option<Task<()>>,
@@ -468,6 +507,7 @@ impl EditorPanel {
                     this.lang_changed(cx);
                     this.check_settings_text(cx);
                     this.spring_changed(cx);
+                    this.impls_changed(cx);
                     if this.writing > 0 {
                         this.writing -= 1;
                     } else {
@@ -607,6 +647,9 @@ impl EditorPanel {
             spring_seen: 0,
             _spring: None,
             _spring_settle: None,
+            impls: Default::default(),
+            md_view: MdView::Editor,
+            md_text: SharedString::default(),
             hints: Rc::new(Vec::new()),
             _hints: None,
             param_hints: Rc::new(Vec::new()),
@@ -672,7 +715,8 @@ impl EditorPanel {
         let project = crate::lang::hub(cx).and_then(|h| h.read(cx).model.read(cx).project_root());
         let served = language_for(&path) == "java"
             || crate::spring::is_config_file(&path)
-            || crate::lang::typescript::language_id(&path).is_some();
+            || crate::lang::typescript::language_id(&path).is_some()
+            || crate::lang::scala::is_scala(&path);
         let read = cx.background_executor().spawn(async move { Loaded::read(&*host, &path, project, served) });
         self._load = Some(cx.spawn_in(window, async move |this, cx| {
             let loaded = read.await;
@@ -724,6 +768,7 @@ impl EditorPanel {
         self.attach_lang(cx);
         self.refresh_runnables(cx);
         self.refresh_spring(cx);
+        self.refresh_impls(true, cx);
         self.param_tries = 0;
         self.refresh_param_hints(cx);
         if let Some(text) = self.pending_sync.take() {
@@ -1148,6 +1193,7 @@ impl EditorPanel {
                 self.saved = text;
                 self.refresh_runnables(cx);
                 self.refresh_spring(cx);
+                self.refresh_impls(true, cx);
                 // A save may follow a commit made elsewhere: the blame is checked against HEAD.
                 self.refresh_blame(cx);
                 if let Some(spring) = crate::spring::spring(cx) {
@@ -1497,7 +1543,7 @@ impl gpui::EventEmitter<gpui_component::dock::PanelEvent> for EditorPanel {}
 
 impl gpui::Focusable for EditorPanel {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.state.read(cx).focus_handle(cx)
+        self.md_focus().unwrap_or_else(|| self.state.read(cx).focus_handle(cx))
     }
 }
 
@@ -1566,7 +1612,6 @@ impl Render for EditorPanel {
             self.state.update(cx, |s, cx| s.set_scroll_offset(gpui::point(px(0.), px(-scroll)), cx));
         }
         let p = palette(cx);
-        let _ = &self.focus;
         let reviewing = self.review.is_some();
         let has_lang = self.lang.is_some();
         // What Run and Debug in the menu start: what the caret is in.
@@ -1602,6 +1647,7 @@ impl Render for EditorPanel {
             .on_action(cx.listener(|this, _: &AnnotateWithGitBlame, _, cx| this.toggle_blame(cx)))
             .on_action(cx.listener(|this, _: &GoToDeclaration, w, cx| this.go_to_declaration(None, w, cx)))
             .on_action(cx.listener(|this, _: &GoToImplementations, w, cx| this.go_to_implementations(None, w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleMarkdownPreview, w, cx| this.toggle_markdown_preview(w, cx)))
             .on_action(cx.listener(|this, a: &BreakpointConditionAt, w, cx| this.condition_at_line(a.0, w, cx)))
             // GPUI Kit's Quick Fix shows the context actions too.
             .on_action(
@@ -1640,110 +1686,115 @@ impl Render for EditorPanel {
             .children(self.revision_bar(cx))
             .children(self.record_bar(cx))
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .font_family(look::mono_font(cx))
-                    .id("editor-body")
-                    .debug_selector(|| "editor-body".into())
-                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, w, cx| {
-                        this.nav_hover(e.position, e.modifiers, w, cx);
-                        this.gutter_hover(e.position, cx);
-                        this.blame_hover(e.position, cx);
-                        this.hover_move(e.position, e.modifiers, e.pressed_button.is_some(), cx);
-                    }))
-                    .on_modifiers_changed(cx.listener(|this, e: &gpui::ModifiersChangedEvent, w, cx| {
-                        if let Some(at) = this.hover.last {
-                            this.nav_hover(at, e.modifiers, w, cx);
-                        }
-                        this.hover_modifiers(e.modifiers, cx)
-                    }))
-                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                        if !*hovered && this.gutter_tip.take().is_some() {
-                            cx.notify();
-                        }
-                        if !*hovered {
-                            this.hover_left(cx);
-                        }
-                    }))
-                    .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
-                        if this.blame_press(e, window, cx)
-                            || this.bulb_press(e, window, cx)
-                            || this.gutter_press(e, window, cx)
-                            || this.nav_click(e, window, cx)
-                        {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                        }
-                    }))
-                    // Laid out once the file is read, so the first layout is of its text (the
-                    // caret asked for scrolls into view on it).
-                    // An earlier revision, annotated, read only.
-                    .when_some(rev_state, |d, rev| {
-                        d.child(
-                            Editor::new(&rev)
-                                .appearance(false)
-                                .pl(px(col + run_gutter::PLAIN_PAD))
-                                .h_full()
-                                .text_size(px(font_size(cx))),
-                        )
-                    })
-                    .when(!self.loading && !revisioning, |d| {
-                        d.child(
-                            // The gutter's lanes (problems, run icons, Spring marks) take a
-                            // strip left of the line numbers.
-                            Editor::new(&self.state)
-                                .appearance(false)
-                                .pl(px(self.gutter_pad + col))
-                                .h_full()
-                                .text_size(px(font_size(cx)))
-                                // The engine's own menu is the system's, which takes no icons:
-                                // it is left empty, and the right click opens ours instead.
-                                .context_menu(move |menu, window, cx| {
-                                    if let Some(this) = this.upgrade() {
-                                        let run = run_label.clone();
-                                        this.update(cx, |e, cx| e.open_context_menu(has_lang, run, window, cx));
-                                    }
-                                    menu
-                                }),
-                        )
-                    })
-                    .when(!revisioning, |d| {
-                        d.children(self.claude_overlay(cx))
-                            .child(self.gutter(cx))
-                            // The gutter's lanes, right of the annotation column.
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .bottom_0()
-                                    .right_0()
-                                    .left(px(col))
-                                    .child(self.problem_marks(cx))
-                                    .child(self.run_gutter(cx))
-                                    .child(self.spring_gutter(cx)),
+                self.with_markdown_preview(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .relative()
+                        .font_family(look::mono_font(cx))
+                        .id("editor-body")
+                        .debug_selector(|| "editor-body".into())
+                        .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, w, cx| {
+                            this.nav_hover(e.position, e.modifiers, w, cx);
+                            this.gutter_hover(e.position, cx);
+                            this.blame_hover(e.position, cx);
+                            this.hover_move(e.position, e.modifiers, e.pressed_button.is_some(), cx);
+                        }))
+                        .on_modifiers_changed(cx.listener(|this, e: &gpui::ModifiersChangedEvent, w, cx| {
+                            if let Some(at) = this.hover.last {
+                                this.nav_hover(at, e.modifiers, w, cx);
+                            }
+                            this.hover_modifiers(e.modifiers, cx)
+                        }))
+                        .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                            if !*hovered && this.gutter_tip.take().is_some() {
+                                cx.notify();
+                            }
+                            if !*hovered {
+                                this.hover_left(cx);
+                            }
+                        }))
+                        .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
+                            if this.blame_press(e, window, cx)
+                                || this.bulb_press(e, window, cx)
+                                || this.gutter_press(e, window, cx)
+                                || this.nav_click(e, window, cx)
+                            {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            }
+                        }))
+                        // Laid out once the file is read, so the first layout is of its text (the
+                        // caret asked for scrolls into view on it).
+                        // An earlier revision, annotated, read only.
+                        .when_some(rev_state, |d, rev| {
+                            d.child(
+                                Editor::new(&rev)
+                                    .appearance(false)
+                                    .pl(px(col + run_gutter::PLAIN_PAD))
+                                    .h_full()
+                                    .text_size(px(font_size(cx))),
                             )
-                            .child(self.end_of_line_hints(cx))
-                            .children(self.blame_hints(cx))
-                    })
-                    .children(self.blame_column(cx))
-                    .children(self.spring_tooltip(cx))
-                    .children(self.gutter_popup(cx))
-                    .children(self.signature_popup(cx))
-                    .children(self.inspections(cx))
-                    .children(self.rename_box(cx))
-                    .children(self.hint_popup(cx))
-                    .children(self.choices_popup(cx))
-                    .children(self.card_view(cx))
-                    .children(self.actions_view(cx))
-                    .children(chip)
-                    .children(self.agent_card_view(cx))
-                    .children(self.blame_card_view(cx))
-                    .children(self.authors_view(cx))
-                    .children(self.nav_link_view(cx))
-                    .children(self.nav_popup_view(cx))
-                    .children(self.context.render(cx)),
+                        })
+                        .when(!self.loading && !revisioning, |d| {
+                            d.child(
+                                // The gutter's lanes (problems, run icons, Spring marks) take a
+                                // strip left of the line numbers.
+                                Editor::new(&self.state)
+                                    .appearance(false)
+                                    .pl(px(self.gutter_pad + col))
+                                    .h_full()
+                                    .text_size(px(font_size(cx)))
+                                    // The engine's own menu is the system's, which takes no icons:
+                                    // it is left empty, and the right click opens ours instead.
+                                    .context_menu(move |menu, window, cx| {
+                                        if let Some(this) = this.upgrade() {
+                                            let run = run_label.clone();
+                                            this.update(cx, |e, cx| e.open_context_menu(has_lang, run, window, cx));
+                                        }
+                                        menu
+                                    }),
+                            )
+                        })
+                        .when(!revisioning, |d| {
+                            d.children(self.claude_overlay(cx))
+                                .child(self.gutter(cx))
+                                // The gutter's lanes, right of the annotation column.
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .right_0()
+                                        .left(px(col))
+                                        .child(self.problem_marks(cx))
+                                        .child(self.run_gutter(cx))
+                                        .child(self.impl_gutter(cx))
+                                        .child(self.spring_gutter(cx)),
+                                )
+                                .child(self.end_of_line_hints(cx))
+                                .children(self.blame_hints(cx))
+                        })
+                        .children(self.blame_column(cx))
+                        .children(self.spring_tooltip(cx))
+                        .children(self.gutter_popup(cx))
+                        .children(self.signature_popup(cx))
+                        .children(self.inspections(cx))
+                        .children(self.rename_box(cx))
+                        .children(self.hint_popup(cx))
+                        .children(self.choices_popup(cx))
+                        .children(self.card_view(cx))
+                        .children(self.actions_view(cx))
+                        .children(chip)
+                        .children(self.agent_card_view(cx))
+                        .children(self.blame_card_view(cx))
+                        .children(self.authors_view(cx))
+                        .children(self.nav_link_view(cx))
+                        .children(self.nav_popup_view(cx))
+                        .children(self.context.render(cx))
+                        .into_any_element(),
+                    cx,
+                ),
             )
     }
 }
@@ -1874,4 +1925,21 @@ pub fn confirm_close(
             });
         })
         .detach();
+}
+
+#[cfg(test)]
+mod scala_tests {
+    #[test]
+    fn scala_highlights_compile_with_names_the_theme_colors() {
+        let scala = tree_sitter::Language::new(tree_sitter_scala::LANGUAGE);
+        let q = tree_sitter::Query::new(&scala, &super::scala_highlights()).expect("the query compiles");
+        for name in q.capture_names() {
+            assert!(
+                !["conditional", "repeat", "include", "exception", "method", "parameter", "float"]
+                    .contains(&name.split('.').next().unwrap()),
+                "{name} is renamed"
+            );
+        }
+        assert_eq!(super::language_for(std::path::Path::new("/p/Web.scala")), "scala");
+    }
 }

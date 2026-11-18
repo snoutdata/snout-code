@@ -1044,6 +1044,7 @@ fn files_open_in_editor_tabs_with_their_grammar_and_save(cx: &mut TestAppContext
     let repo = demo_repo("editor");
     let files = [
         ("src/App.java", "class App {}\n", "java"),
+        ("src/Web.scala", "class Web extends App {}\n", "scala"),
         ("build.gradle.kts", "plugins { java }\n", "kotlin"),
         ("build.gradle", "apply plugin: 'java'\n", "groovy"),
         ("application.yml", "server:\n  port: 8080\n", "yaml"),
@@ -2043,4 +2044,71 @@ fn the_clone_dialog_offers_the_recent_folders_and_browse(cx: &mut TestAppContext
     cx.run_until_parked();
     assert!(cx.debug_bounds("clone-recent-0").is_some(), "the folder the dialog started at is offered now");
     let _ = std::fs::remove_dir_all(a);
+}
+
+/// A double click on a changed file opens its diff in a window of its own: the whole file
+/// (no unchanged lines left out), F7 at a change, Compact leaving lines out, Stage, a double
+/// click on another file showing it in the same window, and Esc closing it.
+#[gpui::test]
+fn a_double_click_on_a_changed_file_shows_both_files_whole_in_a_window(cx: &mut TestAppContext) {
+    use snout_core::diff_layout::SbsLine;
+    let repo = demo_repo("diff-window");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Git, w, cx)));
+    // The panel's diff compact, as it is by default.
+    cx.update(|_, cx| model.update(cx, |m, cx| m.set_diff_options(Some(true), Some(true), cx)));
+    cx.run_until_parked();
+    let row_of = |path: &str, cx: &mut VisualTestContext| {
+        let row = cx.update(|_, cx| model.read(cx).visible_files().iter().position(|f| f.path == path)).unwrap();
+        cx.debug_bounds(Box::leak(format!("file-row-{row}").into_boxed_str())).expect("the row is drawn").center()
+    };
+    let windows = cx.windows().len();
+    clicks_at(row_of("status.rs", cx), 2, cx);
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), windows + 1, "a window of its own");
+    let git = cx.update(|_, cx| ws.read(cx).git.clone());
+    let handle = cx.update(|_, cx| git.read(cx).diff_window.as_ref().and_then(|w| w.handle)).expect("its window");
+    let mut dcx = VisualTestContext::from_window(handle, cx);
+    let dcx = &mut dcx;
+    dcx.run_until_parked();
+    assert!(dcx.debug_bounds("git-diff-window").is_some(), "the diff is drawn there");
+    let layout = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| git.read(cx).diff_window.as_ref().and_then(|w| w.diff.clone()).unwrap().unwrap())
+    };
+    let whole = layout(dcx);
+    assert!(!whole.sbs.iter().any(|l| matches!(l, SbsLine::Gap(_))), "the whole file, nothing left out");
+    assert!(whole.sbs.len() > 100, "{}", whole.sbs.len());
+    let change = |cx: &mut VisualTestContext| cx.update(|_, cx| git.read(cx).diff_window.as_ref().unwrap().change);
+    assert_eq!(change(dcx), Some(0), "at the first change");
+    // F7 past the last change stays on it; ⇧F7 goes back.
+    let changes = crate::git_view::change_starts(&whole, true).len();
+    dcx.simulate_keystrokes("f7");
+    assert_eq!(change(dcx), Some(1.min(changes - 1)));
+    dcx.simulate_keystrokes("shift-f7");
+    assert_eq!(change(dcx), Some(0));
+    // Compact, in the window only.
+    let compact = dcx.debug_bounds("window-compact").unwrap().center();
+    dcx.simulate_click(compact, gpui::Modifiers::none());
+    dcx.run_until_parked();
+    assert!(layout(dcx).sbs.iter().any(|l| matches!(l, SbsLine::Gap(_))), "compact leaves lines out");
+    // Stage: the file is staged, and the window follows.
+    let stage = dcx.debug_bounds("window-stage").unwrap().center();
+    dcx.simulate_click(stage, gpui::Modifiers::none());
+    dcx.run_until_parked();
+    let staged =
+        dcx.update(|_, cx| model.read(cx).status.files.iter().find(|f| f.path == "status.rs").unwrap().has_staged());
+    assert!(staged, "Stage staged the file");
+    // Another file, double clicked: shown in the same window.
+    clicks_at(row_of("src/main.rs", cx), 2, cx);
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), windows + 1, "the same window");
+    cx.update(|_, cx| assert_eq!(git.read(cx).diff_window.as_ref().unwrap().entry.path, "src/main.rs"));
+    // Esc closes it.
+    let mut dcx = VisualTestContext::from_window(handle, cx);
+    dcx.simulate_keystrokes("escape");
+    dcx.run_until_parked();
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), windows, "Esc closes it");
+    cx.update(|_, cx| assert!(git.read(cx).diff_window.is_none()));
+    let _ = std::fs::remove_dir_all(repo);
 }

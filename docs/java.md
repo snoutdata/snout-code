@@ -58,7 +58,8 @@ By default the card shows once the pointer rests for half a second. Hold ⌘ to 
 - The definition opens in its file, with the caret on it.
 - While you hold ⌘, the name under the pointer is underlined as a link and the pointer turns into a hand, at once, for a name the engine knows the declaration of.
 - On the declaration itself, ⌘-click (or ⌘B) lists its **usages** in a popup instead: each one's file, line and code. ↑ ↓ pick, ↩ or a click goes there, Esc closes it. A single usage opens at once.
-- ⌥⌘-click a name, or press ⌥⌘B (Navigate ▸ Go to Implementations), for the implementations of an interface, an abstract class or a method: one opens at once, several are listed in the same popup.
+- ⌥⌘-click a name, ⌘-right-click it, or press ⌥⌘B (Navigate ▸ Go to Implementations), for the implementations of an interface, an abstract class or a method: one opens at once, several are listed in the same popup. ⌘-right-click goes there instead of opening the menu.
+- An interface or abstract class that something implements has a blue mark with an arrow down in the gutter, left of the line numbers, and so has each of its methods that something implements. Click the mark for the implementations, as ⌥⌘B does. The marks come once the engine is ready, and are looked for again when you save.
 - The key you hold to click is a setting: Settings ▸ Editor ▸ Navigation, ⌘ (the default; Ctrl on Linux and Windows) or ⌥. With ⌥, ⌥-click goes to the declaration and ⌥⌘-click still goes to the implementations.
 - A class of a library opens in a read only tab named after the class, such as `String.class`. It shows the library's source when the build has a source jar for it. The status bar shows a lock. You can go to definitions from there too.
 
@@ -69,6 +70,8 @@ By default the card shows once the pointer rests for half a second. Hold ⌘ to 
 ![⌘-click on a declaration: its usages](images/java-usages.png)
 
 ![⌥⌘B on an interface: its implementations](images/java-implementations.png)
+
+![The gutter's marks on an interface and its method](images/java-implementation-marks.png)
 
 To find a class, method or field by name instead, use Go to Class (⌥⌘O, below), Go to Symbol (⌘T) or Search Everywhere (⇧⌘A). See [The editor](editor.md#go-to-symbol).
 
@@ -273,4 +276,4 @@ The Java engine cannot read Scala source. So in a build with Scala, the engine c
 - If the compile fails, the status bar says `The Scala compile failed: see Problems`, and its errors are in the Problems window.
 - Running a main class compiles the Scala first when it changed since the last compile. If the Scala does not compile, the run does not start: its window shows Gradle's reason. Java that uses Scala classes cannot load without them.
 
-Scala files themselves open as plain text, without these features.
+Scala files themselves are highlighted, and get completion, navigation, rename and problems of their own from Metals, the Scala language server. See [Scala](scala.md).
