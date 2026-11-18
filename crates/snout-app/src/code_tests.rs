@@ -1167,13 +1167,13 @@ fn a_markdown_file_shows_its_preview_beside_or_in_place_of_the_text(cx: &mut Tes
     cx.run_until_parked();
     assert!(cx.debug_bounds("md-view-preview").is_some(), "a Markdown tab has the view buttons");
     assert!(cx.debug_bounds("markdown-preview").is_none(), "the text alone at first");
-    cx.simulate_keystrokes("cmd-shift-v");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-shift-v"));
     cx.run_until_parked();
     cx.update(|_, cx| assert_eq!(editor.read(cx).md_view, MdView::Preview));
     assert!(cx.debug_bounds("markdown-preview").is_some(), "the preview shows");
     assert!(cx.debug_bounds("editor-body").is_none(), "in place of the text");
     // The keyboard is in the preview: ⇧⌘V again brings the text back.
-    cx.simulate_keystrokes("cmd-shift-v");
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-shift-v"));
     cx.run_until_parked();
     assert!(cx.debug_bounds("markdown-preview").is_none());
     assert!(cx.debug_bounds("editor-body").is_some());
