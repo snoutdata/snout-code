@@ -231,6 +231,7 @@ impl EditorPanel {
             s.focus(window, cx);
         });
         self.nav.link = None;
+        self.quiet_card_at(e.position, cx);
         if implementations {
             self.go_to_implementations(Some(e.position), window, cx);
         } else {
@@ -293,6 +294,7 @@ impl EditorPanel {
         }
         // In this document the answer's positions count characters, as the editor does.
         let at = link.target_selection_range.start;
+        self.note_jump(cx);
         self.go_to(at.line, at.character, window, cx);
     }
 
@@ -423,7 +425,10 @@ impl EditorPanel {
     pub fn open_nav_item(&mut self, item: &NavItem, window: &mut Window, cx: &mut Context<Self>) {
         self.close_nav_popup(window, cx);
         match &self.lang {
-            Some(link) if link.uri == item.uri => self.go_to_lsp(item.at, window, cx),
+            Some(link) if link.uri == item.uri => {
+                self.note_jump(cx);
+                self.go_to_lsp(item.at, window, cx)
+            }
             Some(link) => {
                 let event =
                     crate::lang::hub::HubEvent::Open { root: link.root.clone(), uri: item.uri.clone(), at: item.at };

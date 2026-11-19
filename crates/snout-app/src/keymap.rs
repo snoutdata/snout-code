@@ -157,6 +157,9 @@ fn mac_defaults() -> Vec<Binding> {
         ("cmd-alt-f", Box::new(i::Replace), Some("EditorPanel > Input")),
         ("cmd-shift-r", Box::new(ReplaceInFiles), None),
         ("cmd-l", Box::new(GoToLine), None),
+        // Back and Forward through the places jumps left, as in IntelliJ.
+        ("cmd-alt-left", Box::new(NavigateBack), None),
+        ("cmd-alt-right", Box::new(NavigateForward), None),
         ("cmd-shift-p", Box::new(CommandPalette), None),
         // Language features, in a Java editor.
         ("f12", Box::new(i::GoToDefinition), Some("EditorPanel > Input")),

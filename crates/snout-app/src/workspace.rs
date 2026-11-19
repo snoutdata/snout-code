@@ -33,6 +33,7 @@ use crate::theme::{self, palette};
 
 mod debug_ui;
 mod lang_ui;
+mod nav_history;
 pub mod quit;
 mod record_ui;
 mod remote_ui;
@@ -179,6 +180,8 @@ pub struct Workspace {
     /// The panels were collapsed for files on their own: a project brings back the saved layout.
     collapsed_for_files: bool,
     _project_settings_poll: Task<()>,
+    /// Navigate ▸ Back and Forward: the places jumps left.
+    history: nav_history::NavHistory,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -639,6 +642,7 @@ impl Workspace {
             hidden: false,
             reading_project_settings: false,
             collapsed_for_files: files_alone,
+            history: Default::default(),
             _project_settings_poll: Task::ready(()),
             _subscriptions: subscriptions,
         };
@@ -1033,6 +1037,12 @@ impl Workspace {
                 EditorEvent::CaretMoved => this.save_layout_soon(cx),
                 EditorEvent::Claude(r) => crate::claude_ide::bridge::editor_request(this, editor, r, window, cx),
                 EditorEvent::AgentLines => crate::claude_ide::bridge::take_lines(this, editor, cx),
+                EditorEvent::Jumped(from) => {
+                    if let Some(place) = nav_history::place_of(editor, Some(*from), cx) {
+                        this.history.note(place);
+                        cx.notify();
+                    }
+                }
                 EditorEvent::Git(r) => {
                     use crate::editor::GitRequest;
                     let action = match r.clone() {
@@ -1076,8 +1086,15 @@ impl Workspace {
             }
             d.select_panel(to, window, cx);
         });
-        let at = editor.read(cx).state.read(cx).cursor_position();
-        twin.update(cx, |t, cx| t.go_to(at.line, at.character, window, cx));
+        // The new view shows what the other did, the caret where it was: no jump.
+        let (at, scroll) = {
+            let s = editor.read(cx).state.read(cx);
+            (s.cursor_position(), -f32::from(s.scroll_offset().y))
+        };
+        twin.update(cx, |t, cx| {
+            t.restore_view(at.line, at.character, scroll, cx);
+            t.state.update(cx, |s, cx| s.focus(window, cx));
+        });
         self.set_active_editor(Some(&twin), cx);
     }
 
@@ -1295,6 +1312,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<EditorPanel> {
+        // Opening a place is a jump: Back comes back to where the caret is now.
+        if focus && at.is_some() {
+            self.note_jump(window, cx);
+        }
         // As the host writes paths: one put together from Git's output has slashes on Windows.
         let path = crate::host::host(cx).info().native_path(&path);
         self.editors.retain(|e| e.upgrade().is_some());
@@ -1378,6 +1399,9 @@ impl Workspace {
             SearchEvent::GoToLine(line, column) => {
                 this.search = None;
                 if let Some(editor) = target.as_ref().and_then(|t| t.upgrade()) {
+                    if let Some(place) = nav_history::place_of(&editor, None, cx) {
+                        this.history.note(place);
+                    }
                     editor.update(cx, |e, cx| e.go_to(*line, *column, window, cx));
                 }
                 cx.notify();
@@ -2221,6 +2245,12 @@ impl Render for Workspace {
             .id("workspace")
             .key_context("Workspace")
             .track_focus(&self.focus)
+            // The mouse's side buttons go back and forth too.
+            .capture_any_mouse_down(cx.listener(|this, e: &gpui::MouseDownEvent, w, cx| match e.button {
+                gpui::MouseButton::Navigate(gpui::NavigationDirection::Back) => this.navigate_back(w, cx),
+                gpui::MouseButton::Navigate(gpui::NavigationDirection::Forward) => this.navigate_forward(w, cx),
+                _ => {}
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -2461,6 +2491,13 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ReplaceInFiles, w, cx| this.open_find_in_files(true, w, cx)))
             .on_action(cx.listener(|this, _: &UndoReplaceInFiles, w, cx| crate::find_in_files::undo(this, w, cx)))
             .on_action(cx.listener(|this, _: &GoToLine, w, cx| this.open_search(Mode::GoToLine, w, cx)))
+            // Back and Forward only while there is somewhere to go (else greyed out).
+            .when(self.history.can_go_back(), |d| {
+                d.on_action(cx.listener(|this, _: &NavigateBack, w, cx| this.navigate_back(w, cx)))
+            })
+            .when(self.history.can_go_forward(), |d| {
+                d.on_action(cx.listener(|this, _: &NavigateForward, w, cx| this.navigate_forward(w, cx)))
+            })
             .on_action(cx.listener(|this, _: &CommandPalette, w, cx| this.open_palette(w, cx)))
             .on_action(cx.listener(|this, _: &SplitRight, w, cx| this.split_right(w, cx)))
             .on_action(cx.listener(|this, _: &CloseProject, w, cx| this.close_project(w, cx)))

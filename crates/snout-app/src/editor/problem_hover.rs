@@ -104,6 +104,9 @@ pub struct HoverState {
     pub over_card: bool,
     /// The spot a card is on its way for.
     pending: Option<Spot>,
+    /// The spot a navigation click was on: no card there until the pointer moves off it,
+    /// so what the click says (no usages, no declaration) is not hidden under one.
+    quiet: Option<Spot>,
     /// Where the pointer was last, for a change of modifiers without a move.
     pub(super) last: Option<Point<Pixels>>,
     next_id: u64,
@@ -251,6 +254,14 @@ impl EditorPanel {
         let command = mods.secondary(cx);
         let wanted = command || EditorDefaults::now(cx).show_hover == ShowHover::AfterDelay;
         let spot = (!dragging && !mods.alt && wanted).then(|| self.spot_at(at, cx)).flatten();
+        if let Some(quiet) = &self.hover.quiet {
+            if spot.as_ref().is_some_and(|(s, _)| s == quiet) {
+                self.hover.pending = None;
+                self.hover._show = None;
+                return;
+            }
+            self.hover.quiet = None;
+        }
         let Some((spot, offset)) = spot else {
             self.hover.pending = None;
             self.hover._show = None;
@@ -292,6 +303,15 @@ impl EditorPanel {
         self.hover._show = None;
         self.hover.last = None;
         self.hide_card_soon(cx);
+    }
+
+    /// A navigation click at `at`: the card goes, and stays away from that spot until the
+    /// pointer leaves it.
+    pub(super) fn quiet_card_at(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        self.hover.pending = None;
+        self.hover._show = None;
+        self.hover.quiet = self.spot_at(at, cx).map(|(s, _)| s);
+        self.hide_card(cx);
     }
 
     /// ⌘ went down or up with the pointer still: as if it moved.
@@ -538,16 +558,15 @@ impl EditorPanel {
                         }
                         None => {
                             let (this, problem) = (this.clone(), problem.clone());
-                            Button::new("hover-ask", agent.icon)
-                                .compact()
-                                .label(t!("editor-ask-to-fix-2", short = (agent.short).to_string()))
-                                .on_click(move |_, _, cx| {
+                            Button::new("hover-ask", agent.icon).compact().label(ts!("editor-ask-to-fix-2")).on_click(
+                                move |_, _, cx| {
                                     let problem = problem.clone();
                                     let _ = this.update(cx, |e, cx| {
                                         e.hide_card(cx);
                                         e.ask_agent_to_fix(&problem, cx);
                                     });
-                                })
+                                },
+                            )
                         }
                     };
                     let this = this.clone();

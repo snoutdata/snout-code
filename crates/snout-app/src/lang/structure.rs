@@ -198,7 +198,10 @@ impl StructureWindow {
         let Some(editor) = self.editor() else { return };
         self.current = Some(row.path.clone());
         let at = row.symbol.selection.start;
-        editor.update(cx, |e, cx| e.go_to_lsp(at, window, cx));
+        editor.update(cx, |e, cx| {
+            e.note_jump(cx);
+            e.go_to_lsp(at, window, cx)
+        });
         cx.notify();
     }
 }

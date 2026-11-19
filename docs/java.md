@@ -154,7 +154,7 @@ When the refactoring is not possible with what is selected, nothing changes, and
 
 ## Quick fixes
 
-Rest the pointer on a squiggle, or on the problem's dot in the gutter. The card shows the problem with its severity icon and message, and the engine's best fix as a button, such as **Import 'LocalDate' (java.time)**. Click it, or press ⌥⇧↩ with the caret on the problem, to apply it. While the engine looks, the card says `Looking for fixes…`. When the engine has no fix, the button is **Ask Claude to fix** instead (see [Ask the agent to fix a problem](agents.md#ask-the-agent-to-fix-a-problem)).
+Rest the pointer on a squiggle, or on the problem's dot in the gutter. The card shows the problem with its severity icon and message, and the engine's best fix as a button, such as **Import 'LocalDate' (java.time)**. Click it, or press ⌥⇧↩ with the caret on the problem, to apply it. While the engine looks, the card says `Looking for fixes…`. When the engine has no fix, the button is **Ask AI to fix** instead (see [Ask the agent to fix a problem](agents.md#ask-the-agent-to-fix-a-problem)).
 
 ![The card of an error: the problem, its fix and More actions](images/java-problem-hover.png)
 
@@ -170,7 +170,7 @@ The list has, in order:
 
 1. the engine's best fix for the problem, with ⌥⇧↩ beside it;
 2. **Fix all ‘…’ in file**, when the file has more problems of the same kind and the same fix applies to each, such as the import of a class used on several lines, or removing every unused import. The fixes are made at once;
-3. **Ask Claude to fix** (or the agent the console runs);
+3. **Ask AI to fix** (it asks the agent the console runs);
 4. the engine's other fixes, such as creating the class, or another name it could be;
 5. the other actions the engine offers there, such as refactorings and generating code.
 
@@ -178,7 +178,7 @@ Use ↑ and ↓ to move, ↩ to apply and Esc to close.
 
 ![The context actions on an error, and the bulb in the gutter](images/java-quick-fix.png)
 
-*⌥↩ on `LocalDate`, used on two lines: the import, Fix all for both, Ask Claude to fix, then the engine's other fixes. The bulb marks the caret's line.*
+*⌥↩ on `LocalDate`, used on two lines: the import, Fix all for both, Ask AI to fix, then the engine's other fixes. The bulb marks the caret's line.*
 
 ## Organize imports
 
@@ -206,7 +206,7 @@ Press ⇧⌘M (Code ▸ Show Problems) to open the **Problems** window in the bo
 - The toggles at the top show or hide errors, warnings and information, each with its count.
 - The filter box narrows the list to the problems whose message, file or source contains what you type.
 - Double-click a problem, or select it and press ↩, to go there.
-- Right-click a problem, or select it and press ⌥↩, for its fixes, **Fix all ‘…’ in file** and **Ask Claude to fix**, as in the editor.
+- Right-click a problem, or select it and press ⌥↩, for its fixes, **Fix all ‘…’ in file** and **Ask AI to fix**, as in the editor.
 - ↑ and ↓ move through the list; ← and → collapse and expand a file.
 
 The list stays quick with hundreds of warnings: only the rows in view are drawn.

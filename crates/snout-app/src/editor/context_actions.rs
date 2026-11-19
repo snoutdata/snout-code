@@ -33,12 +33,12 @@ pub enum Entry {
 }
 
 impl Entry {
-    /// What the line says; `agent` is the console agent's short name.
-    pub fn label(&self, agent: &str) -> String {
+    /// What the line says.
+    pub fn label(&self) -> String {
         match self {
             Entry::Fix(a) | Entry::EngineFixAll(a) | Entry::Other(a) => a.title.clone(),
             Entry::FixAll(f) => f.label.clone(),
-            Entry::Ask(_) => t!("editor-ask-to-fix", agent = agent.to_string()),
+            Entry::Ask(_) => ts!("editor-ask-to-fix").to_owned(),
         }
     }
 }
@@ -259,7 +259,7 @@ pub fn view(
                 .when(selected, |d| d.bg(p.row_selected()))
                 .when(!selected, |d| d.hover(|s| s.bg(p.row_hover())))
                 .child(icon(ico, 14., ink))
-                .child(div().flex_1().min_w_0().whitespace_nowrap().child(e.label(&agent.short)))
+                .child(div().flex_1().min_w_0().whitespace_nowrap().child(e.label()))
                 .when_some(keys, |d, k| d.child(kbd(k, p.fg_dim)))
                 .on_click(move |_, w, cx| pick(i, w, cx))
                 .into_any_element(),
@@ -345,13 +345,13 @@ mod tests {
             &[d(1)],
             vec![other.clone(), fix("Organize imports", false), fix("Remove unused import", true)],
         );
-        let labels: Vec<String> = list.iter().map(|e| e.label("Claude")).collect();
+        let labels: Vec<String> = list.iter().map(|e| e.label()).collect();
         assert_eq!(
             labels,
             [
                 "Remove unused import",
                 "Fix all \u{2018}Remove unused import\u{2019} in file",
-                "Ask Claude to fix",
+                "Ask AI to fix",
                 "Organize imports",
                 "Generate toString()",
             ]

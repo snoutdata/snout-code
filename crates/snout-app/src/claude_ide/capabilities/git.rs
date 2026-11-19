@@ -112,7 +112,80 @@ pub const ALL: &[Capability] = &[
         run: Run::Own(|ws, _, reply, _, cx| repo_action(ws, reply, Action::Fetch, "Fetching", cx)),
         consent: Some(|_| "fetch from the remotes".to_owned()),
     },
+    Capability {
+        name: "getGitCredentials",
+        domain: Domain::Git,
+        effect: Effect::Read,
+        description: "How Git signs in to a repository's remote: the remote, the credential helpers in effect for it \
+                      (each with the file that sets it), the programs each calls and whether Git finds them or where \
+                      they are installed instead, and the repair SnoutCode can make (`repair`). Call it first when a \
+                      pull, fetch or push could not sign in. No token is ever read or shown.",
+        input: Input::Own(repo_input),
+        run: Run::Own(credentials),
+        consent: None,
+    },
+    Capability {
+        name: "fixGitCredentialHelper",
+        domain: Domain::Git,
+        effect: Effect::Change,
+        description: "Make the repair getGitCredentials names: the helper calls the program Git cannot find by its \
+                      full path, in the file that set the helper, and nothing else changes.",
+        input: Input::Own(repo_input),
+        run: Run::Own(fix_credentials),
+        consent: Some(|a| match a.get("path").and_then(Value::as_str) {
+            Some(p) => format!("repair the Git credential helper of {p}"),
+            None => "repair the Git credential helper of the repository".to_owned(),
+        }),
+    },
 ];
+
+fn repo_input() -> Value {
+    tools::schema(
+        json!({ "path": { "type": "string", "description": "The repository, absolute; the Git view's when left out" } }),
+        &[],
+    )
+}
+
+/// The repository a call names, else the one the Git view shows, else the project.
+fn repo_of(ws: &Workspace, a: &Value, cx: &gpui::App) -> Option<std::path::PathBuf> {
+    let home = crate::host::host(cx).info().home.clone();
+    a.get("path").and_then(Value::as_str).map(|p| tools::path_of(p, &home)).or_else(|| {
+        let m = ws.model.read(cx);
+        m.repo_root().or_else(|| m.project_root())
+    })
+}
+
+fn credentials(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
+    let Some(repo) = repo_of(ws, a, cx) else { return missing(reply, "path") };
+    let (host, extra) = (crate::host::host(cx), crate::credentials::ProgramDirs::of(cx));
+    cx.background_executor()
+        .spawn(async move {
+            let report = crate::credentials::diagnose(&*host, &repo, &extra);
+            let repair = report.repair();
+            reply.ok(tools::json_text(&json!({ "report": report, "repair": repair })));
+        })
+        .detach();
+}
+
+fn fix_credentials(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
+    let Some(repo) = repo_of(ws, a, cx) else { return missing(reply, "path") };
+    let (host, extra) = (crate::host::host(cx), crate::credentials::ProgramDirs::of(cx));
+    cx.background_executor()
+        .spawn(async move {
+            let Some(repair) = crate::credentials::diagnose(&*host, &repo, &extra).repair() else {
+                return reply.error(TOOL_ERROR, "There is no helper here that a full path repairs.", None);
+            };
+            match crate::credentials::apply(&*host, &repair) {
+                Ok(()) => reply.ok(tools::text(format!(
+                    "The helper in {} now calls {}. Try the pull, fetch or push again.",
+                    repair.helper.file.as_ref().map(|f| f.display().to_string()).unwrap_or_default(),
+                    repair.path.display()
+                ))),
+                Err(e) => reply.error(TOOL_ERROR, &e, None),
+            }
+        })
+        .detach();
+}
 
 fn path_input() -> Value {
     tools::schema(json!({ "path": { "type": "string", "description": "From the repository's root" } }), &["path"])

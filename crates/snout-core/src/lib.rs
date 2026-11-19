@@ -13,6 +13,7 @@ mod branch_ops;
 mod branches;
 mod checkout;
 pub mod claude;
+pub mod credentials;
 mod diff;
 pub mod diff_layout;
 mod discover;

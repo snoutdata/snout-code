@@ -3510,6 +3510,11 @@ sleep 30
             Some(Select::SettingsScrolled(Page::Terminal, 2000.)),
         );
         TERMINAL_SET.set(false);
+        // The Version Control page's end: the repositories' credentials.
+        for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
+            let name = format!("settings-page-version-control-credentials-{mode}");
+            shot(&name, theme, Activity::Project, Some(Select::SettingsScrolled(Page::VersionControl, 2000.)));
+        }
         for (by, part) in [(560., "middle"), (2000., "end")] {
             for (theme, mode) in [(ThemeChoice::Light, "light"), (ThemeChoice::Dark, "dark")] {
                 let name = format!("settings-page-terminal-{part}-{mode}");

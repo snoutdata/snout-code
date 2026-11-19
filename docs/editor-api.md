@@ -115,7 +115,7 @@ the agent does not hear of what you click. **Clear** empties it, and it lasts un
 
 | Tool | Domain | What it does | Arguments |
 |---|---|---|---|
-| `getAppState` | app | Where the session stands: the project (none when it runs in the home folder), its branch, the Git operation running and the last one that failed (with why Git could not sign in, when that is why), the open files, the runs, the problems, the windows showing and the connection | none |
+| `getAppState` | app | Where the session stands: the project (none when it runs in the home folder), its branch, the Git operation running and the last one that failed (with why Git could not sign in, when that is why), the repository the Git view shows (`gitView`, which may be another than the project's) and every repository it lists (`repositories`, with their paths), the open files, the runs, the problems, the windows showing and the connection | none |
 | `showToolWindow` | app | Brings a window to the front: Project, Git, Run, Debug, Build, Output, Terminal, Problems, Console, Gradle, Maven, Spring, Tests, Agent Changes, Structure, Hierarchy, Notifications, Processes, Agent Log or Agent View | `name` |
 | `showInApp` | app | Shows you markdown in the Agent View | `markdown`; `title`, `clear` |
 | `showNotification` | app | Tells you something in the status bar and Notifications | `message` |
@@ -124,7 +124,7 @@ the agent does not hear of what you click. **Clear** empties it, and it lasts un
 | `getSettings` | app | The appearance and editor settings an agent may change | none |
 | `setSetting` | app | Changes one of them | `key`, `value` |
 | `getShortcuts` | app | The commands, with their keys as bound now | none |
-| `listProjects` | project | The project open, and those opened lately | none |
+| `listProjects` | project | The project open, those opened lately, and every repository the Git view lists, with its path, group and whether the Git view shows it | none |
 | `switchProject` | project | Opens a folder as the project | `path` |
 | `closeProject` | project | Closes the project | none |
 | `showNewProject` | project | Opens the New Project dialog | none |
@@ -165,6 +165,8 @@ the agent does not hear of what you click. **Clear** empties it, and it lasts un
 | `commitChanges` | git | Commits what is staged | `message` |
 | `pushCommits` | git | Pushes the current branch | none |
 | `fetchRemotes` | git | Fetches from the remotes | none |
+| `getGitCredentials` | git | How Git signs in to a repository's remote: the helpers in effect and the file that sets each, the programs they call and whether Git finds them, and the repair SnoutCode can make. No token is read | `path` (the Git view's repository when left out) |
+| `fixGitCredentialHelper` | git | Makes that repair: the helper calls the program Git cannot find by its full path, in the file that set it | `path` |
 | `getCommitChange` | git | While a [draft](git.md#draft-the-message-with-your-agent) waits: the change the commit would record, and how to write its message | none |
 | `setCommitMessage` | git | While a draft waits: puts the message in the commit box. An error once it was stopped. With `snout-api`, the message may also come as plain text on standard input | `message` |
 | `listAgentChanges` | agents | The files agents changed that await review | none |

@@ -2439,3 +2439,48 @@ fn the_sign_in_prompt_carries_the_error_on_one_line() {
     assert!(p.contains("gh: command not found | fatal: Authentication failed"), "{p}");
     assert!(p.contains("--show-origin") && p.contains("Never print a token"), "{p}");
 }
+
+/// An agent sees every repository of the list with its path, reads how one signs in, and
+/// repairs a helper whose program Git cannot find once the user says yes.
+#[gpui::test]
+fn an_agent_finds_the_repositories_and_repairs_a_credential_helper(cx: &mut TestAppContext) {
+    use crate::model::Dialog;
+    let repo = demo_repo("harness-credentials");
+    git(&repo, &["remote", "set-url", "origin", "https://github.com/demo/demo.git"]);
+    let program = "snout-test-credential-agent";
+    let key = "credential.https://github.com.helper";
+    git(&repo, &["config", "--add", key, &format!("!{program} auth git-credential")]);
+    let bin = repo.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join(program), "#!/bin/sh\n").unwrap();
+    let lock_dir = scratch_dir("harness-credentials-ide");
+    let (model, ws, cx) = open_with_ide(cx, with_repo(&repo), &lock_dir);
+    hook_command(&ws, cx);
+    cx.update(|_, cx| cx.set_global(crate::credentials::ProgramDirs(vec![bin.clone()])));
+    let path = repo.to_string_lossy().into_owned();
+
+    let (_, body) = agent_calls(cx, "listProjects", json!({}), true);
+    let listed = serde_json::from_str::<Value>(&body).unwrap();
+    assert!(
+        listed["repositories"].as_array().unwrap().iter().any(|r| r["path"] == path.as_str()),
+        "the repository is listed with its path: {body}"
+    );
+    let (_, body) = agent_calls(cx, "getGitCredentials", json!({ "path": path }), true);
+    let v = serde_json::from_str::<Value>(&body).unwrap();
+    assert_eq!(v["repair"]["program"], program, "{body}");
+    assert!(!body.contains("password"), "no secret is read");
+
+    let call = agent_starts_call(cx, "fixGitCredentialHelper", json!({ "path": path }), true);
+    pump_until(cx, "the card", |cx| cx.update(|_, cx| matches!(model.read(cx).dialog, Some(Dialog::AgentAsks { .. }))));
+    cx.run_until_parked();
+    crate::quit_tests::click(cx, "agent-once");
+    let (status, body) = agent_gets_answer(cx, call);
+    assert_eq!(status, 200, "{body}");
+    let out = std::process::Command::new("git").arg("-C").arg(&repo).args(["config", "--get", key]).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        format!("!{} auth git-credential", bin.join(program).display())
+    );
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}

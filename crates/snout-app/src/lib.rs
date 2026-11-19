@@ -12,6 +12,8 @@ pub mod claude_ide;
 pub mod components;
 pub mod console;
 pub mod core_text;
+pub mod credentials;
+pub mod credentials_view;
 pub mod dialogs;
 pub mod drag_select;
 pub mod editing;

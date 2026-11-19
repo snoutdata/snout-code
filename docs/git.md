@@ -249,9 +249,21 @@ When a pull, fetch, push or clone fails because Git could not sign in to the rem
 - **A repository the server says is not there**, which is also what it tells an account that may not see it. With several accounts, the saved one may be the wrong one.
 - **An SSH key the server does not accept**, or **a host key SSH does not know** yet or that changed.
 
-**Fix with** the console's agent (Claude, Codex, or the one you chose in Settings) sends it what Git said, the repository and where to look, and brings the console forward. The agent finds where the credentials come from and which account they use, fixes or removes a broken helper, and for a sign in only you can do (a browser login, a new token, an SSH key) opens the page or gives you the exact command. It is asked never to print a token. **Open Terminal** opens your terminal in the repository, for a login you would rather type yourself. ⏎ asks the agent; Esc closes.
+When the helper calls a program by its name alone and Git cannot find it, but it is installed elsewhere (a window opened from the Finder runs Git without `/opt/homebrew/bin` on its `PATH`, where Homebrew puts `gh`), the dialog says so and **Fix Helper** comes first: it makes the helper call the program by its full path, in the file that set the helper (`.git/config`, or `~/.gitconfig`), and changes nothing else. ⏎ fixes it; then try again. The same repair is in [Credentials](#credentials).
+
+**Fix with AI** sends the console's agent (Claude, Codex, or the one you chose in Settings) what Git said, the repository and where to look, and brings the console forward. The agent finds where the credentials come from and which account they use, fixes or removes a broken helper, and for a sign in only you can do (a browser login, a new token, an SSH key) opens the page or gives you the exact command. It is asked never to print a token. **Open Terminal** opens your terminal in the repository, for a login you would rather type yourself. ⏎ asks the agent; Esc closes.
 
 An agent working through the [editor API](editor-api.md) sees the same: after `pushCommits` or `fetchRemotes`, `getAppState` reports `project.git.running` while it runs and `project.git.lastFailure` (Git's words, and `signIn` with the reason) when it failed.
+
+### Credentials
+
+Settings ▸ Version Control ▸ **Credentials** shows, for every repository in the list, how Git signs in to its remote: the server, the credential helpers in effect (each with the file that sets it, and a mark for whether Git finds the program it calls), and a badge: **Works**, **Broken helper**, **No helper**, or **SSH keys** for a remote reached over SSH.
+
+- **Fix Helper**, on a helper whose program Git cannot find but which is installed elsewhere: as in the sign in dialog above.
+- **Check Sign In** asks the helpers which account they give for the remote, without asking you anything (the Keychain may ask whether Git may read it).
+- **Save Token…** keeps a user name and a token (or password) for the remote with your system's own helper: the Keychain on the Mac (`osxkeychain`), Git Credential Manager on Windows, libsecret on Linux. When no such helper answers for the remote, SnoutCode adds it to your Git settings first (`credential.helper` in `~/.gitconfig`). The token never goes in a file SnoutCode writes, and the terminal and the agents use the same credentials.
+
+An agent sees the same through the [editor API](editor-api.md): `getGitCredentials` reads it (never a token), and `fixGitCredentialHelper` makes the repair once you say yes. `listProjects` and `getAppState` name every repository of the list with its path, so an agent asked about one finds it without searching the disk.
 
 ### Background fetch
 

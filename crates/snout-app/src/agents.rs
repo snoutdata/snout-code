@@ -416,7 +416,7 @@ fn output_within(host: &dyn snout_host::Host, cmd: snout_host::Cmd, limit: std::
 }
 
 /// The program `name` as the user's shell finds it, if the shell says within [`SHELL_LOOKUP`].
-fn from_shell(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
+pub fn from_shell(host: &dyn snout_host::Host, name: &str) -> Option<PathBuf> {
     let windows = host.info().is_windows();
     let cmd = if windows {
         snout_host::Cmd::new("powershell.exe")

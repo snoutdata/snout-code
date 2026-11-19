@@ -131,6 +131,16 @@ The files of source folders the build compiles from outside the project folder a
 
 Press ⌘L (Edit ▸ Go to Line…) in an editor and type a line number, such as `120`, or a line and a column, such as `120:5`. ↩ moves the caret there.
 
+## Where a jump lands
+
+Going to a declaration, a usage or an implementation, to a line, or to a place a search or a tool window lists brings the place to the middle of the view, unless it already shows well clear of the top and bottom. The word there lights up for a moment, then fades, so your eye finds it.
+
+When ⌘-click has nothing to show (no usages, no declaration), its note shows at the caret; the hover card of the word you clicked stays away until the pointer moves to another word.
+
+## Back and Forward
+
+Navigate ▸ Back (⌥⌘←) returns to where the caret was before the last jump, across files, and Navigate ▸ Forward (⌥⌘→) goes again. On Linux and Windows the keys are Ctrl+Alt+← and Ctrl+Alt+→. The mouse's side buttons do the same. A jump is going to a declaration, usage or implementation, Go to Line, or opening a place from a search, the Structure window or another tool window. A new jump after going back clears what Forward had. Give them other keys on Settings ▸ Keymap, where they are **Back** and **Forward** (see [Keymap](settings-and-keymap.md#keymap)).
+
 ## Go to Symbol
 
 Symbols come from the Java engine, so these work for the Java files of a Gradle build.

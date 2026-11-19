@@ -238,6 +238,8 @@ impl EditorPanel {
 
     /// A note at the caret, for a few seconds: why a command did nothing.
     pub fn show_hint(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
+        // The note answers what was just done: the hover card does not cover it.
+        self.hide_card(cx);
         self.hint = Some(text.into());
         self._hint = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HINT_FOR).await;

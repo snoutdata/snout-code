@@ -108,6 +108,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A jump: Back comes back to where the caret is now.
+        self.note_jump(window, cx);
         if let Some(path) = snout_lang::uri::to_path(&uri) {
             self.open_file(path.clone(), None, false, window, cx);
             if let Some(editor) = self.editors(cx).into_iter().find(|e| e.read(cx).path == path) {

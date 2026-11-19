@@ -143,6 +143,8 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "Search" => sf("magnifyingglass", L::Search),
         "Replace" => sf("arrow.left.arrow.right", L::Replace),
         "GoToLine" => sf("number", L::Hash),
+        "NavigateBack" => sf("arrow.left", L::ArrowLeft),
+        "NavigateForward" => sf("arrow.right", L::ArrowRight),
         "ToggleComment" => sf("text.bubble", L::MessageSquareCode),
         "DuplicateLine" => sf("plus.square.on.square", L::CopyPlus),
         "MoveLineUp" => sf("arrow.up", L::ArrowUp),

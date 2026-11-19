@@ -34,6 +34,7 @@ mod claude;
 pub mod context_actions;
 mod impl_gutter;
 mod inlay;
+mod landing;
 mod lang_features;
 pub mod markdown_preview;
 pub mod navigation;
@@ -313,6 +314,8 @@ pub enum EditorEvent {
     AgentLines,
     /// Something for the Git view (the annotation column's commit).
     Git(GitRequest),
+    /// A jump within the file left the caret's place (Navigate ▸ Back comes back to it).
+    Jumped(Position),
 }
 
 pub struct EditorPanel {
@@ -461,6 +464,8 @@ pub struct EditorPanel {
     caret_seen: usize,
     /// How far down a restored tab's view was, until it has been laid out to scroll there.
     pending_scroll: Option<f32>,
+    /// Where the last jump landed: the view scrolling there, the word lit up.
+    landing: landing::Landing,
     /// The file is being read from the host; the tab shows it once it is.
     pub loading: bool,
     /// What was asked of the tab while its file was being read, done once it is: where
@@ -660,6 +665,7 @@ impl EditorPanel {
             gutter_tip: None,
             caret_seen: 0,
             pending_scroll: None,
+            landing: Default::default(),
             loading: false,
             pending_caret: None,
             pending_sync: None,
@@ -785,6 +791,9 @@ impl EditorPanel {
                 }
             });
             self.caret_seen = self.state.read(cx).cursor();
+            if focus {
+                self.land(cx);
+            }
         }
         if self.review.is_none() && !self.queue.is_empty() {
             self.next_review(window, cx);
@@ -1309,6 +1318,14 @@ impl EditorPanel {
         cx.notify();
     }
 
+    /// A jump within the file is about to move the caret: Back comes back to where it is.
+    pub fn note_jump(&mut self, cx: &mut Context<Self>) {
+        let at = self.state.read(cx).cursor_position();
+        cx.emit(EditorEvent::Jumped(at));
+    }
+
+    /// Put the caret on `line` and `column` (from 0), take the keyboard, and land there: the
+    /// line to the middle of the view, the word lit up for a moment.
     pub fn go_to(&mut self, line: u32, column: u32, window: &mut Window, cx: &mut Context<Self>) {
         if self.loading {
             self.pending_caret = Some((Position::new(line, column), true));
@@ -1318,6 +1335,7 @@ impl EditorPanel {
             s.set_cursor_position(Position::new(line, column), window, cx);
             s.focus(window, cx);
         });
+        self.land(cx);
     }
 
     /// The text in the editor.
@@ -1604,13 +1622,15 @@ pub fn saved_class_file(state: &PanelState) -> Option<(lsp_types::Uri, PathBuf)>
 }
 
 impl Render for EditorPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.state.read(cx).line_height().is_some()
             && !self.loading
             && let Some(scroll) = self.pending_scroll.take()
         {
             self.state.update(cx, |s, cx| s.set_scroll_offset(gpui::point(px(0.), px(-scroll)), cx));
         }
+        // A jump's place comes to the middle (after a restored scroll, which it overrides).
+        self.reveal_now(window, cx);
         let p = palette(cx);
         let reviewing = self.review.is_some();
         let has_lang = self.lang.is_some();

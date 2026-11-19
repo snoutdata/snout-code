@@ -37,3 +37,5 @@ build, editor, git, agents or spring. Call each tool as `{{API}} <name> '<JSON a
 A tool tagged `change` writes or starts something: the call waits while the user answers a card in
 the window, and may come back refused. Do not try it again unless they ask. When you need to know
 where you stand (no project may be open, and you may be in the home folder), call `getAppState` first.
+It also names every Git repository the Git view lists, with its path, and the one the Git view
+shows: when a Git error names a repository, find it there rather than searching the disk.

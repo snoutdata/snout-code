@@ -260,14 +260,14 @@ fn the_context_actions_offer_fix_all_in_file_and_apply_it(cx: &mut TestAppContex
     cx.run_until_parked();
     let labels: Vec<String> = cx.update(|_, cx| {
         let list = editor.read(cx).hover.actions.as_ref().expect("⌥↩ lists the actions");
-        list.entries.iter().map(|e| e.label("Claude")).collect()
+        list.entries.iter().map(|e| e.label()).collect()
     });
     assert_eq!(
         labels,
         [
             "Remove unused import",
             "Fix all \u{2018}Remove unused import\u{2019} in file",
-            "Ask Claude to fix",
+            "Ask AI to fix",
             "Extract to local variable"
         ]
     );
@@ -414,10 +414,10 @@ fn the_problems_window_groups_by_file_filters_and_toggles_severities(cx: &mut Te
     cx.run_until_parked();
     let labels: Vec<String> = cx.update(|_, cx| {
         let list = problems.read(cx).actions.as_ref().expect("the actions of the problem");
-        list.entries.iter().map(|e| e.label("Claude")).collect()
+        list.entries.iter().map(|e| e.label()).collect()
     });
     assert!(labels.iter().any(|l| l.starts_with("Fix all")), "{labels:?}");
-    assert!(labels.iter().any(|l| l == "Ask Claude to fix"), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Ask AI to fix"), "{labels:?}");
     let _ = std::fs::remove_dir_all(repo);
 }
 

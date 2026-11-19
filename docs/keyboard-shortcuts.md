@@ -39,6 +39,8 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⇧⌘R | Replace in Files… | |
 | ⌘↩ | Replace All | In Replace in Files |
 | ⌘L | Go to Line… | |
+| ⌥⌘← | Navigate Back (where the caret was before the last jump) | |
+| ⌥⌘→ | Navigate Forward | |
 | ⌘T | Go to Symbol in Workspace… | |
 | ⇧⌘O | Go to Symbol in File… | Editor |
 | ⌘F12 | File Structure… | Editor |
@@ -88,7 +90,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⌥⌘C | Extract Constant | Editor |
 | ⌥⇧⌘F | Extract Field (⌥⌘F is Replace in File) | Editor |
 | ⌥⌘N | Inline | Editor |
-| ⌥↩, ⌘. | Show Context Actions… (fixes, Fix all in file, Ask Claude to fix) | Editor, Problems window |
+| ⌥↩, ⌘. | Show Context Actions… (fixes, Fix all in file, Ask AI to fix) | Editor, Problems window |
 | ⌥⇧↩ | Apply Top Fix (the best fix of the problem at the caret) | Editor |
 | ⌥⇧F | Format Document | Editor |
 | ⌥⌘L | Format Selection (the whole file when nothing is selected) | Editor |

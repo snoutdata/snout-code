@@ -161,7 +161,9 @@ impl Page {
             }
             Page::Keymap => "shortcuts keys bindings",
             Page::Editor => "tab size indent soft wrap whitespace font navigation click declaration modifier",
-            Page::VersionControl => "git fetch interval background blame annotate annotations author hints line",
+            Page::VersionControl => {
+                "git fetch interval background blame annotate annotations author hints line credentials credential helper token password sign in keychain account"
+            }
             Page::Gradle => "build tools daemon idle timeout",
             Page::Spring => "frameworks boot profiles active beans",
             Page::Terminal => {
@@ -238,6 +240,8 @@ pub struct SettingsView {
     /// its keys, and the commands that had them.
     pub taken: Option<(String, String, Vec<String>)>,
     focus: FocusHandle,
+    /// The Version Control page's credentials, looked at once the page shows.
+    credentials: Entity<crate::credentials_view::CredentialsPanel>,
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
@@ -406,6 +410,7 @@ impl SettingsView {
             }
         })
         .detach();
+        let credentials = cx.new(|cx| crate::credentials_view::CredentialsPanel::new(&model, cx));
         Self {
             model,
             draft,
@@ -432,6 +437,7 @@ impl SettingsView {
             recording: None,
             taken: None,
             focus: cx.focus_handle(),
+            credentials,
         }
     }
 
@@ -1584,6 +1590,9 @@ impl SettingsView {
                         ],
                         &p,
                     ))
+                    .when(!self.project_only, |d| {
+                        d.child(section(ts!("credentials-section"), &p)).child(self.credentials.clone())
+                    })
                     .into_any_element()
             }
             Page::Gradle => {

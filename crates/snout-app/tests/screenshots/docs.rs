@@ -1309,12 +1309,7 @@ fn shop(projects: &Path) {
     let e2 = e.clone();
     let ok = w.pump(60, &mut |cx| e2.read(cx).hover.actions.as_ref().is_some_and(|l| !l.loading));
     let labels: Vec<String> = w.cx.update(|cx| {
-        e.read(cx)
-            .hover
-            .actions
-            .as_ref()
-            .map(|l| l.entries.iter().map(|x| x.label("Claude")).collect())
-            .unwrap_or_default()
+        e.read(cx).hover.actions.as_ref().map(|l| l.entries.iter().map(|x| x.label()).collect()).unwrap_or_default()
     });
     println!("docs: quick fixes {ok} {labels:?}");
     w.pump(1, &mut |_| false);

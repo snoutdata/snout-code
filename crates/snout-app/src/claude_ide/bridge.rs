@@ -984,7 +984,10 @@ pub fn sign_in_prompt(details: &str, repo: Option<&Path>, host: Option<&str>) ->
     let server = host.unwrap_or("the remote");
     let place = repo.map(|r| format!(" in {}", r.display())).unwrap_or_default();
     format!(
-        "Git{place} could not sign in to {server}. Git said: {said}. Find out why: where the credentials come \
+        "Git{place} could not sign in to {server}. Git said: {said}. First call SnoutCode's `getGitCredentials` \
+         (with this repository's path): it lists the helpers in effect and where each is set, the programs they \
+         call and where they are installed, and a repair; when it names one, `fixGitCredentialHelper` makes it. \
+         Otherwise find out why: where the credentials come \
          from (`git config --show-origin --get-regexp '^credential'`, `git remote -v`, the SSH config and agent), \
          whether the programs a credential helper needs are installed here, and which account it signs in as. Then \
          help me get working credentials: fix or remove a broken helper (a repository copied from another computer \
@@ -1078,7 +1081,7 @@ pub fn ask_for_draft(ws: &mut Workspace, window: &mut Window, cx: &mut Context<W
             let api = super::api::script(&dir);
             console.update(cx, |c, cx| {
                 c.ensure_session(&root, window, cx);
-                c.send_when_ready(&root, &draft_prompt(&api), cx);
+                c.send_draft_when_ready(&root, &draft_prompt(&api), cx);
                 let name = c.session_agent(&root, cx).short;
                 c.show_note(t!("agents-asked-for-the-commit-message", name = name.to_string()), cx);
             });

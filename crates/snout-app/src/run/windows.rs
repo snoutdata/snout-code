@@ -446,7 +446,7 @@ impl RunWindow {
                 let (runs, id) = (self.runs.clone(), s.id);
                 row = row.child(
                     crate::components::Button::new("run-fix-with-agent", agent.icon)
-                        .label(t!("runwin-fix-with", agent = agent.short.to_string()))
+                        .label(ts!("runwin-fix-with"))
                         .compact()
                         .ghost()
                         .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.fix_with_agent(id, cx))),
@@ -575,7 +575,7 @@ impl RunWindow {
                     let agent = crate::agents::console_agent(cx);
                     let runs = runs.clone();
                     menu.separator().item(
-                        PopupMenuItem::new(t!("runwin-fix-with", agent = agent.short.to_string()))
+                        PopupMenuItem::new(ts!("runwin-fix-with"))
                             .icon(crate::components::menu_icon(agent.icon))
                             .on_click(move |_, _, cx| runs.update(cx, |r, cx| r.fix_with_agent(id, cx))),
                     )

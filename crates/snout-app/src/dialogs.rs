@@ -249,10 +249,28 @@ fn sign_in_fix(kind: &SignInKind) -> &'static str {
     }
 }
 
-/// Sign in: the folder the agent and the terminal work in, and the agent's prompt.
-fn sign_in_ask(m: &Model, details: &str, repo: Option<&Path>, host: Option<&str>) -> Option<(PathBuf, String)> {
-    let root = repo.map(Path::to_path_buf).or_else(|| m.project_root())?;
-    Some((root, crate::claude_ide::bridge::sign_in_prompt(details, repo, host)))
+/// The file a repair changes, as the user knows it: `.git/config` in the repository, else
+/// the file's full path (`~/.gitconfig`).
+fn repair_file(r: &crate::credentials::Repair) -> String {
+    let Some(file) = &r.helper.file else { return String::new() };
+    match file.strip_prefix(&r.repo) {
+        Ok(rel) => rel.display().to_string(),
+        Err(_) => file.display().to_string(),
+    }
+}
+
+/// Sign in: the folder the terminal opens in (the repository), the one whose agent is asked
+/// (the session the console shows: the project's, else the repository's), and the prompt,
+/// which names the repository.
+fn sign_in_ask(
+    m: &Model,
+    details: &str,
+    repo: Option<&Path>,
+    host: Option<&str>,
+) -> Option<(PathBuf, PathBuf, String)> {
+    let terminal = repo.map(Path::to_path_buf).or_else(|| m.project_root())?;
+    let agent = m.project_root().unwrap_or_else(|| terminal.clone());
+    Some((terminal, agent, crate::claude_ide::bridge::sign_in_prompt(details, repo, host)))
 }
 
 /// The folders the Clone dialog offers, most recent first: those holding the projects opened
@@ -294,6 +312,20 @@ pub struct DialogBody {
     run_hooks: bool,
     /// Holds the keyboard in a dialog with no field, so ⌘⌫ and ⏎ reach it.
     focus: FocusHandle,
+    /// Git could not sign in: the helper repair found for the repository, and how it went.
+    repair: Repairing,
+    _repair: Option<gpui::Task<()>>,
+}
+
+/// The deterministic repair of a broken credential helper, as the sign in dialog offers it.
+#[derive(Clone, Debug, Default)]
+pub enum Repairing {
+    /// Nothing to offer (or still looking).
+    #[default]
+    None,
+    Ready(crate::credentials::Repair),
+    Done(crate::credentials::Repair),
+    Failed(String),
 }
 
 impl DialogBody {
@@ -376,7 +408,51 @@ impl DialogBody {
             cursor: 0,
             dont_ask: false,
             run_hooks: true,
+            repair: Repairing::None,
+            _repair: None,
         }
+        .looking_for_repair(cx)
+    }
+
+    /// Git could not sign in because a helper failed: look, off the UI thread, for a helper
+    /// a full path repairs.
+    fn looking_for_repair(mut self, cx: &mut Context<Self>) -> Self {
+        let Dialog::SignIn { problem, repo, .. } = &self.dialog else { return self };
+        if !matches!(problem.kind, SignInKind::BrokenHelper { .. }) {
+            return self;
+        }
+        let Some(repo) = repo.clone().or_else(|| self.model.read(cx).repo_root()) else { return self };
+        let (host, extra) = (crate::host::host(cx), crate::credentials::ProgramDirs::of(cx));
+        self._repair = Some(cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_executor()
+                .spawn(async move { crate::credentials::diagnose(&*host, &repo, &extra).repair() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(r) = found {
+                    this.repair = Repairing::Ready(r);
+                    cx.notify();
+                }
+            });
+        }));
+        self
+    }
+
+    /// Make the helper repair the dialog offers.
+    fn apply_repair(&mut self, cx: &mut Context<Self>) {
+        let Repairing::Ready(repair) = self.repair.clone() else { return };
+        let host = crate::host::host(cx);
+        self._repair = Some(cx.spawn(async move |this, cx| {
+            let r = repair.clone();
+            let done = cx.background_executor().spawn(async move { crate::credentials::apply(&*host, &r) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.repair = match done {
+                    Ok(()) => Repairing::Done(repair),
+                    Err(e) => Repairing::Failed(e),
+                };
+                cx.notify();
+            });
+        }));
     }
 
     /// Put the keyboard in the dialog: its first field, else the dialog itself (so ⌘⌫
@@ -503,10 +579,12 @@ impl DialogBody {
             Dialog::About | Dialog::Error(_) | Dialog::Failed(_) | Dialog::HookStopped { .. } | Dialog::Info { .. } => {
                 self.close(window, cx)
             }
+            Dialog::SignIn { .. } if matches!(self.repair, Repairing::Ready(_)) => self.apply_repair(cx),
+            Dialog::SignIn { .. } if matches!(self.repair, Repairing::Done(_)) => self.close(window, cx),
             Dialog::SignIn { ref problem, ref details, ref repo } => {
                 let ask = sign_in_ask(self.model.read(cx), details, repo.as_deref(), problem.host.as_deref());
                 match ask {
-                    Some((root, prompt)) => self.act(Action::AskAgent { root, prompt }, window, cx),
+                    Some((_, root, prompt)) => self.act(Action::AskAgent { root, prompt }, window, cx),
                     None => self.close(window, cx),
                 }
             }
@@ -985,10 +1063,32 @@ impl Render for DialogBody {
                 body.push(code(&details).into_any_element());
                 let ask = sign_in_ask(m, &details, repo.as_deref(), problem.host.as_deref());
                 let agent = crate::agents::console_agent(cx);
-                if ask.is_some() {
-                    let text = t!("dialogs-sign-in-agent", agent = agent.short.to_string());
-                    body.push(callout(Tone::Info, text, &p).into_any_element());
+                let repair = self.repair.clone();
+                match &repair {
+                    Repairing::Ready(r) => {
+                        let text = t!(
+                            "dialogs-sign-in-repair",
+                            program = r.program.clone(),
+                            path = r.path.display().to_string(),
+                            file = repair_file(r)
+                        );
+                        body.push(callout(Tone::Info, text, &p).into_any_element());
+                    }
+                    Repairing::Done(r) => {
+                        let text = t!("dialogs-sign-in-repaired", path = r.path.display().to_string());
+                        body.push(callout(Tone::Success, text, &p).into_any_element());
+                    }
+                    Repairing::Failed(e) => {
+                        let text = t!("dialogs-sign-in-repair-failed", error = e.clone());
+                        body.push(callout(Tone::Danger, text, &p).into_any_element());
+                    }
+                    Repairing::None if ask.is_some() => {
+                        let text = ts!("dialogs-sign-in-agent");
+                        body.push(callout(Tone::Info, text, &p).into_any_element());
+                    }
+                    Repairing::None => {}
                 }
+                let fixing = matches!(repair, Repairing::Ready(_) | Repairing::Done(_));
                 let copy = details.clone();
                 buttons.push(
                     Button::new("copy", IconName::Copy)
@@ -997,13 +1097,13 @@ impl Render for DialogBody {
                         .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone())))
                         .into_any_element(),
                 );
-                if let Some((root, prompt)) = ask {
+                if let Some((terminal, root, prompt)) = ask {
                     buttons.push(on!(
                         Button::new("terminal", IconName::SquareTerminal)
                             .debug_selector("sign-in-terminal")
                             .focusable()
                             .label(ts!("dialogs-open-terminal")),
-                        Action::OpenInTerminal(root.clone())
+                        Action::OpenInTerminal(terminal)
                     ));
                     buttons.push(
                         Button::new("close", CANCEL_ICON)
@@ -1013,15 +1113,31 @@ impl Render for DialogBody {
                             .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
                             .into_any_element(),
                     );
-                    buttons.push(on!(
-                        Button::new("ok", agent.icon)
-                            .debug_selector("sign-in-fix-with-agent")
-                            .primary()
-                            .focusable()
-                            .label(t!("dialogs-fix-with", agent = agent.short.to_string()))
-                            .kbd("⏎"),
-                        Action::AskAgent { root, prompt }
-                    ));
+                    // The deterministic repair comes first; the agent is there for the rest.
+                    let ai = Button::new("ai", agent.icon)
+                        .debug_selector("sign-in-fix-with-agent")
+                        .focusable()
+                        .label(ts!("dialogs-fix-with"));
+                    let ai = if fixing { ai } else { ai.primary().kbd("⏎") };
+                    buttons.push(on!(ai, Action::AskAgent { root, prompt }));
+                    match repair {
+                        Repairing::Ready(_) => buttons.push(
+                            Button::new("ok", IconName::Wrench)
+                                .debug_selector("sign-in-repair")
+                                .primary()
+                                .focusable()
+                                .label(ts!("dialogs-fix-helper"))
+                                .kbd("⏎")
+                                .on_click(cx.listener(|this, _, _, cx| this.apply_repair(cx)))
+                                .into_any_element(),
+                        ),
+                        Repairing::Done(_) => buttons.push(
+                            ok(ts!("dialogs-close"))
+                                .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
+                                .into_any_element(),
+                        ),
+                        _ => {}
+                    }
                 } else {
                     buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
                 }

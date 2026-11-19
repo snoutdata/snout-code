@@ -115,7 +115,7 @@ You do not need to send the selection for Claude Code to see it: while connected
 
 ## Ask the agent to fix a problem
 
-For any problem in the code, **Ask Claude to fix** is in the context actions (⌥↩ on the problem, or the bulb in the gutter), and in the Problems window's (right-click a problem). When the engine has no fix for a problem, it is also the button of the problem's hover card. With another agent in the console, it says that agent's name, such as **Ask Codex to fix**.
+For any problem in the code, **Ask AI to fix** is in the context actions (⌥↩ on the problem, or the bulb in the gutter), and in the Problems window's (right-click a problem). When the engine has no fix for a problem, it is also the button of the problem's hover card. It asks whichever agent the console runs.
 
 SnoutCode puts the file, the problem's lines and what is wrong in the agent's prompt, and brings the console forward:
 
@@ -130,7 +130,7 @@ Nothing is sent until you press ↩, so you can add to it first. The lines light
 
 ### A run that failed
 
-When a run fails, the Run window offers **Fix with Claude** beside **Failed after …**, and in the console's right-click menu. SnoutCode saves the run's whole output to a file on the machine the project is on and sends the agent a request to read it, find the cause in the project and fix it, telling you what only you can do, such as starting a service the run needs. This one is sent at once, and a note by the console says **Asked Claude to fix Application**. See [Run and debug](run-and-debug.md).
+When a run fails, the Run window offers **Fix with AI** beside **Failed after …**, and in the console's right-click menu. SnoutCode saves the run's whole output to a file on the machine the project is on and sends the agent a request to read it, find the cause in the project and fix it, telling you what only you can do, such as starting a service the run needs. This one is sent at once, and a note by the console says **Asked Claude to fix Application**. See [Run and debug](run-and-debug.md).
 
 ## Watch the agent write
 

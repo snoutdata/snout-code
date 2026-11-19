@@ -15,7 +15,9 @@ pub const ALL: &[Capability] = &[
         name: "listProjects",
         domain: Domain::Project,
         effect: Effect::Read,
-        description: "The project open now, and the projects the user opened lately, most recent first.",
+        description: "The project open now, the projects the user opened lately (most recent first), and every \
+                      Git repository the Git view lists, with its path, its group and whether the Git view shows \
+                      it now. A repository a Git error names is one of these: look it up here, not on the disk.",
         input: Input::None,
         run: Run::Own(list),
         consent: None,
@@ -59,7 +61,26 @@ fn list(ws: &mut Workspace, _: &Value, reply: Reply, _: &mut Window, cx: &mut Co
     let m = ws.model.read(cx);
     let open = m.project_root().map(|p| p.to_string_lossy().into_owned());
     let recent: Vec<String> = m.recent_projects().iter().map(|p| p.to_string_lossy().into_owned()).collect();
-    reply.ok(tools::json_text(&json!({ "open": open, "recent": recent })));
+    reply.ok(tools::json_text(&json!({ "open": open, "recent": recent, "repositories": repositories(m) })));
+}
+
+/// The repositories the Git view lists, in its order: path, name, group, and whether the Git
+/// view shows it now.
+pub(crate) fn repositories(m: &crate::model::Model) -> Vec<Value> {
+    let shown = m.repo_root();
+    m.settings
+        .repos
+        .iter()
+        .map(|r| {
+            let group = m.settings.groups.iter().find(|g| g.repos.contains(r)).map(|g| g.name.clone());
+            json!({
+                "path": r.to_string_lossy(),
+                "name": crate::model::Model::dir_name(r),
+                "group": group,
+                "inGitView": shown.as_ref() == Some(r),
+            })
+        })
+        .collect()
 }
 
 fn open(_: &mut Workspace, a: &Value, reply: Reply, window: &mut Window, cx: &mut Context<Workspace>) {

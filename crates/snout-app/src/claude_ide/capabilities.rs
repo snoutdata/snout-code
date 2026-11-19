@@ -142,8 +142,10 @@ const CORE: &[Capability] = &[
         domain: Domain::App,
         effect: Effect::Read,
         description: "Where this session stands in the SnoutCode window: the project (none is open when the session \
-                      runs in the home folder), its Git branch, the open files, the runs, the problems, the windows \
-                      showing and the connection. Call it first when you need to know any of them.",
+                      runs in the home folder), its Git branch, the repository the Git view shows (it may be another \
+                      than the project's) and every repository it lists with its path, the open files, the runs, the \
+                      problems, the windows showing and the connection. Call it first when you need to know any of \
+                      them.",
         input: Input::None,
         run: Run::Own(app_state),
         consent: None,
@@ -461,6 +463,14 @@ fn app_state_of(ws: &Workspace, window: &Window, cx: &App) -> Value {
     json!({
         "version": env!("CARGO_PKG_VERSION"),
         "project": project,
+        // The repository the Git view shows, which may be another than the project's: the one
+        // a Git error (a push that could not sign in) is about.
+        "gitView": m.repo_root().map(|r| json!({
+            "path": r.to_string_lossy(),
+            "name": crate::model::Model::dir_name(&r),
+            "isTheProject": !m.shows_other_repo(),
+        })),
+        "repositories": projects::repositories(m),
         "homeFolder": host.info().home.to_string_lossy(),
         "connection": crate::remote::connection(cx).map(|(name, _)| name),
         "agent": crate::agents::console_agent(cx).name.to_string(),

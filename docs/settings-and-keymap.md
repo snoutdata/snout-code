@@ -165,6 +165,9 @@ hints, and a long line wrapped or cut at the edge.
   long ago and the commit's message, faint after its end, once the caret rests there for the
   hover's delay (Editor ▸ Hover). Off by default (`blame_current_line`).
 
+**Credentials**: how Git signs in to each repository's remote, with **Fix Helper**, **Check Sign
+In** and **Save Token…**. See [Credentials](git.md#credentials).
+
 ## Build Tools ▸ Gradle
 
 The JDK a project's builds run on is the project's: see [Project Settings](project-settings.md#project),

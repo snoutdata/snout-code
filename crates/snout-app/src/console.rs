@@ -189,9 +189,18 @@ struct Queued {
     text: String,
     /// Press Return after it, once the agent is idle: the prompt is sent, not just typed.
     submit: bool,
+    /// The prompt asks for the commit message: it goes only while that draft waits.
+    draft: bool,
     /// When the text went in, for the Return that follows.
     pasted: Option<Instant>,
     deadline: Instant,
+}
+
+/// Whether `q` will not be sent any more, at `now`, while the draft of the commit message
+/// waits for `asked` (none: no draft waits): its time is up, or it is the draft's prompt and
+/// that draft was stopped. A fix the user asked for goes whatever the draft does.
+fn given_up(q: &Queued, now: Instant, asked: Option<&Path>) -> bool {
+    now > q.deadline || (q.draft && asked != Some(q.root.as_path()))
 }
 
 /// Why the console's agent cannot start.
@@ -1145,19 +1154,25 @@ impl ConsolePanel {
         if self.sessions.get(root).is_some_and(agent_up) {
             return self.type_text(root, text);
         }
-        self.enqueue(root, text, false, Duration::from_secs(30), cx);
+        self.enqueue(root, text, false, false, Duration::from_secs(30), cx);
     }
 
     /// Send `text` to the agent of `root` as a prompt: typed and Return pressed once the agent
     /// is up and has nothing else on (its turn over, no question of its own on the screen).
     pub fn send_when_ready(&mut self, root: &Path, text: &str, cx: &mut Context<Self>) {
-        self.enqueue(root, text, true, SEND_WAIT, cx);
+        self.enqueue(root, text, true, false, SEND_WAIT, cx);
+    }
+
+    /// Send the prompt that asks for the commit message, as [`Self::send_when_ready`] does,
+    /// while that draft waits: stopped or given up, it stays unsent.
+    pub fn send_draft_when_ready(&mut self, root: &Path, text: &str, cx: &mut Context<Self>) {
+        self.enqueue(root, text, true, true, SEND_WAIT, cx);
     }
 
     /// Take back a prompt that is waiting, or stop the turn it began: whether it was sent.
     pub fn take_back(&mut self, root: &Path) -> bool {
         let before = self.queued.len();
-        self.queued.retain(|q| !(q.submit && q.root == root));
+        self.queued.retain(|q| !(q.draft && q.root == root));
         let waiting = self.queued.len() != before;
         if !waiting && let Some(s) = self.sessions.get(root) {
             s.pty.send(b"\x1b");
@@ -1185,9 +1200,10 @@ impl ConsolePanel {
         .detach();
     }
 
-    fn enqueue(&mut self, root: &Path, text: &str, submit: bool, wait: Duration, cx: &mut Context<Self>) {
+    fn enqueue(&mut self, root: &Path, text: &str, submit: bool, draft: bool, wait: Duration, cx: &mut Context<Self>) {
         let deadline = Instant::now() + wait;
-        self.queued.push(Queued { root: root.to_owned(), text: text.to_owned(), submit, pasted: None, deadline });
+        let q = Queued { root: root.to_owned(), text: text.to_owned(), submit, draft, pasted: None, deadline };
+        self.queued.push(q);
         if self._queue.is_some() {
             return;
         }
@@ -1207,11 +1223,12 @@ impl ConsolePanel {
     fn send_queued(&mut self, cx: &mut Context<Self>) -> bool {
         let now = Instant::now();
         let mut sent = false;
-        // A prompt goes only while its draft waits: stopped or given up, it stays unsent.
+        // The draft's prompt goes only while its draft waits: stopped or given up, it stays
+        // unsent. Any other prompt (a fix the user asked for) goes in any case.
         let asked = self.model.read(cx).draft.as_ref().map(|d| d.root.clone());
         let sessions = &mut self.sessions;
         self.queued.retain_mut(|q| {
-            if now > q.deadline || (q.submit && asked.as_ref() != Some(&q.root)) {
+            if given_up(q, now, asked.as_deref()) {
                 return false;
             }
             let Some(s) = sessions.get_mut(&q.root) else { return true };
@@ -1222,7 +1239,7 @@ impl ConsolePanel {
                 }
                 s.pty.send(b"\r");
                 s.turn = Some(Instant::now());
-                sent = true;
+                sent |= q.draft;
                 return false;
             }
             if !agent_up(s) || (q.submit && !agent_idle(s)) {
@@ -1285,7 +1302,7 @@ impl ConsolePanel {
         let asking = self.sessions.get(&root).is_some_and(|s| s.pty.is_running() && asks_the_user(&s.pty.contents()));
         self.model.update(cx, |m, cx| m.draft_asking(asking, &agent.short, cx));
         if let Some(why) = self.prompt_stuck(&root, &agent, cx) {
-            self.queued.retain(|q| !(q.submit && q.root == root));
+            self.queued.retain(|q| !(q.draft && q.root == root));
             self.show_note(why.clone(), cx);
             self.model.update(cx, |m, cx| m.draft_gone(why, cx));
         }
@@ -2920,6 +2937,27 @@ fn default_shell_name(info: &snout_host::HostInfo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fix_the_user_asked_for_is_sent_with_no_draft_waiting() {
+        let now = Instant::now();
+        let q = |draft: bool| Queued {
+            root: PathBuf::from("/p"),
+            text: "fix it".into(),
+            submit: true,
+            draft,
+            pasted: None,
+            deadline: now + Duration::from_secs(60),
+        };
+        // Sign in, a failed run: sent whether or not a draft waits.
+        assert!(!given_up(&q(false), now, None));
+        assert!(!given_up(&q(false), now, Some(Path::new("/other"))));
+        // The draft's own prompt: only while that draft waits.
+        assert!(!given_up(&q(true), now, Some(Path::new("/p"))));
+        assert!(given_up(&q(true), now, None));
+        // Either, once its time is up.
+        assert!(given_up(&q(false), now + Duration::from_secs(61), None));
+    }
 
     #[test]
     fn ctrl_c_copies_only_on_windows_and_only_as_ctrl_c() {

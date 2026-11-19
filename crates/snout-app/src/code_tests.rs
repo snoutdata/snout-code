@@ -1259,3 +1259,237 @@ fn a_click_on_an_implementation_mark_asks_for_the_implementations(cx: &mut TestA
     });
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// A ⌘-click puts the hover card away, and it stays away from that word while the pointer
+/// rests there, so what the click says is not hidden under it; another word shows one again.
+#[gpui::test]
+fn a_navigation_click_puts_the_hover_card_away_until_the_pointer_moves_on(cx: &mut TestAppContext) {
+    use std::time::Duration;
+    let text = "class A {\n    void greet() { helper(1); }\n}\n";
+    let (repo, _, _, editor, cx) = open_text("Quiet.txt", text, (0, 0), cx);
+    let probe = std::rc::Rc::new(Probe {
+        hovers: Default::default(),
+        definitions: Default::default(),
+        cache: Default::default(),
+    });
+    cx.update(|_, cx| {
+        cx.set_global(crate::editor::CannedLang {
+            actions: std::rc::Rc::new(|_, _| Vec::new()),
+            hover: std::rc::Rc::new(|_, word| Some(format!("```java\nvoid {word}()\n```"))),
+        });
+        let state = editor.read(cx).state.clone();
+        state.update(cx, |s, _| s.lsp_mut().definition_provider = Some(probe.clone()));
+    });
+    cx.run_until_parked();
+    let point_at = |cx: &mut VisualTestContext, at: usize| {
+        cx.update(|_, cx| editor.read(cx).state.read(cx).range_to_bounds(&(at..at + 1)).map(|b| b.center()).unwrap())
+    };
+    let helper = point_at(cx, text.find("helper").unwrap() + 2);
+    let greet = point_at(cx, text.find("greet").unwrap() + 2);
+    let card = |cx: &mut VisualTestContext| cx.update(|_, cx| editor.read(cx).hover.card.is_some());
+    let rest = |cx: &mut VisualTestContext| {
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+    };
+    cx.simulate_mouse_move(helper, None, crate::tests::primary());
+    rest(cx);
+    assert!(card(cx), "⌘ over a word shows its card");
+    cx.simulate_click(helper, crate::tests::primary());
+    rest(cx);
+    assert!(!card(cx), "the click puts it away");
+    cx.simulate_mouse_move(helper, None, crate::tests::primary());
+    rest(cx);
+    assert!(!card(cx), "and it stays away while the pointer rests on the word");
+    cx.simulate_mouse_move(greet, None, crate::tests::primary());
+    rest(cx);
+    assert!(card(cx), "another word shows its card again");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A jump lands its place in the middle of the view, the word there lit for a moment; Back
+/// and Forward (⌥⌘← and ⌥⌘→) go through the places jumps left, across files.
+#[gpui::test]
+fn a_jump_lands_in_the_middle_lit_up_and_back_and_forward_retrace_it(cx: &mut TestAppContext) {
+    use std::time::Duration;
+    let text: String = (1..=400).map(|i| format!("line{i} of the file\n")).collect();
+    let (repo, model, ws, editor, cx) = open_text("Long.txt", &text, (0, 0), cx);
+    std::fs::write(repo.join("Other.txt"), "other\nfile\n").unwrap();
+    cx.run_until_parked();
+    let caret = |cx: &mut VisualTestContext| cx.update(|_, cx| editor.read(cx).state.read(cx).cursor_position().line);
+    // Go to Line 300: the line lands in the middle, lit.
+    cx.simulate_keystrokes(&crate::keymap::platform_keys("cmd-l"));
+    cx.simulate_input("300");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.run_until_parked();
+    assert_eq!(caret(cx), 299);
+    let (line_y, view) = cx.update(|_, cx| {
+        let s = editor.read(cx).state.read(cx);
+        let c = s.cursor();
+        (s.range_to_bounds(&(c..c)).expect("the line shows").center().y, s.input_bounds())
+    });
+    let off = (f32::from(line_y) - f32::from(view.center().y)).abs();
+    assert!(off < f32::from(view.size.height) / 8., "the line is in the middle ({off} off)");
+    assert!(cx.update(|_, cx| editor.read(cx).landing_lit()), "the word is lit");
+    cx.executor().advance_clock(Duration::from_millis(2500));
+    cx.run_until_parked();
+    assert!(!cx.update(|_, cx| editor.read(cx).landing_lit()), "for a moment only");
+    // Another file at a place: a jump too.
+    act(&model, cx, Action::OpenFile(repo.join("Other.txt"), Some((1, 0))));
+    cx.run_until_parked();
+    let front = |cx: &mut VisualTestContext| {
+        cx.update(|w, cx| ws.read(cx).active_editor(w, cx).map(|e| e.read(cx).name().to_string()))
+    };
+    assert_eq!(front(cx).as_deref(), Some("Other.txt"));
+    let back = crate::keymap::platform_keys("cmd-alt-left");
+    let forward = crate::keymap::platform_keys("cmd-alt-right");
+    cx.simulate_keystrokes(&back);
+    cx.run_until_parked();
+    assert_eq!((front(cx).as_deref(), caret(cx)), (Some("Long.txt"), 299), "back to line 300");
+    cx.simulate_keystrokes(&back);
+    cx.run_until_parked();
+    assert_eq!(caret(cx), 0, "back to where Go to Line left");
+    cx.simulate_keystrokes(&forward);
+    cx.run_until_parked();
+    assert_eq!(caret(cx), 299);
+    cx.simulate_keystrokes(&forward);
+    cx.run_until_parked();
+    assert_eq!(front(cx).as_deref(), Some("Other.txt"), "forward again to the other file");
+    // The Navigate menu has both, with their keys.
+    let names: Vec<String> = cx.update(|_, cx| {
+        crate::menus::bar(&model.read(cx).settings, &[], &[])
+            .into_iter()
+            .flat_map(|m| m.items)
+            .filter_map(|i| menu_item_name(&i))
+            .collect()
+    });
+    assert!(names.iter().any(|n| n == "Back") && names.iter().any(|n| n == "Forward"), "{names:?}");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Git could not sign in because the repository's helper calls a program by a name Git's PATH
+/// lacks, though it is installed: the dialog offers Fix Helper first, and the fix makes the
+/// helper call the program by its full path in the repository's own config, nothing else.
+#[gpui::test]
+fn a_helper_whose_program_git_cannot_find_is_fixed_from_the_sign_in_dialog(cx: &mut TestAppContext) {
+    use crate::model::{Dialog, ModelEvent};
+    let repo = demo_repo("sign-in-repair");
+    crate::tests::git(&repo, &["remote", "set-url", "origin", "https://github.com/demo/demo.git"]);
+    let program = "snout-test-credential-program";
+    let helper = format!("!f() {{ echo username=demo; echo \"password=$({program} token)\"; }}; f");
+    let key = "credential.https://github.com.helper";
+    crate::tests::git(&repo, &["config", "--add", key, &helper]);
+    // Installed, but in a folder Git's PATH does not have.
+    let bin = repo.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join(program), "#!/bin/sh\necho t\n").unwrap();
+    let (model, _ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|_, cx| cx.set_global(crate::credentials::ProgramDirs(vec![bin.clone()])));
+    let details = format!(
+        "`git push` failed: f get: {program}: command not found\nfatal: Authentication failed for 'https://github.com/demo/demo.git/'"
+    );
+    cx.update(|_, cx| {
+        model.update(cx, |m, cx| {
+            m.dialog = Some(Dialog::SignIn {
+                problem: snout_core::SignInProblem::from_error(&details).unwrap(),
+                details: details.clone(),
+                repo: Some(repo.clone()),
+            });
+            cx.emit(ModelEvent::Dialog);
+        })
+    });
+    for _ in 0..50 {
+        cx.run_until_parked();
+        if cx.debug_bounds("sign-in-repair").is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let fix = cx.debug_bounds("sign-in-repair").expect("Fix Helper is offered").center();
+    cx.simulate_click(fix, Modifiers::none());
+    let read = || {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["config", "--local", "--get-all", key])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    let want = helper.replace(&format!("$({program} "), &format!("$({} ", bin.join(program).display()));
+    for _ in 0..50 {
+        cx.run_until_parked();
+        if read() == want {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(read(), want, "the helper calls the program by its path, and nothing else changed");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Settings ▸ Version Control lists each repository's credential helpers, and repairs one
+/// whose program Git cannot find, as the sign in dialog does.
+#[gpui::test]
+fn the_credentials_section_shows_a_broken_helper_and_repairs_it(cx: &mut TestAppContext) {
+    let repo = demo_repo("credentials-page");
+    crate::tests::git(&repo, &["remote", "set-url", "origin", "https://github.com/demo/demo.git"]);
+    let program = "snout-test-credential-page";
+    let key = "credential.https://github.com.helper";
+    crate::tests::git(&repo, &["config", "--add", key, &format!("!{program} auth git-credential")]);
+    let bin = repo.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join(program), "#!/bin/sh\n").unwrap();
+    let (_model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|_, cx| cx.set_global(crate::credentials::ProgramDirs(vec![bin.clone()])));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_settings_at(crate::settings_view::Page::VersionControl, w, cx)));
+    let wait_for = |cx: &mut VisualTestContext, id: &'static str| {
+        for _ in 0..60 {
+            cx.run_until_parked();
+            if cx.debug_bounds(id).is_some() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
+    };
+    assert!(wait_for(cx, "credentials-repo-0"), "the repository is listed");
+    assert!(wait_for(cx, "credentials-fix-0"), "with Fix Helper for its helper");
+    // Down the page to it.
+    let sheet = cx.debug_bounds("settings").unwrap();
+    for _ in 0..10 {
+        cx.simulate_event(gpui::ScrollEvent {
+            position: sheet.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-400.))),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+    }
+    let at = cx.debug_bounds("credentials-fix-0").unwrap().center();
+    assert!(at.y < sheet.bottom() - gpui::px(60.), "in view");
+    cx.simulate_click(at, Modifiers::none());
+    let want = format!("!{} auth git-credential", bin.join(program).display());
+    let read = || {
+        let out =
+            std::process::Command::new("git").arg("-C").arg(&repo).args(["config", "--get", key]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    for _ in 0..60 {
+        cx.run_until_parked();
+        if read() == want {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(read(), want);
+    // Looked at again: it works now, and there is nothing to fix.
+    for _ in 0..60 {
+        cx.run_until_parked();
+        if cx.debug_bounds("credentials-fix-0").is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(cx.debug_bounds("credentials-fix-0").is_none());
+    let _ = std::fs::remove_dir_all(repo);
+}
