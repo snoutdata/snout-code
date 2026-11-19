@@ -92,6 +92,17 @@ pub enum Mood {
     Warning,
 }
 
+/// Which push ran, so one a hook stopped can run again.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PushJob {
+    /// The current branch, to its upstream.
+    Current,
+    /// This local branch, to its upstream.
+    Branch(String),
+    /// This local branch, to a remote branch of the user's choosing.
+    To { name: String, remote: String, branch: String, track: bool },
+}
+
 /// A question or a message the workspace puts up.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
@@ -126,6 +137,12 @@ pub enum Dialog {
     ConfirmDeleteFiles(Vec<FileEntry>),
     PullProblem {
         problem: PullProblem,
+        details: String,
+    },
+    /// The repository's pre-push hook stopped a push: what it and Git said, and the push to
+    /// try again.
+    HookStopped {
+        push: PushJob,
         details: String,
     },
     /// A pull, fetch, push or clone failed because Git could not sign in to the remote.
@@ -249,6 +266,12 @@ pub enum Action {
         remote: String,
         branch: String,
         track: bool,
+        run_hooks: bool,
+    },
+    /// Run a push again; `run_hooks` false skips the pre-push hook, by the user's own choice.
+    RetryPush {
+        push: PushJob,
+        run_hooks: bool,
     },
     AskReset(StartPoint),
     Reset {
@@ -626,6 +649,8 @@ pub struct Model {
     /// What git said when the last pull, fetch, push or clone failed; none once one worked.
     /// Agents read it in getAppState.
     pub last_git_error: Option<String>,
+    /// The push running now, if the job is one.
+    push_job: Option<PushJob>,
     /// The label of the slow operation running, if any.
     pub job: Option<String>,
     /// Reload from Disk while it runs, and its outcome for a moment after: what the
@@ -761,6 +786,7 @@ impl Model {
             output: Vec::new(),
             message: ts!("model-ready").into(),
             last_git_error: None,
+            push_job: None,
             job: None,
             reload: None,
             _job_task: None,
@@ -1956,8 +1982,32 @@ impl Model {
         cx.notify();
     }
 
+    /// Run `push`; `run_hooks` false skips the pre-push hook.
+    fn start_push(&mut self, repo: Repo, push: PushJob, run_hooks: bool, cx: &mut Context<Self>) {
+        if self.job.is_some() {
+            return;
+        }
+        let label = match &push {
+            PushJob::Current => ts!("cmd-push").to_owned(),
+            PushJob::Branch(name) => t!("model-push-branch", name = name.to_string()),
+            PushJob::To { name, remote, branch, .. } => {
+                t!("model-push-branch-to", name = name.to_string(), to = format!("{remote}/{branch}"))
+            }
+        };
+        self.push_job = Some(push.clone());
+        self.spawn(&label, cx, move || {
+            match push {
+                PushJob::Current => repo.push(run_hooks),
+                PushJob::Branch(name) => repo.push_branch(&name, run_hooks),
+                PushJob::To { name, remote, branch, track } => repo.push_to(&name, &remote, &branch, track, run_hooks),
+            }
+            .map(Outcome::Done)
+        });
+    }
+
     fn finish_job(&mut self, label: &str, result: Result<Outcome, String>, cx: &mut Context<Self>) {
         self.job = None;
+        let push = self.push_job.take();
         self.git_wrote = Some(std::time::Instant::now());
         self.survey_hold.store(false, Ordering::Relaxed);
         self.last_git_error = result.as_ref().err().cloned();
@@ -1988,7 +2038,14 @@ impl Model {
                         let repo = if e.contains("`git clone") { None } else { self.repo_root() };
                         self.ask(Dialog::SignIn { problem, details: e, repo }, cx);
                     }
-                    None => self.fail(t!("model-failed-2", label = label.to_string(), e = e.to_string()), cx),
+                    None => match push.filter(|_| snout_core::push_stopped_by_hook(&e)) {
+                        Some(push) => {
+                            self.message = t!("model-failed", label = label.to_string());
+                            self.log_output(e.clone(), true);
+                            self.ask(Dialog::HookStopped { push, details: e }, cx);
+                        }
+                        None => self.fail(t!("model-failed-2", label = label.to_string(), e = e.to_string()), cx),
+                    },
                 },
             },
         }
@@ -2508,17 +2565,12 @@ impl Model {
                 let label = t!("model-fast-forwarded", name = name.to_string());
                 said(self, label, Box::new(move |r| r.fast_forward(&name)), cx);
             }
-            Action::PushBranch(name) => {
-                let repo = repo.unwrap();
-                let label = t!("model-push-branch", name = name.to_string());
-                self.spawn(&label, cx, move || repo.push_branch(&name).map(Outcome::Done));
-            }
+            Action::PushBranch(name) => self.start_push(repo.unwrap(), PushJob::Branch(name), true, cx),
             Action::ShowPushTo(name) => self.ask(Dialog::PushTo(name), cx),
-            Action::PushTo { name, remote, branch, track } => {
-                let repo = repo.unwrap();
-                let label = t!("model-push-branch-to", name = name.to_string(), to = format!("{remote}/{branch}"));
-                self.spawn(&label, cx, move || repo.push_to(&name, &remote, &branch, track).map(Outcome::Done));
+            Action::PushTo { name, remote, branch, track, run_hooks } => {
+                self.start_push(repo.unwrap(), PushJob::To { name, remote, branch, track }, run_hooks, cx)
             }
+            Action::RetryPush { push, run_hooks } => self.start_push(repo.unwrap(), push, run_hooks, cx),
             Action::AskReset(start) => self.ask(Dialog::Reset(start), cx),
             Action::Reset { rev, mode } => {
                 let head = self.status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
@@ -2571,10 +2623,7 @@ impl Model {
                 });
                 self.refresh(cx);
             }
-            Action::Push => {
-                let repo = repo.unwrap();
-                self.spawn(ts!("cmd-push"), cx, move || repo.push().map(Outcome::Done));
-            }
+            Action::Push => self.start_push(repo.unwrap(), PushJob::Current, true, cx),
             Action::OpenGithub => {
                 if let Some(url) = &self.github_url {
                     cx.open_url(url);

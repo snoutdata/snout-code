@@ -76,14 +76,17 @@ impl Repo {
     }
 
     /// Push local branch `name` to its upstream; one without an upstream goes to a branch of
-    /// its own name on `origin` (else the first remote), which becomes its upstream.
-    pub fn push_branch(&self, name: &str) -> Result<String> {
+    /// its own name on `origin` (else the first remote), which becomes its upstream. With
+    /// `run_hooks` false the pre-push hook is skipped (`--no-verify`).
+    pub fn push_branch(&self, name: &str, run_hooks: bool) -> Result<String> {
         let remote = self.config(&format!("branch.{name}.remote"));
         let merge = self.config(&format!("branch.{name}.merge"));
         if let (Some(remote), Some(merge)) = (remote, merge)
             && remote != "."
         {
-            return Ok(self.git(&["push", &remote, &format!("refs/heads/{name}:{merge}")])?.text());
+            let spec = format!("refs/heads/{name}:{merge}");
+            let verify: &[&str] = if run_hooks { &[] } else { &["--no-verify"] };
+            return Ok(self.git(&[&["push"][..], verify, &[&remote, &spec]].concat())?.text());
         }
         let remotes = self.remotes()?;
         let remote = remotes
@@ -92,11 +95,12 @@ impl Repo {
             .or(remotes.first())
             .map(|(n, _)| n.clone())
             .ok_or_else(|| Error::Invalid("no remote configured".into()))?;
-        self.push_to(name, &remote, name, true)
+        self.push_to(name, &remote, name, true, run_hooks)
     }
 
-    /// Push local branch `name` to `branch` on `remote`; `track` makes that its upstream.
-    pub fn push_to(&self, name: &str, remote: &str, branch: &str, track: bool) -> Result<String> {
+    /// Push local branch `name` to `branch` on `remote`; `track` makes that its upstream, and
+    /// `run_hooks` false skips the pre-push hook (`--no-verify`).
+    pub fn push_to(&self, name: &str, remote: &str, branch: &str, track: bool, run_hooks: bool) -> Result<String> {
         let branch = branch.trim();
         self.git(&["check-ref-format", "--branch", branch])
             .map_err(|_| Error::Invalid(format!("`{branch}` is not a valid branch name")))?;
@@ -105,6 +109,9 @@ impl Repo {
         }
         let spec = format!("refs/heads/{name}:refs/heads/{branch}");
         let mut args = vec!["push"];
+        if !run_hooks {
+            args.push("--no-verify");
+        }
         if track {
             args.push("-u");
         }
@@ -159,6 +166,16 @@ impl Repo {
     }
 }
 
+/// Whether a failed push was stopped by the repository's own pre-push hook rather than by
+/// the remote: git gave up on the refs without reaching the remote to report on any of them.
+pub fn push_stopped_by_hook(message: &str) -> bool {
+    message.contains("failed to push some refs")
+        && !message.lines().any(|l| {
+            let l = l.trim_start();
+            l.starts_with("To ") || l.starts_with("! [") || l.starts_with("fatal:") || l.contains("refspec")
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,7 +225,7 @@ mod tests {
         run(&work, &["checkout", "-q", "-b", "main"]).unwrap();
         let repo = Repo::open(&snout_host::local(), &work).unwrap();
         commit(&repo, "a.txt", "a\n");
-        repo.push().unwrap();
+        repo.push(true).unwrap();
         (dir, repo)
     }
 
@@ -260,12 +277,12 @@ mod tests {
         let (dir, repo) = cloned("push");
         // A branch of its own pushes to its own name and tracks it.
         repo.create_branch("feature", None, false).unwrap();
-        repo.push_branch("feature").unwrap();
+        repo.push_branch("feature", true).unwrap();
         assert_eq!(branch(&repo, "feature").upstream.as_deref(), Some("origin/feature"));
         // Push To another name, tracking it.
-        repo.push_to("feature", "origin", "other", true).unwrap();
+        repo.push_to("feature", "origin", "other", true, true).unwrap();
         assert_eq!(branch(&repo, "feature").upstream.as_deref(), Some("origin/other"));
-        assert!(repo.push_to("feature", "nowhere", "x", false).is_err());
+        assert!(repo.push_to("feature", "nowhere", "x", false, true).is_err());
         repo.unset_upstream("feature").unwrap();
         assert_eq!(branch(&repo, "feature").upstream, None);
         repo.set_upstream("feature", "origin/main").unwrap();
@@ -274,12 +291,46 @@ mod tests {
 
         // main moves on; feature (not checked out) and then main itself fast-forward.
         commit(&repo, "b.txt", "b\n");
-        repo.push_branch("main").unwrap();
+        repo.push_branch("main", true).unwrap();
         repo.fast_forward("feature").unwrap();
         assert_eq!(branch(&repo, "feature").target, branch(&repo, "main").target);
         repo.reset("HEAD~1", ResetMode::Hard).unwrap();
         repo.fast_forward("main").unwrap();
         assert!(repo.root().join("b.txt").exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_pre_push_hook_stops_the_push_until_skipped() {
+        let (dir, repo) = cloned("pre-push");
+        let hook = repo.root().join(".git/hooks/pre-push");
+        fs::write(&hook, "#!/bin/sh\necho 'pre-push: not today' >&2\nexit 1\n").unwrap();
+        if cfg!(unix) {
+            std::process::Command::new("chmod").arg("+x").arg(&hook).status().unwrap();
+        }
+        commit(&repo, "b.txt", "b\n");
+        let e = repo.push(true).unwrap_err().to_string();
+        assert!(e.contains("pre-push: not today") && push_stopped_by_hook(&e), "{e}");
+        repo.create_branch("feature", None, false).unwrap();
+        assert!(push_stopped_by_hook(&repo.push_branch("feature", true).unwrap_err().to_string()));
+        assert!(push_stopped_by_hook(&repo.push_to("main", "origin", "x", false, true).unwrap_err().to_string()));
+        // Skipping the hook is the user's call; then it goes.
+        repo.push(false).unwrap();
+        repo.push_branch("feature", false).unwrap();
+        repo.push_to("main", "origin", "x", false, false).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn what_the_remote_turns_back_is_not_a_hook() {
+        for m in [
+            "To github.com:a/b.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'github.com:a/b.git'",
+            "To github.com:a/b.git\n ! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push some refs to 'github.com:a/b.git'",
+            "error: src refspec main does not match any\nerror: failed to push some refs to 'origin'",
+            "fatal: Authentication failed for 'https://github.com/a/b.git/'",
+        ] {
+            assert!(!push_stopped_by_hook(m), "{m}");
+        }
+        assert!(push_stopped_by_hook("error: failed to push some refs to 'github.com:a/b.git'"));
     }
 }

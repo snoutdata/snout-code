@@ -47,6 +47,7 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut gpui::App) {
         Dialog::SignIn { .. } => 620.,
         Dialog::Error(_)
         | Dialog::Failed(_)
+        | Dialog::HookStopped { .. }
         | Dialog::PullProblem { .. }
         | Dialog::Clone { .. }
         | Dialog::ConfirmCheckout(_) => 560.,
@@ -99,6 +100,9 @@ fn look(d: &Dialog, m: &Model) -> (Tone, Option<&'static Drawing>, Option<Shared
             (Tone::Danger, Some(art), Some(ts!("dialogs-git-stopped-and-said-why").into()))
         }
         Dialog::Failed(_) => (Tone::Danger, Some(spots::warning()), None),
+        Dialog::HookStopped { .. } => {
+            (Tone::Warning, Some(spots::warning()), Some(ts!("dialogs-hook-stopped-subtitle").into()))
+        }
         Dialog::Info { mood: Mood::Warning, .. } => (Tone::Warning, Some(spots::warning()), None),
         Dialog::Info { mood: Mood::Done, .. } => (Tone::Success, Some(spots::success()), None),
         Dialog::Info { .. } => (Tone::Info, Some(spots::no_results()), None),
@@ -200,6 +204,7 @@ fn title(d: &Dialog, m: &Model) -> SharedString {
             ts!("dialogs-both-sides-have-new-commits").into()
         }
         Dialog::PullProblem { .. } => ts!("dialogs-no-shared-history").into(),
+        Dialog::HookStopped { .. } => ts!("dialogs-hook-stopped-title").into(),
         Dialog::SignIn { problem, .. } => match &problem.host {
             Some(host) => t!("dialogs-git-could-not-sign-in-to", host = host.to_string()).into(),
             None => ts!("dialogs-git-could-not-sign-in").into(),
@@ -285,6 +290,8 @@ pub struct DialogBody {
     track: bool,
     /// Quit: "Don't ask again" is ticked.
     dont_ask: bool,
+    /// Push To, and a push a hook stopped: "Run Git hooks" is ticked.
+    run_hooks: bool,
     /// Holds the keyboard in a dialog with no field, so ⌘⌫ and ⏎ reach it.
     focus: FocusHandle,
 }
@@ -368,6 +375,7 @@ impl DialogBody {
             local: LocalChanges::Keep,
             cursor: 0,
             dont_ask: false,
+            run_hooks: true,
         }
     }
 
@@ -433,6 +441,7 @@ impl DialogBody {
                     remote,
                     branch: name,
                     track: self.track,
+                    run_hooks: self.run_hooks,
                 })
             }
             Dialog::SetUpstream(local) => upstream_items(m, &name)
@@ -441,6 +450,24 @@ impl DialogBody {
                 .map(|u| Action::SetUpstream { name: local.clone(), upstream: u }),
             _ => None,
         }
+    }
+
+    /// "Run Git hooks", and what unticking it means.
+    fn hooks_choice(&self, p: &crate::theme::Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut out = vec![
+            Checkbox::new("run-hooks")
+                .label(ts!("dialogs-run-git-hooks"))
+                .checked(self.run_hooks)
+                .on_click(cx.listener(|this, v: &bool, _, cx| {
+                    this.run_hooks = *v;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        ];
+        if !self.run_hooks {
+            out.push(callout(Tone::Warning, ts!("dialogs-hooks-skipped"), p).into_any_element());
+        }
+        out
     }
 
     /// Browse… in the Clone dialog: a folder picked in the system's dialog goes in Into folder.
@@ -473,7 +500,9 @@ impl DialogBody {
     /// ⏎: the main button, unless it destroys something.
     fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.dialog {
-            Dialog::About | Dialog::Error(_) | Dialog::Failed(_) | Dialog::Info { .. } => self.close(window, cx),
+            Dialog::About | Dialog::Error(_) | Dialog::Failed(_) | Dialog::HookStopped { .. } | Dialog::Info { .. } => {
+                self.close(window, cx)
+            }
             Dialog::SignIn { ref problem, ref details, ref repo } => {
                 let ask = sign_in_ask(self.model.read(cx), details, repo.as_deref(), problem.host.as_deref());
                 match ask {
@@ -784,6 +813,36 @@ impl Render for DialogBody {
                         .into_any_element(),
                 );
                 buttons.push(ok("OK").on_click(cx.listener(|this, _, w, cx| this.close(w, cx))).into_any_element());
+            }
+            Dialog::HookStopped { push, details } => {
+                body.push(dim(ts!("dialogs-hook-stopped-body").into()).into_any_element());
+                body.push(code(&details).into_any_element());
+                body.extend(self.hooks_choice(&p, cx));
+                let copy = details.clone();
+                buttons.push(
+                    Button::new("copy", IconName::Copy)
+                        .ghost()
+                        .label(ts!("cmd-copy"))
+                        .on_click(move |_, _, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone())))
+                        .into_any_element(),
+                );
+                buttons.push(
+                    Button::new("close", CANCEL_ICON)
+                        .focusable()
+                        .label(ts!("dialogs-close"))
+                        .kbd("Esc")
+                        .on_click(cx.listener(|this, _, w, cx| this.close(w, cx)))
+                        .into_any_element(),
+                );
+                let run_hooks = self.run_hooks;
+                buttons.push(on!(
+                    Button::new("ok", IconName::ArrowUp)
+                        .debug_selector("push-again")
+                        .primary()
+                        .focusable()
+                        .label(ts!("dialogs-push-again")),
+                    Action::RetryPush { push: push.clone(), run_hooks }
+                ));
             }
             Dialog::Info { text, .. } => {
                 body.push(dim(text).into_any_element());
@@ -1180,6 +1239,7 @@ impl Render for DialogBody {
                         }))
                         .into_any_element(),
                 );
+                body.extend(self.hooks_choice(&p, cx));
                 buttons.push(cancel);
                 buttons.push(
                     ok(ts!("cmd-push"))

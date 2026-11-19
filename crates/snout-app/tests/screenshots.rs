@@ -1459,6 +1459,10 @@ sleep 30
                         "error" => Dialog::Error(
                             "To github.com:demo/demo.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'github.com:demo/demo.git'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally.".into(),
                         ),
+                        "hook-stopped" => Dialog::HookStopped {
+                            push: snout_app::model::PushJob::Current,
+                            details: "`git push` failed: pre-push: these commits name an address this repository never takes, so the push stopped:\n3f9c2a1\tdemo@example.com\tdemo@example.com\nerror: failed to push some refs to 'github.com:demo/demo.git'".into(),
+                        },
                         "info" => Dialog::Info {
                             title: "No repositories found".into(),
                             text: "Nothing under /Users/demo/Downloads is a Git repository.".into(),
@@ -3560,6 +3564,7 @@ sleep 30
             "new-branch",
             "clone",
             "error",
+            "hook-stopped",
             "info",
             "pull",
             "sign-in",

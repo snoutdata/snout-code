@@ -36,7 +36,7 @@ pub mod term;
 pub use scope::{Scope, branch_name_problem, on_disk, repo_dir_name, stage_paths, unstage_paths};
 
 pub use auth::{SignInKind, SignInProblem};
-pub use branch_ops::ResetMode;
+pub use branch_ops::{ResetMode, push_stopped_by_hook};
 pub use branches::{Branch, BranchKind};
 pub use checkout::{CheckoutOutcome, CheckoutTarget, LocalChanges};
 pub use diff::{DiffBase, DiffRow, FileDiff, RowKind};

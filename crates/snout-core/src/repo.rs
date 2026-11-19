@@ -460,14 +460,16 @@ impl Repo {
         run_unattended(&*self.host, &self.root, &["fetch", "--all", "--prune", "--quiet"]).map(drop)
     }
 
-    /// Push the current branch, setting the upstream on first push.
-    pub fn push(&self) -> Result<String> {
+    /// Push the current branch, setting the upstream on first push. With `run_hooks` false
+    /// the repository's pre-push hook is skipped (`--no-verify`).
+    pub fn push(&self, run_hooks: bool) -> Result<String> {
         let status = self.status()?;
         let Some(head) = status.branch.head else {
             return Err(Error::Invalid("HEAD is detached; check out a branch to push".into()));
         };
+        let verify: &[&str] = if run_hooks { &[] } else { &["--no-verify"] };
         if status.branch.upstream.is_some() {
-            return Ok(self.git(&["push"])?.text());
+            return Ok(self.git(&[&["push"][..], verify].concat())?.text());
         }
         let remotes = self.remotes()?;
         let remote = remotes
@@ -476,7 +478,7 @@ impl Repo {
             .or(remotes.first())
             .map(|(n, _)| n.clone())
             .ok_or_else(|| Error::Invalid("no remote configured".into()))?;
-        Ok(self.git(&["push", "-u", &remote, &head])?.text())
+        Ok(self.git(&[&["push"][..], verify, &["-u", &remote, &head]].concat())?.text())
     }
 
     /// Delete `branch` on `remote` (`git push <remote> --delete <branch>`).
@@ -704,7 +706,7 @@ mod tests {
         assert_eq!(repo.status().unwrap().branch.upstream, None);
         assert_eq!(repo.tracking().unwrap(), None);
 
-        repo.push().unwrap();
+        repo.push(true).unwrap();
         let st = repo.status().unwrap();
         assert_eq!(st.branch.upstream.as_deref(), Some("origin/main"));
         assert!(repo.log(10).unwrap().iter().all(|c| !c.unpushed));

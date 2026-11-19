@@ -137,16 +137,16 @@ mod tests {
         run(a.root(), &["checkout", "-q", "-b", "main"]).unwrap();
         commit(&a, "base.txt", "base\n");
         run(a.root(), &["remote", "add", "origin", &remote.to_string_lossy()]).unwrap();
-        a.push().unwrap();
+        a.push(true).unwrap();
         let b = clone(&remote, &root.join("b"));
 
         // Both sides move on: merge, then rebase.
         commit(&a, "a.txt", "a\n");
-        a.push().unwrap();
+        a.push(true).unwrap();
         commit(&b, "b.txt", "b\n");
         b.pull_with(PullMode::Merge).unwrap();
         assert!(b.root().join("a.txt").exists());
-        b.push().unwrap();
+        b.push(true).unwrap();
         commit(&b, "b2.txt", "b2\n");
         commit(&a, "a2.txt", "a2\n");
         a.pull_with(PullMode::Rebase).unwrap();

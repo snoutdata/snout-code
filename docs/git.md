@@ -72,7 +72,7 @@ Right-click a branch in the pane. Where an item names the current branch, it act
 - **Merge into** the current branch, and **Rebase** the current branch **onto this**. Both run straight away. When they stop on conflicts, SnoutCode undoes them, so your branch and files are as they were, and shows Git's message with the files that clashed.
 - **Fast-forward to upstream** (local branches): moves the branch to its upstream when it is only behind, with no commits of its own. It works on any local branch, checked out or not, so you can bring a branch up to date without switching to it.
 - **Push** (local branches): pushes this branch, checked out or not, to its upstream. A branch with no upstream goes to a branch of its own name on `origin` and tracks it from then on.
-- **Push to…** (local branches): pick the remote and the branch name there, and whether the branch should track it.
+- **Push to…** (local branches): pick the remote and the branch name there, whether the branch should track it, and whether to **Run Git hooks** (see [When a hook stops a push](#when-a-hook-stops-a-push)).
 - **Reset** the current branch **to here…**: **Soft** moves the branch only and keeps the changes since staged; **Mixed** also unstages them, keeping them in your files; **Hard** makes your files match too, and discards uncommitted changes (the dialog warns you when you have some).
 - **Rename…** (local branches) and **Delete…** (a remote branch: **Delete from** the remote).
 - **Set tracked branch…** (local branches): pick the remote branch it pulls from and pushes to. **Stop tracking** removes that link; the remote branch stays.
@@ -232,6 +232,12 @@ They use your normal Git credentials, as in a terminal.
 Each dialog shows what Git reported. When Git stops with an error (a push the remote turns back, for example), **Something went wrong** shows Git's own words, with **Copy** to put them on the clipboard.
 
 ![A push the remote turned back](images/git-error.png)
+
+### When a hook stops a push
+
+Git runs your repository's `pre-push` hook before every push from SnoutCode, as it does in a terminal. When the hook refuses, nothing is sent, and **A pre-push hook stopped the push** shows everything the hook printed, then Git's own words, with **Copy**.
+
+Fix what the hook found and click **Push Again**. To push past it this once, untick **Run Git hooks** first: the dialog warns that whatever the hook checks goes unchecked, and the push runs `git push --no-verify`. The box is ticked every time the dialog opens, so skipping a hook is always your own choice for that one push. **Push to…** has the same box.
 
 ### When Git cannot sign in
 
