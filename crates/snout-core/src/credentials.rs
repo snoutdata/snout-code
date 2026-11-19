@@ -85,12 +85,7 @@ impl Helper {
         if !self.value.starts_with('!') {
             return None;
         }
-        let shown = path.to_string_lossy();
-        let word = if shown.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@%".contains(c)) {
-            shown.into_owned()
-        } else {
-            format!("'{}'", shown.replace('\'', "'\\''"))
-        };
+        let word = shell_word(path);
         let spans: Vec<Range<usize>> = self.programs().into_iter().filter(|(n, _)| n == name).map(|(_, r)| r).collect();
         if spans.is_empty() {
             return None;
@@ -100,6 +95,17 @@ impl Helper {
             out.replace_range(r, &word);
         }
         Some(out)
+    }
+}
+
+/// `path` as one word of a shell command: as it is when it can be, else in single quotes (a
+/// Windows path, whose backslashes the shell would take as escapes, or one with a space).
+pub fn shell_word(path: &Path) -> String {
+    let shown = path.to_string_lossy();
+    if shown.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@%".contains(c)) {
+        shown.into_owned()
+    } else {
+        format!("'{}'", shown.replace('\'', "'\\''"))
     }
 }
 
@@ -349,6 +355,12 @@ mod tests {
         assert_eq!(fixed, GH.replace("$(gh ", "$(/opt/homebrew/bin/gh "));
         let spaced = helper("!gh auth git-credential").calling("gh", Path::new("/Apps/My Tools/gh")).unwrap();
         assert_eq!(spaced, "!'/Apps/My Tools/gh' auth git-credential");
+        // A Windows path: its backslashes would be escapes to the shell Git runs the helper in.
+        assert_eq!(
+            shell_word(Path::new(r"C:\Program Files\GitHub CLI\gh.exe")),
+            r"'C:\Program Files\GitHub CLI\gh.exe'"
+        );
+        assert_eq!(shell_word(Path::new("/opt/homebrew/bin/gh")), "/opt/homebrew/bin/gh");
         assert_eq!(helper("osxkeychain").calling("git-credential-osxkeychain", Path::new("/x")), None);
         assert_eq!(helper(GH).calling("op", Path::new("/x")), None);
     }

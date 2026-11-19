@@ -1416,7 +1416,8 @@ fn a_helper_whose_program_git_cannot_find_is_fixed_from_the_sign_in_dialog(cx: &
             .unwrap();
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
     };
-    let want = helper.replace(&format!("$({program} "), &format!("$({} ", bin.join(program).display()));
+    let path = snout_core::credentials::shell_word(&bin.join(program));
+    let want = helper.replace(&format!("$({program} "), &format!("$({path} "));
     for _ in 0..50 {
         cx.run_until_parked();
         if read() == want {
@@ -1468,7 +1469,7 @@ fn the_credentials_section_shows_a_broken_helper_and_repairs_it(cx: &mut TestApp
     let at = cx.debug_bounds("credentials-fix-0").unwrap().center();
     assert!(at.y < sheet.bottom() - gpui::px(60.), "in view");
     cx.simulate_click(at, Modifiers::none());
-    let want = format!("!{} auth git-credential", bin.join(program).display());
+    let want = format!("!{} auth git-credential", snout_core::credentials::shell_word(&bin.join(program)));
     let read = || {
         let out =
             std::process::Command::new("git").arg("-C").arg(&repo).args(["config", "--get", key]).output().unwrap();

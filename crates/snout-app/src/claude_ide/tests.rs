@@ -2479,7 +2479,7 @@ fn an_agent_finds_the_repositories_and_repairs_a_credential_helper(cx: &mut Test
     let out = std::process::Command::new("git").arg("-C").arg(&repo).args(["config", "--get", key]).output().unwrap();
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).trim(),
-        format!("!{} auth git-credential", bin.join(program).display())
+        format!("!{} auth git-credential", snout_core::credentials::shell_word(&bin.join(program)))
     );
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
