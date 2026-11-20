@@ -203,6 +203,10 @@ final class WorkspaceLayout {
             IFolder folder = project.getFolder(link.getKey());
             URI target = link.getValue().toURI();
             if (folder.exists() && folder.isLinked() && Objects.equals(sameUri(folder.getLocationURI()), sameUri(target))) {
+                // The link is kept from the last session, and with it the files it held then:
+                // read the folder again, or a file that came while jdtls was stopped (a pull)
+                // would stay unknown, never compiled, until an edit in the app named it.
+                folder.refreshLocal(IResource.DEPTH_INFINITE, progress.split(1));
                 continue;
             }
             folder.createLink(target, IResource.REPLACE | IResource.ALLOW_MISSING_LOCAL, progress.split(1));

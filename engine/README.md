@@ -180,7 +180,7 @@ A module without Scala or generators is ready when jdtls is (its `ServiceReady`)
 Each Gradle project with Java sources becomes one JDT project, the way Buildship maps them:
 
 - The project lives in jdtls's workspace directory, not the repository: no `.project`, `.classpath`, `.settings` or `bin` appears in the user's files.
-- Each source root is a linked folder, including folders outside the project directory. A root nested in another is excluded from the outer one.
+- Each source root is a linked folder, including folders outside the project directory. A root nested in another is excluded from the outer one. A link kept from the last session is read again from disk at each import, so files that came while jdtls was stopped (a pull with the app closed) are compiled: jdtls's resource tree otherwise keeps the folder as it last saw it, and only the macOS polling refresh would find them, slowly.
 - Each source set compiles to `bin/<sourceSet>` inside the workspace project. Test source sets, and libraries only they use, carry JDT's `test` attribute.
 - Libraries come from the compile classpaths, with their source jars attached. Project dependencies, including those on included builds, become project references.
 - The JDK is the compile task's toolchain, or the Gradle daemon's, registered with jdtls when it does not know it. Source, target, `--release`, `-parameters`, `--enable-preview` and the encoding come from the main Java compile task.
