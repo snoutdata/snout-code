@@ -1601,10 +1601,26 @@ fn agent_starts_call(
     std::thread::spawn(move || {
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream.write_all(request.as_bytes()).unwrap();
-        let mut out = String::new();
-        stream.read_to_string(&mut out).unwrap();
+        let mut bytes = Vec::new();
+        let read = stream.read_to_end(&mut bytes);
+        let out = String::from_utf8_lossy(&bytes).into_owned();
+        // Windows may report a reset once the whole answer is in: the answer counts, not how
+        // the connection ended.
+        if let Err(e) = read {
+            assert!(complete_answer(&out), "the answer was cut off ({e}): {out:?}");
+        }
         out
     })
+}
+
+/// Whether `out` holds a whole HTTP answer: its head, and as many bytes of body as it says.
+fn complete_answer(out: &str) -> bool {
+    let Some((head, body)) = out.split_once("\r\n\r\n") else { return false };
+    let len = head
+        .lines()
+        .find_map(|l| l.split_once(':').filter(|(n, _)| n.eq_ignore_ascii_case("content-length")))
+        .and_then(|(_, v)| v.trim().parse::<usize>().ok());
+    len.is_some_and(|n| body.len() >= n)
 }
 
 /// The status and body of the answer to a call on its way.

@@ -661,6 +661,26 @@ pub fn read_request(stream: impl std::io::Read) -> std::io::Result<Request> {
 fn respond(stream: &mut TcpStream, status: &str) {
     let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     let _ = stream.flush();
+    close_gracefully(stream);
+}
+
+/// How long a closing connection waits for the client to be done.
+const CLOSE_WAIT: Duration = Duration::from_millis(500);
+
+/// End the answer without a reset: say the answer is over, take what the client still sends,
+/// then let the connection go. Dropped straight away, with anything it sent unread, a socket is
+/// reset on Windows, and a client still reading the answer gets "connection reset" for it.
+fn close_gracefully(stream: &mut TcpStream) {
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let _ = stream.set_read_timeout(Some(CLOSE_WAIT));
+    let mut sink = [0u8; 1024];
+    let deadline = std::time::Instant::now() + CLOSE_WAIT;
+    while std::time::Instant::now() < deadline {
+        match stream.read(&mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+    }
 }
 
 fn respond_with(stream: &mut TcpStream, a: &super::api::Answer) {
@@ -673,6 +693,7 @@ fn respond_with(stream: &mut TcpStream, a: &super::api::Answer) {
         a.body
     );
     let _ = stream.flush();
+    close_gracefully(stream);
 }
 
 /// A call of the editor's API: `GET /utcp` (the manual) or `POST /api/<tool>`.
