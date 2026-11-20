@@ -835,7 +835,7 @@ impl LangHub {
             }
         });
         let root_buf = root.to_owned();
-        let init = client.request_raw("initialize", initialize_params(root));
+        let init = client.request_raw("initialize", initialize_params(root, self.host.info().pid));
         let initialize = cx.spawn(async move |this, cx| {
             let result = init.await;
             let _ = this.update(cx, |this, cx| this.on_initialized(&root_buf, generation, result, cx));
@@ -1607,11 +1607,13 @@ pub fn language_id(path: &Path) -> &'static str {
 }
 
 /// `initialize` for jdtls: the editor's capabilities, the folder, and jdtls's settings.
-fn initialize_params(root: &Path) -> Value {
+/// jdtls exits when the process it is given stops running: that is the program serving the
+/// host (`pid`), the app here or the server on a remote host, where the app's pid means nothing.
+pub(crate) fn initialize_params(root: &Path, pid: u32) -> Value {
     let uri = snout_lang::uri::from_path(root);
     let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     json!({
-        "processId": std::process::id(),
+        "processId": pid,
         "clientInfo": { "name": "SnoutCode" },
         "rootUri": uri.as_str(),
         "rootPath": root,
