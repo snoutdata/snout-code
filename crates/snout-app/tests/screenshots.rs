@@ -3875,6 +3875,7 @@ fn vitest_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
 }
 
 /// The specs of the Cypress shot.
+#[cfg(target_os = "macos")]
 const CYPRESS_SPECS: [(&str, &str); 3] = [
     (
         "checkout.cy.ts",
@@ -3888,6 +3889,7 @@ const CYPRESS_SPECS: [(&str, &str); 3] = [
 ];
 
 /// A Cypress run in Electron: one failure, then the browser crashed as it closed.
+#[cfg(target_os = "macos")]
 fn cypress_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
     use serde_json::json;
     let mut run = snout_app::playwright::report::Run::default();
