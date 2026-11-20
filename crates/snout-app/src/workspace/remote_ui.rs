@@ -157,9 +157,13 @@ impl Workspace {
             this.stash_session(cx);
             this.save_layout(cx);
             this.hub.update(cx, |h, _| h.shutdown_all());
+            // Leaving another host: Claude Code's lock file and ports there go before its
+            // connection does, as on Close Remote Connection.
+            let leaving = remote::connection(cx).is_some_and(|(n, _)| n != name);
+            let claude = this.claude.take_if(|_| leaving).map(|b| Box::new(b.shut_down()) as Box<dyn FnOnce() + Send>);
             let model = this.model.clone();
             let old = window.window_handle();
-            cx.defer(move |cx| remote::open_project(name, host, dir, &model, old, cx));
+            cx.defer(move |cx| remote::open_project(name, host, dir, &model, old, claude, cx));
         });
     }
 
@@ -178,11 +182,14 @@ impl Workspace {
                 let _ = handle.update(cx, |_, window, cx| {
                     let _ = ws.update(cx, |this, cx| match result {
                         Ok(host) => this.open_remote(name, host, path, window, cx),
-                        Err(why) => this.model.update(cx, |m, cx| {
-                            m.message =
-                                t!("remote-could-not-connect-to", name = name.to_string(), why = why.to_string());
-                            cx.notify();
-                        }),
+                        Err(why) => {
+                            remote::forget_last(&RemoteProject { host: name.clone(), path }, cx);
+                            this.model.update(cx, |m, cx| {
+                                m.message =
+                                    t!("remote-could-not-connect-to", name = name.to_string(), why = why.to_string());
+                                cx.notify();
+                            })
+                        }
                     });
                 });
             },
@@ -213,17 +220,32 @@ impl Workspace {
 
     /// File ▸ Close Remote Connection: the window opens again on this Mac.
     pub fn close_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_remote_to(None, window, cx);
+    }
+
+    /// A project of this machine from a remote window's Welcome page: close the connection and
+    /// open it here.
+    pub fn open_local_recent(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if remote::is_remote(cx) {
+            self.close_remote_to(Some(path), window, cx);
+        } else {
+            self.send(Action::OpenRepo(path), cx);
+        }
+    }
+
+    /// Close the connection; the window opens again on this Mac, on `folder` if there is one.
+    fn close_remote_to(&mut self, folder: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         if !remote::is_remote(cx) {
             return;
         }
-        self.settle_unsaved(window, cx, |this, window, cx| {
+        self.settle_unsaved(window, cx, move |this, window, cx| {
             this.stash_session(cx);
             this.save_layout(cx);
             this.hub.update(cx, |h, _| h.shutdown_all());
             // Claude Code's lock file and ports on the host go while the connection is there.
             let claude = this.claude.take().map(|b| Box::new(b.shut_down()) as Box<dyn FnOnce() + Send>);
             let old = window.window_handle();
-            cx.defer(move |cx| remote::disconnect(old, claude, cx));
+            cx.defer(move |cx| remote::disconnect(old, folder, claude, cx));
         });
     }
 }
