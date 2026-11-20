@@ -182,10 +182,28 @@ fn title_and_modes() {
         assert_eq!(f.modes, Modes::default(), "{kind:?}");
         e.write(b"\x1b[?2004h\x1b[?1000h\x1b[?1006h");
         let m = frame(e).modes;
-        assert!(m.bracketed_paste && m.mouse && m.mouse_sgr, "{kind:?}: {m:?}");
+        assert!(m.bracketed_paste && m.mouse == MouseTracking::Click && m.mouse_sgr, "{kind:?}: {m:?}");
         e.write(b"\x1b[?2004l\x1b[?1000l\x1b[?1006l");
         let m = frame(e).modes;
-        assert!(!m.bracketed_paste && !m.mouse && !m.mouse_sgr, "{kind:?}: {m:?}");
+        assert!(!m.bracketed_paste && m.mouse == MouseTracking::Off && !m.mouse_sgr, "{kind:?}: {m:?}");
+    });
+}
+
+#[test]
+fn tells_which_mouse_events_the_child_asked_for() {
+    each(|e| {
+        let kind = e.kind();
+        for (mode, tracking) in [
+            (9, MouseTracking::Press),
+            (1000, MouseTracking::Click),
+            (1002, MouseTracking::Drag),
+            (1003, MouseTracking::Motion),
+        ] {
+            e.write(format!("\x1b[?{mode}h").as_bytes());
+            assert_eq!(frame(e).modes.mouse, tracking, "{kind:?}: mode {mode}");
+            e.write(format!("\x1b[?{mode}l").as_bytes());
+            assert_eq!(frame(e).modes.mouse, MouseTracking::Off, "{kind:?}: mode {mode} off");
+        }
     });
 }
 

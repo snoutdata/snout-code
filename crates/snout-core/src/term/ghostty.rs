@@ -17,7 +17,9 @@ use libghostty_vt::terminal::{
 };
 use libghostty_vt::{RenderState, Terminal, TerminalOptions, key};
 
-use super::{Attrs, Cell, Color, Cursor, CursorShape, Engine, EngineKind, Frame, Modes, Underline, Width};
+use super::{
+    Attrs, Cell, Color, Cursor, CursorShape, Engine, EngineKind, Frame, Modes, MouseTracking, Underline, Width,
+};
 use crate::pty::{self, KeyInput, Rgb};
 
 /// What the terminal's callbacks write, for the engine to pick up.
@@ -102,6 +104,23 @@ impl Ghostty {
 
     fn mode(&self, mode: Mode) -> bool {
         self.term.mode(mode).unwrap_or(false)
+    }
+
+    /// The mouse events the child asked for: the highest of the modes it set.
+    fn mouse_tracking(&self) -> MouseTracking {
+        if !self.term.is_mouse_tracking().unwrap_or(false) {
+            MouseTracking::Off
+        } else if self.mode(Mode::ANY_MOUSE) {
+            MouseTracking::Motion
+        } else if self.mode(Mode::BUTTON_MOUSE) {
+            MouseTracking::Drag
+        } else if self.mode(Mode::NORMAL_MOUSE) {
+            MouseTracking::Click
+        } else if self.mode(Mode::X10_MOUSE) {
+            MouseTracking::Press
+        } else {
+            MouseTracking::Click
+        }
     }
 
     /// The hyperlink of the visible cell at (`x`, `y`).
@@ -333,7 +352,7 @@ impl Engine for Ghostty {
             bracketed_paste: self.mode(Mode::BRACKETED_PASTE),
             app_cursor: self.mode(Mode::DECCKM),
             alt_screen: matches!(self.term.active_screen(), Ok(Screen::Alternate)),
-            mouse: self.term.is_mouse_tracking().unwrap_or(false),
+            mouse: self.mouse_tracking(),
             mouse_sgr: self.mode(Mode::SGR_MOUSE),
             kitty_keyboard: self.term.kitty_keyboard_flags().map(|f| f.bits()).unwrap_or(0),
             sync_output: self.mode(Mode::SYNC_OUTPUT),
