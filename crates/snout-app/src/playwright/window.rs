@@ -60,7 +60,7 @@ pub fn mark(s: State, p: &Palette) -> (Icon, Hsla) {
     }
 }
 
-fn button(
+pub(crate) fn button(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
     g: Option<Icon>,
@@ -224,10 +224,13 @@ impl TestsWindow {
             None => String::new(),
         };
         let progress = if total == 0 { 0. } else { c.done as f32 / total as f32 };
-        // Environments and Watch are Playwright's; a project with suites switches between
-        // them.
-        let unit = t.unit(cx).is_some();
+        // Environments and Watch are for the tests in a browser (Playwright's, Cypress's); a
+        // project with suites switches between them.
+        let current = t.unit(cx);
+        let unit = current.as_ref().is_some_and(|s| !s.runner.browser());
+        let cypress = current.as_ref().is_some_and(|s| s.runner.browser());
         let env = (!unit).then(|| Self::environment_switch("tests-environment", false, cx));
+        let browser = cypress.then(|| crate::cypress::window::browser_switch("tests-cypress-browser", cx));
         let suites = self.suite_switch(cx);
         let tests = self.tests.clone();
         let failed_any = c.failed > 0 && !running;
@@ -266,6 +269,7 @@ impl TestsWindow {
                         div().flex_1().min_w(px(120.)).text_color(p.fg_dim).truncate().child(crate::look::text(detail)),
                     )
                     .children(suites)
+                    .children(browser)
                     .children(env)
                     .when(!unit, |d| {
                         d.child(
@@ -353,13 +357,13 @@ impl TestsWindow {
         }
         let current = t.unit(cx);
         let label = current.as_ref().map_or_else(|| "Playwright".to_owned(), |s| s.label(&root));
-        let choices: Vec<(Option<PathBuf>, String)> = t
+        let choices: Vec<(Option<crate::jstest::Suite>, String)> = t
             .playwright
             .then(|| (None, "Playwright".to_owned()))
             .into_iter()
-            .chain(t.suites.iter().map(|s| (Some(s.dir.clone()), s.label(&root))))
+            .chain(t.suites.iter().map(|s| (Some(s.clone()), s.label(&root))))
             .collect();
-        let on = current.map(|s| s.dir);
+        let on = current;
         let tests = self.tests.clone();
         let trigger = button("tests-suite", label, Some(Icon::TestFolder), p.accent, &p).child(icon(
             Icon::ChevronDown,
@@ -1019,11 +1023,20 @@ impl TestsWindow {
                     .into_any_element(),
             );
             let tests = self.tests.clone();
-            actions.push(
-                button("tests-debug-this", ts!("tests-debug-this-test"), Some(Icon::Bug), p.fg, &p)
-                    .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.debug_selected(cx)))
-                    .into_any_element(),
-            );
+            // Cypress debugs in its own app, the browser's developer tools at hand.
+            if self.tests.read(cx).cypress_run(cx) {
+                actions.push(
+                    button("tests-open-cypress", ts!("cypress-open-in-cypress"), Some(Icon::Bug), p.fg, &p)
+                        .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.open_cypress(cx)))
+                        .into_any_element(),
+                );
+            } else {
+                actions.push(
+                    button("tests-debug-this", ts!("tests-debug-this-test"), Some(Icon::Bug), p.fg, &p)
+                        .on_click(move |_, _, cx| tests.update(cx, |t, cx| t.debug_selected(cx)))
+                        .into_any_element(),
+                );
+            }
             let tests = self.tests.clone();
             if !self.tests.read(cx).unit_run(cx) {
                 actions.push(
@@ -1270,10 +1283,11 @@ impl Render for TestsWindow {
             return base.child(summary).child(div().flex_1().min_h_0().child(self.history(cx)));
         }
         let workers = self.workers(cx);
+        let problems = crate::cypress::window::problem_cards(&self.tests, cx);
         let filters = self.filters(cx);
         let grid = self.grid(cx);
         let detail = selected.map(|s| self.detail(&s, cx));
-        base.child(summary).children(workers).child(filters).child(
+        base.child(summary).children(problems).children(workers).child(filters).child(
             div().flex_1().min_h_0().flex().child(div().flex_1().min_w_0().h_full().child(grid)).children(detail.map(
                 |d| {
                     div()

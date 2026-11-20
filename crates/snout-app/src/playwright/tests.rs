@@ -1,5 +1,6 @@
 //! What the Tests window shows of the open project: a Playwright project's tests as
-//! `playwright test --list` finds them, and the packages that test with Vitest or Jest
+//! `playwright test --list` finds them, and the packages that test with Vitest, Jest or
+//! Cypress
 //! ([`crate::jstest`]); the run in front (the newest test session, live while it runs), the
 //! runs kept before it, and what the window has picked (a test, a filter, a tab, the suite
 //! runs go to). Runs start through [`crate::run::Runs`]; this follows them.
@@ -53,9 +54,9 @@ pub struct PwTests {
     pub playwright: bool,
     /// Its packages that test with Vitest or Jest.
     pub suites: Vec<crate::jstest::Suite>,
-    /// The suite runs go to, as picked (by its folder); none for Playwright's, or the one
-    /// the run in front ran.
-    pub picked: Option<PathBuf>,
+    /// The suite runs go to, as picked; none for Playwright's, or the one the run in front
+    /// ran.
+    pub picked: Option<crate::jstest::Suite>,
     suites_task: Option<Task<()>>,
     /// The tests as listed (nothing run).
     pub listing: Option<Run>,
@@ -175,13 +176,12 @@ impl PwTests {
     /// The suite runs go to, when not Playwright's: the one picked, else the one the run in
     /// front ran, else (in a project without Playwright) the first.
     pub fn unit(&self, cx: &App) -> Option<crate::jstest::Suite> {
-        let by_dir = |d: &PathBuf| self.suites.iter().find(|s| &s.dir == d).cloned();
-        if let Some(d) = &self.picked {
-            return by_dir(d);
+        if let Some(s) = &self.picked {
+            return self.suites.contains(s).then(|| s.clone());
         }
         if let Some(run) = self.run(cx) {
             return match (&run.dir, run.runner) {
-                (Some(d), Some(runner)) => by_dir(d).or(Some(crate::jstest::Suite { dir: d.clone(), runner })),
+                (Some(d), Some(runner)) => Some(crate::jstest::Suite { dir: d.clone(), runner }),
                 _ if self.playwright => None,
                 _ => self.suites.first().cloned(),
             };
@@ -190,9 +190,18 @@ impl PwTests {
     }
 
     /// Run in this suite from now on (none: Playwright's).
-    pub fn pick_suite(&mut self, dir: Option<PathBuf>, cx: &mut Context<Self>) {
-        self.picked = dir;
+    pub fn pick_suite(&mut self, suite: Option<crate::jstest::Suite>, cx: &mut Context<Self>) {
+        self.picked = suite;
         cx.notify();
+    }
+
+    /// The package of the project that tests with Cypress, when one does: the one picked or
+    /// run last, else the first.
+    pub fn cypress_suite(&self, cx: &App) -> Option<crate::jstest::Suite> {
+        use crate::jstest::Runner;
+        self.unit(cx)
+            .filter(|s| s.runner == Runner::Cypress)
+            .or_else(|| self.suites.iter().find(|s| s.runner == Runner::Cypress).cloned())
     }
 
     /// List the project's tests again (a Playwright project's).
@@ -347,12 +356,45 @@ impl PwTests {
         self.tab = Tab::Live;
         self.ended_note = None;
         if let Some(suite) = self.unit(cx) {
-            let scope = self.unit_scope(scope, &suite, cx);
-            self.runs.update(cx, |r, cx| r.start_js_tests(suite.dir, suite.runner, scope, false, cx));
+            self.start_in(suite, scope, cx);
             return;
         }
         let options = self.options();
         self.runs.update(cx, |r, cx| r.start_playwright(scope, options, cx));
+    }
+
+    /// Run `scope` in `suite` (Vitest's, Jest's or Cypress's).
+    pub fn start_in(&mut self, suite: crate::jstest::Suite, scope: Scope, cx: &mut Context<Self>) {
+        self.tab = Tab::Live;
+        self.ended_note = None;
+        let scope = self.unit_scope(scope, &suite, cx);
+        self.start_unit(suite, scope, cx);
+    }
+
+    /// Run `scope` of `suite`: Cypress's headed when Watch is on.
+    pub fn start_unit(&mut self, suite: crate::jstest::Suite, scope: crate::jstest::Scope, cx: &mut Context<Self>) {
+        let headed = self.watch;
+        self.runs.update(cx, |r, cx| {
+            if suite.runner.browser() {
+                r.start_cypress(suite.dir, scope, headed, cx);
+            } else {
+                r.start_js_tests(suite.dir, suite.runner, scope, false, cx);
+            }
+        });
+    }
+
+    /// Carry out `fix` for the Cypress run in front, then run it again.
+    pub fn fix(&mut self, fix: crate::cypress::Fix, cx: &mut Context<Self>) {
+        let Some(id) = self.live else { return };
+        self.tab = Tab::Live;
+        self.runs.update(cx, |r, cx| r.fix_cypress(id, fix, cx));
+    }
+
+    /// Open the Cypress app on the package with Cypress.
+    pub fn open_cypress(&mut self, cx: &mut Context<Self>) {
+        if let Some(suite) = self.cypress_suite(cx) {
+            self.runs.update(cx, |r, cx| r.open_cypress(suite.dir, cx));
+        }
     }
 
     /// A Playwright scope as a unit runner takes it: the tests that failed in the run in
@@ -400,7 +442,7 @@ impl PwTests {
     /// Run the test picked, in its project.
     pub fn run_selected(&mut self, cx: &mut Context<Self>) {
         if let Some((suite, scope)) = self.selected_unit(cx) {
-            self.runs.update(cx, |r, cx| r.start_js_tests(suite.dir, suite.runner, scope, false, cx));
+            self.start_unit(suite, scope, cx);
             return;
         }
         let Some(t) = self.selected_test(cx).cloned() else { return };
@@ -417,9 +459,14 @@ impl PwTests {
         self.start_selected(Options { breakpoints: true, ..Default::default() }, cx);
     }
 
-    /// Whether the run in front is a unit runner's (no browsers, traces or Inspector).
+    /// Whether the run in front is a unit runner's or Cypress's (no traces or Inspector).
     pub fn unit_run(&self, cx: &App) -> bool {
         self.run(cx).is_some_and(|r| r.runner.is_some())
+    }
+
+    /// Whether the run in front is Cypress's.
+    pub fn cypress_run(&self, cx: &App) -> bool {
+        self.run(cx).is_some_and(|r| r.runner == Some(crate::jstest::Runner::Cypress))
     }
 
     /// Step through the test picked in the Playwright Inspector (`--debug`).

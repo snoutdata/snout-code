@@ -98,6 +98,7 @@ fn panel_name(tool: Tool) -> &'static str {
         Tool::AgentLog => "Agent Log",
         Tool::AgentView => "Agent View",
         Tool::Tests => "Tests",
+        Tool::Cypress => "Cypress",
     }
 }
 

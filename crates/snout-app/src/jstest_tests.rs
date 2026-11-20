@@ -1,6 +1,6 @@
-//! Vitest and Jest: packages found as suites, run icons in their test files, and runs into
-//! the Tests window through our reporters (here driven by stand-ins for the runners, which
-//! call the reporters as Vitest 3 and Jest 29 do).
+//! Vitest, Jest and Cypress: packages found as suites, run icons in their test files, and
+//! runs into the Tests window through our reporters (here driven by stand-ins for the
+//! runners, which call the reporters as Vitest 3, Jest 29 and Cypress 13 do).
 
 use std::path::{Path, PathBuf};
 
@@ -50,11 +50,34 @@ fn suite_package(dir: &Path, runner: Runner) {
                 "describe('math', () => {\n  test('adds', () => {});\n\n  test('divides', () => {});\n});\n",
             );
         }
+        Runner::Cypress => {
+            let json = r#"{ "name": "shop", "devDependencies": { "cypress": "^13.6.4" }, "scripts": { "test": "cypress run", "both": "cypress run && echo done" } }"#;
+            write(dir, "package.json", json);
+            write(dir, "cypress.config.js", "module.exports = { e2e: {} };\n");
+            write(
+                dir,
+                "node_modules/cypress/package.json",
+                r#"{ "version": "13.6.4", "bin": { "cypress": "bin/cypress" } }"#,
+            );
+            std::fs::create_dir_all(dir.join("node_modules/cypress/bin")).unwrap();
+            std::fs::copy(fixtures().join("fake-cypress.js"), dir.join("node_modules/cypress/bin/cypress")).unwrap();
+            write(
+                dir,
+                "cypress/e2e/cart.cy.js",
+                "describe('cart', () => {\n  it('adds items', () => {\n    cy.wrap(1).should('eq', 1);\n  });\n\n  it('fails to total', () => {\n    expect(2 * 2).to.eq(5);\n  });\n});\n",
+            );
+            write(dir, "cypress/e2e/login.cy.js", "it('signs in', () => {});\n");
+            write(dir, "cypress/support/e2e.js", "// not a spec\n");
+        }
     }
 }
 
 fn args_of(dir: &Path, runner: Runner) -> Vec<String> {
-    let name = if runner == Runner::Vitest { "vitest-args.json" } else { "jest-args.json" };
+    let name = match runner {
+        Runner::Vitest => "vitest-args.json",
+        Runner::Jest => "jest-args.json",
+        Runner::Cypress => "cypress-args.json",
+    };
     serde_json::from_str(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap()
 }
 
@@ -276,4 +299,182 @@ fn real_vitest_and_jest_tests_run_and_stop_at_breakpoints(cx: &mut gpui::TestApp
         assert!(done, "{} goes on to the end", runner.name());
         cx.update(|_, cx| runs.update(cx, |r, cx| r.toggle_breakpoint(&file, 3, cx)));
     }
+}
+
+#[test]
+fn a_package_with_cypress_is_a_suite_of_its_own_beside_its_unit_tests() {
+    let host = snout_host::local();
+    let repo = scratch_dir("cypress-suites");
+    suite_package(&repo, Runner::Cypress);
+    write(
+        &repo,
+        "package.json",
+        r#"{ "name": "shop", "devDependencies": { "cypress": "^13.6.4", "jest": "^29.7.0" } }"#,
+    );
+    write(&repo, "src/cart.test.js", "test('x', () => {});\n");
+    let found = crate::jstest::suites(&*host, &repo);
+    let labels: Vec<String> = found.iter().map(|s| s.label(&repo)).collect();
+    assert_eq!(labels, ["Jest", "Cypress"]);
+    let suite = |f: &str| crate::jstest::suite_of(&*host, &repo.join(f), &repo).map(|s| s.runner);
+    assert_eq!(suite("cypress/e2e/cart.cy.js"), Some(Runner::Cypress));
+    assert_eq!(suite("src/cart.test.js"), Some(Runner::Jest));
+    let specs = crate::cypress::specs(&*host, &repo);
+    assert_eq!(specs, [repo.join("cypress/e2e/cart.cy.js"), repo.join("cypress/e2e/login.cy.js")]);
+    assert_eq!(crate::cypress::version(&*host, &repo).as_deref(), Some("13.6.4"));
+    // A pattern of its own.
+    write(&repo, "cypress.config.js", "module.exports = { e2e: { specPattern: 'cypress/e2e/shop*.cy.js' } };\n");
+    write(&repo, "cypress/e2e/shop-home.cy.js", "it('opens', () => {});\n");
+    assert_eq!(crate::cypress::specs(&*host, &repo), [repo.join("cypress/e2e/shop-home.cy.js")]);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn a_cypress_run_names_its_specs_browser_and_environment() {
+    let host = snout_host::local();
+    let dir = scratch_dir("cypress-launch");
+    suite_package(&dir, Runner::Cypress);
+    let n = node::Node { bin: "/n/bin/node".into(), version: "22.12.0".into(), major: 22 };
+    let scope = Scope::At { file: dir.join("cypress/e2e/cart.cy.js"), path: vec!["cart".into()], group: true };
+    let options = crate::cypress::Options { browser: crate::cypress::Browser::Chrome, headed: true };
+    let vars = crate::cypress::environment_vars(&[("BASE_URL".into(), "https://staging.test".into())]);
+    let l = crate::cypress::run_launch(&*host, &dir, &dir, &n, &scope, &options, vars).unwrap();
+    assert_eq!(l.args[1..3], ["run".to_owned(), "--reporter".to_owned()]);
+    let after = |f: &str| l.args.iter().position(|a| a == f).map(|i| l.args[i + 1].clone());
+    assert_eq!(after("--spec").as_deref(), Some("cypress/e2e/cart.cy.js"), "a test runs its spec");
+    assert_eq!(after("--browser").as_deref(), Some("chrome"));
+    assert!(l.args.iter().any(|a| a == "--headed") && l.report);
+    assert!(l.env.contains(&("CYPRESS_baseUrl".to_owned(), "https://staging.test".to_owned())));
+    assert_eq!(l.title, "cart.cy.js");
+    let all = crate::cypress::run_launch(&*host, &dir, &dir, &n, &Scope::All, &Default::default(), Vec::new()).unwrap();
+    assert!(!all.args.iter().any(|a| a == "--spec" || a == "--browser" || a == "--headed"), "{:?}", all.args);
+    assert_eq!(all.title, "Cypress");
+    // The script that is `cypress run` gets the reporter; one that chains another command does not.
+    assert_eq!(crate::cypress::script_runs_cypress(&*host, &dir, "test"), Some(crate::cypress::Browser::Electron));
+    assert_eq!(crate::cypress::script_runs_cypress(&*host, &dir, "both"), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn a_cypress_run_fills_the_tests_window_and_says_how_to_fix_a_crash(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress runs: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress");
+    suite_package(&repo, Runner::Cypress);
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some()));
+    assert!(found, "the Tests window has the package's specs");
+    // The spec's icons: at its top level, each running the spec.
+    let file = repo.join("cypress/e2e/cart.cy.js");
+    act(&model, cx, Action::OpenFile(file.clone(), None));
+    let editor = editor_of(&ws, &file, cx).expect("the spec opens");
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| editor.read(cx).runnables.is_some()));
+    assert!(found);
+    let r = cx.update(|_, cx| editor.read(cx).runnables.clone()).unwrap();
+    let lines: Vec<u32> = r.items.iter().map(|i| i.line).collect();
+    assert_eq!(lines, [0], "one icon, at the describe (lines from 0)");
+    // A new run ended (the Run window keeps the newest sessions).
+    let newest =
+        |cx: &mut gpui::VisualTestContext| cx.update(|_, cx| runs.read(cx).sessions.last().map_or(0, |s| s.id));
+    let ended_after = |before: u64, cx: &mut gpui::VisualTestContext| {
+        pump_until(cx, 30, |cx| {
+            cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.id > before && s.ended.is_some()))
+        })
+    };
+    // Run all, from the Tests window.
+    let before = newest(cx);
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx)));
+    assert!(ended_after(before, cx), "the run ends");
+    cx.update(|_, cx| {
+        let s = runs.read(cx).sessions.last().unwrap();
+        let run = s.playwright.as_ref().expect("the Tests window follows it");
+        assert_eq!(run.runner, Some(Runner::Cypress));
+        let c = run.counts();
+        assert_eq!((c.total, c.passed, c.failed), (3, 2, 1), "{}", s.console_text());
+        let failed = run.failures()[0];
+        assert_eq!(failed.path, ["cart", "fails to total"]);
+        let e = &failed.last_try().unwrap().errors[0];
+        assert_eq!((e.headline().as_str(), e.location.line), ("expected 4 to equal 5", Some(6)));
+        assert_eq!(run.location(&failed.id), Some((file.clone(), 6)));
+        assert!(s.console_text().contains("✗ fails to total"), "our reporter prints the tests: {}", s.console_text());
+        assert!(run.cypress.problems.is_empty());
+    });
+    // Rerun failed: the spec that failed.
+    let before = newest(cx);
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::LastFailed, cx)));
+    assert!(ended_after(before, cx));
+    let args = args_of(&repo, Runner::Cypress);
+    let spec = args.iter().position(|a| a == "--spec").map(|i| args[i + 1].clone());
+    assert_eq!(spec.as_deref(), Some("cypress/e2e/cart.cy.js"), "{args:?}");
+    // An environment whose variables make the stand-in crash as it ends: the problem, and its fixes.
+    let env = crate::run::config::Environment {
+        name: "crashy".into(),
+        vars: [("FAKE_CYPRESS_CRASH".to_owned(), "1".to_owned())].into_iter().collect(),
+        ..Default::default()
+    };
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.set_environments(vec![env], Some("crashy".into()), cx)));
+    let before = newest(cx);
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx)));
+    assert!(ended_after(before, cx), "the crashing run ends");
+    cx.update(|_, cx| {
+        let s = runs.read(cx).sessions.last().unwrap();
+        let run = s.playwright.as_ref().unwrap();
+        assert_eq!(run.cypress.problems, [crate::cypress::Problem::Crashed { signal: "SIGSEGV".into() }]);
+        assert_eq!(run.environment.as_deref(), Some("crashy"));
+    });
+    cx.update(|w, _| w.refresh());
+    cx.run_until_parked();
+    // Run Again, the fix that needs nothing installed: the same run starts again.
+    let before = newest(cx);
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.fix(crate::cypress::Fix::RunAgain, cx)));
+    assert!(ended_after(before, cx), "it runs again");
+    cx.update(|_, cx| {
+        let s = runs.read(cx).sessions.last().unwrap();
+        assert_eq!(s.playwright.as_ref().unwrap().runner, Some(Runner::Cypress), "the run again is Cypress's too");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn the_npm_script_that_runs_cypress_reports_to_the_tests_window(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress script: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-script");
+    suite_package(&repo, Runner::Cypress);
+    // `npm run test` runs `cypress run` from node_modules/.bin, as npm links it.
+    std::fs::create_dir_all(repo.join("node_modules/.bin")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("../cypress/bin/cypress", repo.join("node_modules/.bin/cypress")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(repo.join("node_modules/cypress/bin/cypress"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.run_npm_script(&repo, "test", false, cx)));
+    let done =
+        pump_until(cx, 60, |cx| cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.ended.is_some())));
+    assert!(done);
+    if crate::lang::typescript::npm_cli(&*snout_host::local(), &node::discover(&*snout_host::local())[0]).is_none() {
+        println!("cypress script: no npm beside Node");
+        return;
+    }
+    cx.update(|_, cx| {
+        let s = runs.read(cx).sessions.last().unwrap();
+        let run = s.playwright.as_ref().unwrap_or_else(|| panic!("the Tests window follows it: {}", s.console_text()));
+        assert_eq!(run.runner, Some(Runner::Cypress));
+        assert_eq!(run.counts().total, 3, "{}", s.console_text());
+    });
+    let args = args_of(&repo, Runner::Cypress);
+    assert!(args.iter().any(|a| a == "--reporter"), "{args:?}");
+    let _ = std::fs::remove_dir_all(repo);
 }

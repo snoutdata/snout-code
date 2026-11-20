@@ -10,6 +10,7 @@
 pub mod ansi;
 pub mod config;
 pub mod config_dialog;
+mod cypress_run;
 pub mod debug;
 pub mod debug_dialogs;
 pub mod gradle_window;
@@ -644,6 +645,12 @@ pub struct Runs {
     /// The js-debug server script to use instead of the one SnoutCode downloads (the
     /// tests' stand-in).
     pub js_debug_server: Option<PathBuf>,
+    /// A fix of a Cypress run that runs (by its session), and the run (its session) to run
+    /// again once the fix ends well.
+    pub cypress_then: HashMap<u64, u64>,
+    /// Run (or Debug, when true) was pressed with nothing to run before the engine had
+    /// found the project's main classes: the project's configuration runs once it has.
+    pub pending_run: Option<bool>,
     _tick: Option<Task<()>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -691,6 +698,8 @@ impl Runs {
             run_to: None,
             then: HashMap::new(),
             js_debug_server: None,
+            cypress_then: HashMap::new(),
+            pending_run: None,
             _tick: None,
             _subscriptions: subscriptions,
         };
@@ -892,6 +901,9 @@ impl Runs {
                     }
                     Err(e) => eprintln!("[run] run configurations: {e}"),
                 }
+                if let Some(debug) = this.pending_run.take() {
+                    this.run_project(debug, cx);
+                }
                 cx.notify();
             });
         })
@@ -949,6 +961,28 @@ impl Runs {
             Some(id) if all.iter().any(|c| c.id == id) => all.into_iter().find(|c| c.id == id),
             _ => config::default_config(&all),
         }
+    }
+
+    /// Run (or Debug) with nothing picked and nothing to run in the file in front: the
+    /// project's own configuration (its Spring Boot application, else its first main class),
+    /// which the title bar then shows. Before the engine has found them, the run waits for
+    /// it; a project with none opens Edit Configurations.
+    pub fn run_project(&mut self, debug: bool, cx: &mut Context<Self>) {
+        if let Some(config) = config::default_config(&self.configurations()) {
+            self.select_config(Some(config.id.clone()), cx);
+            self.start(Launch::Config { config, debug }, cx);
+            return;
+        }
+        let found = self.engine(cx).is_some_and(|(_, pid)| self.configs_from == Some(pid)) && !self.configs_loading;
+        if !found && let EngineState::Waiting(doing) = self.engine_state(false, cx) {
+            if let Some(project) = self.model.read(cx).project_root() {
+                self.hub.update(cx, |h, cx| h.ensure_server(&project, cx));
+            }
+            self.pending_run = Some(debug);
+            self.say(t!("run-runs-once-the-engine-finds-the-main-class", doing = doing.to_string()), cx);
+            return;
+        }
+        cx.emit(RunsEvent::EditConfigurations);
     }
 
     pub fn select_config(&mut self, id: Option<String>, cx: &mut Context<Self>) {
@@ -1486,11 +1520,22 @@ impl Runs {
     /// Run session `id`'s launch again, stopping it first.
     pub fn rerun(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some((launch, config)) = self.session(id).map(|s| (s.launch.clone(), s.config.clone())) else { return };
+        // A test run of Vitest, Jest or Cypress keeps what the Tests window knows of it.
+        let tests = self
+            .session(id)
+            .and_then(|s| s.playwright.as_ref())
+            .map(|r| (r.runner, r.dir.clone(), r.environment.clone(), r.browser));
         self.stop(id, cx);
         if let Some(next) = self.start(launch, cx)
             && let Some(s) = self.session_mut(next)
         {
             s.config = config;
+            if let (Some((runner, dir, environment, browser)), Some(run)) = (tests, s.playwright.as_mut()) {
+                run.runner = runner;
+                run.dir = dir;
+                run.environment = environment;
+                run.browser = browser;
+            }
         }
     }
 

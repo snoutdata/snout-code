@@ -197,6 +197,7 @@ impl Runs {
 
     fn on_process_event(&mut self, id: u64, event: Event, cx: &mut Context<Self>) {
         let ended = matches!(event, Event::Exit(_) | Event::Failed(_));
+        let host = crate::host::host(cx);
         let Some(s) = self.session_mut(id) else { return };
         let debugged = s.debug.is_some();
         match event {
@@ -204,9 +205,18 @@ impl Runs {
                 let (shown, event) = crate::playwright::report::split_line(&line);
                 if let Some(text) = shown {
                     s.push(Stream::Out, text);
+                    if let Some(run) = s.playwright.as_mut() {
+                        run.see_output(text);
+                    }
                 }
                 if let (Some(json), Some(run)) = (event, s.playwright.as_mut()) {
                     run.apply_line(json);
+                }
+            }
+            Event::Line(Stream::Err, line) if s.playwright.is_some() => {
+                s.push(Stream::Err, &line);
+                if let Some(run) = s.playwright.as_mut() {
+                    run.see_output(&line);
                 }
             }
             Event::Line(Stream::Out, line) if line.contains(crate::playwright::report::MARK) => {
@@ -238,6 +248,12 @@ impl Runs {
                 s.process = None;
                 if let Some(run) = s.playwright.as_mut() {
                     run.finish();
+                    // Cypress's screenshots of the failed tests, beside their results.
+                    if run.runner == Some(crate::jstest::Runner::Cypress)
+                        && let Some(dir) = run.dir.clone()
+                    {
+                        crate::cypress::attach_screenshots(&*host, &dir, run);
+                    }
                 }
                 if let Some(d) = s.debug.as_mut() {
                     d.end();
@@ -265,6 +281,9 @@ impl Runs {
         if ended && debugged {
             // The debugger went with the program, and so does the line it showed.
             self.sync_marks(cx);
+        }
+        if ended {
+            self.cypress_fix_ended(id, cx);
         }
         cx.notify();
     }

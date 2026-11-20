@@ -521,6 +521,7 @@ const WINDOWS: &[(&str, Target)] = &[
     ("Maven", Target::Tool(Tool::Maven)),
     ("Spring", Target::Tool(Tool::Spring)),
     ("Tests", Target::Tool(Tool::Tests)),
+    ("Cypress", Target::Tool(Tool::Cypress)),
     ("Agent Changes", Target::Tool(Tool::ClaudeChanges)),
     ("Structure", Target::Tool(Tool::Structure)),
     ("Hierarchy", Target::Tool(Tool::Hierarchy)),

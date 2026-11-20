@@ -694,6 +694,12 @@ fn tool_header(group: &TabGroupContext, cx: &mut App) -> AnyElement {
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::CollapseMaven), cx)),
                 )
         }
+        "Cypress" => {
+            row = row.child(
+                tool_button("tool-refresh-cypress", Icon::Refresh, ts!("cypress-find-the-specs-again"), &p)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::RefreshCypress), cx)),
+            )
+        }
         "Processes" => {
             row = row.child(
                 tool_button(

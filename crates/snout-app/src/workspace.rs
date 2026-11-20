@@ -53,6 +53,7 @@ pub struct Tabs {
     pub problems: PanelId,
     pub gradle: PanelId,
     pub maven: PanelId,
+    pub cypress: PanelId,
     pub spring: PanelId,
     pub notifications: PanelId,
     pub claude_changes: PanelId,
@@ -115,6 +116,7 @@ pub struct Workspace {
     /// The right stripe's tool windows.
     pub gradle: Entity<crate::run::gradle_window::GradleWindow>,
     pub maven: Entity<crate::run::maven_window::MavenWindow>,
+    pub cypress: Entity<crate::cypress::window::CypressWindow>,
     pub spring_window: Entity<crate::spring::window::SpringWindow>,
     /// The project's Spring model, for the Spring window and the editors' gutters.
     pub spring: Entity<crate::spring::Spring>,
@@ -396,6 +398,8 @@ impl Workspace {
         let debug_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Debug, window, cx));
         let build_window = cx.new(|cx| RunWindow::new(runs.clone(), Place::Build, window, cx));
         let tests_window = cx.new(|cx| crate::playwright::window::TestsWindow::new(pw_tests.clone(), window, cx));
+        let cypress_window =
+            cx.new(|cx| crate::cypress::window::CypressWindow::new(pw_tests.clone(), runs.clone(), cx));
         let notifications = cx.new(|cx| crate::tool_windows::NotificationsPanel::new(model.clone(), cx));
         let claude_changes = cx.new(|cx| crate::claude_ide::panel::ChangesPanel::new(cx_ws.clone(), cx));
         let agent_log = cx.new(|_| crate::claude_ide::agent_log::AgentLog::default());
@@ -416,6 +420,7 @@ impl Workspace {
             problems: PanelId::from(problems.entity_id()),
             gradle: PanelId::from(gradle.entity_id()),
             maven: PanelId::from(maven.entity_id()),
+            cypress: PanelId::from(cypress_window.entity_id()),
             spring: PanelId::from(spring_window.entity_id()),
             notifications: PanelId::from(notifications.entity_id()),
             claude_changes: PanelId::from(claude_changes.entity_id()),
@@ -448,6 +453,7 @@ impl Workspace {
         panels.push((panel_handle(hierarchy.clone()), DockPlacement::Right));
         panels.push((panel_handle(gradle.clone()), DockPlacement::Right));
         panels.push((panel_handle(maven.clone()), DockPlacement::Right));
+        panels.push((panel_handle(cypress_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(spring_window.clone()), DockPlacement::Right));
         panels.push((panel_handle(notifications.clone()), DockPlacement::Right));
         panels.push((panel_handle(claude_changes.clone()), DockPlacement::Right));
@@ -606,6 +612,7 @@ impl Workspace {
             project_structure: None,
             gradle,
             maven,
+            cypress: cypress_window,
             spring_window,
             spring,
             notifications,
@@ -2423,6 +2430,10 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &EditConfigurations, w, cx| this.open_config_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &crate::menus::EditEnvironments, w, cx| this.open_env_dialog(w, cx)))
             .on_action(cx.listener(|this, _: &crate::menus::ShowTests, w, cx| this.show_tool(Tool::Tests, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::ShowCypress, w, cx| this.show_tool(Tool::Cypress, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::menus::RefreshCypress, _, cx| {
+                this.cypress.update(cx, |c, cx| c.refresh(cx));
+            }))
             .on_action(cx.listener(|this, _: &crate::menus::RecordAtCursor, w, cx| this.record_at_cursor(w, cx)))
             .on_action(cx.listener(|this, _: &crate::menus::PickLocator, w, cx| this.pick_locator(w, cx)))
             .on_action(cx.listener(|this, _: &crate::menus::StopRecording, _, cx| this.stop_recording(cx)))

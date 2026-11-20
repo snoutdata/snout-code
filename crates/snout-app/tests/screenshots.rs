@@ -215,6 +215,9 @@ mod shots {
         NodeScripts,
         /// A Vitest run in the Tests window, a failure picked; its test file above.
         VitestRun,
+        /// A Cypress run whose browser crashed as it closed: the Cypress window on the right,
+        /// the Tests window with the problem and its fixes, a failure picked.
+        CypressRun,
         /// Problems and their fixes, the engine canned: 0 the hover card of an error with its
         /// fix and what the type is, 1 the bulb and the context actions with Fix all and Ask,
         /// 2 the Problems window grouped, 3 filtered with a problem's actions open.
@@ -1964,6 +1967,64 @@ sleep 30
                 })
                 .unwrap();
             }
+            Some(Select::CypressRun) => {
+                std::fs::write(
+                    repo.join("package.json"),
+                    r#"{ "name": "shop", "devDependencies": { "cypress": "^13.6.4" }, "scripts": { "test": "cypress run" } }"#,
+                )
+                .unwrap();
+                std::fs::write(
+                    repo.join("cypress.config.ts"),
+                    "export default { e2e: { baseUrl: 'http://localhost:3000' } };\n",
+                )
+                .unwrap();
+                let pkg = repo.join("node_modules/cypress");
+                std::fs::create_dir_all(&pkg).unwrap();
+                std::fs::write(
+                    pkg.join("package.json"),
+                    r#"{ "version": "13.6.4", "bin": { "cypress": "bin/cypress" } }"#,
+                )
+                .unwrap();
+                for (name, text) in crate::CYPRESS_SPECS {
+                    let file = repo.join("cypress/e2e").join(name);
+                    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                    std::fs::write(&file, text).unwrap();
+                }
+                let file = repo.join("cypress/e2e/checkout.cy.ts");
+                cx.update(|cx| model.update(cx, |m, cx| m.handle(Action::OpenFile(file.clone(), Some((9, 4))), cx)));
+                let run = crate::cypress_run(&repo);
+                cx.update_window(handle.into(), |_, _, cx| {
+                    let runs = ws.read(cx).runs.clone();
+                    let tests = ws.read(cx).pw_tests.clone();
+                    tests.update(cx, |t, cx| {
+                        t.root = Some(repo.clone());
+                        t.suites = vec![snout_app::jstest::Suite {
+                            dir: repo.clone(),
+                            runner: snout_app::jstest::Runner::Cypress,
+                        }];
+                        cx.notify();
+                    });
+                    runs.update(cx, |r, cx| {
+                        r.adopt_playwright("Cypress", run, cx);
+                    });
+                    tests.update(cx, |t, cx| {
+                        t.select("cypress/e2e/checkout.cy.ts › checkout › pays by card".into(), "Electron".into(), cx)
+                    });
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |ws, cx| {
+                        ws.show_tool(snout_app::workspace::Tool::Tests, window, cx);
+                        ws.show_tool(snout_app::workspace::Tool::Cypress, window, cx);
+                        ws.dock.update(cx, |d, cx| {
+                            d.set_dock_size(gpui_component::dock::DockPlacement::Bottom, gpui::px(470.), window, cx);
+                            d.set_dock_size(gpui_component::dock::DockPlacement::Right, gpui::px(340.), window, cx)
+                        });
+                    });
+                })
+                .unwrap();
+            }
             Some(Select::TestsWindow) => {
                 let run = crate::playwright_run(&repo);
                 cx.update_window(handle.into(), |_, window, cx| {
@@ -3637,6 +3698,7 @@ sleep 30
             shot(&format!("ui-playwright-debug-{mode}"), theme, Activity::Project, Some(Select::PlaywrightDebug));
             shot(&format!("ui-node-scripts-{mode}"), theme, Activity::Project, Some(Select::NodeScripts));
             shot(&format!("ui-tests-vitest-{mode}"), theme, Activity::Project, Some(Select::VitestRun));
+            shot(&format!("ui-cypress-{mode}"), theme, Activity::Project, Some(Select::CypressRun));
             shot(&format!("ui-welcome-{mode}"), theme, Activity::Project, Some(Select::Nothing));
             shot(&format!("ui-git-{mode}"), theme, Activity::Git, Some(Select::File("status.rs")));
             themed_shot(
@@ -3809,6 +3871,55 @@ fn vitest_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
     run.apply(&json!({ "e": "end", "status": "failed", "duration": 412 }));
     run.runner = Some(snout_app::jstest::Runner::Vitest);
     run.dir = Some(repo.to_owned());
+    run
+}
+
+/// The specs of the Cypress shot.
+const CYPRESS_SPECS: [(&str, &str); 3] = [
+    (
+        "checkout.cy.ts",
+        "describe('checkout', () => {\n  beforeEach(() => {\n    cy.visit('/cart');\n  });\n\n  it('shows the total', () => {\n    cy.get('[data-qa=total]').should('have.text', '€42.00');\n  });\n\n  it('pays by card', () => {\n    cy.get('[data-qa=pay]').click();\n    cy.contains('Thank you').should('be.visible');\n  });\n});\n",
+    ),
+    ("login/login.cy.ts", "describe('login', () => {\n  it('signs in', () => {\n    cy.visit('/login');\n  });\n});\n"),
+    (
+        "customer/customer.cy.ts",
+        "describe('customer', () => {\n  it('edits the address', () => {\n    cy.visit('/me');\n  });\n});\n",
+    ),
+];
+
+/// A Cypress run in Electron: one failure, then the browser crashed as it closed.
+fn cypress_run(repo: &std::path::Path) -> snout_app::playwright::report::Run {
+    use serde_json::json;
+    let mut run = snout_app::playwright::report::Run::default();
+    let spec = |f: &str| repo.join("cypress/e2e").join(f).display().to_string();
+    let (checkout, login, customer) =
+        (spec("checkout.cy.ts"), spec("login/login.cy.ts"), spec("customer/customer.cy.ts"));
+    run.apply(&json!({ "e": "begin", "version": "", "rootDir": repo, "workers": 1, "projects": [{ "name": "Electron" }], "tests": [] }));
+    let tests = [
+        ("k1", &checkout, 6, vec!["checkout", "shows the total"], "passed", 412.0),
+        ("k2", &checkout, 10, vec!["checkout", "pays by card"], "failed", 4180.0),
+        ("l1", &login, 2, vec!["login", "signs in"], "passed", 797.0),
+        ("u1", &customer, 2, vec!["customer", "edits the address"], "passed", 970.0),
+    ];
+    let list: Vec<_> = tests
+        .iter()
+        .map(|(id, f, line, path, _, _)| json!({ "id": id, "project": "Electron", "file": f, "line": line, "column": 3, "path": path, "expected": "passed" }))
+        .collect();
+    run.apply(&json!({ "e": "tests", "tests": list }));
+    for (id, _, _, _, status, ms) in &tests {
+        let outcome = if *status == "failed" { "unexpected" } else { "expected" };
+        let errors = if *status == "failed" {
+            json!([{ "message": "Timed out retrying after 4000ms: Expected to find content: 'Thank you' but never did.", "stack": "AssertionError: Timed out retrying after 4000ms\n    at Context.eval (webpack://shop/./cypress/e2e/checkout.cy.ts:12:35)", "snippet": "  10 |   it('pays by card', () => {\n  11 |     cy.get('[data-qa=pay]').click();\n> 12 |     cy.contains('Thank you').should('be.visible');\n     |                                   ^", "file": checkout, "line": 12, "column": 35 }])
+        } else {
+            json!([])
+        };
+        run.apply(&json!({ "e": "testBegin", "id": id, "retry": 0, "worker": 0 }));
+        run.apply(&json!({ "e": "testEnd", "id": id, "retry": 0, "worker": 0, "status": status, "outcome": outcome, "duration": ms, "errors": errors }));
+    }
+    run.runner = Some(snout_app::jstest::Runner::Cypress);
+    run.dir = Some(repo.to_owned());
+    run.cypress.see("The Test Runner unexpectedly exited via a exit event with signal SIGSEGV");
+    run.millis = Some(12_900);
     run
 }
 

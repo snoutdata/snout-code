@@ -59,6 +59,8 @@ The right side of the title bar holds:
 
 With **Current File**, Run and Debug take the file in front: its test class, else its main class; a TypeScript or JavaScript file runs on Node (see [Script files](node.md#script-files)).
 
+When there is nothing to run in front (no file open, or one with no tests or main class), Run and Debug start the project's own configuration instead, its Spring Boot application, else its first main class, and the title bar shows it from then on. On a project just opened, before the Java engine has found its main classes, the run waits for the engine and starts once it has. A project with nothing to run opens **Edit Configurations** to make a configuration.
+
 Run and Debug are grey until the Java engine is ready, except for Current File and the configurations that run on Node.
 
 ## Run from the editor

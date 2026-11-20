@@ -1363,7 +1363,7 @@ remote-show-hidden-folders = Mostrar pastas ocultas
 ## run
 
 run-is-not-among-the-projects-sources = { $class } não está entre os fontes do projeto
-run-the-file-in-front-has-no-tests-main = O arquivo em primeiro plano não tem testes, classe principal nem script para executar
+run-runs-once-the-engine-finds-the-main-class = Aguardando o mecanismo Java ({ $doing }): a classe principal do projeto é executada assim que for encontrada.
 run-nothing-to-run-here-put-the-caret-in = Nada para executar aqui: coloque o cursor em uma classe principal, um teste ou um script
 run-root = { $name } (raiz)
 run-reading-the-gradle-tasks = Lendo as tarefas Gradle
@@ -2402,3 +2402,41 @@ credentials-token-placeholder = Token ou senha
 credentials-token-hint = O token vai para o helper de credenciais do seu sistema, nunca para um arquivo que o SnoutCode escreva.
 credentials-saved = Salvo. O Git passa a usá-lo para este remoto.
 credentials-repaired = O helper agora chama { $path }.
+
+# Cypress: a janela do Cypress, os problemas que uma execução pode ter e suas correções.
+stripes-cypress = Cypress
+cmd-show-the-cypress-window = Mostrar a janela do Cypress
+cypress-specs = { $count ->
+    [one] 1 spec
+   *[other] { $count } specs
+    }
+cypress-specs-heading = Specs
+cypress-open-cypress = Abrir o Cypress
+cypress-open-cypress-tip = Abrir o aplicativo do Cypress nestas specs, para acompanhar um teste passo a passo e depurá-lo nas ferramentas de desenvolvedor do navegador
+cypress-open-in-cypress = Abrir no Cypress
+cypress-the-browser-the-specs-run-in = O navegador em que as specs rodam
+cypress-watch-tip = Executar com o navegador visível
+cypress-run-this-spec = Executar esta spec
+cypress-show-results = Mostrar os resultados
+cypress-find-the-specs-again = Procurar as specs de novo
+cypress-looking-for-specs = Procurando specs…
+cypress-no-specs = Nenhuma spec encontrada. O Cypress procura { $pattern }, a menos que o specPattern da configuração diga outra coisa.
+cypress-no-cypress = Nenhuma spec do Cypress
+cypress-no-cypress-hint = Um pacote que depende do cypress, ou que tem um arquivo cypress.config, lista suas specs aqui.
+cypress-failed-of = { $failed } de { $total } falharam
+cypress-passed-of = { $passed } de { $total } passaram
+cypress-problem-crashed = O navegador do Cypress travou
+cypress-problem-crashed-passed = Todos os testes passaram, e então o navegador em que o Cypress os executa travou ao fechar ({ $signal }), por isso a execução relata uma falha. O Cypress { $version } traz um navegador mais antigo do que este sistema espera; um Cypress mais novo corrige isso, ou execute as specs em outro navegador.
+cypress-problem-crashed-detail = O navegador em que o Cypress executa as specs travou ({ $signal }). O Cypress { $version } traz um navegador mais antigo do que este sistema espera; um Cypress mais novo corrige isso, ou execute as specs em outro navegador.
+cypress-problem-no-binary = O aplicativo do Cypress não está instalado
+cypress-problem-no-binary-detail = O pacote cypress está lá, mas não o aplicativo que ele baixa na instalação. Instalar leva um minuto.
+cypress-problem-rosetta = O Cypress não conseguiu medir sua saída
+cypress-problem-rosetta-detail = Um pequeno utilitário do Cypress é feito para Macs Intel, e este Mac não tem o Rosetta para executá-lo. Os resultados estão certos; o Rosetta silencia o erro.
+cypress-problem-server-down = Nada responde em { $url }
+cypress-problem-server-down-detail = Os testes visitam este endereço, e ele não respondeu. Inicie o aplicativo, ou aponte as execuções para outro ambiente.
+cypress-fix-update = Atualizar o Cypress
+cypress-fix-use-browser = Executar no { $browser }
+cypress-fix-install-binary = Instalar o aplicativo do Cypress
+cypress-fix-install-rosetta = Instalar o Rosetta
+cypress-fix-edit-environments = Editar ambientes
+cypress-fix-run-again = Executar de novo

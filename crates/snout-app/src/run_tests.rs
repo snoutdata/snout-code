@@ -1020,6 +1020,48 @@ fn the_title_bar_starts_on_the_spring_boot_application() {
     assert!(default_config(&all[..1]).is_none());
 }
 
+/// Run with nothing picked and no file to run: the project's Spring Boot application runs,
+/// and the title bar shows it from then on; a project with nothing to run opens Edit
+/// Configurations.
+#[gpui::test]
+fn run_with_nothing_to_run_starts_the_projects_application_else_edits_configurations(cx: &mut TestAppContext) {
+    use crate::run::config::{CURRENT_FILE, RunConfig};
+    let repo = demo_repo("run-nothing-picked");
+    let (_model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = runs_of(&ws, cx);
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.select_config(None, cx)));
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::RunSelected), cx));
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| ws.read(cx).config_dialog.is_some()), "nothing to run: Edit Configurations");
+    cx.update(|_, cx| assert!(runs.read(cx).sessions.is_empty(), "and nothing ran"));
+    cx.update(|_, cx| {
+        ws.update(cx, |w, cx| {
+            w.config_dialog = None;
+            cx.notify();
+        })
+    });
+
+    let c = |id: &str, boot| RunConfig {
+        id: id.into(),
+        name: id.into(),
+        kind: Kind::Main,
+        main_class: Some(format!("demo.{id}")),
+        spring_boot: boot,
+        ..Default::default()
+    };
+    cx.update(|_, cx| runs.update(cx, |r, _| r.engine_configs = vec![c("Tool", false), c("Application", true)]));
+    cx.update(|_, cx| assert_eq!(runs.read(cx).project.selected.as_deref(), Some(CURRENT_FILE)));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.run_selected(false, w, cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let r = runs.read(cx);
+        assert_eq!(r.selected_config().map(|c| c.id).as_deref(), Some("Application"), "the title bar shows it");
+        assert_eq!(r.sessions.last().map(|s| s.title.as_str()), Some("Application"), "and it ran");
+        assert!(ws.read(cx).config_dialog.is_none());
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 /// Another project in the window: the engines of builds outside it stop, and runs ask the
 /// new project's engine; a run asked for with no engine says why in the Run window.
 #[gpui::test]

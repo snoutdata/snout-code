@@ -432,7 +432,18 @@ pub fn config_launch(
     let mut launch = match config.kind {
         Kind::Npm => {
             let script = task.ok_or(ts!("run-the-configuration-names-no-script"))?;
-            let mut l = script_launch(host, &package, root, node, script, &config.args, env)?;
+            // A script that is `cypress run`: our reporter joins it, and the Tests window
+            // follows the run.
+            let cypress = (!debug).then(|| crate::cypress::script_runs_cypress(host, &package, script)).flatten();
+            let mut args = config.args.clone();
+            let mut env = env;
+            if let Some(browser) = cypress {
+                let (more, vars) = crate::cypress::reporter_args(host, &package, browser)?;
+                args.extend(more);
+                env.extend(vars);
+            }
+            let mut l = script_launch(host, &package, root, node, script, &args, env)?;
+            l.report = cypress.is_some();
             if let Some(cwd) = cwd {
                 l.cwd = cwd;
             }
@@ -495,10 +506,24 @@ impl Runs {
             let found = find.await;
             let _ = this.update(cx, |this, cx| match found {
                 Ok(launch) => {
+                    // A script that runs Cypress: what the Tests window knows of the run.
+                    let cypress =
+                        launch.env.iter().find(|(k, _)| k == "SNOUT_CYPRESS_ROOT").map(|(_, v)| PathBuf::from(v));
+                    let browser = launch
+                        .env
+                        .iter()
+                        .find(|(k, _)| k == "SNOUT_CYPRESS_BROWSER")
+                        .and_then(|(_, v)| crate::cypress::Browser::ALL.into_iter().find(|b| b.name() == v))
+                        .unwrap_or_default();
                     if let Some(session) = this.start(Launch::Process(launch), cx)
                         && let Some(s) = this.session_mut(session)
                     {
                         s.config = Some(id);
+                        if let (Some(dir), Some(run)) = (cypress, s.playwright.as_mut()) {
+                            run.runner = Some(crate::jstest::Runner::Cypress);
+                            run.dir = Some(dir);
+                            run.browser = browser;
+                        }
                     }
                 }
                 Err(why) => this.say(why, cx),
@@ -556,6 +581,16 @@ impl Runs {
         debug: bool,
         cx: &mut Context<Self>,
     ) {
+        // Cypress runs in the browser picked, against the environment; its debugging is
+        // its own app's.
+        if runner == crate::jstest::Runner::Cypress {
+            if debug {
+                self.open_cypress(dir, cx);
+            } else {
+                self.start_cypress(dir, scope, false, cx);
+            }
+            return;
+        }
         let Some(project) = self.model.read(cx).project_root() else {
             self.say(ts!("run-open-a-project-first"), cx);
             return;

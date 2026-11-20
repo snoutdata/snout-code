@@ -2,7 +2,8 @@
 
 The tool windows sit around the editor: Run, Debug, Build, Output, Terminal, Problems and the
 agent console in the bottom dock, with Tests for a Playwright project; Structure, Hierarchy,
-Gradle, Maven, Spring, Notifications and Agent Changes on the right; the Project view on the
+Gradle, Maven, Spring, Cypress (for a package with Cypress specs), Notifications and Agent Changes
+on the right; the Project view on the
 left. Each can [move to another dock](#move-a-tool-window). The stripes down the window's edges
 open them, and so do the View, Build and Tools menus.
 
@@ -20,6 +21,7 @@ does. The buttons per window:
 | Gradle | Sync the Gradle Project, Read the Tasks Again, Collapse All |
 | Maven | Reload the Maven Project, Read the Goals Again, Collapse All |
 | Spring | Read the Spring Model Again, Collapse All |
+| Cypress | Find the Specs Again |
 | Processes | Stop Idle Processes |
 | Output | Clear |
 

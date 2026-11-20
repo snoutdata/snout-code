@@ -155,6 +155,11 @@ to `update.log`, in `~/Library/Logs/SnoutCode/` on a Mac, `~/.local/state/SnoutC
 
 ## Logs
 
+When SnoutCode quits unexpectedly, the reason is in `panic.log`: `~/Library/Logs/SnoutCode/panic.log`
+on macOS, `~/.local/state/SnoutCode/panic.log` on Linux, `%LOCALAPPDATA%\SnoutCode\logs\panic.log`
+on Windows. Each entry has the time, the version, the message, where in the code it happened and
+a backtrace. Send it with a bug report.
+
 SnoutCode writes its log to standard error. To read it:
 
 - Start the app from a terminal, and the log shows there:

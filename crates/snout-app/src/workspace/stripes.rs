@@ -60,6 +60,8 @@ pub enum Tool {
     AgentView,
     /// A Playwright project's tests.
     Tests,
+    /// The specs of a package that tests with Cypress.
+    Cypress,
 }
 
 /// A dock a tool window can be moved to.
@@ -133,7 +135,7 @@ pub fn dock_of(dock: &DockArea, id: PanelId) -> Option<DockPlacement> {
 }
 
 /// The tool windows in the order the stripes list them, whichever dock they are in.
-const ORDER: [Tool; 15] = [
+const ORDER: [Tool; 16] = [
     Tool::Tests,
     Tool::Run,
     Tool::Debug,
@@ -147,6 +149,7 @@ const ORDER: [Tool; 15] = [
     Tool::Gradle,
     Tool::Maven,
     Tool::Spring,
+    Tool::Cypress,
     Tool::Notifications,
     Tool::ClaudeChanges,
 ];
@@ -162,7 +165,8 @@ impl Tool {
             | Tool::AgentView
             | Tool::ClaudeChanges
             | Tool::Structure
-            | Tool::Hierarchy => DockPlacement::Right,
+            | Tool::Hierarchy
+            | Tool::Cypress => DockPlacement::Right,
             _ => DockPlacement::Bottom,
         }
     }
@@ -188,6 +192,7 @@ impl Tool {
             "Structure" => Tool::Structure,
             "Hierarchy" => Tool::Hierarchy,
             "Tests" => Tool::Tests,
+            "Cypress" => Tool::Cypress,
             _ => return None,
         })
     }
@@ -212,6 +217,7 @@ impl Tool {
             Tool::AgentLog => Icon::Gear,
             Tool::AgentView => Icon::Gear,
             Tool::Tests => Icon::TestFolder,
+            Tool::Cypress => Icon::Locate,
         }
     }
 
@@ -236,6 +242,7 @@ impl Tool {
             Tool::Structure => 4,
             Tool::Hierarchy => 0,
             Tool::Tests => 4,
+            Tool::Cypress => 2,
         }
     }
 
@@ -259,6 +266,7 @@ impl Tool {
             Tool::AgentLog => ts!("cmd-agent-log"),
             Tool::AgentView => ts!("stripes-agent-view"),
             Tool::Tests => ts!("stripes-tests"),
+            Tool::Cypress => ts!("stripes-cypress"),
         }
     }
 
@@ -282,6 +290,7 @@ impl Tool {
             Tool::AgentLog => "stripe-agent-log",
             Tool::AgentView => "stripe-agent-view",
             Tool::Tests => "stripe-tests",
+            Tool::Cypress => "stripe-cypress",
         }
     }
 }
@@ -392,6 +401,7 @@ impl Workspace {
             Tool::AgentLog => Some(self.tabs.agent_log),
             Tool::AgentView => Some(self.tabs.agent_view),
             Tool::Tests => Some(self.tabs.tests),
+            Tool::Cypress => Some(self.tabs.cypress),
         }
     }
 
@@ -609,6 +619,7 @@ impl Workspace {
             }
             let shown = match tool {
                 Tool::Tests => self.pw_tests.read(cx).root.is_some(),
+                Tool::Cypress => self.pw_tests.read(cx).cypress_suite(cx).is_some(),
                 Tool::Gradle => self.shows_gradle(cx),
                 Tool::Maven => self.shows_maven(cx),
                 _ => true,
@@ -618,6 +629,14 @@ impl Workspace {
             }
             let badge = match tool {
                 Tool::Tests => Some((self.pw_tests.read(cx).run(cx).map_or(0, |r| r.counts().failed), p.error)),
+                Tool::Cypress => {
+                    let t = self.pw_tests.read(cx);
+                    let failed = t
+                        .run(cx)
+                        .filter(|r| r.runner == Some(crate::jstest::Runner::Cypress))
+                        .map_or(0, |r| r.counts().failed);
+                    Some((failed, p.error))
+                }
                 Tool::Problems => Some((self.error_count(cx), p.error)),
                 Tool::Notifications => Some((self.notifications.read(cx).items(cx).len(), p.accent)),
                 Tool::ClaudeChanges => {

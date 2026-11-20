@@ -1362,7 +1362,7 @@ remote-show-hidden-folders = Show hidden folders
 ## run
 
 run-is-not-among-the-projects-sources = { $class } is not among the project's sources
-run-the-file-in-front-has-no-tests-main = The file in front has no tests, main class or script to run
+run-runs-once-the-engine-finds-the-main-class = Waiting for the Java engine ({ $doing }): the project's main class runs once it is found.
 run-nothing-to-run-here-put-the-caret-in = Nothing to run here: put the caret in a main class, a test or a script
 run-root = { $name } (root)
 run-reading-the-gradle-tasks = Reading the Gradle tasks
@@ -2383,3 +2383,41 @@ credentials-token-placeholder = Token or password
 credentials-token-hint = The token goes to your system’s credential helper, never into a file SnoutCode writes.
 credentials-saved = Saved. Git uses it for this remote from now on.
 credentials-repaired = The helper now calls { $path }.
+
+# Cypress: the Cypress window, the problems a run can hit, and their fixes.
+stripes-cypress = Cypress
+cmd-show-the-cypress-window = Show the Cypress Window
+cypress-specs = { $count ->
+    [one] 1 spec
+   *[other] { $count } specs
+    }
+cypress-specs-heading = Specs
+cypress-open-cypress = Open Cypress
+cypress-open-cypress-tip = Open the Cypress app on these specs, to watch a test step by step and debug it in the browser's developer tools
+cypress-open-in-cypress = Open in Cypress
+cypress-the-browser-the-specs-run-in = The browser the specs run in
+cypress-watch-tip = Run with the browser showing
+cypress-run-this-spec = Run this spec
+cypress-show-results = Show the results
+cypress-find-the-specs-again = Find the Specs Again
+cypress-looking-for-specs = Looking for specs…
+cypress-no-specs = No specs found. Cypress looks for { $pattern } unless the configuration's specPattern says otherwise.
+cypress-no-cypress = No Cypress specs
+cypress-no-cypress-hint = A package that depends on cypress, or has a cypress.config file, lists its specs here.
+cypress-failed-of = { $failed } of { $total } failed
+cypress-passed-of = { $passed } of { $total } passed
+cypress-problem-crashed = Cypress's browser crashed
+cypress-problem-crashed-passed = Every test passed, then the browser Cypress runs them in crashed as it closed ({ $signal }), so the run reports a failure. Cypress { $version } brings an older browser than this system expects; a newer Cypress fixes it, or run the specs in another browser.
+cypress-problem-crashed-detail = The browser Cypress runs the specs in crashed ({ $signal }). Cypress { $version } brings an older browser than this system expects; a newer Cypress fixes it, or run the specs in another browser.
+cypress-problem-no-binary = The Cypress app is not installed
+cypress-problem-no-binary-detail = The cypress package is there, but not the app it downloads on install. Installing it takes a minute.
+cypress-problem-rosetta = Cypress could not size its output
+cypress-problem-rosetta-detail = A small helper of Cypress's is built for Intel Macs, and this Mac has no Rosetta to run it. The results are fine; Rosetta quiets the error.
+cypress-problem-server-down = Nothing answers at { $url }
+cypress-problem-server-down-detail = The tests visit this address, and it did not answer. Start the application, or point the runs at another environment.
+cypress-fix-update = Update Cypress
+cypress-fix-use-browser = Run in { $browser }
+cypress-fix-install-binary = Install the Cypress App
+cypress-fix-install-rosetta = Install Rosetta
+cypress-fix-edit-environments = Edit Environments
+cypress-fix-run-again = Run Again

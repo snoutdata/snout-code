@@ -298,6 +298,8 @@ pub struct ProjectSettings {
     /// A Playwright project's environments, and the one its runs go against.
     pub environments: Vec<Environment>,
     pub environment: Option<String>,
+    /// The browser Cypress runs the specs in (none: Electron, Cypress's own).
+    pub cypress_browser: Option<crate::cypress::Browser>,
 }
 
 /// Where a Playwright project's tests point: `BASE_URL`, other variables and a `.env` file.

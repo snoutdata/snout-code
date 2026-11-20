@@ -157,10 +157,7 @@ impl Workspace {
         });
         match found {
             Some((target, module)) => runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx)),
-            None => self.model.update(cx, |m, cx| {
-                m.message = ts!("run-the-file-in-front-has-no-tests-main").into();
-                cx.notify();
-            }),
+            None => runs.update(cx, |r, cx| r.run_project(debug, cx)),
         }
     }
 

@@ -14,6 +14,7 @@ pub mod console;
 pub mod core_text;
 pub mod credentials;
 pub mod credentials_view;
+pub mod cypress;
 pub mod dialogs;
 pub mod drag_select;
 pub mod editing;
@@ -198,6 +199,7 @@ fn model_for_files(
 pub fn run() {
     startup::mark("main");
     startup::init_log();
+    startup::install_panic_log();
     // ssh runs this program to ask for a password or a passphrase (see `remote::askpass`).
     if std::env::var_os(snout_remote::ASKPASS_ENV).is_some() {
         remote::askpass::run();

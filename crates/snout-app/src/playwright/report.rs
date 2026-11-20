@@ -324,6 +324,10 @@ pub struct Run {
     /// The test runner, when not Playwright, and the package it ran in.
     pub runner: Option<crate::jstest::Runner>,
     pub dir: Option<PathBuf>,
+    /// What went wrong in a Cypress run that its output says, with the fixes.
+    pub cypress: crate::cypress::Scan,
+    /// The browser a Cypress run ran in.
+    pub browser: crate::cypress::Browser,
 }
 
 /// What a run counts.
@@ -466,6 +470,13 @@ impl Run {
 
     fn try_mut(&mut self, id: &str, retry: u32) -> Option<&mut Try> {
         self.tests.get_mut(id)?.tries.iter_mut().rev().find(|t| t.retry == retry)
+    }
+
+    /// A line the run printed (on either stream), for what a Cypress run says went wrong.
+    pub fn see_output(&mut self, line: &str) {
+        if self.runner == Some(crate::jstest::Runner::Cypress) {
+            self.cypress.see(line);
+        }
     }
 
     /// The process ended: what still runs did not finish.

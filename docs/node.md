@@ -82,6 +82,8 @@ A package that depends on `vitest` or `jest` (or has a `vitest.config.*` or `jes
 - **Several packages.** When more than one package has tests (or a Playwright project also has them), a switch beside Run all picks which tests it runs: `Vitest in apps/web`, `Jest in apps/api`, `Playwright`. Unless you pick one, it runs those of the run in front.
 - **Debugging.** Debug runs the test under js-debug and stops at the breakpoints in the test and the code it calls, in TypeScript or JavaScript. Vitest then runs its files one at a time in a child process (`--no-file-parallelism --pool=forks`) and Jest in its own process (`--runInBand`), both without a test timeout, so a test paused at a breakpoint does not fail for taking too long.
 
+A package with Cypress has its specs in the Cypress window and its runs in the Tests window too; see [Cypress](cypress.md).
+
 Vitest 2 and later and Jest 27 and later work (tried with Vitest 2.1 and 3.2, and Jest 27.5 and 29.7). Results come as each test ends; with Vitest 2, all of them when the run ends.
 
 ## Attach to a running Node

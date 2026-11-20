@@ -21,6 +21,7 @@ SnoutCode is a native IDE for Java, Gradle, Maven and Spring Boot, for TypeScrip
 - [Scala](scala.md): highlighting, completion, navigation, rename and problems in Scala files, through Metals, for Gradle builds that mix Java and Scala.
 - [TypeScript and JavaScript](typescript.md): completion, navigation, rename and problems for Node projects, test projects such as Playwright repositories, and the scripts beside a Java project, and the Node they run on.
 - [Playwright projects](playwright.md): a repository of Playwright tests as a project of its own: the packages and browsers its tests need, steps recorded into a spec and locators picked from the page, runs followed live in the Tests window, breakpoints in the test code, environments, traces and screenshot comparisons, and the runs kept.
+- [Cypress](cypress.md): a package's Cypress specs in the Cypress window, each with how it last went; runs followed in the Tests window in the browser and environment picked; and a fix a click away when a run goes wrong, such as Cypress's browser crashing.
 - [Spring](spring.md): beans and injections, endpoints, the Spring window, and `application.yml` and `application.properties` help.
 
 ## Building and running

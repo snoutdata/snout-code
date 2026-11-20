@@ -1,4 +1,5 @@
-//! Unit tests of Node packages, run with Vitest or Jest into the Tests window. A package
+//! Tests of Node packages, run with Vitest, Jest or Cypress into the Tests window (Cypress
+//! has more of its own in [`crate::cypress`]). A package
 //! tests with the runner its `package.json` depends on (or whose configuration file it
 //! has); SnoutCode runs that runner from the package's own `node_modules`, with a reporter
 //! of ours beside the runner's own, which tells the run in the protocol of the Playwright
@@ -22,6 +23,8 @@ const JEST_REPORTER: &str = include_str!("snout-jest-reporter.cjs");
 pub enum Runner {
     Vitest,
     Jest,
+    /// End-to-end specs in a browser; it runs whole specs.
+    Cypress,
 }
 
 impl Runner {
@@ -29,6 +32,7 @@ impl Runner {
         match self {
             Runner::Vitest => "Vitest",
             Runner::Jest => "Jest",
+            Runner::Cypress => "Cypress",
         }
     }
 
@@ -37,7 +41,14 @@ impl Runner {
         match self {
             Runner::Vitest => "vitest",
             Runner::Jest => "jest",
+            Runner::Cypress => "cypress",
         }
+    }
+
+    /// Whether it runs the tests in a browser (Cypress), with a browser to pick and the
+    /// environments of the project.
+    pub fn browser(self) -> bool {
+        self == Runner::Cypress
     }
 
     /// The configuration files that say a package tests with it.
@@ -47,22 +58,34 @@ impl Runner {
             Runner::Jest => {
                 &["jest.config.ts", "jest.config.js", "jest.config.mjs", "jest.config.cjs", "jest.config.json"]
             }
+            Runner::Cypress => crate::cypress::CONFIGS,
         }
     }
 }
 
-/// The runner the package at `dir` tests with: the one it depends on, else the one whose
-/// configuration it has.
-pub fn runner_of(host: &dyn Host, dir: &Path) -> Option<Runner> {
-    let json: Value = serde_json::from_str(&host.read_to_string(&dir.join("package.json")).ok()?).ok()?;
+/// The runners the package at `dir` tests with: its unit runner (the one it depends on,
+/// else the one whose configuration it has), then Cypress when it has that too.
+pub fn runners_of(host: &dyn Host, dir: &Path) -> Vec<Runner> {
+    let Some(text) = host.read_to_string(&dir.join("package.json")).ok() else { return Vec::new() };
+    let Ok(json) = serde_json::from_str::<Value>(&text) else { return Vec::new() };
     let depends = |name: &str| {
         ["devDependencies", "dependencies", "optionalDependencies"]
             .iter()
             .any(|k| json.get(k).and_then(|d| d.get(name)).is_some())
     };
-    [Runner::Vitest, Runner::Jest].into_iter().find(|r| depends(r.package())).or_else(|| {
-        [Runner::Vitest, Runner::Jest].into_iter().find(|r| r.configs().iter().any(|c| host.is_file(&dir.join(c))))
-    })
+    let configured = |r: Runner| r.configs().iter().any(|c| host.is_file(&dir.join(c)));
+    let unit = [Runner::Vitest, Runner::Jest]
+        .into_iter()
+        .find(|r| depends(r.package()))
+        .or_else(|| [Runner::Vitest, Runner::Jest].into_iter().find(|r| configured(*r)));
+    let cypress = (depends(Runner::Cypress.package()) || configured(Runner::Cypress)).then_some(Runner::Cypress);
+    unit.into_iter().chain(cypress).collect()
+}
+
+/// The unit runner the package at `dir` tests with: the one it depends on, else the one
+/// whose configuration it has.
+pub fn runner_of(host: &dyn Host, dir: &Path) -> Option<Runner> {
+    runners_of(host, dir).into_iter().find(|r| *r != Runner::Cypress)
 }
 
 /// The runner's program, installed for the package at `dir` (in its `node_modules` or a
@@ -97,18 +120,27 @@ impl Suite {
     }
 }
 
-/// The packages of the project at `root` that test with Vitest or Jest.
+/// The packages of the project at `root` that test with Vitest, Jest or Cypress (a package
+/// with a unit runner and Cypress is two suites).
 pub fn suites(host: &dyn Host, root: &Path) -> Vec<Suite> {
     crate::run::node_run::packages(host, root)
         .into_iter()
-        .filter_map(|dir| runner_of(host, &dir).map(|runner| Suite { dir, runner }))
+        .flat_map(|dir| runners_of(host, &dir).into_iter().map(move |runner| Suite { dir: dir.clone(), runner }))
         .collect()
 }
 
-/// The suite `file` belongs to: its package, when that tests with a runner.
+/// The suite `file` belongs to: its package, when that tests with a runner; Cypress's for a
+/// Cypress spec (or for any test file of a package with Cypress alone).
 pub fn suite_of(host: &dyn Host, file: &Path, root: &Path) -> Option<Suite> {
     let dir = crate::run::node_run::package_of(host, file, root)?;
-    runner_of(host, &dir).map(|runner| Suite { dir, runner })
+    let runners = runners_of(host, &dir);
+    let cypress = runners.contains(&Runner::Cypress);
+    let runner = if cypress && (crate::cypress::is_spec(file) || runners.len() == 1) {
+        Runner::Cypress
+    } else {
+        runners.into_iter().find(|r| *r != Runner::Cypress)?
+    };
+    Some(Suite { dir, runner })
 }
 
 /// Whether `path` is a test file as the runners' defaults have them: `*.test.ts`,
@@ -118,7 +150,9 @@ pub fn is_test_file(path: &Path) -> bool {
         path.extension().and_then(|e| e.to_str()),
         Some("ts" | "tsx" | "js" | "jsx" | "mts" | "mjs" | "cts" | "cjs")
     );
-    crate::playwright::is_test_file(path) || script && path.components().any(|c| c.as_os_str() == "__tests__")
+    crate::playwright::is_test_file(path)
+        || crate::cypress::is_spec(path)
+        || script && path.components().any(|c| c.as_os_str() == "__tests__")
 }
 
 /// What a run runs.
@@ -169,6 +203,7 @@ pub fn reporter(host: &dyn Host, runner: Runner) -> std::io::Result<PathBuf> {
     let (content, ext) = match runner {
         Runner::Vitest => (VITEST_REPORTER, "mjs"),
         Runner::Jest => (JEST_REPORTER, "cjs"),
+        Runner::Cypress => (crate::cypress::REPORTER, "cjs"),
     };
     let hash = content.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
     let name = format!("snout-{}-reporter-{hash:016x}.{ext}", runner.package());
@@ -198,6 +233,10 @@ pub fn test_launch(
     scope: &Scope,
     debug: bool,
 ) -> Result<ProcessLaunch, String> {
+    if runner == Runner::Cypress {
+        let options = crate::cypress::Options::default();
+        return crate::cypress::run_launch(host, dir, root, node, scope, &options, Vec::new());
+    }
     let cli = cli(host, dir, runner)
         .ok_or_else(|| t!("tests-is-not-installed-install-the-packages-first", runner = (runner.name()).to_string()))?;
     let reporter = reporter(host, runner)
@@ -238,6 +277,7 @@ pub fn test_launch(
             // Jest's file filter is a pattern.
             args.extend(files.iter().map(|f| escape(f)));
         }
+        Runner::Cypress => unreachable!("Cypress runs as `crate::cypress` says"),
     }
     if !names.is_empty() {
         args.extend(["-t".to_owned(), name_pattern(&names)]);
@@ -273,10 +313,13 @@ pub fn test_launch(
 }
 
 /// The run icons of a test file of `suite`: one at each `test`, `it` and `describe`, each
-/// knowing its `describe`s.
+/// knowing its `describe`s. Cypress runs whole specs: its spec's have one at each test and
+/// `describe` of the top level, which runs the spec.
 pub fn runnables(path: &Path, text: &str, suite: &Suite) -> FileRunnables {
+    let whole = suite.runner == Runner::Cypress;
     let items = crate::playwright::gutter::tests_with_paths(path, text)
         .into_iter()
+        .filter(|(_, titles, _)| !whole || titles.len() == 1)
         .map(|(line, path_titles, group)| Runnable {
             line,
             target: Target::JsTest {

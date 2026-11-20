@@ -71,3 +71,80 @@ pub fn init_log() {
         log::set_max_level(level);
     }
 }
+
+/// The file a panic is written to: `panic.log` among the app's logs
+/// (`~/Library/Logs/SnoutCode` on macOS). A window started from the Finder or the Start menu
+/// has no stderr anyone reads, and a panic in a window's event handler aborts the app, so
+/// this is where the reason stays.
+pub fn panic_log_path() -> std::path::PathBuf {
+    snout_host::dirs::AppDirs::local().state.join("panic.log")
+}
+
+/// Write each panic to [`panic_log_path`] (its message, where, the thread, a backtrace),
+/// then let the default hook print it as before.
+pub fn install_panic_log() {
+    let path = panic_log_path();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        write_panic(&path, &panic_entry(info, &backtrace.to_string()));
+        previous(info);
+    }));
+}
+
+/// One panic, as the log keeps it.
+fn panic_entry(info: &std::panic::PanicHookInfo<'_>, backtrace: &str) -> String {
+    let message = info
+        .payload()
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| info.payload().downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "(no message)".to_owned());
+    let at = info.location().map_or_else(String::new, |l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
+    let seconds = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    entry_text(seconds, std::thread::current().name().unwrap_or("unnamed"), &at, &message, backtrace)
+}
+
+fn entry_text(seconds: u64, thread: &str, at: &str, message: &str, backtrace: &str) -> String {
+    format!(
+        "=== panic at {seconds} (unix seconds), SnoutCode {} on {}-{}\nthread '{thread}' panicked at {at}:\n{message}\n\n{backtrace}\n",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+}
+
+/// Add `entry` to the log at `path`; a log over 1 MB starts over. Never fails.
+fn write_panic(path: &std::path::Path, entry: &str) {
+    use std::io::Write as _;
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > 1 << 20) {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = f.write_all(entry.as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_is_written_with_its_message_and_place() {
+        let dir = crate::tests::scratch_dir("panic-log");
+        let path = dir.join("logs/panic.log");
+        let entry = entry_text(7, "main", "src/view.rs:12:5", "index out of bounds", "the backtrace");
+        write_panic(&path, &entry);
+        write_panic(&path, &entry);
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(log.matches("=== panic at 7 ").count(), 2, "{log}");
+        assert!(
+            log.contains("thread 'main' panicked at src/view.rs:12:5:\nindex out of bounds\n\nthe backtrace"),
+            "{log}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
