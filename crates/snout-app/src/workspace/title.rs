@@ -240,11 +240,16 @@ impl Workspace {
 
         // The branch: its name, and the popup of branches and repository actions.
         let branch_widget = branch.map(|b| {
+            // Its name gives way in a small window, as the project's does.
             div()
                 .relative()
-                .flex_none()
+                .min_w_0()
+                .flex()
                 .child(
                     bar_button("title-branch", &p)
+                        .flex_shrink_1()
+                        .min_w_0()
+                        .overflow_hidden()
                         .when(p.tinted, |d| {
                             d.h(px(24.))
                                 .bg(p.wash(p.branch()))
@@ -254,7 +259,15 @@ impl Workspace {
                                 .text_color(if p.dark { p.branch() } else { p.fg })
                         })
                         .child(icon(Icon::Branch, 15., if p.tinted { p.branch() } else { p.fg_dim }))
-                        .child(div().max_w(px(240.)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(b))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .max_w(px(240.))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .child(b),
+                        )
                         .child(icon(Icon::ChevronDown, 12., if p.tinted { p.branch() } else { p.fg_dim }))
                         .on_click(cx.listener(|this, _, window, cx| this.toggle_branches(window, cx))),
                 )
@@ -359,7 +372,7 @@ impl Workspace {
         });
 
         let right = div()
-            .min_w_0()
+            .flex_none()
             .flex()
             .items_center()
             .gap(px(2.))
@@ -413,6 +426,9 @@ impl Workspace {
                 div()
                     .id("title-bar")
                     .flex_1()
+                    // Sized by the room left, not by what it holds: as wide as its contents,
+                    // it would push the window's own controls off the right edge.
+                    .w(px(0.))
                     .min_w_0()
                     .h_full()
                     .pr(px(8.))
@@ -420,8 +436,9 @@ impl Workspace {
                     .items_center()
                     .gap(px(2.))
                     .children(self.menu_bar.clone().map(|bar| div().flex_none().mr(px(6.)).child(bar)))
-                    .children(remote_widget)
-                    // The project's name gives way in a small window, never Run or Search.
+                    .children(remote_widget.map(|w| div().min_w_0().overflow_hidden().flex().items_center().child(w)))
+                    // The names give way in a small window (host, project, branch), never Run
+                    // or Search.
                     .child(
                         div()
                             .min_w_0()
