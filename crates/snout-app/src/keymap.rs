@@ -236,6 +236,10 @@ fn mac_defaults() -> Vec<Binding> {
         ("down", Box::new(s::SearchDown), Some("SearchBox > Input")),
         ("escape", Box::new(s::SearchClose), Some("SearchBox > Input")),
         ("escape", Box::new(s::SearchClose), Some("TerminalFind > Input")),
+        // In a terminal Tab and Shift+Tab go to the program (completion, a TUI's next field),
+        // not to GPUI Kit's Root, which would move the keyboard to the window's next field.
+        ("tab", Box::new(gpui::NoAction), Some("Terminal")),
+        ("shift-tab", Box::new(gpui::NoAction), Some("Terminal")),
         // A change Claude Code proposes: ⌘↩ accepts it, Esc (once the editor has nothing
         // of its own to dismiss) rejects it.
         ("cmd-enter", Box::new(e::AcceptChanges), Some("ClaudeReview")),
