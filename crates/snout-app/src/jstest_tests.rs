@@ -458,6 +458,10 @@ fn the_npm_script_that_runs_cypress_reports_to_the_tests_window(cx: &mut gpui::T
         std::fs::set_permissions(repo.join("node_modules/cypress/bin/cypress"), std::fs::Permissions::from_mode(0o755))
             .unwrap();
     }
+    // On Windows npm links it as a .cmd shim.
+    #[cfg(windows)]
+    std::fs::write(repo.join("node_modules/.bin/cypress.cmd"), "@node \"%~dp0\\..\\cypress\\bin\\cypress\" %*\r\n")
+        .unwrap();
     let (_, ws, cx) = open(cx, with_repo(&repo));
     let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
     cx.update(|_, cx| runs.update(cx, |r, cx| r.run_npm_script(&repo, "test", false, cx)));
