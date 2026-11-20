@@ -810,6 +810,48 @@ fn claude_edits_reported_by_its_hooks_play_out_and_wait_for_review(cx: &mut Test
     let _ = std::fs::remove_dir_all(lock_dir);
 }
 
+/// The console's Claude at work with its hooks heard, and a file changed by something else
+/// (Claude Code in another terminal): the change is not put down to it. The tab simply
+/// takes the new text, with no dot and nothing waiting for review.
+#[gpui::test]
+fn a_change_the_hooks_did_not_report_is_not_the_agents(cx: &mut TestAppContext) {
+    use crate::agents::{CLAUDE, ConsoleTurn};
+    let (repo, lock_dir, _model, ws, _client, cx) = connected("claude-elsewhere", cx);
+    let (port, cmd) = hook_command(&ws, cx);
+    let hello = repo.join("src/demo/Hello.java");
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.open_file(hello.clone(), None, false, w, cx)));
+    let editor = editor_of(&ws, &hello, cx).unwrap();
+    pump_until(cx, "the file", |cx| text_of(&editor, cx) == HELLO);
+    pump(cx, 300);
+    std::thread::sleep(Duration::from_millis(300));
+    let at_work = || ConsoleTurn { agent: Some(CLAUDE), active: true, ..Default::default() };
+    cx.update(|_, cx| {
+        cx.set_global(at_work());
+        assert_eq!(super::bridge::watched_agent(ws.read(cx), cx), Some(CLAUDE), "no hooks heard yet");
+    });
+    run_hook(port, &cmd, json!({ "hook_event_name": "UserPromptSubmit", "session_id": "fake-session", "prompt": "x" }));
+    let c = changes(&ws, cx);
+    pump_until(cx, "the hooks", |cx| cx.update(|_, cx| c.read(cx).set.current().is_some()));
+    cx.update(|_, cx| {
+        cx.set_global(at_work());
+        assert_eq!(super::bridge::watched_agent(ws.read(cx), cx), None, "its hooks report its own edits");
+    });
+    std::fs::write(&hello, HELLO_V2).unwrap();
+    pump_until(cx, "the reload", |cx| {
+        cx.update(|_, cx| cx.set_global(at_work()));
+        text_of(&editor, cx) == HELLO_V2 && settled(&ws, cx)
+    });
+    pump(cx, 300);
+    cx.update(|_, cx| {
+        let e = editor.read(cx);
+        assert!(!e.dirty && !e.touched && e.live.is_none(), "the tab is the file");
+        assert!(e.agent_dot(cx).is_none(), "no agent's dot");
+    });
+    cx.update(|_, cx| assert!(c.read(cx).set.file(&hello).is_none(), "nothing waits for review"));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
 /// Pump until `done`, for as long as `secs`; the console's text on the way out if not.
 fn wait_long(
     cx: &mut VisualTestContext,

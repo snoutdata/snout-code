@@ -1177,7 +1177,11 @@ pub fn watched_agent(ws: &Workspace, cx: &App) -> Option<&'static str> {
         return None;
     }
     let turn = cx.try_global::<ConsoleTurn>();
-    let console = turn.filter(|t| t.at_work()).and_then(|t| t.agent);
+    // The console's agent, unless its hooks are heard: those report each of its edits, so a
+    // change they did not report was made elsewhere (another terminal, another app), and the
+    // tab simply takes it.
+    let reports = |a: &str| agents::reports_prompts(a) && ws.claude.as_ref().is_some_and(|b| b.heard.contains(a));
+    let console = turn.filter(|t| t.at_work()).and_then(|t| t.agent).filter(|a| !reports(a));
     // A Claude Code connected without hooks (started elsewhere): the watcher stands in for
     // them. One whose hooks are heard reports each edit itself, so a change it did not
     // report is not its own.
