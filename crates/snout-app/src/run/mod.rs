@@ -1153,6 +1153,9 @@ impl Runs {
             }
             Stage::Ready if hub.client(&root).is_some() => EngineState::Ready,
             Stage::NeedsJdk(v) => EngineState::Unavailable(t!("run-needs-jdk-note", v = v.to_string())),
+            // Stopped by hand, it stays stopped: a run waiting for it would wait forever. A new
+            // run starts it again (see `start`).
+            Stage::Stopped => EngineState::Unavailable(ts!("run-the-java-engine-was-stopped").into()),
             Stage::Failed(why) => {
                 EngineState::Unavailable(t!("run-the-java-engine-is-not-running", why = why.to_string()))
             }
@@ -1179,6 +1182,8 @@ impl Runs {
             self.start_node_config(config.clone(), *debug, cx);
             return None;
         }
+        // A run asks for the engine: one stopped by hand starts again for it.
+        let restarted = !matches!(launch, Launch::Process(_)) && self.restart_stopped_engine(cx);
         let state = if matches!(launch, Launch::Process(_)) {
             EngineState::Ready
         } else {
@@ -1234,6 +1239,9 @@ impl Runs {
             },
         };
         session.lines.push(ConsoleLine::system(what));
+        if restarted {
+            session.lines.push(ConsoleLine::system(ts!("run-the-java-engine-was-stopped-starting-it").to_owned()));
+        }
         if matches!(&launch, Launch::Tests { .. })
             || matches!(&launch, Launch::Config { config, .. } if config.kind == Kind::Tests)
         {
@@ -1271,6 +1279,19 @@ impl Runs {
         }
         cx.notify();
         Some(id)
+    }
+
+    /// Start the project's engine again when it was stopped by hand; whether it was.
+    fn restart_stopped_engine(&mut self, cx: &mut Context<Self>) -> bool {
+        use crate::lang::hub::Stage;
+        let Some(project) = self.model.read(cx).project_root() else { return false };
+        let hub = self.hub.read(cx);
+        let Some(root) = hub.engine_root(&project) else { return false };
+        if !hub.servers.get(&root).is_some_and(|s| s.stage == Stage::Stopped && s.restartable()) {
+            return false;
+        }
+        self.hub.update(cx, |h, cx| h.restart(&root, cx));
+        true
     }
 
     /// Send session `id`'s launch to the engine.
