@@ -361,6 +361,10 @@ pub enum Problem {
     /// The browser (Electron, unless another was picked) went down with a signal: most often
     /// an old Cypress on a newer system, as it closes once the specs are done.
     Crashed { signal: String },
+    /// The browser crashed, and this Mac has no Rosetta for Cypress's Intel helper: the
+    /// crash comes from that (it stops once Rosetta is in), so the two are one problem.
+    /// [`ranked`] makes it from the two; a scan never reports it.
+    CrashedNoRosetta { signal: String },
     /// The `cypress` package is installed but not the Cypress app it downloads.
     NoBinary,
     /// A helper of Cypress's is built for Intel Macs, and this Mac has no Rosetta.
@@ -399,10 +403,13 @@ impl Fix {
 }
 
 impl Problem {
-    /// The problem's headline.
-    pub fn title(&self) -> String {
+    /// The problem's headline; `passed` is whether every test that ran passed.
+    pub fn title(&self, passed: bool) -> String {
         match self {
-            Problem::Crashed { .. } => ts!("cypress-problem-crashed").to_owned(),
+            Problem::Crashed { .. } | Problem::CrashedNoRosetta { .. } if passed => {
+                ts!("cypress-problem-crashed-closing").to_owned()
+            }
+            Problem::Crashed { .. } | Problem::CrashedNoRosetta { .. } => ts!("cypress-problem-crashed").to_owned(),
             Problem::NoBinary => ts!("cypress-problem-no-binary").to_owned(),
             Problem::NeedsRosetta => ts!("cypress-problem-rosetta").to_owned(),
             Problem::ServerDown { url } => t!("cypress-problem-server-down", url = url.clone()),
@@ -419,6 +426,13 @@ impl Problem {
                     t!("cypress-problem-crashed-passed", version = v, signal = signal.clone())
                 } else {
                     t!("cypress-problem-crashed-detail", version = v, signal = signal.clone())
+                }
+            }
+            Problem::CrashedNoRosetta { signal } => {
+                if passed {
+                    t!("cypress-problem-crashed-rosetta-passed", signal = signal.clone())
+                } else {
+                    t!("cypress-problem-crashed-rosetta-detail", signal = signal.clone())
                 }
             }
             Problem::NoBinary => ts!("cypress-problem-no-binary-detail").to_owned(),
@@ -441,16 +455,41 @@ impl Problem {
                 }
                 out
             }
+            Problem::CrashedNoRosetta { .. } => vec![Fix::InstallRosetta],
             Problem::NoBinary => vec![Fix::InstallBinary],
             Problem::NeedsRosetta => vec![Fix::InstallRosetta],
             Problem::ServerDown { .. } => vec![Fix::EditEnvironments, Fix::RunAgain],
         }
     }
 
-    /// Whether it is only a nuisance: the run's results stand.
-    pub fn minor(&self) -> bool {
-        matches!(self, Problem::NeedsRosetta)
+    /// Whether it is only a nuisance: the run's results stand. A crash as the browser closes
+    /// is one when every test passed.
+    pub fn minor(&self, passed: bool) -> bool {
+        match self {
+            Problem::NeedsRosetta => true,
+            Problem::Crashed { .. } | Problem::CrashedNoRosetta { .. } => passed,
+            Problem::NoBinary | Problem::ServerDown { .. } => false,
+        }
     }
+}
+
+/// The problems of a run as the run shows them, the one that matters most first: that one in
+/// full, the rest as a line each under it. A crash on a Mac without Rosetta is one problem,
+/// Rosetta's.
+pub fn ranked(problems: &[Problem], passed: bool) -> Vec<Problem> {
+    let fold =
+        problems.contains(&Problem::NeedsRosetta) && problems.iter().any(|p| matches!(p, Problem::Crashed { .. }));
+    let mut out: Vec<Problem> = problems
+        .iter()
+        .filter(|p| !(fold && **p == Problem::NeedsRosetta))
+        .map(|p| match p {
+            Problem::Crashed { signal } if fold => Problem::CrashedNoRosetta { signal: signal.clone() },
+            p => p.clone(),
+        })
+        .collect();
+    // Rosetta last of all: the others have a cause worth fixing first.
+    out.sort_by_key(|p| (p.minor(passed), matches!(p, Problem::NeedsRosetta)));
+    out
 }
 
 /// Watches a Cypress run's output for the problems known here.
@@ -672,6 +711,23 @@ mod tests {
             [Fix::UpdateCypress, Fix::UseBrowser(Browser::Chrome)]
         );
         assert_eq!(crashed.fixes(Browser::Chrome, &[Browser::Electron, Browser::Chrome]), [Fix::UpdateCypress]);
-        assert!(s.problems[1].minor() && !crashed.minor());
+        assert!(s.problems[1].minor(false) && !crashed.minor(false));
+    }
+
+    #[test]
+    fn a_crash_after_every_test_passed_is_minor_and_the_serious_problem_leads() {
+        let crashed = Problem::Crashed { signal: "SIGSEGV".into() };
+        let server = Problem::ServerDown { url: "http://localhost:3000".into() };
+        assert!(crashed.minor(true) && !server.minor(true));
+        let problems = [server.clone(), crashed.clone(), Problem::NeedsRosetta];
+        assert_eq!(ranked(&problems[..2], true), [server.clone(), crashed.clone()]);
+        assert_eq!(ranked(&problems[..2], false), [crashed.clone(), server.clone()]);
+        assert_eq!(ranked(&[Problem::NeedsRosetta, server.clone()], true), [server.clone(), Problem::NeedsRosetta]);
+        assert!(crashed.detail(Some("13.6.4"), true).contains("the results stand"));
+        // Without Rosetta, the crash is Rosetta's: one problem, fixed by installing it.
+        let folded = Problem::CrashedNoRosetta { signal: "SIGSEGV".into() };
+        assert_eq!(ranked(&problems, true), [server.clone(), folded.clone()]);
+        assert_eq!(folded.fixes(Browser::Electron, &[Browser::Electron]), [Fix::InstallRosetta]);
+        assert!(folded.detail(None, true).contains("Rosetta"));
     }
 }

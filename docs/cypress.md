@@ -38,13 +38,15 @@ Every run is kept with the project's history, as Playwright's are (see [History]
 
 ## When a run goes wrong
 
-A run that fails for a reason SnoutCode knows says so above the results, in the Tests window and the Cypress window, with buttons that fix it. A fix that installs something runs in the Build window, then the same run starts again.
+A run that goes wrong in a way SnoutCode knows says so above the results, in the Tests window and the Cypress window, with buttons that fix it. A fix that installs something runs in the Build window, then the same run starts again.
+
+A run gets one notice, however many things went wrong. The one that matters most leads, with its explanation and fixes; each lesser one is a line under it with its own fix. The notice is red when the results cannot be trusted, and amber when they stand: a crash after every test passed, or a missing Rosetta, leaves the run green.
 
 | What happened | What fixes it |
 |---|---|
-| **Cypress's browser crashed**: Electron went down with a signal such as `SIGSEGV`, most often as it closes after the specs, so a run whose tests all passed still reports a failure. An older Cypress brings an older Electron than a newer system expects. | **Update Cypress** installs the latest Cypress into the package with its package manager (`npm install --save-dev cypress@latest`, `pnpm add -D`, `yarn add -D`, `bun add -d`). **Run in Chrome** (or Edge, or Firefox, when installed) runs the specs there from now on. |
+| **Cypress's browser crashed**: Electron went down with a signal such as `SIGSEGV`, most often as it closes after the specs. When every test passed, the results stand and only Cypress's exit code says otherwise. An older Cypress brings an older Electron than a newer system expects. SnoutCode keeps macOS's own “Cypress quit unexpectedly” window and crash report away for its runs: the notice says it all. | **Update Cypress** installs the latest Cypress into the package with its package manager (`npm install --save-dev cypress@latest`, `pnpm add -D`, `yarn add -D`, `bun add -d`). **Run in Chrome** (or Edge, or Firefox, when installed) runs the specs there from now on. |
 | **The Cypress app is not installed**: the `cypress` package is there, but not the app it downloads on install. | **Install the Cypress App** runs `cypress install`. |
 | **Nothing answers at the application's URL**: Cypress checked `baseUrl` and nothing was running there. | **Edit Environments** to point the runs at another environment, or start the application and **Run Again**. |
-| **Cypress could not size its output**: a small helper of Cypress's is built for Intel Macs, and this Mac has no Rosetta (`Bad CPU type in executable`). The results are fine. | **Install Rosetta** runs `softwareupdate --install-rosetta`. |
+| **Cypress could not size its output**: a small helper of Cypress's is built for Intel Macs, and this Mac has no Rosetta (`Bad CPU type in executable`). The results are fine. When the browser crashed in the same run, the crash comes from this, and the two are one problem with Rosetta's fix. | **Install Rosetta** runs `softwareupdate --install-rosetta`. |
 
-Tried with Cypress 13.6.
+Tried with Cypress 13.6 on macOS 27, where it crashed only without Rosetta.

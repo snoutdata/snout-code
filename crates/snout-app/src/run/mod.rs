@@ -19,6 +19,7 @@ mod node_debug;
 pub mod node_run;
 pub mod process;
 mod pw;
+pub mod quiet_crash;
 pub mod test_tree;
 pub mod windows;
 

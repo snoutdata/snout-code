@@ -236,33 +236,29 @@ pub fn browser_switch(id: &'static str, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// The cards of what went wrong in the Cypress run in front, each with its fixes; none when
-/// nothing did.
+/// What went wrong in the Cypress run in front, as one notice: the problem that matters most
+/// in full with its fixes, then a line for each lesser one with its own. None when nothing did.
+/// Red only when the results cannot be trusted; amber when they stand.
 pub fn problem_cards(tests: &Entity<PwTests>, cx: &App) -> Option<AnyElement> {
     let p = palette(cx);
     let t = tests.read(cx);
     let run = t.run(cx).filter(|r| r.runner == Some(Runner::Cypress) && r.over)?;
-    if run.cypress.problems.is_empty() {
-        return None;
-    }
     let c = run.counts();
     let passed = c.failed == 0 && c.passed + c.flaky > 0;
+    let ranked = super::ranked(&run.cypress.problems, passed);
+    let (lead, rest) = ranked.split_first()?;
     let info = info(cx);
     let version = info.version.clone();
     let mut installed = info.browsers.clone();
     if installed.is_empty() {
         installed.push(Browser::Electron);
     }
-    let mut cards =
-        div().flex_none().px(px(12.)).py(px(8.)).flex().flex_col().gap(px(8.)).border_b_1().border_color(p.border);
-    for (ix, problem) in run.cypress.problems.iter().enumerate() {
-        let ink = if problem.minor() { p.warn } else { p.error };
-        let fixes = problem.fixes(run.browser, &installed);
-        let mut row = div().pt(px(6.)).flex().flex_wrap().gap(px(6.));
-        for (n, fix) in fixes.into_iter().enumerate() {
+    let fix_buttons = |ix: usize, problem: &super::Problem, first_accent: bool| {
+        let mut row = div().flex().flex_wrap().gap(px(6.));
+        for (n, fix) in problem.fixes(run.browser, &installed).into_iter().enumerate() {
             let tests = tests.clone();
             let id = format!("cypress-fix-{ix}-{n}");
-            let ink = if n == 0 { p.accent } else { p.fg };
+            let ink = if n == 0 && first_accent { p.accent } else { p.fg };
             let glyph = match fix {
                 Fix::UpdateCypress | Fix::InstallBinary | Fix::InstallRosetta => Icon::Pull,
                 Fix::UseBrowser(_) => Icon::Eye,
@@ -277,32 +273,54 @@ pub fn problem_cards(tests: &Entity<PwTests>, cx: &App) -> Option<AnyElement> {
                 }
             }));
         }
-        cards = cards.child(
+        row
+    };
+    let ink = if lead.minor(passed) { p.warn } else { p.error };
+    let mut card = div()
+        .debug_selector(|| "cypress-problem-0".to_owned())
+        .p(px(10.))
+        .rounded(px(6.))
+        .border_1()
+        .border_color(mix(ink, 0.45, p.border))
+        .bg(p.wash(ink))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(icon(Icon::Warning, 14., ink))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(crate::look::text(lead.title(passed)))),
+        )
+        .child(div().pt(px(4.)).text_color(p.fg_dim).child(crate::look::text(lead.detail(version.as_deref(), passed))))
+        .child(div().pt(px(6.)).child(fix_buttons(0, lead, true)));
+    for (i, problem) in rest.iter().enumerate() {
+        let ix = i + 1;
+        let small = if problem.minor(passed) { p.warn } else { p.error };
+        card = card.child(
             div()
                 .debug_selector(move || format!("cypress-problem-{ix}"))
-                .p(px(10.))
-                .rounded(px(6.))
-                .border_1()
-                .border_color(mix(ink, 0.45, p.border))
-                .bg(p.wash(ink))
+                .mt(px(10.))
+                .pt(px(8.))
+                .border_t_1()
+                .border_color(mix(ink, 0.3, p.border))
+                .flex()
+                .items_start()
+                .gap(px(8.))
+                .child(div().pt(px(2.)).child(icon(Icon::Warning, 12., small)))
                 .child(
                     div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(icon(Icon::Warning, 14., ink))
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(crate::look::text(problem.title()))),
-                )
-                .child(
-                    div()
-                        .pt(px(4.))
-                        .text_color(p.fg_dim)
-                        .child(crate::look::text(problem.detail(version.as_deref(), passed))),
-                )
-                .child(row),
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().text_size(px(12.)).text_color(p.fg_dim).child(crate::look::text(format!(
+                            "{}. {}",
+                            problem.title(passed),
+                            problem.detail(version.as_deref(), passed)
+                        ))))
+                        .child(div().pt(px(6.)).child(fix_buttons(ix, problem, false))),
+                ),
         );
     }
-    Some(cards.into_any_element())
+    Some(div().flex_none().px(px(12.)).py(px(8.)).border_b_1().border_color(p.border).child(card).into_any_element())
 }
 
 impl Render for CypressWindow {

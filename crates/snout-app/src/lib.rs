@@ -197,6 +197,11 @@ fn model_for_files(
 
 /// Start the app: one window on the saved repositories.
 pub fn run() {
+    // A run that macOS's crash reporter should not hear about starts under this program.
+    #[cfg(target_os = "macos")]
+    if std::env::var_os(run::quiet_crash::ENV).is_some() {
+        run::quiet_crash::run();
+    }
     startup::mark("main");
     startup::init_log();
     startup::install_panic_log();
@@ -215,6 +220,7 @@ pub fn run() {
         return;
     }
     platform::app_started();
+    run::quiet_crash::enable();
     let open: Vec<std::path::PathBuf> = std::env::args_os().skip(1).map(Into::into).collect();
     let app = gpui_platform::application().with_assets(gpui_kit_assets::AllAssets);
     // What the system asks to open, from before the first window on.

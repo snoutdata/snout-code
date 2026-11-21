@@ -130,7 +130,12 @@ impl Runs {
         for (k, v) in &launch.env {
             cmd = cmd.env(k, v);
         }
-        let cmd = cmd.stdin(Stdio::Null).stdout(Stdio::Piped).stderr(Stdio::Piped).group();
+        let mut cmd = cmd.stdin(Stdio::Null).stdout(Stdio::Piped).stderr(Stdio::Piped).group();
+        // A Cypress run's browser can crash as it closes, which the Tests window explains:
+        // macOS's own window for it on every run would only be in the way.
+        if launch.env.iter().any(|(k, _)| k == "SNOUT_CYPRESS_ROOT") {
+            cmd = super::quiet_crash::wrap(cmd, host.info().pid == std::process::id());
+        }
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
         match host.spawn(&cmd) {
             Ok(mut child) => {
