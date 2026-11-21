@@ -294,3 +294,86 @@ fn the_console_hides_in_its_own_dock(cx: &mut TestAppContext) {
     assert!(shows(vcx) && vcx.update(|_, cx| model.read(cx).settings.console_open));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+/// Every tool window, in every dock: moved there, hidden with its header's Hide, and shown
+/// again from its stripe button, it comes back in that dock, in front, drawn with at least
+/// the room it needs. Hide works whatever had the keyboard before (a terminal behind
+/// another tab kept it once, and the header's buttons reached nothing).
+#[gpui::test]
+fn every_tool_window_comes_back_where_it_was_and_big_enough(cx: &mut TestAppContext) {
+    use crate::workspace::Side;
+    let repo = demo_repo("tool-every-dock");
+    let (_model, ws, vcx) = open(cx, with_repo(&repo));
+    vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    vcx.run_until_parked();
+    let tools = [
+        Tool::Tests,
+        Tool::Run,
+        Tool::Debug,
+        Tool::Build,
+        Tool::Output,
+        Tool::Terminal,
+        Tool::Problems,
+        Tool::Claude,
+        Tool::Structure,
+        Tool::Hierarchy,
+        Tool::Gradle,
+        Tool::Maven,
+        Tool::Spring,
+        Tool::Notifications,
+        Tool::ClaudeChanges,
+        Tool::Processes,
+        Tool::AgentLog,
+        Tool::AgentView,
+        Tool::Cypress,
+    ];
+    // Docks dragged small first: showing a tool window must give it its room back.
+    vcx.update(|w, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.dock.update(cx, |d, cx| {
+                for place in [DockPlacement::Left, DockPlacement::Right, DockPlacement::Bottom] {
+                    d.set_dock_size(place, px(40.), w, cx);
+                }
+            })
+        })
+    });
+    let mut wrong = Vec::new();
+    for tool in tools {
+        for side in [Side::Right, Side::Bottom, Side::Left, Side::Bottom] {
+            let place = side.placement();
+            vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.move_tool(tool, side, w, cx)));
+            vcx.run_until_parked();
+            // Hidden with its header's Hide, then back from its stripe button.
+            let panel = panel_name(tool);
+            vcx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::HideToolWindow(panel)), cx));
+            vcx.run_until_parked();
+            if vcx.update(|_, cx| ws.read(cx).tool_open(tool, cx)) {
+                wrong.push(format!("{tool:?} at {side:?}: still shown after Hide"));
+            }
+            vcx.update(|w, cx| ws.update(cx, |ws, cx| ws.toggle_tool(tool, w, cx)));
+            vcx.run_until_parked();
+            draw(vcx);
+            let (at, open, size) = vcx.update(|_, cx| {
+                let ws = ws.read(cx);
+                (ws.placement_of(tool, cx), ws.tool_open(tool, cx), ws.dock.read(cx).dock_size(place))
+            });
+            let least = px(tool.least(place));
+            if at != place || !open {
+                wrong.push(format!("{tool:?} at {side:?}: came back {at:?}, shown {open}"));
+            }
+            if size.is_none_or(|s| s < least) {
+                wrong.push(format!("{tool:?} at {side:?}: dock {size:?}, needs {least:?}"));
+            }
+            let title = crate::tool_windows::title(panel);
+            match vcx.debug_bounds(selector(format!("tool-header-{title}"))) {
+                None => wrong.push(format!("{tool:?} at {side:?}: no header drawn")),
+                Some(h) if side != Side::Bottom && h.size.width < least - px(24.) => {
+                    wrong.push(format!("{tool:?} at {side:?}: header {:?} wide", h.size.width))
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    let _ = std::fs::remove_dir_all(repo);
+}

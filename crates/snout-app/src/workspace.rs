@@ -677,6 +677,18 @@ impl Workspace {
                 }
             }
         });
+        // The keyboard never stays with something no longer drawn (a tool window hidden with
+        // its dock, or put behind another tab, a terminal most of all): keys and the window's
+        // actions, the tool windows' header buttons among them, would reach nothing. It
+        // comes back to the editor in front, or else to the window.
+        let lost = cx.on_focus_lost(window, |this, window, cx| {
+            let editor = (this.side.read(cx).activity == Activity::Project)
+                .then(|| this.status.read(cx).editor())
+                .flatten()
+                .map(|e| gpui::Focusable::focus_handle(e.read(cx).state.read(cx), cx));
+            window.focus(&editor.unwrap_or_else(|| this.focus.clone()), cx);
+        });
+        this._subscriptions.push(lost);
         this.adopt_editors(restored.1, window, cx);
         this.refresh_tool_places(cx);
         for path in reopen {

@@ -351,7 +351,9 @@ impl Render for CypressWindow {
 
         // The buttons.
         let tests = self.tests.clone();
-        let mut bar = div().flex_none().px(px(8.)).pt(px(8.)).pb(px(4.)).flex().flex_wrap().items_center().gap(px(6.));
+        // Two groups, the run's buttons and its switches: side by side when the window is wide
+        // (docked at the bottom), the switches under the buttons when it is narrow.
+        let mut bar = div().flex().flex_wrap().items_center().gap(px(6.));
         bar = bar.child(if running {
             let tests = tests.clone();
             button("cypress-stop", ts!("cmd-stop"), Some(Icon::Stop), p.error, &p)
@@ -380,9 +382,6 @@ impl Render for CypressWindow {
             );
         }
         let switches = div()
-            .flex_none()
-            .px(px(8.))
-            .pb(px(8.))
             .flex()
             .flex_wrap()
             .items_center()
@@ -573,25 +572,36 @@ impl Render for CypressWindow {
             .child(icon(Icon::TestFolder, 13., p.accent))
             .child(crate::look::text(ts!("cypress-show-results")))
             .on_click(|_, w, cx| w.dispatch_action(Box::new(crate::menus::ShowTests), cx));
-        base.child(bar)
-            .child(switches)
-            .child(summary)
-            .children(problems)
-            .child(
-                div()
-                    .px(px(10.))
-                    .pb(px(2.))
-                    .text_size(px(11.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(p.fg_dim)
-                    .child(crate::look::text(if folder.is_empty() {
-                        ts!("cypress-specs-heading").to_owned()
-                    } else {
-                        format!("{} · {folder}", ts!("cypress-specs-heading"))
-                    })),
-            )
-            .child(list)
-            .child(show)
+        base.child(
+            div()
+                .flex_none()
+                .px(px(8.))
+                .pt(px(8.))
+                .pb(px(8.))
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(6.))
+                .child(bar)
+                .child(switches),
+        )
+        .child(summary)
+        .children(problems)
+        .child(
+            div()
+                .px(px(10.))
+                .pb(px(2.))
+                .text_size(px(11.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(p.fg_dim)
+                .child(crate::look::text(if folder.is_empty() {
+                    ts!("cypress-specs-heading").to_owned()
+                } else {
+                    format!("{} · {folder}", ts!("cypress-specs-heading"))
+                })),
+        )
+        .child(list)
+        .child(show)
     }
 }
 

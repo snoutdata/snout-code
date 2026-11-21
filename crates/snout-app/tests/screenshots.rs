@@ -127,6 +127,9 @@ mod shots {
         ConsoleInstall(Option<snout_app::workspace::Side>),
         /// The agent console moved to another dock, in the Project view.
         ConsoleAt(snout_app::workspace::Side),
+        /// A tool window moved to another dock, hidden, and shown again from its stripe
+        /// button (`SNOUT_SHOT_ONLY=tool-at` takes one of each in each dock).
+        ToolAt(snout_app::workspace::Tool, snout_app::workspace::Side),
         /// The console running a program that prints colours, attributes, wide characters
         /// and a link: the same output under each terminal engine.
         TerminalColors,
@@ -587,6 +590,18 @@ sleep 30
                     })
                     .unwrap();
                 }
+            }
+            Some(Select::ToolAt(tool, side)) => {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    ws.update(cx, |w, cx| {
+                        w.move_tool(tool, side, window, cx);
+                        w.hide_dock(side.placement(), window, cx);
+                    })
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| ws.update(cx, |w, cx| w.toggle_tool(tool, window, cx)))
+                    .unwrap();
             }
             Some(Select::ConsoleAt(side)) => {
                 let console = cx.update(|cx| snout_app::console::console_of(ws.read(cx), cx)).unwrap();
@@ -3370,6 +3385,38 @@ sleep 30
     }
 
     pub fn run() {
+        // Every tool window in every dock, when asked for by name only (57 shots).
+        if std::env::var("SNOUT_SHOT_ONLY").is_ok_and(|o| o.contains("tool-at")) {
+            use snout_app::workspace::{Side, Tool};
+            let tools = [
+                Tool::Tests,
+                Tool::Run,
+                Tool::Debug,
+                Tool::Build,
+                Tool::Output,
+                Tool::Terminal,
+                Tool::Problems,
+                Tool::Claude,
+                Tool::Structure,
+                Tool::Hierarchy,
+                Tool::Gradle,
+                Tool::Maven,
+                Tool::Spring,
+                Tool::Notifications,
+                Tool::ClaudeChanges,
+                Tool::Processes,
+                Tool::AgentLog,
+                Tool::AgentView,
+                Tool::Cypress,
+            ];
+            for side in [Side::Right, Side::Bottom, Side::Left] {
+                for tool in tools {
+                    let name = format!("tool-at-{side:?}-{tool:?}");
+                    shot(&name, ThemeChoice::Light, Activity::Project, Some(Select::ToolAt(tool, side)));
+                }
+            }
+            return;
+        }
         splash_shot("splash-dark", ThemeChoice::Dark);
         splash_shot("splash-light", ThemeChoice::Light);
         // The Git view, as the egui app's `renders_repo_and_diff` and

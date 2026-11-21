@@ -487,8 +487,15 @@ pub fn ranked(problems: &[Problem], passed: bool) -> Vec<Problem> {
             p => p.clone(),
         })
         .collect();
-    // Rosetta last of all: the others have a cause worth fixing first.
-    out.sort_by_key(|p| (p.minor(passed), matches!(p, Problem::NeedsRosetta)));
+    // Serious first, then by what most likely caused the rest: no Cypress app, no server for
+    // the tests (their failures follow from it), the browser's crash, and Rosetta last.
+    let cause = |p: &Problem| match p {
+        Problem::NoBinary => 0,
+        Problem::ServerDown { .. } => 1,
+        Problem::Crashed { .. } | Problem::CrashedNoRosetta { .. } => 2,
+        Problem::NeedsRosetta => 3,
+    };
+    out.sort_by_key(|p| (p.minor(passed), cause(p)));
     out
 }
 
@@ -721,7 +728,7 @@ mod tests {
         assert!(crashed.minor(true) && !server.minor(true));
         let problems = [server.clone(), crashed.clone(), Problem::NeedsRosetta];
         assert_eq!(ranked(&problems[..2], true), [server.clone(), crashed.clone()]);
-        assert_eq!(ranked(&problems[..2], false), [crashed.clone(), server.clone()]);
+        assert_eq!(ranked(&[crashed.clone(), server.clone()], false), [server.clone(), crashed.clone()]);
         assert_eq!(ranked(&[Problem::NeedsRosetta, server.clone()], true), [server.clone(), Problem::NeedsRosetta]);
         assert!(crashed.detail(Some("13.6.4"), true).contains("the results stand"));
         // Without Rosetta, the crash is Rosetta's: one problem, fixed by installing it.

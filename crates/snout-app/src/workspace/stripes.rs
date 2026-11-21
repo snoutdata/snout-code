@@ -28,12 +28,27 @@ use crate::theme::{Palette, palette};
 /// A stripe's width.
 pub const STRIPE_W: f32 = 40.;
 
-/// The least width the right dock opens to for the Spring window.
+/// The least width a side dock opens to for a tool window.
+const SIDE_W: f32 = 280.;
+
+/// The least height the bottom dock opens to for a tool window.
+const BOTTOM_H: f32 = 160.;
+
+/// The least width a side dock opens to for the Spring window: its table wants more room.
 const SPRING_W: f32 = 460.;
 
-/// The least width a side dock takes when a terminal (the agent console, the Terminal)
-/// moves into it: an agent's screen needs its columns.
+/// The least width a side dock opens to for a terminal (the agent console, the Terminal):
+/// an agent's screen needs its columns.
 const TERMINAL_SIDE_W: f32 = 480.;
+
+/// Give the dock at `place` the room `tool`'s window needs there ([`Tool::least`]), when it
+/// has less: a dock dragged small, or never sized, does not bring a tool window back thin.
+fn fit_dock(tool: Tool, place: DockPlacement, d: &mut DockArea, window: &mut Window, cx: &mut Context<DockArea>) {
+    let least = px(tool.least(place));
+    if d.dock_size(place).is_some_and(|size| size < least) {
+        d.set_dock_size(place, least, window, cx);
+    }
+}
 
 /// A tool window a stripe opens.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -155,6 +170,17 @@ const ORDER: [Tool; 16] = [
 ];
 
 impl Tool {
+    /// The least room it takes in the dock at `place`: its width in a side dock, its height
+    /// in the bottom one. Every tool window opens to at least that, wherever it is.
+    pub fn least(self, place: DockPlacement) -> f32 {
+        match (place, self) {
+            (DockPlacement::Bottom, _) => BOTTOM_H,
+            (_, Tool::Spring) => SPRING_W,
+            (_, Tool::Claude | Tool::Terminal) => TERMINAL_SIDE_W,
+            _ => SIDE_W,
+        }
+    }
+
     /// The dock it starts in.
     pub fn placement(self) -> DockPlacement {
         match self {
@@ -488,10 +514,7 @@ impl Workspace {
                 d.toggle_dock(place, window, cx);
             }
             d.select_panel(id, window, cx);
-            let terminal = matches!(tool, Tool::Claude | Tool::Terminal);
-            if terminal && to != Side::Bottom && d.dock_size(place).is_some_and(|w| w < px(TERMINAL_SIDE_W)) {
-                d.set_dock_size(place, px(TERMINAL_SIDE_W), window, cx);
-            }
+            fit_dock(tool, place, d, window, cx);
         });
         if tool == Tool::Claude {
             self.note_console_open(true, cx);
@@ -511,6 +534,7 @@ impl Workspace {
                     d.toggle_dock(place, window, cx);
                 }
                 d.select_panel(id, window, cx);
+                fit_dock(Tool::Claude, place, d, window, cx);
             });
         } else if place == DockPlacement::Left {
             self.front_side(window, cx);
@@ -566,10 +590,7 @@ impl Workspace {
                     d.toggle_dock(place, window, cx);
                 }
                 d.select_panel(id, window, cx);
-                // The Spring window's table wants more room than the dock's first width.
-                if tool == Tool::Spring && d.dock_size(place).is_some_and(|w| w < px(SPRING_W)) {
-                    d.set_dock_size(place, px(SPRING_W), window, cx);
-                }
+                fit_dock(tool, place, d, window, cx);
             }
         });
         if tool == Tool::Claude {
