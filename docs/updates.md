@@ -90,14 +90,17 @@ you update it by building the latest source again.
 For maintainers. The feed is `latest.json` and `latest.json.sig`, attached to each GitHub release.
 Installed apps read them from the newest published release, so a draft is invisible to them.
 
-1. Set the version in `Cargo.toml`, and push the tag `v<version>`. Its Windows and Linux runs build
+1. Push the release's work to `main` without the new version, and wait until its Windows and
+   Linux runs pass. A Mac's tests do not see Windows paths, `cfg` gates or `.cmd` shims, so a
+   tag pushed first breaks the release instead.
+2. Set the version in `Cargo.toml`, and push the tag `v<version>`. Its Windows and Linux runs build
    the packages; a tag's builds are the ones marked as releases (`SNOUT_OFFICIAL_BUILD`).
-2. Run `scripts/package-mac.sh` on a Mac, with the Developer ID set up. It also writes the `.zip`
+3. Run `scripts/package-mac.sh` on a Mac, with the Developer ID set up. It also writes the `.zip`
    apps update from.
-3. Run `scripts/make-release.sh <version> <notes file>`. It collects the packages, signs the feed
+4. Run `scripts/make-release.sh <version> <notes file>`. It collects the packages, signs the feed
    with the key `SNOUT_UPDATE_KEY` names, and makes a draft release. It refuses a key the app would
    not accept.
-4. Look the draft over, and publish it on GitHub. Apps hear of it within 4 hours.
+5. Look the draft over, and publish it on GitHub. Apps hear of it within 4 hours.
 
 The signing key cannot be replaced: every installed app trusts it and no other, so without it they
 can never update again. Keep it backed up, and never in a repository.
