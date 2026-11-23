@@ -127,8 +127,11 @@ impl StatusBar {
     /// Show what the language servers are doing.
     pub fn set_hub(&mut self, hub: Entity<crate::lang::LangHub>, cx: &mut Context<Self>) {
         self._hub_watch = Some(cx.observe(&hub, |this, hub, cx| {
-            // An engine build that ended: look for the engine again.
-            let built = hub.read(cx).engine_build.as_ref().is_some_and(|b| b.finished());
+            // An engine build that ended, or an engine that started (on a remote host it is
+            // installed just before, after this window looked): look for the engine again.
+            let hub = hub.read(cx);
+            let built = hub.engine_build.as_ref().is_some_and(|b| b.finished())
+                || hub.servers.values().any(|s| s.pid().is_some());
             if built && this.java_missing && !this.looking {
                 this.looking = true;
                 Self::look_for_engine(cx);
