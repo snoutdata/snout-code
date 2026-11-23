@@ -1453,3 +1453,48 @@ fn the_title_bar_keeps_run_and_search_with_an_environment_in_a_small_window(cx: 
         assert!(b.right() <= gpui::px(800.), "{id} is on the window: {b:?}");
     }
 }
+
+#[gpui::test]
+fn the_title_bar_leaves_room_for_the_window_controls_in_the_smallest_window(cx: &mut gpui::TestAppContext) {
+    use crate::lang_tests::pump_until;
+    use crate::tests::{git, open, with_repo};
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("pw-title-controls");
+    write(&repo, "package.json", r#"{ "devDependencies": { "@playwright/test": "1.64.1" } }"#);
+    write(&repo, "playwright.config.ts", "export default {};\n");
+    git(&repo, &["switch", "-qc", "feature/a-branch-name-long-enough-to-reach-its-limit"]);
+    let (_, _ws, cx) = open(cx, with_repo(&repo));
+    // Drawn as a Remote SSH window, on a host with a long name, as the screenshots draw one.
+    cx.update(|_, cx| {
+        cx.default_global::<crate::remote::Remote>().connection = Some(crate::remote::Connection {
+            name: "build-server.staging.example.com".into(),
+            host: None,
+            status: snout_remote::Status::Connected,
+        });
+    });
+    // The window's smallest size, 800 wide, less its controls: tests draw none, so the bar
+    // gets the room it has beside minimize, maximize and close, each as wide as the bar is
+    // high.
+    let room = gpui::px(800.) - gpui_component::TITLE_BAR_HEIGHT * 3.;
+    cx.simulate_resize(gpui::size(room, gpui::px(500.)));
+    let shown = pump_until(cx, 10, |cx| cx.debug_bounds("title-environment").is_some());
+    assert!(shown, "the project has its environment switch");
+    for id in ["title-run", "title-debug", "title-search", "title-settings"] {
+        let b = cx.debug_bounds(id).unwrap_or_else(|| panic!("{id}"));
+        assert!(b.right() <= room, "{id} is on the bar: {b:?}, room {room:?}");
+    }
+    // The narrowest window that still shows every menu. Its width decides the fold, so the
+    // controls' room cannot be taken off it here: what never gives way (the menus, and the
+    // environment through Settings) must fit beside them, the names having none left.
+    let w = gpui::px(crate::menu_bar::FOLD_BELOW_W);
+    cx.simulate_resize(gpui::size(w, gpui::px(500.)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("menu-bar-0").is_some(), "every menu shows");
+    let menus = cx.debug_bounds("menu-bar").expect("the menu bar");
+    let environment = cx.debug_bounds("title-environment").expect("the environment switch");
+    let settings = cx.debug_bounds("title-settings").expect("Settings");
+    // The bar's padding: 12 before the menus (gpui-component's), 8 after Settings (ours).
+    let fixed = menus.right() + gpui::px(6.) + (settings.right() - environment.left()) + gpui::px(8.);
+    let room = w - gpui_component::TITLE_BAR_HEIGHT * 3.;
+    assert!(fixed <= room, "the menus and buttons fit beside the controls: {fixed:?}, room {room:?}");
+}
