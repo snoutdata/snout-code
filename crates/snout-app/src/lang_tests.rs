@@ -517,15 +517,17 @@ fn readiness_reads_the_answer_and_the_notifications() {
     assert_eq!(crate::lang::java::Requirement { declared: None, gradle_max: Some(16) }.wanted(), 11);
 }
 
-/// jdtls and vtsls watch the process they are given and exit when it stops: they are given the
-/// program serving their host, the app here and the server on a remote host (where the app's
-/// pid does not exist, so they stopped within a minute).
+/// jdtls, vtsls and Metals watch the process they are given and exit when it stops: they are
+/// given the program serving their host, the app here and the server on a remote host (where
+/// the app's pid does not exist, so they stopped within a minute).
 #[test]
 fn a_language_server_watches_the_program_serving_its_host() {
-    use crate::lang::{hub, typescript};
+    use crate::lang::{hub, scala, typescript};
     let root = Path::new("/work/demo");
     assert_eq!(snout_host::local().info().pid, std::process::id(), "here, the app");
-    for params in [hub::initialize_params, typescript::initialize_params] {
+    let servers: [fn(&Path, u32) -> _; 3] =
+        [hub::initialize_params, typescript::initialize_params, |root, pid| scala::initialize_params(root, pid, None)];
+    for params in servers {
         assert_eq!(params(root, 4242)["processId"], 4242);
         assert_eq!(params(root, 4242)["rootPath"], "/work/demo");
     }
