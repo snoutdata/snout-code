@@ -1359,6 +1359,16 @@ remote-could-not-install-it = Impossible de l’installer : { $e }
 remote-open-folder-on = Ouvrir un dossier sur { $name }
 remote-no-folders-here = Aucun dossier ici
 remote-show-hidden-folders = Afficher les dossiers masqués
+remote-forwarded-port-taken = Le port { $port } est déjà pris sur { $machine } : il n’est pas redirigé vers { $name }
+remote-forwarded-port-failed = Impossible de rediriger le port { $port } vers { $name } : { $e }
+remote-forwarded-port-not-a-port = forwarded_ports : { $port } n’est ni un port ni "local:distant"
+remote-forwarded-ports = Ports redirigés
+remote-no-forwarded-ports = Aucun
+remote-edit-forwarded-ports = Modifier les ports redirigés…
+remote-forwarded-port-to = { $port } → { $name }:{ $remote }
+remote-forwarded-port-taken-short = { $port } : déjà pris sur { $machine }
+remote-forwarded-port-not-a-port-short = { $port } : pas un port
+remote-forwarded-port-failed-short = { $port } : { $e }
 
 ## run
 

@@ -161,7 +161,7 @@ pub enum StructureEvent {
     /// close when `close` says so).
     Apply {
         user: Box<Settings>,
-        project: Option<ProjectSettings>,
+        project: Option<Box<ProjectSettings>>,
         close: bool,
     },
     /// Close, and show this place (the changes put in place first).
@@ -538,7 +538,7 @@ impl ProjectStructureView {
         if let Some(project) = &project {
             self.project = project.clone();
         }
-        cx.emit(StructureEvent::Apply { user: Box::new(user), project, close });
+        cx.emit(StructureEvent::Apply { user: Box::new(user), project: project.map(Box::new), close });
     }
 
     /// Run the project on `home` (none: each build's own JDK, as the user's settings say).

@@ -449,8 +449,8 @@ pub trait Stream: Read + Write + Send + Sync {
     fn shutdown(&self) -> io::Result<()>;
 }
 
-/// A port of the host whose connections arrive at a port of this Mac (see
-/// [`Host::forward_to_app`]); the forwarding ends when it is dropped.
+/// A port forwarded between the host and this Mac, either way (see [`Host::forward_to_app`]
+/// and [`Host::forward_to_host`]); the forwarding ends when it is dropped.
 pub struct Forward {
     /// The port on the host's loopback.
     pub port: u16,
@@ -606,6 +606,17 @@ pub trait Host: Send + Sync {
     /// reconnect. On this Mac itself that is `app_port`.
     fn forward_to_app(&self, app_port: u16) -> io::Result<Forward> {
         Ok(Forward::new(app_port, Box::new(())))
+    }
+
+    /// Make connections to `app_port` on this Mac's loopback arrive at `port` on the host's,
+    /// each on a connection of its own (the way there for a program on this Mac to a server
+    /// on the host: a browser to a dev server, as `ssh -L` does). Fails when `app_port` is
+    /// taken here. On this Mac itself the port is already there.
+    fn forward_to_host(&self, app_port: u16, port: u16) -> io::Result<Forward> {
+        if app_port != port {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "a port of this machine to another of its own"));
+        }
+        Ok(Forward::new(port, Box::new(())))
     }
 
     /// Every process of the host; with `cpu`, after measuring their CPU use if the listing

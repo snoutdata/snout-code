@@ -9,7 +9,8 @@
 //! where they were (output waits on the server). A file watch starts again and reports a
 //! change at its root, since what happened in between is unknown. TCP tunnels end; a port
 //! forwarded back to the app ([`Host::forward_to_app`]) stays, the server keeping its
-//! listener.
+//! listener, and so does one forwarded to the host ([`Host::forward_to_host`]), whose
+//! connections each take a tunnel of their own.
 //!
 //! Calls that can be repeated without harm (reads, metadata, listings, writes of a whole
 //! file) are made again on the new connection when the connection dropped under them;
@@ -611,6 +612,36 @@ impl Host for RemoteHost {
         Ok(snout_host::Forward::new(port, Box::new(keep)))
     }
 
+    fn forward_to_host(&self, app_port: u16, port: u16) -> io::Result<snout_host::Forward> {
+        // A program here that answers on either loopback has the port, though a bind would go
+        // past it: one on ::1 alone, or (macOS, Windows) one on every address.
+        let loopbacks = [std::net::Ipv4Addr::LOCALHOST.into(), std::net::Ipv6Addr::LOCALHOST.into()];
+        for ip in loopbacks {
+            let at = std::net::SocketAddr::new(ip, app_port);
+            if std::net::TcpStream::connect_timeout(&at, Duration::from_millis(200)).is_ok() {
+                return Err(io::Error::new(io::ErrorKind::AddrInUse, format!("{at} is taken")));
+            }
+        }
+        // 127.0.0.1 is the port's; ::1 too where this Mac has it free (a `localhost` that
+        // resolves there first then reaches it), as ssh's `-L` does.
+        let mut listeners = vec![std::net::TcpListener::bind(("127.0.0.1", app_port))?];
+        listeners.extend(std::net::TcpListener::bind(("::1", app_port)).ok());
+        for l in &listeners {
+            l.set_nonblocking(true)?;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let (link, s) = (self.link.clone(), stop.clone());
+        let thread = std::thread::Builder::new()
+            .name("snout-remote-forward-in".into())
+            .spawn(move || forward_in_loop(link, listeners, port, s))?;
+        // Joined, so the port is free again once the forward is dropped.
+        let keep = OnDrop(Some(Box::new(move || {
+            stop.store(true, Ordering::SeqCst);
+            let _ = thread.join();
+        })));
+        Ok(snout_host::Forward::new(port, Box::new(keep)))
+    }
+
     fn processes(&self, cpu: bool) -> io::Result<Vec<ProcInfo>> {
         let list = self.call(true, |c| c.system_processes(cpu))?;
         Ok(list
@@ -745,6 +776,35 @@ fn forward_loop(link: Arc<Link>, port: u16, app_port: u16, mut listened: u64, st
                 pause(200);
             }
             Err(_) => {}
+        }
+    }
+}
+
+/// Take the connections to `listeners`, on this machine, to `port` on the remote one, each
+/// on a tunnel of its own, until `stop` or the host closes. The listeners stay through a
+/// reconnect: a connection made meanwhile waits for the new one.
+fn forward_in_loop(link: Arc<Link>, listeners: Vec<std::net::TcpListener>, port: u16, stop: Arc<AtomicBool>) {
+    while !stop.load(Ordering::SeqCst) && link.status() != Status::Closed {
+        let mut idle = true;
+        for listener in &listeners {
+            let Ok((stream, _)) = listener.accept() else { continue };
+            idle = false;
+            let link = link.clone();
+            let _ = std::thread::Builder::new().name("snout-remote-forward-tunnel".into()).spawn(move || {
+                let _ = stream.set_nonblocking(false);
+                match link.client().and_then(|(c, _)| c.connect_tcp(port)) {
+                    Ok(channel) => {
+                        if proto::tcp::carry(stream, channel.clone()).is_err() {
+                            channel.close();
+                        }
+                    }
+                    // Dropping the stream closes it, as nothing listening there would.
+                    Err(e) => eprintln!("[remote] port {port} of {}: {e}", link.connector.name()),
+                }
+            });
+        }
+        if idle {
+            std::thread::sleep(Duration::from_millis(25));
         }
     }
 }

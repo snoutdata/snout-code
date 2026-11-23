@@ -78,6 +78,43 @@ pub struct ProjectSettings {
     /// in place of the user's (`{ "SPRING_PROFILES_ACTIVE": "dev" }`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_env: Option<std::collections::BTreeMap<String, String>>,
+    /// The ports of the window's machine forwarded to the remote machine's loopback while
+    /// the project is open there over Remote SSH, as `ssh -L` does: `[4200, 8080]` for the
+    /// same ports there, or `"18080:8080"` for 18080 here to 8080 there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarded_ports: Option<Vec<ForwardedPort>>,
+}
+
+/// A port of the window's machine forwarded to one of the remote machine: a number for the
+/// same port there, or `"local:remote"`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum ForwardedPort {
+    Same(u16),
+    Pair(String),
+}
+
+impl ForwardedPort {
+    /// The window's machine's port and the remote machine's; none when it names no port.
+    pub fn ports(&self) -> Option<(u16, u16)> {
+        let (app, host) = match self {
+            Self::Same(p) => (*p, *p),
+            Self::Pair(text) => {
+                let (a, b) = text.split_once(':').unwrap_or((text, text));
+                (a.trim().parse().ok()?, b.trim().parse().ok()?)
+            }
+        };
+        (app != 0 && host != 0).then_some((app, host))
+    }
+}
+
+impl std::fmt::Display for ForwardedPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Same(p) => write!(f, "{p}"),
+            Self::Pair(text) => write!(f, "\"{text}\""),
+        }
+    }
 }
 
 /// The Spring profiles as the project file writes them: `"any"`, `"config"` or a list.
