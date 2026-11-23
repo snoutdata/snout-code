@@ -300,11 +300,13 @@ fn settings(build_jdk: Option<&Path>) -> Value {
     s
 }
 
-fn initialize_params(root: &Path, build_jdk: Option<&Path>) -> Value {
+/// `initialize` for Metals. Like jdtls, it exits when the process it is given (`pid`, the
+/// program serving the host) stops running.
+pub(crate) fn initialize_params(root: &Path, pid: u32, build_jdk: Option<&Path>) -> Value {
     let uri = snout_lang::uri::from_path(root);
     let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     json!({
-        "processId": std::process::id(),
+        "processId": pid,
         "clientInfo": { "name": "SnoutCode" },
         "rootUri": uri.as_str(),
         "rootPath": root,
@@ -617,7 +619,8 @@ impl LangHub {
                 }
             }
         });
-        let init = client.request_raw("initialize", initialize_params(root, build_jdk.as_deref()));
+        let init =
+            client.request_raw("initialize", initialize_params(root, self.host.info().pid, build_jdk.as_deref()));
         let root_buf = root.to_owned();
         let initialize = cx.spawn(async move |this, cx| {
             let result = init.await;
