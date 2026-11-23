@@ -8,6 +8,10 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # A pull request into main must pass these before it can merge (the repository's rules).
+  # Nothing is signed for one.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -24,11 +28,12 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  # Azure Trusted Signing, for a tag here or a run started by hand on main; never for a fork, and
-  # this workflow has no pull_request trigger. It needs the secrets AZURE_TENANT_ID, AZURE_CLIENT_ID,
-  # AZURE_CLIENT_SECRET, AZURE_SIGNING_ACCOUNT and AZURE_SIGNING_PROFILE. All are secrets, not
-  # variables: the logs are public, and GitHub prints a variable in them.
-  SIGN_WINDOWS: ${{ github.repository == 'snoutdata/snout-code' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
+  # Azure Trusted Signing, for a release tag here only: never for a branch, a pull request or a
+  # fork. It needs the secrets AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+  # AZURE_SIGNING_ACCOUNT and AZURE_SIGNING_PROFILE, kept in the `release` environment, which
+  # only a `v*` tag can use (and only an admin can push one). All are secrets, not variables:
+  # the logs are public, and GitHub prints a variable in them.
+  SIGN_WINDOWS: ${{ github.repository == 'snoutdata/snout-code' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
 
 jobs:
   check:
@@ -147,6 +152,8 @@ jobs:
           - arch: arm64
             runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
+    # The signing secrets live in `release`; any other run has no environment, and no secrets.
+    environment: ${{ github.repository == 'snoutdata/snout-code' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && 'release' || '' }}
     timeout-minutes: 120
     steps:
       - run: git config --global core.autocrlf false

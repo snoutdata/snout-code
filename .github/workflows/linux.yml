@@ -9,6 +9,9 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # A pull request into main must pass these before it can merge (the repository's rules).
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
