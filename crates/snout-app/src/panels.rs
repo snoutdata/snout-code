@@ -168,16 +168,20 @@ impl Render for SidePanel {
 
 pub use crate::welcome::WelcomePanel;
 
-/// The bottom dock's Output tab: what Git said.
+/// The bottom dock's Output tab: what Git and the tools said (a Java engine's Gradle runs
+/// among them). It follows the end as lines come, unless scrolled up.
 pub struct OutputPanel {
     model: Entity<Model>,
     focus: FocusHandle,
+    scroll: gpui::ScrollHandle,
+    /// How many lines it last showed, and the last of them, to tell when more came.
+    seen: (usize, Option<String>),
 }
 
 impl OutputPanel {
     pub fn new(model: Entity<Model>, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
-        Self { model, focus: cx.focus_handle() }
+        Self { model, focus: cx.focus_handle(), scroll: gpui::ScrollHandle::new(), seen: (0, None) }
     }
 }
 
@@ -187,6 +191,14 @@ impl Render for OutputPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let m = self.model.read(cx);
+        let now = (m.output.len(), m.output.last().map(|l| l.text.clone()));
+        if now != self.seen {
+            let (offset, max) = (self.scroll.offset(), self.scroll.max_offset());
+            if self.seen.0 == 0 || -offset.y >= max.y - px(8.) {
+                self.scroll.scroll_to_bottom();
+            }
+            self.seen = now;
+        }
         if m.output.is_empty() {
             return div().size_full().bg(p.ground).flex().flex_col().child(
                 crate::components::EmptyState::new(snout_core::art::spots::no_output(), ts!("panels-no-output-yet"))
@@ -200,19 +212,29 @@ impl Render for OutputPanel {
                     ),
             );
         }
-        div().size_full().bg(p.ground).flex().flex_col().child(
-            div()
-                .id("output")
-                .flex_1()
-                .overflow_y_scrollbar()
-                .px(px(12.))
-                .py(px(6.))
-                .font_family(cx.theme_mono())
-                .text_size(px(12.))
-                .children(m.output.iter().map(|l| {
-                    div().text_color(if l.error { p.error } else { p.fg }).child(crate::look::text(l.text.clone()))
-                })),
-        )
+        div()
+            .size_full()
+            .relative()
+            .bg(p.ground)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .id("output")
+                    .debug_selector(|| "output".into())
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .px(px(12.))
+                    .py(px(6.))
+                    .font_family(cx.theme_mono())
+                    .text_size(px(12.))
+                    .children(m.output.iter().map(|l| {
+                        div().text_color(if l.error { p.error } else { p.fg }).child(crate::look::text(l.text.clone()))
+                    })),
+            )
+            .vertical_scrollbar(&self.scroll)
     }
 }
 

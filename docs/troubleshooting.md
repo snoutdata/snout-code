@@ -9,6 +9,10 @@ The status bar, at the bottom right, shows the Java engine of the project:
 - While it works, its stage shows as a background task with a progress bar. Click it to list
   everything running in the background, with each module's stage.
 - When it is done, it shows `Java:` and its state. Click it to show the Problems tab.
+- While the engine's Gradle runs go on, the line beside the progress bar says what Gradle does
+  this moment, such as the file it downloads. If that line keeps changing, the engine is working:
+  a first sync of a large build can take minutes. **Show log**, in the list of background tasks,
+  opens the Output tool window with every line.
 
 | Status | What it means |
 |---|---|

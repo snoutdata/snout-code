@@ -365,6 +365,19 @@ fn task_parts(parts: &[(String, String, Option<u32>)], p: &crate::theme::Palette
         .into_any_element()
 }
 
+/// A line of a tool's activity, short enough for the status bar: a download names its file
+/// rather than its whole address. The Output tool window has the line in full.
+pub fn short_activity(line: &str) -> String {
+    let line = line.trim();
+    match line.split_once(' ') {
+        Some((verb, url)) if url.contains("://") => {
+            let file = url.trim_end_matches('/').rsplit('/').next().unwrap_or(url);
+            format!("{verb} {file}")
+        }
+        _ => line.to_owned(),
+    }
+}
+
 /// When the app started, for the sliding progress bars.
 pub fn started() -> std::time::Instant {
     static START: std::sync::LazyLock<std::time::Instant> = std::sync::LazyLock::new(std::time::Instant::now);
@@ -390,6 +403,9 @@ impl StatusBar {
         let more = tasks.len() - 1;
         let front = first.compact.clone().unwrap_or_else(|| first.stage.clone());
         let label = if more > 0 { format!("{front} (+{more})") } else { front };
+        // What the task in front does this moment, so a long sync is seen to work.
+        let activity = first.activity.as_deref().map(short_activity);
+        let fg_dim = p.fg_dim;
         Some(
             div()
                 .relative()
@@ -409,6 +425,18 @@ impl StatusBar {
                         .hover(move |s| s.bg(hover_bg))
                         .child(label)
                         .child(progress_bar(first.percent, 64., &p))
+                        .when_some(activity, |d, a| {
+                            d.child(
+                                div()
+                                    .id("status-activity")
+                                    .debug_selector(|| "status-activity".into())
+                                    .max_w(px(260.))
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .text_color(fg_dim)
+                                    .child(a),
+                            )
+                        })
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.tasks_open = !this.tasks_open;
                             cx.notify();
@@ -442,6 +470,8 @@ impl StatusBar {
                                             .child(crate::art::drawing(snout_core::art::building(), 84., 56., None))
                                             .child(
                                                 div()
+                                                    .flex_1()
+                                                    .min_w_0()
                                                     .flex()
                                                     .flex_col()
                                                     .child(
@@ -452,6 +482,26 @@ impl StatusBar {
                                                     .child(div().text_color(p.fg_dim).child(crate::look::text(ts!(
                                                         "status-the-editor-works-meanwhile"
                                                     )))),
+                                            )
+                                            // The Output tool window has every line the tools said.
+                                            .child(
+                                                div()
+                                                    .id("tasks-show-log")
+                                                    .debug_selector(|| "tasks-show-log".into())
+                                                    .flex_none()
+                                                    .self_start()
+                                                    .px(px(6.))
+                                                    .py(px(2.))
+                                                    .rounded(px(4.))
+                                                    .text_color(p.accent)
+                                                    .cursor_pointer()
+                                                    .hover(move |s| s.bg(hover_bg))
+                                                    .child(ts!("status-show-log"))
+                                                    .on_click(cx.listener(|this, _, window, cx| {
+                                                        this.tasks_open = false;
+                                                        window.dispatch_action(Box::new(crate::menus::ShowOutput), cx);
+                                                        cx.notify();
+                                                    })),
                                             ),
                                     )
                                     .children(tasks.into_iter().map(|t| {
@@ -479,6 +529,18 @@ impl StatusBar {
                                             )
                                             .child(div().text_color(p.fg_dim).child(crate::look::text(t.stage)))
                                             .child(progress_bar(t.percent, 316., &p))
+                                            .when_some(t.activity.as_deref().map(short_activity), |d, a| {
+                                                d.child(
+                                                    div()
+                                                        .debug_selector(|| "task-activity".into())
+                                                        .text_size(px(11.5))
+                                                        .text_color(p.fg_dim)
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .child(a),
+                                                )
+                                            })
                                             .when(!t.parts.is_empty(), |d| d.child(task_parts(&t.parts, &p)))
                                     }))
                                     .on_mouse_down_out(cx.listener(|this, _, _, cx| {
@@ -814,4 +876,18 @@ fn message_icon(m: &crate::model::Model) -> Option<(crate::components::IconName,
     } else {
         (IconName::CircleCheck, |p: &crate::theme::Palette| p.ok)
     })
+}
+
+#[cfg(test)]
+mod activity_tests {
+    #[test]
+    fn a_download_names_its_file() {
+        use super::short_activity;
+        assert_eq!(
+            short_activity("Download https://repo.maven.apache.org/maven2/org/x/y/1.0/y-1.0.jar"),
+            "Download y-1.0.jar"
+        );
+        assert_eq!(short_activity(" Task :core:compileScala "), "Task :core:compileScala");
+        assert_eq!(short_activity("Configure project :app"), "Configure project :app");
+    }
 }

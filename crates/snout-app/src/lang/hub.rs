@@ -195,6 +195,9 @@ pub struct Server {
     stopped: bool,
     /// How far the project and its modules are, as the engine says.
     pub readiness: Readiness,
+    /// What the engine's Gradle run does right now (`snout/activity`): "Download https://...",
+    /// "Task :core:compileScala". None once no run of its own goes on.
+    pub activity: Option<String>,
     _tasks: Vec<Task<()>>,
 }
 
@@ -623,6 +626,7 @@ impl LangHub {
             generation: next_generation(),
             stopped: false,
             readiness: Readiness::default(),
+            activity: None,
             _tasks: Vec::new(),
         };
         let generation = server.generation;
@@ -825,6 +829,7 @@ impl LangHub {
         server.started = Instant::now();
         server.diagnostics.clear();
         server.readiness = Readiness::default();
+        server.activity = None;
         let root_buf = root.to_owned();
         let listen = cx.spawn(async move |this, cx| {
             while let Ok(message) = events.recv().await {
@@ -1008,6 +1013,41 @@ impl LangHub {
                         }
                     }
                     cx.emit(HubEvent::Changed);
+                    cx.notify();
+                }
+            }
+            "snout/activity" => {
+                let lines: Vec<String> = params
+                    .get("lines")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect();
+                let more = params.get("more").and_then(Value::as_u64).unwrap_or(0);
+                let idle = params.get("idle").and_then(Value::as_bool).unwrap_or(false);
+                let activity = if idle { None } else { lines.last().cloned().or_else(|| server.activity.clone()) };
+                let changed = server.activity != activity;
+                server.activity = activity;
+                // The whole of it goes to the Output tool window, for whoever wants to watch.
+                if !lines.is_empty() {
+                    let project = crate::model::Model::dir_name(root);
+                    self.model.update(cx, |m, cx| {
+                        if more > 0 {
+                            m.log_output(
+                                t!("editor-gradle-more-lines", project = project.to_string(), n = more.to_string()),
+                                false,
+                            );
+                        }
+                        for line in lines {
+                            m.log_output(t!("editor-gradle-line", project = project.to_string(), line = line), false);
+                        }
+                        cx.notify();
+                    });
+                }
+                // The status bar shows it: no diagnostics changed, so no HubEvent.
+                if changed {
                     cx.notify();
                 }
             }
@@ -1665,6 +1705,7 @@ impl LangHub {
             generation: 0,
             stopped: true,
             readiness: Readiness::default(),
+            activity: None,
             _tasks: Vec::new(),
         });
         server.diagnostics.insert(uri, list);

@@ -165,7 +165,7 @@ public final class Sync {
         try (ProjectConnection connection = connector(dir, options).connect()) {
             List<String> args = arguments(initScripts, projectCacheDir, options);
             args.add("-D" + ProjectModelBuilder.SOURCES_PROPERTY + "=" + options.sources);
-            BuildActionExecuter<SyncResult> action = connection.action(new SyncAction()).withArguments(args);
+            BuildActionExecuter<SyncResult> action = Activity.watch(connection.action(new SyncAction()).withArguments(args));
             if (options.javaHome != null) {
                 action.setJavaHome(options.javaHome);
             }
@@ -177,7 +177,7 @@ public final class Sync {
             GradleSaid.Tail stderr = new GradleSaid.Tail(options.gradleOutput);
             action.setStandardError(stderr);
             try {
-                return action.run();
+                return Activity.running(action::run);
             } catch (RuntimeException e) {
                 String said = GradleSaid.whatWentWrong(stderr.text());
                 throw said == null ? e : new GradleSaid(said, e);

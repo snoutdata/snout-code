@@ -224,6 +224,7 @@ Problems and References share the bottom dock: click their names in its header t
 When a project opens, the engine syncs the Gradle model, compiles Scala if the build has any, and then imports and indexes each module. You can edit meanwhile. Each module becomes ready on its own, so the files of small modules work early in a large project.
 
 - **The status bar** shows the engine's work on the right while it runs, such as `Java: 7 of 12 modules ready`, with a thin progress bar. Click it to see everything that runs in the background, with each module's stage. The modules still on their way come first.
+- **What Gradle does this moment** shows beside the progress bar while the engine's own Gradle runs go on: the file it downloads, the project it configures, or the task it runs, such as `Download scala-library-2.13.12.jar`. A first sync of a large build can download dependencies for minutes; this line shows it is still working. Click **Show log** in the list of background tasks to open the Output tool window, which has every line in full.
 - **The editor** shows its own module's stage in the top right corner until that module is ready, with a percentage when one is known.
 
 A module's stage is one of:

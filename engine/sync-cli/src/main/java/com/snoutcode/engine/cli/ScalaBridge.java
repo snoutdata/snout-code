@@ -1032,7 +1032,7 @@ public final class ScalaBridge {
                 if (spec != null) {
                     args.add("-D" + SPEC_PROPERTY + "=" + spec.toAbsolutePath());
                 }
-                BuildLauncher launcher = connection.newBuild().forTasks(tasks.toArray(new String[0])).withArguments(args);
+                BuildLauncher launcher = Activity.watch(connection.newBuild().forTasks(tasks.toArray(new String[0])).withArguments(args));
                 if (options.javaHome != null) {
                     launcher.setJavaHome(options.javaHome);
                 }
@@ -1040,7 +1040,7 @@ public final class ScalaBridge {
                 launcher.setStandardOutput(out);
                 launcher.setStandardError(out);
                 launcher.setColorOutput(false);
-                launcher.run();
+                Activity.runningVoid(launcher::run);
             }
         } catch (BuildException e) {
             result.error = SnoutEngine.describe(e);

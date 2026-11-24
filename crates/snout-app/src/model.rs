@@ -424,6 +424,9 @@ impl PartialEq for AfterPick {
     }
 }
 
+/// The most lines the Output tool window keeps.
+pub const OUTPUT_LINES: usize = 3000;
+
 pub struct OutputLine {
     pub text: String,
     pub error: bool,
@@ -1726,6 +1729,10 @@ impl Model {
     pub fn log_output(&mut self, text: String, error: bool) {
         if !text.trim().is_empty() {
             self.output.push(OutputLine { text, error });
+            // A first sync can download thousands of files: the Output keeps the latest.
+            if self.output.len() > OUTPUT_LINES {
+                self.output.drain(..self.output.len() - OUTPUT_LINES);
+            }
         }
     }
 

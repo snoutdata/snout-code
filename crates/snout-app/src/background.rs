@@ -60,6 +60,9 @@ pub struct BgTask {
     pub compact: Option<String>,
     /// Its parts and how far each is (the modules of a Java project): name, stage, percent.
     pub parts: Vec<(String, String, Option<u32>)>,
+    /// What it does this moment, in the tool's words ("Download https://..."), when it says:
+    /// the status bar shows it beside the stage, so a long first sync is seen to work.
+    pub activity: Option<String>,
 }
 
 /// A Java server's stage, as the background tasks name it.
@@ -110,6 +113,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
                     percent: work.and_then(|w| w.percentage),
                     compact: Some(ts!("background-java-stopped-starting-again").into()),
                     parts: Vec::new(),
+                    activity: s.activity.clone(),
                 });
                 continue;
             }
@@ -136,6 +140,7 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
                     percent: project.percent,
                     compact: Some(t!("editor-java", summary = summary.to_string())),
                     parts,
+                    activity: s.activity.clone(),
                 });
                 continue;
             }
@@ -144,7 +149,13 @@ pub fn tasks(hub: Option<&gpui::Entity<LangHub>>, model: &crate::model::Model, c
                 (Stage::Indexing | Stage::Ready, Some(w)) => w.label(),
                 (stage, _) => stage_text(stage),
             };
-            out.push(BgTask { title, stage, percent: work.and_then(|w| w.percentage), ..Default::default() });
+            out.push(BgTask {
+                title,
+                stage,
+                percent: work.and_then(|w| w.percentage),
+                activity: s.activity.clone(),
+                ..Default::default()
+            });
         }
     }
     if let Some(task) = crate::project_model::store(cx).and_then(|s| s.read(cx).task()) {

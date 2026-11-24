@@ -478,6 +478,42 @@ fn readiness_shows_in_the_status_bar_and_the_editor(cx: &mut TestAppContext) {
     cx.update(|_, cx| ws.update(cx, |_, cx| cx.notify()));
     cx.run_until_parked();
     assert!(cx.debug_bounds("task-parts").is_some(), "the popover lists the modules");
+    // What the engine's Gradle run does this moment: beside the stage, and in the Output.
+    let activity = |params: serde_json::Value, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| hub.update(cx, |h, cx| h.engine_says(&repo, "snout/activity", params, cx)));
+        cx.run_until_parked();
+    };
+    let url = "https://repo.example/org/scala-lang/scala-library/2.13.12/scala-library-2.13.12.jar";
+    activity(json!({ "lines": ["Configure project :app", format!("Download {url}")], "more": 3 }), cx);
+    let tasks = cx.update(|_, cx| ws.read(cx).status.read(cx).tasks(cx));
+    let java = tasks.iter().find(|t| t.title.starts_with("Java: ")).expect("the engine's task");
+    assert_eq!(java.activity, Some(format!("Download {url}")));
+    assert!(cx.debug_bounds("status-activity").is_some(), "the status bar shows it");
+    assert!(cx.debug_bounds("task-activity").is_some(), "and the popover");
+    assert!(cx.debug_bounds("tasks-show-log").is_some());
+    let output: Vec<String> = cx.update(|_, cx| model.read(cx).output.iter().map(|l| l.text.clone()).collect());
+    let dir = crate::model::Model::dir_name(&repo);
+    assert!(output.contains(&format!("Gradle ({dir}): 3 more lines left out")), "{output:?}");
+    assert!(output.contains(&format!("Gradle ({dir}): Download {url}")), "{output:?}");
+    // A batch with no lines keeps the last; once no run goes on, it is gone.
+    activity(json!({ "lines": [] }), cx);
+    let has_activity = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| ws.read(cx).status.read(cx).tasks(cx).iter().any(|t| t.activity.is_some()))
+    };
+    assert!(has_activity(cx));
+    activity(json!({ "lines": [], "idle": true }), cx);
+    assert!(!has_activity(cx));
+    assert!(cx.debug_bounds("status-activity").is_none());
+    // Show log opens the Output, in place of the popover.
+    let at = cx.debug_bounds("tasks-show-log").expect("Show log is drawn").center();
+    cx.simulate_click(at, Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| ws.read(cx).tool_open(crate::workspace::Tool::Output, cx)), "the Output shows");
+    assert!(cx.debug_bounds("tasks-popover").is_none());
+    assert!(cx.debug_bounds("output").is_some());
+    cx.update(|_, cx| status_bar.update(cx, |s, _| s.tasks_open = true));
+    cx.update(|_, cx| ws.update(cx, |_, cx| cx.notify()));
+    cx.run_until_parked();
     // The open file's module, in the inspections widget, until it is ready.
     let pending = cx.update(|_, cx| editor.read(cx).module_readiness(cx)).expect("the module is not ready");
     assert_eq!((pending.label(), pending.percent), ("Compiling Scala", Some(40)));

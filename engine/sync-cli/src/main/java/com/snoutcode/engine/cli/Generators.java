@@ -170,7 +170,7 @@ final class Generators {
             }
             List<String> args = Sync.arguments(scripts, options.projectCacheDir, options);
             args.add("--continue");
-            BuildLauncher launcher = connection.newBuild().forTasks(job.tasks().toArray(new String[0])).withArguments(args);
+            BuildLauncher launcher = Activity.watch(connection.newBuild().forTasks(job.tasks().toArray(new String[0])).withArguments(args));
             if (options.javaHome != null) {
                 launcher.setJavaHome(options.javaHome);
             }
@@ -179,7 +179,7 @@ final class Generators {
             launcher.setStandardOutput(out);
             launcher.setStandardError(stderr);
             try {
-                launcher.run();
+                Activity.runningVoid(launcher::run);
                 return null;
             } catch (RuntimeException e) {
                 String said = GradleSaid.whatWentWrong(stderr.text());

@@ -125,6 +125,7 @@ final class Lsp {
         BufferedOutputStream appOut = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
         System.setOut(log);
         Readiness readiness = new Readiness(message -> LspProxy.write(appOut, message));
+        Activity.sendTo(message -> LspProxy.write(appOut, message));
         File projectDir = options.projectDir.getCanonicalFile();
         String hash = Sync.sha256(projectDir.getAbsolutePath().getBytes(StandardCharsets.UTF_8)).substring(0, 16);
         Path cache = cacheDir(options);
