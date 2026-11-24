@@ -1392,6 +1392,14 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
         let corner = grid.origin + gpui::point(gpui::px(2.), gpui::px(2.));
         cx.simulate_click(corner, gpui::Modifiers::none());
         wait(cx, "click:[<0;1;1M[<0;1;1m");
+        // A release that never came (the button went up in another window) is sent when the
+        // pointer next moves with no button down, so the program does not keep a held button.
+        let script = script.replace("ar''med", "ar''med2").replace("cl''ick", "lo''st");
+        cx.update(|_, cx| terminal.read(cx).type_keys(&repo, script.as_bytes()));
+        wait(cx, "\narmed2");
+        cx.simulate_mouse_down(corner, gpui::MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_move(corner + gpui::point(gpui::px(1.), gpui::px(1.)), None, gpui::Modifiers::none());
+        wait(cx, "lost:[<0;1;1M[<0;1;1m");
     }
     // A colourful line, a link, and ⌘F finding text in the scrollback.
     let typed =

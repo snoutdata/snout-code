@@ -295,13 +295,17 @@ impl Pty {
     }
 
     /// Report a mouse `event` over the cell `at` (row, col), if the app asked for it. Whether
-    /// the app has the mouse: when it has not, the front end selects text as usual.
+    /// the app has the mouse: when it has not, the front end selects text as usual. `at` is a
+    /// cell of the live screen, so the scrollback goes back to it first, as for typing.
     pub fn mouse(&self, event: MouseEvent, at: (u16, u16), mods: Mods) -> bool {
-        let modes = self.frame().modes;
-        if modes.mouse == MouseTracking::Off {
+        let frame = self.frame();
+        if frame.modes.mouse == MouseTracking::Off {
             return false;
         }
-        self.write(&encode_mouse(event, at, mods, modes));
+        if frame.scrollback != 0 {
+            let _ = self.to_engine.send(Msg::ScrollTo(0));
+        }
+        self.write(&encode_mouse(event, at, mods, frame.modes));
         true
     }
 
@@ -831,5 +835,41 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(term.exit_status(), Some("exited"));
+    }
+
+    /// A click reported while the terminal shows its scrollback brings back the live screen,
+    /// whose rows the click's cell counts, as typing does.
+    #[cfg(unix)]
+    #[test]
+    fn a_click_for_the_program_goes_back_to_the_live_screen() {
+        for engine in EngineKind::available() {
+            let dir = std::env::temp_dir();
+            let script = r#"seq 1 100; printf '\033[?1000h'; echo armed; stty raw -echo; dd bs=1 count=6 >/dev/null 2>&1; stty sane; printf '\033[?1000l'"#;
+            let args = ["-c".to_owned(), script.to_owned()];
+            let launch = Launch {
+                size: None,
+                program: Path::new("/bin/sh"),
+                args: &args,
+                cwd: &dir,
+                env: &[],
+                env_remove: &[],
+                scrollback: crate::term::SCROLLBACK,
+            };
+            let term = Pty::spawn(&*snout_host::local(), &launch, engine, (255, 255, 255), (0, 0, 0), || {}).unwrap();
+            wait_for(&term, "armed");
+            let settle = |want: usize| {
+                for _ in 0..200 {
+                    if term.frame().scrollback == want {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                panic!("{engine:?}: scrollback {} after waiting for {want}", term.frame().scrollback);
+            };
+            term.scroll_to(10);
+            settle(10);
+            assert!(term.mouse(MouseEvent::Press(MouseButton::Left), (0, 0), Mods::default()), "{engine:?}");
+            settle(0);
+        }
     }
 }

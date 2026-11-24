@@ -204,6 +204,12 @@ fn tells_which_mouse_events_the_child_asked_for() {
             e.write(format!("\x1b[?{mode}l").as_bytes());
             assert_eq!(frame(e).modes.mouse, MouseTracking::Off, "{kind:?}: mode {mode} off");
         }
+        // The mode set last counts, as in xterm, though an earlier one was not turned off.
+        e.write(b"\x1b[?1003h");
+        e.write(b"\x1b[?1000h");
+        assert_eq!(frame(e).modes.mouse, MouseTracking::Click, "{kind:?}: 1003, then 1000");
+        e.write(b"\x1b[?1000l");
+        assert_eq!(frame(e).modes.mouse, MouseTracking::Off, "{kind:?}: 1000 off, 1003 left on");
     });
 }
 

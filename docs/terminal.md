@@ -35,6 +35,22 @@ The row under the window's title names the shell (`zsh`, `bash`) and its state: 
   scrollback. Typing goes back to the live screen. In a full-screen program the wheel scrolls the program (it gets the wheel as
   mouse events, or as arrow keys).
 
+## The mouse
+
+A program that asks for the mouse (htop, vim with `mouse=a`, Midnight Commander) gets its
+clicks, drags and wheel, at the cell under the pointer. It gets only what it asks for: some
+programs want clicks alone, others every move.
+
+While a program has the mouse, hold Shift to click for the terminal instead:
+
+- Shift+drag selects text.
+- Shift+right-click opens the menu.
+
+The wheel still goes to the program, Shift or not.
+
+⌘-click (Ctrl+click on Linux) still opens a link. When no program asks for the mouse, a drag
+selects and a right click opens the menu.
+
 ## Find
 
 Press ⌘F in a terminal to find text in it, scrollback included. The match count shows beside
@@ -62,8 +78,8 @@ On Linux, Ctrl takes ⌘'s place here too, and the Ctrl keys go to the shell: co
 find are Ctrl+Shift+C, Ctrl+Shift+V and Ctrl+Shift+F (see [SnoutCode on Linux](linux.md#in-the-terminal)).
 
 On Windows, Ctrl+V pastes, and Ctrl+C copies when text is selected (with nothing selected it
-interrupts). Everywhere, a right click offers Copy and Paste, and on a web address Open Link and
-Copy Link.
+interrupts). Everywhere, a right click (Shift+right-click in a program that has
+[the mouse](#the-mouse)) offers Copy and Paste, and on a web address Open Link and Copy Link.
 
 ⌘-click (Ctrl+click on Linux) a web address in a terminal (`https://`, `http://` or `file://`) to open it. A
 program can also print a link under other text (an OSC 8 hyperlink); with the Ghostty engine

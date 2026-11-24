@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, DispatchPhase, Entity, FocusHandle, Font, FontStyle,
-    FontWeight, Global, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString,
+    FontWeight, Global, Hitbox, HitboxBehavior, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, ScrollEvent, SharedString,
     StatefulInteractiveElement as _, StrikethroughStyle, Styled as _, Subscription, TextAlign, TextRun, UnderlineStyle,
     WeakEntity, Window, canvas, div, font, point, px, size,
 };
@@ -252,6 +252,9 @@ pub struct ConsolePanel {
     mouse_cell: Option<(u16, u16)>,
     /// Where the grid was last painted, and its cell size, for the pointer.
     grid: Option<(Bounds<Pixels>, gpui::Size<Pixels>)>,
+    /// The grid's hitbox, last painted: whether the pointer is on the grid, not on something
+    /// drawn over it (a menu).
+    grid_hitbox: Option<Hitbox>,
     shown_gen: u64,
     /// The folders whose session is being started: the attempt that counts, and the agent it
     /// starts. A later attempt replaces an earlier one, whose result is then dropped.
@@ -414,6 +417,7 @@ impl ConsolePanel {
             mouse_held: Vec::new(),
             mouse_cell: None,
             grid: None,
+            grid_hitbox: None,
             shown_gen: 0,
             starting: Default::default(),
             attempts: 0,
@@ -1346,16 +1350,20 @@ impl ConsolePanel {
 
     /// Hand a press to the program in `root`'s terminal if it has the mouse. Shift keeps the
     /// press here, so text can still be selected. Whether the program took it.
-    fn press_to_child(&mut self, root: &Path, e: &MouseDownEvent) -> bool {
+    fn press_to_child(&mut self, root: &Path, e: &MouseDownEvent, cx: &mut Context<Self>) -> bool {
         let (Some(button), false) = (pty_button(e.button), e.modifiers.shift) else { return false };
         let Some(cell) = self.mouse_cell_at(root, e.position) else { return false };
         let Some(s) = self.sessions.get(root) else { return false };
         if !s.pty.mouse(pty::MouseEvent::Press(button), cell, pty_mods(&e.modifiers)) {
             return false;
         }
-        self.mouse_held.push(button);
+        if !self.mouse_held.contains(&button) {
+            self.mouse_held.push(button);
+        }
         self.mouse_cell = Some(cell);
-        self.selection = None;
+        if self.selection.take().is_some() {
+            cx.notify();
+        }
         true
     }
 
@@ -1364,7 +1372,8 @@ impl ConsolePanel {
         let Some(button) = pty_button(e.button) else { return };
         let Some(i) = self.mouse_held.iter().position(|b| *b == button) else { return };
         self.mouse_held.remove(i);
-        if let Some(cell) = self.mouse_cell_at(root, e.position)
+        // With no grid (the terminal hidden meanwhile), where the program last heard of it.
+        if let Some(cell) = self.mouse_cell_at(root, e.position).or(self.mouse_cell)
             && let Some(s) = self.sessions.get(root)
         {
             s.pty.mouse(pty::MouseEvent::Release(button), cell, pty_mods(&e.modifiers));
@@ -1372,20 +1381,34 @@ impl ConsolePanel {
     }
 
     /// The pointer moved: a drag goes on outside the grid, held to its edges; a move with no
-    /// button down counts only over the grid. Once per cell.
-    fn mouse_moved(&mut self, root: &Path, e: &MouseMoveEvent) {
+    /// button down counts only over the grid, and not over what is drawn on it. Once per cell.
+    fn mouse_moved(&mut self, root: &Path, e: &MouseMoveEvent, window: &Window) {
         if self.selecting {
             return;
         }
+        // No button is down, but one went up where its release never came (in another window):
+        // the program hears it now, so it does not keep the button held.
+        if e.pressed_button.is_none() && !self.mouse_held.is_empty() {
+            let cell = self.mouse_cell_at(root, e.position).or(self.mouse_cell);
+            for button in std::mem::take(&mut self.mouse_held) {
+                if let (Some(cell), Some(s)) = (cell, self.sessions.get(root)) {
+                    s.pty.mouse(pty::MouseEvent::Release(button), cell, pty_mods(&e.modifiers));
+                }
+            }
+        }
         let held = self.mouse_held.first().copied();
-        let over = self.grid.is_some_and(|(b, _)| b.contains(&e.position));
+        let over = self.grid.is_some_and(|(b, _)| b.contains(&e.position))
+            && self.grid_hitbox.as_ref().is_none_or(|h| h.is_hovered_at(e.position, window));
         let Some(cell) = self.mouse_cell_at(root, e.position).filter(|_| held.is_some() || over) else { return };
         if self.mouse_cell == Some(cell) {
             return;
         }
         self.mouse_cell = Some(cell);
-        if let Some(s) = self.sessions.get(root) {
-            s.pty.mouse(pty::MouseEvent::Move(held), cell, pty_mods(&e.modifiers));
+        if let Some(s) = self.sessions.get(root)
+            && !s.pty.mouse(pty::MouseEvent::Move(held), cell, pty_mods(&e.modifiers))
+        {
+            // The program let go of the mouse: nothing it was pressed for is held any more.
+            self.mouse_held.clear();
         }
     }
 
@@ -2530,7 +2553,7 @@ impl ConsolePanel {
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus, cx);
                     // A program that has the mouse gets the right button; Shift keeps the menu.
-                    if this.press_to_child(&root, e) {
+                    if this.press_to_child(&root, e, cx) {
                         cx.stop_propagation();
                         return;
                     }
@@ -2544,7 +2567,7 @@ impl ConsolePanel {
                 move |this, e: &ScrollEvent, _, cx| {
                     let cell_h = this.grid.map_or(px(16.), |(_, c)| c.height);
                     let lines = e.delta.pixel_delta(cell_h).y / cell_h;
-                    let at = this.mouse_cell_at(&root, e.position).unwrap_or_default();
+                    let Some(at) = this.mouse_cell_at(&root, e.position) else { return };
                     if let Some(s) = this.sessions.get(&root)
                         && s.pty.scroll(lines, at, pty_mods(&e.modifiers))
                     {
@@ -2567,7 +2590,7 @@ impl ConsolePanel {
                         cx.open_url(&link);
                         return;
                     }
-                    if this.press_to_child(&root, e) {
+                    if this.press_to_child(&root, e, cx) {
                         cx.notify();
                         return;
                     }
@@ -2580,7 +2603,7 @@ impl ConsolePanel {
                 let root = root.to_owned();
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus, cx);
-                    this.press_to_child(&root, e);
+                    this.press_to_child(&root, e, cx);
                 })
             })
             .child(mouse_to_child(cx.entity().downgrade(), root.to_owned()))
@@ -2616,10 +2639,11 @@ impl ConsolePanel {
                 },
             ))
             .child(
-                canvas(|_, _, _| {}, {
+                canvas(|bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal), {
                     let root = root.to_owned();
-                    move |bounds, _, window, cx| {
+                    move |bounds, hitbox, window, cx| {
                         view.update(cx, |this, cx| {
+                            this.grid_hitbox = Some(hitbox);
                             this.paint(&root, bounds, &look, (focused, cursor_shown), selection, &p, window, cx)
                         });
                     }
@@ -2840,9 +2864,9 @@ fn mouse_to_child(view: WeakEntity<ConsolePanel>, root: PathBuf) -> impl IntoEle
         |_, _, _| (),
         move |_, _, window, _| {
             let (moved, at) = (view.clone(), root.clone());
-            window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+            window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
                 if phase == DispatchPhase::Bubble {
-                    let _ = moved.update(cx, |this, _| this.mouse_moved(&at, e));
+                    let _ = moved.update(cx, |this, _| this.mouse_moved(&at, e, window));
                 }
             });
             let (released, at) = (view.clone(), root.clone());
