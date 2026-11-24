@@ -1485,7 +1485,11 @@ fn the_title_bar_leaves_room_for_the_window_controls_in_the_smallest_window(cx: 
     }
     // The narrowest window that still shows every menu. Its width decides the fold, so the
     // controls' room cannot be taken off it here: what never gives way (the menus, and the
-    // environment through Settings) must fit beside them, the names having none left.
+    // environment through Settings) must fit beside them, the names having none left. On
+    // macOS the menus are the system's, and the window draws no controls.
+    if !crate::platform::IN_WINDOW_MENUS {
+        return;
+    }
     let w = gpui::px(crate::menu_bar::FOLD_BELOW_W);
     cx.simulate_resize(gpui::size(w, gpui::px(500.)));
     cx.run_until_parked();

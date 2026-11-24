@@ -303,9 +303,10 @@ impl Workspace {
         let configs = runs.configurations();
         let selected = runs.selected_config();
         let playwright = self.pw_tests.read(cx).playwright;
-        // Node configurations run without the Java engine, and so may the current file (a
-        // script).
-        let ready = runs.engine(cx).is_some() || selected.as_ref().is_none_or(|c| c.kind.is_node());
+        // Run and Debug work whenever a project is open, as the Run window's Rerun does: before
+        // the Java engine is up (starting, compiling Scala, stopped by hand) the run waits for
+        // it, starts it again, or says in the Run window why it cannot run.
+        let ready = self.model.read(cx).project_root().is_some();
         let loading = runs.configs_loading;
         let running = runs.any_running();
         // The selected configuration runs: Run becomes Rerun.

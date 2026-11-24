@@ -975,6 +975,10 @@ impl Runs {
             return;
         }
         let found = self.engine(cx).is_some_and(|(_, pid)| self.configs_from == Some(pid)) && !self.configs_loading;
+        // An engine stopped by hand starts again to find the main class.
+        if !found {
+            self.restart_stopped_engine(cx);
+        }
         if !found && let EngineState::Waiting(doing) = self.engine_state(false, cx) {
             if let Some(project) = self.model.read(cx).project_root() {
                 self.hub.update(cx, |h, cx| h.ensure_server(&project, cx));

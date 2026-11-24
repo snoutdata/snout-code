@@ -32,7 +32,11 @@ type Binding = (&'static str, Box<dyn Action>, Option<&'static str>);
 /// The app's own bindings on this system: keys, action, and the context they apply in.
 fn ours() -> Vec<(String, Box<dyn Action>, Option<&'static str>)> {
     if cfg!(target_os = "macos") {
-        return mac_defaults().into_iter().map(|(k, a, c)| (k.to_owned(), a, c)).collect();
+        let mut out: Vec<_> = mac_defaults().into_iter().map(|(k, a, c)| (k.to_owned(), a, c)).collect();
+        // In a terminal the Ctrl keys go to the shell (Ctrl+D ends the input, Ctrl+R searches
+        // its history), not to Run and Debug: ⌘ is the app's.
+        out.extend(CTRL_LETTERS.map(|k| (k.to_owned(), Box::new(gpui::NoAction) as Box<dyn Action>, Some("Terminal"))));
+        return out;
     }
     let mut out: Vec<(String, Box<dyn Action>, Option<&'static str>)> = mac_defaults()
         .into_iter()
@@ -80,6 +84,13 @@ pub fn linux_keys(mac: &str, action: &str) -> Option<String> {
     Some(mac.split(' ').map(|k| k.replace("cmd-", "ctrl-")).collect::<Vec<_>>().join(" "))
 }
 
+/// The Ctrl letters, which a terminal leaves to its shell on every system.
+const CTRL_LETTERS: [&str; 26] = [
+    "ctrl-a", "ctrl-b", "ctrl-c", "ctrl-d", "ctrl-e", "ctrl-f", "ctrl-g", "ctrl-h", "ctrl-i", "ctrl-j", "ctrl-k",
+    "ctrl-l", "ctrl-m", "ctrl-n", "ctrl-o", "ctrl-p", "ctrl-q", "ctrl-r", "ctrl-s", "ctrl-t", "ctrl-u", "ctrl-v",
+    "ctrl-w", "ctrl-x", "ctrl-y", "ctrl-z",
+];
+
 /// Bindings Linux has besides the Mac's: the editor's Type Hierarchy ahead of GPUI Kit's
 /// Ctrl+H, Redo on Ctrl+Shift+Z too, and the terminal's keys. In a terminal the Ctrl keys
 /// go to the shell (Ctrl+C interrupts, Ctrl+R searches its history, Ctrl+W deletes a word),
@@ -93,11 +104,6 @@ fn linux_extras() -> Vec<Binding> {
         ("ctrl-shift-v", Box::new(i::Paste), Some("Terminal")),
         ("ctrl-shift-f", Box::new(gpui::NoAction), Some("Terminal")),
         ("ctrl-\\", Box::new(gpui::NoAction), Some("Terminal")),
-    ];
-    const CTRL_LETTERS: [&str; 26] = [
-        "ctrl-a", "ctrl-b", "ctrl-c", "ctrl-d", "ctrl-e", "ctrl-f", "ctrl-g", "ctrl-h", "ctrl-i", "ctrl-j", "ctrl-k",
-        "ctrl-l", "ctrl-m", "ctrl-n", "ctrl-o", "ctrl-p", "ctrl-q", "ctrl-r", "ctrl-s", "ctrl-t", "ctrl-u", "ctrl-v",
-        "ctrl-w", "ctrl-x", "ctrl-y", "ctrl-z",
     ];
     // Windows: Ctrl+V pastes in a terminal, as Windows Terminal has it. (Ctrl+C copies when text
     // is selected: the console decides, since with none it still interrupts.)

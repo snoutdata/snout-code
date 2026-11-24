@@ -1108,6 +1108,43 @@ fn opening_another_project_drops_the_engines_outside_it(cx: &mut TestAppContext)
     let _ = std::fs::remove_dir_all(b);
 }
 
+/// The title bar's Run works while the Java engine is not up, as the Run window's Rerun
+/// does: with the engine stopped by hand, it starts a run that says so (it did nothing).
+#[gpui::test]
+fn the_title_bars_run_works_with_the_engine_stopped(cx: &mut TestAppContext) {
+    let repo = demo_repo("title-run-stopped");
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let hub = cx.update(|_, cx| ws.read(cx).hub.clone());
+    let runs = runs_of(&ws, cx);
+    cx.update(|_, cx| {
+        hub.update(cx, |h, _| {
+            h.insert_published(&repo, String::new(), Vec::new());
+            h.servers.get_mut(&repo).expect("the engine").stage = crate::lang::hub::Stage::Stopped;
+        })
+    });
+    let config = crate::run::config::RunConfig {
+        id: "user:app".into(),
+        kind: Kind::Main,
+        name: "App".into(),
+        main_class: Some("demo.App".into()),
+        user: true,
+        ..Default::default()
+    };
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.set_user_configurations(vec![config], Some("user:app".into()), cx)));
+    cx.run_until_parked();
+    let run = cx.debug_bounds("title-run").expect("Run is in the title bar");
+    cx.simulate_click(run.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let r = runs.read(cx);
+        let s = r.sessions.last().expect("Run started a run");
+        let lines = s.clone_lines();
+        assert!(lines.iter().any(|l| l.contains("The Java engine was stopped")), "{lines:?}");
+        assert!(!s.running(), "it does not wait for an engine that is stopped");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 #[gpui::test]
 fn a_process_run_streams_its_output_and_ends_with_its_exit_code(cx: &mut TestAppContext) {
     use crate::lang_tests::pump_until;
