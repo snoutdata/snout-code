@@ -1359,6 +1359,16 @@ remote-could-not-install-it = Não foi possível instalar: { $e }
 remote-open-folder-on = Abrir uma pasta em { $name }
 remote-no-folders-here = Nenhuma pasta aqui
 remote-show-hidden-folders = Mostrar pastas ocultas
+remote-forwarded-port-taken = A porta { $port } está em uso em { $machine }: ela não é encaminhada para { $name }
+remote-forwarded-port-failed = Não foi possível encaminhar a porta { $port } para { $name }: { $e }
+remote-forwarded-port-not-a-port = forwarded_ports: { $port } não é uma porta nem "local:remota"
+remote-forwarded-ports = Portas encaminhadas
+remote-no-forwarded-ports = Nenhuma
+remote-edit-forwarded-ports = Editar portas encaminhadas…
+remote-forwarded-port-to = { $port } → { $name }:{ $remote }
+remote-forwarded-port-taken-short = { $port }: em uso em { $machine }
+remote-forwarded-port-not-a-port-short = { $port }: não é uma porta
+remote-forwarded-port-failed-short = { $port }: { $e }
 
 ## run
 

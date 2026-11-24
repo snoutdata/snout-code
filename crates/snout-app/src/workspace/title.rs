@@ -211,6 +211,7 @@ impl Workspace {
         let remote_widget = crate::remote::connection(cx).map(|(host, status)| {
             let (text, dot) = crate::remote::describe_status(&host, &status, &p);
             let lost = matches!(status, snout_remote::Status::Lost(_));
+            let ports = crate::remote::forwarded_ports(cx);
             Trigger(
                 bar_button("title-remote", &p)
                     .child(div().flex_none().size(px(7.)).rounded_full().bg(dot))
@@ -229,7 +230,24 @@ impl Workspace {
                 } else {
                     menu
                 };
+                // The project's forwarded ports, how each went, and its file to change them.
+                let mut menu = menu.label(ts!("remote-forwarded-ports"));
+                if ports.is_empty() {
+                    menu = menu.item(PopupMenuItem::new(ts!("remote-no-forwarded-ports")).disabled(true));
+                }
+                for (text, ok) in &ports {
+                    use crate::components::IconName;
+                    let mark = if *ok { IconName::CircleCheck } else { IconName::TriangleAlert };
+                    menu = menu
+                        .item(PopupMenuItem::new(text.clone()).icon(crate::components::menu_icon(mark)).disabled(true));
+                }
                 menu.item(
+                    PopupMenuItem::new(ts!("remote-edit-forwarded-ports"))
+                        .icon(crate::components::menu_icon(crate::components::IconName::FileBraces))
+                        .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::OpenProjectSettingsJson), cx)),
+                )
+                .separator()
+                .item(
                     PopupMenuItem::new(ts!("cmd-close-remote-connection"))
                         .icon(crate::components::menu_icon(crate::components::IconName::Unplug))
                         .on_click(|_, w, cx| w.dispatch_action(Box::new(menus::CloseRemote), cx)),

@@ -1666,7 +1666,7 @@ impl Workspace {
         cx.subscribe_in(&view, window, |this, view, e: &StructureEvent, window, cx| {
             let close = match e {
                 StructureEvent::Apply { user, project, close } => {
-                    this.apply_layers((**user).clone(), project.clone(), window, cx);
+                    this.apply_layers((**user).clone(), project.as_deref().cloned(), window, cx);
                     *close
                 }
                 StructureEvent::Open(place) => {
@@ -1913,6 +1913,7 @@ impl Workspace {
         }
         let Some(root) = root else {
             let before = m.settings.clone();
+            let ports = m.project_settings.forwarded_ports.clone();
             self.model.update(cx, |m, _| {
                 m.project_settings_root = None;
                 m.project_settings_stamp = None;
@@ -1920,6 +1921,7 @@ impl Workspace {
                 m.set_project_settings(Default::default());
             });
             self.follow_settings(before, window, cx);
+            self.follow_forwarded_ports(ports, cx);
             return;
         };
         let known = (!moved).then_some(m.project_settings_stamp);
@@ -1947,6 +1949,19 @@ impl Workspace {
         .detach();
     }
 
+    /// The project's forwarded ports changed from `before` (another project, or its file):
+    /// on a remote machine, forward those it names now.
+    fn follow_forwarded_ports(
+        &mut self,
+        before: Option<Vec<crate::project_settings::ForwardedPort>>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.model.read(cx).project_settings.forwarded_ports != before {
+            let model = self.model.clone();
+            crate::remote::forward_ports(&model, cx);
+        }
+    }
+
     /// The project's settings file as read: in place, or its error shown and the values read
     /// last kept.
     fn took_project_settings(
@@ -1967,6 +1982,7 @@ impl Workspace {
         };
         let before = self.model.read(cx).settings.clone();
         let spring_before = self.model.read(cx).spring_mode();
+        let ports = self.model.read(cx).project_settings.forwarded_ports.clone();
         self.model.update(cx, |m, cx| {
             let moved = m.project_settings_root.as_ref() != Some(&root);
             m.project_settings_root = Some(root.clone());
@@ -1997,6 +2013,7 @@ impl Workspace {
         if before != self.model.read(cx).settings {
             self.follow_settings(before, window, cx);
         }
+        self.follow_forwarded_ports(ports, cx);
         let mode = self.model.read(cx).spring_mode();
         if mode != spring_before
             && let Some(spring) = crate::spring::spring(cx)

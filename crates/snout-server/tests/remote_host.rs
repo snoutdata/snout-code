@@ -378,3 +378,109 @@ fn a_port_forwarded_back_to_the_app_stays_through_a_reconnect() {
         std::net::TcpStream::connect(("127.0.0.1", port)).is_err()
     });
 }
+
+/// A server on the host's side: it answers each line with the line in capitals.
+fn capitals_server() -> u16 {
+    let server = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = server.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in server.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut r = io::BufReader::new(stream.try_clone().unwrap());
+                let mut w = stream;
+                let mut line = String::new();
+                while io::BufRead::read_line(&mut r, &mut line).is_ok_and(|n| n > 0) {
+                    let _ = w.write_all(line.to_uppercase().as_bytes());
+                    line.clear();
+                }
+            });
+        }
+    });
+    port
+}
+
+/// A port free on this machine's loopback, for now.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
+}
+
+#[test]
+fn a_port_forwarded_to_the_host_carries_both_ways_and_stays_through_a_reconnect() {
+    let f = fixture();
+    let host = &f.host;
+    let port = capitals_server();
+    let app_port = free_port();
+    let forward = host.forward_to_host(app_port, port).unwrap();
+    assert_eq!(forward.port, port);
+    // A program on this side connects to the port here, as a browser does.
+    let ask = |what: &str| {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", app_port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        s.write_all(format!("{what}\n").as_bytes()).unwrap();
+        read_until(&mut s, &what.to_uppercase())
+    };
+    assert_eq!(ask("hello"), "HELLO\n");
+    // Two at once, each on its tunnel.
+    let mut a = std::net::TcpStream::connect(("127.0.0.1", app_port)).unwrap();
+    let mut b = std::net::TcpStream::connect(("127.0.0.1", app_port)).unwrap();
+    for s in [&a, &b] {
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    }
+    b.write_all(b"second\n").unwrap();
+    a.write_all(b"first\n").unwrap();
+    assert_eq!(read_until(&mut a, "FIRST"), "FIRST\n");
+    assert_eq!(read_until(&mut b, "SECOND"), "SECOND\n");
+    // A large answer comes whole.
+    let big = "x".repeat(300_000);
+    assert_eq!(ask(&big).len(), big.len() + 1);
+
+    // The connection drops: the port here stays bound, and leads there again once it is back.
+    let connections = host.connections();
+    f.local.kill_proxy();
+    wait_until("the reconnect", Duration::from_secs(10), || {
+        host.connections() > connections && host.status() == Status::Connected
+    });
+    assert_eq!(ask("after"), "AFTER\n");
+
+    // Nothing listens there: a connection here is closed, and the forward stays.
+    let other = free_port();
+    let _nothing = host.forward_to_host(other, free_port()).unwrap();
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", other)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    assert_eq!(s.read(&mut [0u8; 16]).unwrap_or(0), 0, "closed");
+    assert_eq!(ask("still"), "STILL\n");
+
+    // Dropped: the port here is free at once.
+    drop(forward);
+    std::net::TcpListener::bind(("127.0.0.1", app_port)).expect("the port is free again");
+}
+
+#[test]
+fn a_port_taken_here_is_an_error_and_the_rest_carry_on() {
+    let f = fixture();
+    let host = &f.host;
+    let port = capitals_server();
+    let taken = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let busy = taken.local_addr().unwrap().port();
+    let e = host.forward_to_host(busy, port).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::AddrInUse, "{e}");
+    // The connection is none the worse, and another port forwards.
+    assert_eq!(host.status(), Status::Connected);
+    let app_port = free_port();
+    let _forward = host.forward_to_host(app_port, port).unwrap();
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", app_port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    s.write_all(b"fine\n").unwrap();
+    assert_eq!(read_until(&mut s, "FINE"), "FINE\n");
+}
+
+#[test]
+fn a_port_a_program_here_has_on_another_loopback_is_taken() {
+    // A program here on ::1 alone: binding 127.0.0.1 would go past it (as one on every
+    // address can on some systems), and a `localhost` resolving to ::1 would reach it.
+    let Ok(other) = std::net::TcpListener::bind(("::1", 0)) else { return };
+    let busy = other.local_addr().unwrap().port();
+    let f = fixture();
+    let e = f.host.forward_to_host(busy, capitals_server()).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::AddrInUse, "{e}");
+}

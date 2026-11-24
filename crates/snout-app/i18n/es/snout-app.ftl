@@ -1359,6 +1359,16 @@ remote-could-not-install-it = No se pudo instalar: { $e }
 remote-open-folder-on = Abrir una carpeta en { $name }
 remote-no-folders-here = No hay carpetas aquí
 remote-show-hidden-folders = Mostrar carpetas ocultas
+remote-forwarded-port-taken = El puerto { $port } está ocupado en { $machine }: no se reenvía a { $name }
+remote-forwarded-port-failed = No se pudo reenviar el puerto { $port } a { $name }: { $e }
+remote-forwarded-port-not-a-port = forwarded_ports: { $port } no es un puerto ni "local:remoto"
+remote-forwarded-ports = Puertos reenviados
+remote-no-forwarded-ports = Ninguno
+remote-edit-forwarded-ports = Editar puertos reenviados…
+remote-forwarded-port-to = { $port } → { $name }:{ $remote }
+remote-forwarded-port-taken-short = { $port }: ocupado en { $machine }
+remote-forwarded-port-not-a-port-short = { $port }: no es un puerto
+remote-forwarded-port-failed-short = { $port }: { $e }
 
 ## run
 

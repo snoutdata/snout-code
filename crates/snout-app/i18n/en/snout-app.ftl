@@ -1358,6 +1358,16 @@ remote-could-not-install-it = Could not install it: { $e }
 remote-open-folder-on = Open a Folder on { $name }
 remote-no-folders-here = No folders here
 remote-show-hidden-folders = Show hidden folders
+remote-forwarded-port-taken = Port { $port } is taken on { $machine }: it is not forwarded to { $name }
+remote-forwarded-port-failed = Port { $port } could not be forwarded to { $name }: { $e }
+remote-forwarded-port-not-a-port = forwarded_ports: { $port } is not a port or "local:remote"
+remote-forwarded-ports = Forwarded ports
+remote-no-forwarded-ports = None
+remote-edit-forwarded-ports = Edit Forwarded Ports…
+remote-forwarded-port-to = { $port } → { $name }:{ $remote }
+remote-forwarded-port-taken-short = { $port }: taken on { $machine }
+remote-forwarded-port-not-a-port-short = { $port }: not a port
+remote-forwarded-port-failed-short = { $port }: { $e }
 
 ## run
 

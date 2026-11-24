@@ -134,6 +134,8 @@ A project can set these, by their names in the file:
 | Terminal ▸ Shell ▸ Arguments | `terminal_shell_args` | a list, such as `["-l"]` |
 | Terminal ▸ Shell ▸ Environment | `terminal_env` | `{ "NAME": "value" }`, in place of yours |
 
+The file can also list the ports forwarded from your Mac while the project is open over Remote SSH, as `forwarded_ports` (see [Forward ports](remote-ssh.md#forward-ports)).
+
 A project's file looks like this:
 
 ```json

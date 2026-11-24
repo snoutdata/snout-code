@@ -165,6 +165,8 @@ pub struct Remote {
     pub pending: Option<(String, Arc<RemoteHost>)>,
     /// This machine's WSL distros, to offer beside the hosts of ssh.
     pub wsl_distros: Vec<String>,
+    /// The ports the open project names (`forwarded_ports`), and how forwarding each went.
+    pub forwards: Vec<Forwarding>,
 }
 
 impl Global for Remote {}
@@ -440,6 +442,8 @@ pub fn open_project(
     }
     let store = store_for(&name, main.as_ref(), &base);
     cx.set_global(crate::host::HostGlobal(as_workspace_host(host.clone())));
+    // The project before's ports go with it; the new one's follow once its settings are read.
+    cx.global_mut::<Remote>().forwards.clear();
     cx.global_mut::<Remote>().connection = Some(Connection { name, host: Some(host), status: Status::Connected });
     switch_window(store, Some(folder), old, cx);
 }
@@ -451,6 +455,7 @@ pub fn disconnect(old: AnyWindowHandle, before: Option<Box<dyn FnOnce() + Send>>
     let local = r.local.clone().unwrap_or_else(snout_host::local);
     let store = r.main_store.clone();
     let conn = cx.global_mut::<Remote>().connection.take();
+    cx.global_mut::<Remote>().forwards.clear();
     if let Some(host) = conn.and_then(|c| c.host) {
         cx.background_executor()
             .spawn(async move {
@@ -475,10 +480,173 @@ fn switch_window(store: Option<Store>, folder: Option<PathBuf>, old: AnyWindowHa
     cx.refresh_windows();
 }
 
+/// Forward the ports the open project names (`forwarded_ports` in its `.snout/settings.json`)
+/// from this Mac to the connection's host, in place of those forwarded before. A port that
+/// cannot be (taken here, say) is said in the status bar and the output; the others are
+/// forwarded all the same.
+pub fn forward_ports(model: &Entity<Model>, cx: &mut App) {
+    let Some(r) = cx.try_global::<Remote>() else { return };
+    let Some((name, host)) = r.connection.as_ref().and_then(|c| Some((c.name.clone(), c.host.clone()?))) else {
+        return;
+    };
+    // The ports before go first, so one forwarded again is free to take.
+    cx.global_mut::<Remote>().forwards.clear();
+    let wanted = model.read(cx).project_settings.forwarded_ports.clone().unwrap_or_default();
+    let forwards = forward_each(&wanted, |app_port, port| snout_host::Host::forward_to_host(&*host, app_port, port));
+    let mut problems = Vec::new();
+    for f in &forwards {
+        match &f.state {
+            Ok(_) => eprintln!("[remote] forwarding {}", f.short(&name)),
+            Err(p) => problems.push(p.long(&f.named, &name)),
+        }
+    }
+    cx.global_mut::<Remote>().forwards = forwards;
+    if !problems.is_empty() {
+        model.update(cx, |m, cx| {
+            m.message = problems.join("; ");
+            for p in problems {
+                m.log_output(p, true);
+            }
+            cx.notify();
+        });
+    }
+}
+
+/// The project's forwarded ports as the host's menu lists them: what each is, and whether it
+/// is forwarded.
+pub fn forwarded_ports(cx: &App) -> Vec<(String, bool)> {
+    let Some(r) = cx.try_global::<Remote>() else { return Vec::new() };
+    let Some(name) = r.connection.as_ref().map(|c| c.name.clone()) else { return Vec::new() };
+    r.forwards.iter().map(|f| (f.short(&name), f.state.is_ok())).collect()
+}
+
+/// A port the open project names, and how forwarding it went.
+pub struct Forwarding {
+    /// As the project's file names it.
+    pub named: crate::project_settings::ForwardedPort,
+    /// Forwarded (until dropped), or why not.
+    pub state: Result<snout_host::Forward, PortProblem>,
+}
+
+/// Why a port is not forwarded.
+#[derive(Debug, PartialEq)]
+pub enum PortProblem {
+    NotAPort,
+    /// This Mac's port is taken.
+    Taken,
+    Failed(String),
+}
+
+impl Forwarding {
+    /// `4200 → devbox:4200`, or `8080: taken on this Mac`.
+    pub fn short(&self, name: &str) -> String {
+        let port = match self.named.ports() {
+            Some((app_port, _)) => app_port.to_string(),
+            None => self.named.to_string(),
+        };
+        match &self.state {
+            Ok(f) => t!("remote-forwarded-port-to", port = port, name = name.to_string(), remote = f.port.to_string()),
+            Err(PortProblem::NotAPort) => t!("remote-forwarded-port-not-a-port-short", port = port),
+            Err(PortProblem::Taken) => {
+                t!("remote-forwarded-port-taken-short", port = port, machine = crate::platform::this_machine())
+            }
+            Err(PortProblem::Failed(e)) => t!("remote-forwarded-port-failed-short", port = port, e = e.clone()),
+        }
+    }
+}
+
+impl PortProblem {
+    /// What the status bar says of `named`, not forwarded to `name`.
+    fn long(&self, named: &crate::project_settings::ForwardedPort, name: &str) -> String {
+        let port = named.ports().map(|(app_port, _)| app_port.to_string()).unwrap_or_else(|| named.to_string());
+        match self {
+            Self::NotAPort => t!("remote-forwarded-port-not-a-port", port = port),
+            Self::Taken => t!(
+                "remote-forwarded-port-taken",
+                port = port,
+                machine = crate::platform::this_machine(),
+                name = name.to_string()
+            ),
+            Self::Failed(e) => t!("remote-forwarded-port-failed", port = port, name = name.to_string(), e = e.clone()),
+        }
+    }
+}
+
+/// Forward each of `ports` with `forward` (this Mac's port, the host's), and say how each went.
+fn forward_each(
+    ports: &[crate::project_settings::ForwardedPort],
+    forward: impl Fn(u16, u16) -> std::io::Result<snout_host::Forward>,
+) -> Vec<Forwarding> {
+    ports
+        .iter()
+        .map(|named| {
+            let state = match named.ports() {
+                None => Err(PortProblem::NotAPort),
+                Some((app_port, port)) => forward(app_port, port).map_err(|e| match e.kind() {
+                    std::io::ErrorKind::AddrInUse => PortProblem::Taken,
+                    _ => PortProblem::Failed(e.to_string()),
+                }),
+            };
+            Forwarding { named: named.clone(), state }
+        })
+        .collect()
+}
+
 /// Forget a connection made for a folder that was not picked.
 pub fn drop_pending(cx: &mut App) {
     if let Some((_, host)) = cx.try_global::<Remote>().and_then(|r| r.pending.clone()) {
         host.close();
         cx.global_mut::<Remote>().pending = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::forward_each;
+    use crate::project_settings::ForwardedPort;
+    use snout_host::Forward;
+
+    #[test]
+    fn a_port_that_cannot_be_forwarded_is_said_and_the_others_are_forwarded() {
+        let ports = [
+            ForwardedPort::Same(4200),
+            ForwardedPort::Same(8080),
+            ForwardedPort::Pair("13306:3306".into()),
+            ForwardedPort::Pair("not-a-port".into()),
+            ForwardedPort::Same(0),
+            ForwardedPort::Same(9000),
+        ];
+        let asked = std::sync::Mutex::new(Vec::new());
+        let forwards = forward_each(&ports, |app_port, port| {
+            asked.lock().unwrap().push((app_port, port));
+            match app_port {
+                8080 => Err(std::io::ErrorKind::AddrInUse.into()),
+                9000 => Err(std::io::Error::other("no luck")),
+                _ => Ok(Forward::new(port, Box::new(()))),
+            }
+        });
+        assert_eq!(*asked.lock().unwrap(), [(4200, 4200), (8080, 8080), (13306, 3306), (9000, 9000)]);
+        let ok: Vec<_> = forwards.iter().filter_map(|f| f.state.as_ref().ok().map(|f| f.port)).collect();
+        assert_eq!(ok, [4200, 3306]);
+        let short: Vec<_> = forwards.iter().map(|f| f.short("devbox")).collect();
+        assert_eq!(short[0], "4200 → devbox:4200");
+        assert_eq!(short[2], "13306 → devbox:3306");
+        assert!(short[1].starts_with("8080: taken on "), "{short:?}");
+        assert_eq!(short[3], "\"not-a-port\": not a port");
+        assert_eq!(short[5], "9000: no luck");
+        let problems: Vec<_> =
+            forwards.iter().filter_map(|f| f.state.as_ref().err().map(|p| p.long(&f.named, "devbox"))).collect();
+        assert_eq!(problems.len(), 4, "{problems:?}");
+        assert!(problems[0].contains("8080") && problems[0].contains("devbox"), "{problems:?}");
+        assert!(problems[1].contains("\"not-a-port\""), "{problems:?}");
+        assert!(problems[3].contains("9000") && problems[3].contains("no luck"), "{problems:?}");
+    }
+
+    #[test]
+    fn forwarded_ports_read_as_numbers_and_pairs() {
+        let p = crate::project_settings::parse(r#"{ "forwarded_ports": [4200, "18080:8080", " 9000 "] }"#).unwrap();
+        let ports: Vec<_> = p.forwarded_ports.unwrap().iter().map(ForwardedPort::ports).collect();
+        assert_eq!(ports, [Some((4200, 4200)), Some((18080, 8080)), Some((9000, 9000))]);
+        assert_eq!(ForwardedPort::Pair("1:99999".into()).ports(), None);
     }
 }

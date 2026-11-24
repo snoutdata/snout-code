@@ -61,6 +61,26 @@ The Claude Code console runs `claude` on the remote machine, and it connects to 
 - Both ports are kept while the connection comes back, so the hooks go on reporting edits after a reconnect. Close Remote Connection closes them and removes the lock file. When SnoutCode quits, it removes the lock file, and the ports close when the server stops.
 - The editor connection drops with the SSH connection. If the console's header no longer shows **Claude connected** after a reconnect, run `/ide` in Claude Code to connect again.
 
+## Forward ports
+
+A server the project runs on the remote machine, such as a dev server, an API or a database, can be reached from your Mac at the same port of `localhost`, as with `ssh -L`. List the ports in the project's `.snout/settings.json` (see [Settings for this project](project-settings.md#settings-for-this-project)), which is on the remote machine, in the project's folder:
+
+```json
+{
+  "forwarded_ports": [3306, 4200, 8080, "19000:9000"]
+}
+```
+
+A number forwards that port of your Mac to the same port on the remote machine. `"local:remote"` forwards your Mac's `local` to the remote machine's `remote`, for a port your Mac already uses. Commit the file and everyone who opens the project over Remote SSH gets the same ports.
+
+- SnoutCode listens on those ports of your Mac's loopback (127.0.0.1, and ::1 where it is free) while the project is open. Each connection is carried to the port on the remote machine's loopback over the SSH connection; the SSH server needs no port forwarding allowed.
+- The host's menu in the title bar lists the ports, each with a check mark when it is forwarded or a warning that says why not. **Edit Forwarded Ports…** there opens the project's file.
+- Open another project and its ports are forwarded in place of these. Save the file and the change applies at once.
+- A port your Mac already uses is not forwarded. The status bar and the host's menu say which one, and the others are forwarded all the same.
+- When the connection drops, the ports stay open on your Mac, and connections made meanwhile wait for it to come back. Connections already open end. Close Remote Connection closes the ports.
+- A port nothing listens on, on the remote machine, takes a connection and closes it.
+- In a window on your Mac, the setting does nothing: the ports are there already.
+
 ## When the connection drops
 
 SnoutCode notices a dropped connection when the `ssh` processes on your Mac end (killed, or because the network went) or the SSH server's side closes it. It also sends the server a ping every 15 seconds, and a connection that leaves one unanswered for 15 seconds counts as dropped.
