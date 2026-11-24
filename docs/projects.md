@@ -50,7 +50,11 @@ On a remote machine, Open Project… browses that machine's folders instead. See
   machines. **Clear Recent** at the bottom empties the list.
 - The project menu in the title bar lists the 10 most recent.
 - The Welcome page lists them all, with each one's branch and when you last opened it. Type
-  in **Search recent projects** to filter by name or path.
+  in **Search recent projects** to filter by name, path or host. Projects of remote machines
+  are listed too: with any, the list has a heading for this Mac's projects and one for
+  **Remote**. Click a remote project to connect and open it. In a window on a remote machine,
+  your Mac's projects come first, then the host's, then those of other hosts; picking one of
+  your Mac's closes the connection and opens it here.
 - The command palette (⇧⌘P) has an "Open Recent: name" command for each.
 
 ## Clone a repository
@@ -82,11 +86,12 @@ of your recent projects only.
 
 When you start SnoutCode, it opens the project you had open last, with its tabs, the tool
 windows and their sizes, and the view (Project or Git) you closed it on. The first time, it opens
-on the Project view.
+on the Project view. If you quit on a project of a remote machine, SnoutCode connects again and
+opens that project once the window shows (see [Remote SSH](remote-ssh.md#connect)).
 
 ## Create a new project
 
-Choose File ▸ New Project…, or **New Project…** on the Welcome page. The dialog makes a Gradle
+Choose File ▸ New Project…, or **+ New Project** above the tiles of the Welcome page. The dialog makes a Gradle
 or Maven project, or a Playwright project of end-to-end tests, and opens it.
 
 ![The New Project dialog for a Spring Boot project](images/projects-new-spring.png)

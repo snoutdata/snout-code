@@ -67,9 +67,12 @@ project is open, and the Welcome page shows:
 
 - **Open Project…** opens a folder on this Mac.
 - **Clone Repository…** copies a repository from a Git URL and opens it.
-- **New Project…** makes a Java or Spring Boot project with Gradle or Maven.
+- **Remote Project…** opens a folder on another machine, over SSH (see
+  [Remote SSH](remote-ssh.md)).
+- **+ New Project**, above the tiles, makes a Java or Spring Boot project with Gradle or Maven.
 - **Recent Projects** lists the projects you opened, with their branch and when you last
-  opened them. Type in the search box to filter them.
+  opened them, and those of remote machines under their own heading. Type in the search box
+  to filter them.
 
 ![The Welcome page](images/getting-started-welcome.png)
 

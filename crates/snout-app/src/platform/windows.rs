@@ -19,6 +19,11 @@ pub fn this_machine() -> &'static str {
     ts!("machine-windows")
 }
 
+/// This machine's name on the network.
+pub fn machine_name() -> Option<String> {
+    std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty())
+}
+
 /// The app draws the title bar and its buttons; Windows draws the frame and its shadow.
 pub fn window_decorations() -> Option<gpui::WindowDecorations> {
     None

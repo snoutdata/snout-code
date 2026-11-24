@@ -179,19 +179,21 @@ fn model_with(
 
 /// The model of a start that shows files on their own: the project last open stays remembered
 /// for the next start, but does not open, and `open` goes to a tab whatever repository it is in.
-fn model_for_files(
-    store: Option<Store>,
-    mut settings: Settings,
-    open: &std::path::Path,
-    cx: &mut App,
-) -> Entity<Model> {
-    let current = settings.current.take();
-    let model = cx.new(|cx| Model::new(settings, store, cx));
+fn model_for_files(store: Option<Store>, settings: Settings, open: &std::path::Path, cx: &mut App) -> Entity<Model> {
+    let model = model_unopened(store, settings, cx);
     model.update(cx, |m, cx| {
-        m.settings.current = current;
         m.files_alone = true;
         m.open_in_window(open, cx);
     });
+    model
+}
+
+/// The model of a start that does not open the project last open, which stays remembered
+/// for the next start.
+fn model_unopened(store: Option<Store>, mut settings: Settings, cx: &mut App) -> Entity<Model> {
+    let current = settings.current.take();
+    let model = cx.new(|cx| Model::new(settings, store, cx));
+    model.update(cx, |m, _| m.settings.current = current);
     model
 }
 
@@ -316,13 +318,17 @@ fn open_main(
         open.extend(urls.iter().filter_map(|url| system_open::path_of_url(url)));
     }
     let alone = system_open::opens_files_alone(&open);
+    // The app quit on a remote project: it opens that again, over a new connection, once the
+    // window has painted. The project open last on this machine stays remembered, unopened.
+    let restore = remote::to_restore(!open.is_empty(), cx);
     let mut open = open.into_iter();
     let first = open.next();
     let model = match first.as_deref() {
         Some(file) if alone => model_for_files(store, settings, file, cx),
+        _ if restore.is_some() => model_unopened(store, settings, cx),
         _ => model_with(store, settings, first, cx),
     };
-    if open_window(model.clone(), splash, cx).is_none() {
+    if open_window_restoring(model.clone(), splash, restore, cx).is_none() {
         cx.quit();
         return;
     }
@@ -346,6 +352,16 @@ fn open_main(
 pub fn open_window(
     model: Entity<Model>,
     splash: Option<gpui::WindowHandle<splash::Splash>>,
+    cx: &mut App,
+) -> Option<gpui::AnyWindowHandle> {
+    open_window_restoring(model, splash, None, cx)
+}
+
+/// [`open_window`], then, once it has painted, the remote project `restore` opened again.
+fn open_window_restoring(
+    model: Entity<Model>,
+    splash: Option<gpui::WindowHandle<splash::Splash>>,
+    restore: Option<remote::RemoteProject>,
     cx: &mut App,
 ) -> Option<gpui::AnyWindowHandle> {
     let mut bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
@@ -377,12 +393,15 @@ pub fn open_window(
             // runs at the frame after that runs once it is on the screen.
             let painted = view.clone();
             window.on_next_frame(move |window, _| {
-                window.on_next_frame(move |_, cx| {
+                window.on_next_frame(move |window, cx| {
                     startup::mark("main window painted");
                     if let Some(splash) = splash {
                         let _ = splash.update(cx, |_, window, _| window.remove_window());
                     }
                     after_first_paint(&painted, cx);
+                    if let Some(p) = restore {
+                        painted.update(cx, |ws, cx| ws.restore_remote(p, window, cx));
+                    }
                 })
             });
             cx.new(|cx| gpui_component::Root::new(view, window, cx))

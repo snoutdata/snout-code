@@ -180,6 +180,12 @@ pub struct RunMavenGoal {
 #[action(namespace = snout, no_json)]
 pub struct OpenRemoteRecent(pub crate::remote::RemoteProject);
 
+/// The Welcome page of a remote window: open this project of this machine, closing the
+/// connection.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct OpenLocalRecent(pub std::path::PathBuf);
+
 /// Connect to this machine (`WSL: Ubuntu`, say) and pick a folder there: the console's way to an
 /// agent installed in a distro.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]

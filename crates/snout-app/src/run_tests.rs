@@ -444,6 +444,79 @@ fn the_welcome_page_lists_recent_projects_and_goes_with_the_first_file(cx: &mut 
 }
 
 #[gpui::test]
+fn the_welcome_page_lists_remote_projects_under_their_own_heading(cx: &mut TestAppContext) {
+    let a = demo_repo("welcome-local");
+    let settings = crate::settings::Settings { recent: Some(vec![a.clone()]), ..Default::default() };
+    let (_, ws, cx) = open(cx, settings);
+    cx.run_until_parked();
+    // Only local projects: no headings, as before.
+    assert!(cx.debug_bounds("welcome-recent-0").is_some());
+    assert!(cx.debug_bounds("welcome-heading-here").is_none());
+    let welcome = cx.update(|_, cx| ws.read(cx).welcome.clone());
+    cx.update(|_, cx| {
+        if !cx.has_global::<crate::remote::Remote>() {
+            cx.set_global(crate::remote::Remote::default());
+        }
+        cx.global_mut::<crate::remote::Remote>().recents.projects =
+            vec![crate::remote::RemoteProject { host: "devbox".into(), path: "/home/me/shop".into() }];
+        welcome.update(cx, |_, cx| cx.notify());
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("welcome-heading-here").is_some(), "this machine's projects have a heading");
+    assert!(cx.debug_bounds("welcome-heading-remote").is_some(), "so do the remote ones");
+    assert!(cx.debug_bounds("welcome-remote-recent-0").is_some(), "the remote project is listed");
+    // The search box finds a remote project by its host.
+    let search = cx.update(|_, cx| welcome.read(cx).search.clone());
+    cx.update(|w, cx| search.update(cx, |s, cx| s.set_value("devbox", w, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("welcome-remote-recent-0").is_some());
+    assert!(cx.debug_bounds("welcome-recent-0").is_none(), "the local project is not called devbox");
+    let _ = std::fs::remove_dir_all(a);
+}
+
+#[gpui::test]
+fn a_remote_window_lists_this_machine_first_and_its_host_once(cx: &mut TestAppContext) {
+    use crate::remote::{Connection, Remote, RemoteProject};
+    let dir = scratch_dir("welcome-here");
+    let store = crate::settings::Store::at(dir.join("settings.json"));
+    let mine = dir.join("notes");
+    store.save(&crate::settings::Settings { recent: Some(vec![mine]), ..Default::default() }).unwrap();
+    // The window's own list: the host's projects.
+    let theirs = std::path::PathBuf::from("/home/me/shop");
+    let on_host = crate::settings::Settings { recent: Some(vec![theirs.clone()]), ..Default::default() };
+    let (_, ws, cx) = open(cx, on_host);
+    let welcome = cx.update(|_, cx| ws.read(cx).welcome.clone());
+    cx.update(|_, cx| {
+        let connection = Connection { name: "devbox".into(), host: None, status: snout_remote::Status::Connected };
+        let mut r = Remote {
+            local: Some(snout_host::local()),
+            main_store: Some(store),
+            connection: Some(connection),
+            ..Default::default()
+        };
+        r.recents.projects = vec![
+            RemoteProject { host: "devbox".into(), path: theirs },
+            RemoteProject { host: "build-host".into(), path: "/srv/media".into() },
+        ];
+        cx.set_global(r);
+        welcome.update(cx, |w, cx| w.read_here(cx));
+    });
+    cx.run_until_parked();
+    let mut top = |id: &'static str| cx.debug_bounds(id).map(|b| b.origin.y);
+    let (Some(here), Some(host), Some(remote)) =
+        (top("welcome-heading-here"), top("welcome-heading-host"), top("welcome-heading-remote"))
+    else {
+        panic!("each group has its heading");
+    };
+    assert!(here < host && host < remote, "this machine, then devbox, then the others");
+    assert!(top("welcome-local-recent-0").is_some(), "this machine's project is listed");
+    assert!(top("welcome-recent-0").is_some(), "so is the host's");
+    assert!(top("welcome-remote-recent-0").is_some(), "and build-host's");
+    assert!(top("welcome-remote-recent-1").is_none(), "devbox's project is not listed twice");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
 fn a_build_that_needs_a_jdk_offers_it_once(cx: &mut TestAppContext) {
     let repo = demo_repo("needs-jdk");
     let (_, ws, cx) = open(cx, with_repo(&repo));

@@ -21,7 +21,7 @@ Host devbox
 
 ## Connect
 
-1. Choose File ▸ Connect to SSH Host….
+1. Choose File ▸ Connect to SSH Host…, or click **Remote Project…** on the Welcome page.
 2. Pick a host under **Recent** or **From your ssh config**, or type one (`devbox`, `me@devbox.example.com`). Click **Connect**.
 
    ![The Connect to SSH Host dialog](images/remote-ssh-connect.png)
@@ -39,6 +39,8 @@ The window opens again on that folder, with the host's name in the title bar. Th
 
 While it connects, the dialog says so. If the connection fails, the dialog says why, and you can try again.
 
+If you quit SnoutCode while a window is on a remote project, the next start opens it again: the window shows first, then connects and opens the project. Starting SnoutCode on a folder or files opens those instead. If the host cannot be reached, the next start opens your Mac's last project.
+
 Processes on the remote machine get the environment of your login shell there: `PATH`, `JAVA_HOME`, SDK managers and the like.
 
 ## Work on the remote machine
@@ -48,7 +50,8 @@ Processes on the remote machine get the environment of your login shell there: `
 *`shop` on `devbox`: the host in the title bar, and the Java engine running there.*
 
 - File ▸ Open Project… browses the remote machine.
-- File ▸ Open Recent lists remote projects as `shop on devbox`. Pick one to connect and open it in one go.
+- File ▸ Open Recent lists remote projects as `shop on devbox`. Pick one to connect and open it in one go. The Welcome page lists them under **Remote**.
+- Opening a project on another host closes the connection to this one. A folder on the same host keeps it.
 - The windows on a host keep their own tabs and recent projects, apart from your Mac's. A host starts with your Mac's appearance and shortcuts.
 - The host's name in the title bar has a dot that shows the connection's state, and a menu with **Close Remote Connection** (and **Reconnect** once the connection is lost).
 
@@ -97,7 +100,7 @@ After two minutes of trying, SnoutCode stops and says **The connection to devbox
 
 ## Disconnect
 
-Choose File ▸ Close Remote Connection, or **Close Remote Connection** in the host's menu. The window opens again on your Mac.
+Choose File ▸ Close Remote Connection, or **Close Remote Connection** in the host's menu. The window opens again on your Mac, and the next start stays on your Mac.
 
 The server on the remote machine stops by itself after three hours without a window connected, and stops what it runs with it.
 
@@ -124,6 +127,6 @@ rm -rf ~/.snout-code ~/.cache/SnoutCode
 ## What SnoutCode keeps on your Mac
 
 - `~/Library/Application Support/SnoutCode/remote/<host>/settings.json`: the settings of the windows on each host (tabs, recent projects, layout).
-- `~/Library/Application Support/SnoutCode/remote.json`: the recent hosts and remote projects.
+- `~/Library/Application Support/SnoutCode/remote.json`: the recent hosts and remote projects, and the remote project to open again at the next start.
 
 See also [Troubleshooting](troubleshooting.md).
