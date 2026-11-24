@@ -17,7 +17,9 @@ use libghostty_vt::terminal::{
 };
 use libghostty_vt::{RenderState, Terminal, TerminalOptions, key};
 
-use super::{Attrs, Cell, Color, Cursor, CursorShape, Engine, EngineKind, Frame, Modes, Underline, Width};
+use super::{
+    Attrs, Cell, Color, Cursor, CursorShape, Engine, EngineKind, Frame, Modes, MouseTracking, Underline, Width,
+};
 use crate::pty::{self, KeyInput, Rgb};
 
 /// What the terminal's callbacks write, for the engine to pick up.
@@ -35,7 +37,18 @@ pub(super) struct Ghostty {
     keys: key::Encoder<'static>,
     shared: Rc<RefCell<Shared>>,
     plain: style::Style,
+    /// The mouse mode the child set last. Ghostty keeps a bit per mode and says only whether
+    /// one is on, while the one set last is the one that counts (as in xterm).
+    mouse: MouseTracking,
 }
+
+/// The mouse modes, each with its mode bit, from the least to the most reported.
+const MOUSE_MODES: [(MouseTracking, Mode); 4] = [
+    (MouseTracking::Press, Mode::X10_MOUSE),
+    (MouseTracking::Click, Mode::NORMAL_MOUSE),
+    (MouseTracking::Drag, Mode::BUTTON_MOUSE),
+    (MouseTracking::Motion, Mode::ANY_MOUSE),
+];
 
 fn rgb((r, g, b): Rgb) -> RgbColor {
     RgbColor { r, g, b }
@@ -97,11 +110,21 @@ impl Ghostty {
             keys: key::Encoder::new().map_err(err)?,
             shared,
             plain: style::Style::default(),
+            mouse: MouseTracking::Off,
         })
     }
 
     fn mode(&self, mode: Mode) -> bool {
         self.term.mode(mode).unwrap_or(false)
+    }
+
+    /// The mouse events the child asked for: the mode it set last, while it is on.
+    fn mouse_tracking(&self) -> MouseTracking {
+        if self.term.is_mouse_tracking().unwrap_or(false) { self.mouse } else { MouseTracking::Off }
+    }
+
+    fn mouse_modes(&self) -> [bool; 4] {
+        MOUSE_MODES.map(|(_, mode)| self.mode(mode))
     }
 
     /// The hyperlink of the visible cell at (`x`, `y`).
@@ -295,7 +318,18 @@ impl Engine for Ghostty {
     }
 
     fn write(&mut self, bytes: &[u8]) {
+        let before = self.mouse_modes();
         self.term.vt_write(bytes);
+        let after = self.mouse_modes();
+        // A mode turned on is the one set last (the highest, if one write turned on several).
+        // Turning off the one in use stops the reports, as in xterm, whatever else is on.
+        if let Some(i) = (0..4).rev().find(|&i| after[i] && !before[i]) {
+            self.mouse = MOUSE_MODES[i].0;
+        } else if let Some(i) = MOUSE_MODES.iter().position(|(t, _)| *t == self.mouse)
+            && !after[i]
+        {
+            self.mouse = MouseTracking::Off;
+        }
     }
 
     fn take_replies(&mut self) -> Vec<u8> {
@@ -333,7 +367,7 @@ impl Engine for Ghostty {
             bracketed_paste: self.mode(Mode::BRACKETED_PASTE),
             app_cursor: self.mode(Mode::DECCKM),
             alt_screen: matches!(self.term.active_screen(), Ok(Screen::Alternate)),
-            mouse: self.term.is_mouse_tracking().unwrap_or(false),
+            mouse: self.mouse_tracking(),
             mouse_sgr: self.mode(Mode::SGR_MOUSE),
             kitty_keyboard: self.term.kitty_keyboard_flags().map(|f| f.bits()).unwrap_or(0),
             sync_output: self.mode(Mode::SYNC_OUTPUT),

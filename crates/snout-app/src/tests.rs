@@ -1381,6 +1381,26 @@ fn terminal_tab_on(engine: EngineKind, cx: &mut TestAppContext) {
     );
     // A click lets go of the selection (⌘F would look for it).
     cx.simulate_click(from, gpui::Modifiers::none());
+    // A program that asks for the mouse hears a click, where it was: the top left cell here.
+    // (The quotes keep the words it prints out of the command line the shell echoes.)
+    if cfg!(unix) {
+        let script = "stty raw -echo; printf '\\033[?1000h\\033[?1006h'; echo ar''med; \
+                      r=$(dd bs=1 count=18 2>/dev/null); printf '\\033[?1000l\\033[?1006l'; stty sane; \
+                      echo cl''ick:\"$(printf %s \"$r\" | tr -d '\\033')\"\r";
+        cx.update(|_, cx| terminal.read(cx).type_keys(&repo, script.as_bytes()));
+        wait(cx, "\narmed");
+        let corner = grid.origin + gpui::point(gpui::px(2.), gpui::px(2.));
+        cx.simulate_click(corner, gpui::Modifiers::none());
+        wait(cx, "click:[<0;1;1M[<0;1;1m");
+        // A release that never came (the button went up in another window) is sent when the
+        // pointer next moves with no button down, so the program does not keep a held button.
+        let script = script.replace("ar''med", "ar''med2").replace("cl''ick", "lo''st");
+        cx.update(|_, cx| terminal.read(cx).type_keys(&repo, script.as_bytes()));
+        wait(cx, "\narmed2");
+        cx.simulate_mouse_down(corner, gpui::MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_move(corner + gpui::point(gpui::px(1.), gpui::px(1.)), None, gpui::Modifiers::none());
+        wait(cx, "lost:[<0;1;1M[<0;1;1m");
+    }
     // A colourful line, a link, and ⌘F finding text in the scrollback.
     let typed =
         "printf '\\033[32mgreen\\033[0m https://example.com\\n'; for i in $(seq 1 60); do echo filler $i; done\r";
