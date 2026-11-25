@@ -224,6 +224,11 @@ const LAYOUT_VERSION: usize = 2;
 /// How long the tabs stay as they are before the menu bar follows their order.
 const MENUS_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// The workspace whose menus the app's menu bar shows: the last to put them up.
+pub(crate) struct MenuOwner(pub gpui::EntityId);
+
+impl Global for MenuOwner {}
+
 /// The panels of the window being restored, by name, for the dock's panel registry.
 struct PanelPool(HashMap<&'static str, Arc<dyn BasePanelView>>, Vec<Entity<EditorPanel>>);
 
@@ -576,8 +581,10 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     crate::platform::clear_attention();
-                    // Another window's menus may be up: this one's go up again.
-                    this.menu_checks = None;
+                    // Another window's menus up, this one's go up again.
+                    if cx.try_global::<MenuOwner>().map(|o| o.0) != Some(cx.entity_id()) {
+                        this.menu_checks = None;
+                    }
                     cx.notify();
                 } else {
                     this.menu_pending = None;
@@ -2241,6 +2248,8 @@ impl Workspace {
         let files = m.recent_project_files(cx);
         crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote, &files), cx);
         self.menu_checks = Some(menus::checks(&m.settings, &recent, &remote, &files));
+        let me = cx.entity_id();
+        cx.set_global(MenuOwner(me));
         self.menu_pending = None;
         self._menu_later = None;
         if let Some(bar) = &self.menu_bar {
@@ -2269,10 +2278,16 @@ impl Workspace {
         self.menus_held = true;
     }
 
-    /// Put the menu bar up, and keep it in step from now on.
+    /// Put the menu bar up, and keep it in step from now on. Once another window's menus are
+    /// up, this one's go up when it is in front.
     pub fn release_menus(&mut self, cx: &mut Context<Self>) {
         self.menus_held = false;
-        self.sync_menus(cx);
+        if cx.try_global::<MenuOwner>().is_none() {
+            self.sync_menus(cx);
+        } else {
+            self.menu_checks = None;
+            cx.notify();
+        }
     }
 }
 

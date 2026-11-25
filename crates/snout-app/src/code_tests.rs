@@ -736,16 +736,53 @@ fn the_menu_bar_follows_the_recent_files_once_tab_switching_stops(cx: &mut TestA
     });
     cx.run_until_parked();
     assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "no wait for a check");
-    // A window gone to the back leaves the menu bar to the one in front, and puts its own up
-    // again when it comes back.
+    // A window gone to the back leaves the menu bar to the one in front; back in front, it
+    // follows its files once they settle.
     act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
     cx.deactivate_window();
     cx.executor().advance_clock(std::time::Duration::from_secs(1));
     cx.run_until_parked();
     assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "not from the back");
     cx.update(|w, _| w.activate_window());
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
     cx.run_until_parked();
-    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "at once when back in front");
+    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "back in front");
+    // Its own menus still up, coming back makes nothing again (an empty bar stands for one
+    // nobody put up since, to show that nothing is put up).
+    cx.deactivate_window();
+    cx.update(|_, cx| cx.set_menus(Vec::<gpui::Menu>::new()));
+    cx.update(|w, _| w.activate_window());
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| cx.get_menus().unwrap_or_default().is_empty()), "nothing made again");
+    // Another window's menus up, this one's go up at once.
+    cx.deactivate_window();
+    cx.update(|_, cx| cx.set_global(crate::workspace::MenuOwner(model.entity_id())));
+    cx.update(|w, _| w.activate_window());
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "at once after another window's");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A window that paints behind another leaves the menu bar to the one in front, and puts its
+/// own up once it comes to the front.
+#[gpui::test]
+fn a_window_painted_in_the_back_leaves_the_menu_bar_to_the_one_in_front(cx: &mut TestAppContext) {
+    let repo = demo_repo("menu-back");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    // Another window's menus are up (an empty bar stands for them), and this one paints
+    // behind it.
+    cx.update(|_, cx| {
+        cx.set_menus(Vec::<gpui::Menu>::new());
+        cx.set_global(crate::workspace::MenuOwner(model.entity_id()));
+    });
+    cx.update(|_, cx| ws.update(cx, |ws, _| ws.hold_menus()));
+    cx.deactivate_window();
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.release_menus(cx)));
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| cx.get_menus().unwrap_or_default().is_empty()), "the front window's stay");
+    cx.update(|w, _| w.activate_window());
+    cx.run_until_parked();
+    assert!(!cx.update(|_, cx| cx.get_menus().unwrap_or_default().is_empty()), "its own once in front");
     let _ = std::fs::remove_dir_all(repo);
 }
 
