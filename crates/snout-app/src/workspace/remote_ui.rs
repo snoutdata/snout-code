@@ -167,7 +167,7 @@ impl Workspace {
         });
     }
 
-    /// File ▸ Open Recent on a remote project: on the connection there is, else after
+    /// File ▸ Recent Projects on a remote project: on the connection there is, else after
     /// connecting.
     pub fn open_remote_recent(&mut self, p: RemoteProject, window: &mut Window, cx: &mut Context<Self>) {
         if remote::connection(cx).is_some_and(|(name, _)| name == p.host) {

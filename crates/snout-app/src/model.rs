@@ -49,8 +49,14 @@ pub fn recent_projects(settings: &crate::settings::Settings) -> Vec<PathBuf> {
     }
 }
 
-/// How many projects File ▸ Open Recent lists.
+/// How many projects File ▸ Recent Projects lists.
 pub const RECENT_LIMIT: usize = 12;
+
+/// How many recent files are kept, of all projects together.
+const RECENT_FILES_KEPT: usize = 100;
+
+/// How many of the project's recent files File ▸ Recent Files lists.
+pub const RECENT_FILES_LIMIT: usize = 15;
 
 /// A branch on a remote: `origin` and `feature/x` for `origin/feature/x`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -596,8 +602,6 @@ impl GitSide {
 pub struct Model {
     pub settings: Settings,
     store: Option<Store>,
-    /// The files opened this session, the latest first (the empty editor and Recent Files).
-    pub recent_files: Vec<PathBuf>,
     saved: Settings,
     /// The repository the Git panel shows: the project's, or another one picked in the
     /// panel's list.
@@ -726,9 +730,23 @@ impl Model {
         if path.as_os_str().is_empty() {
             return;
         }
-        self.recent_files.retain(|p| p != path);
-        self.recent_files.insert(0, path.to_owned());
-        self.recent_files.truncate(30);
+        let files = &mut self.settings.recent_files;
+        files.retain(|p| p != path);
+        files.insert(0, path.to_owned());
+        files.truncate(RECENT_FILES_KEPT);
+    }
+
+    /// The open project's recent files, the latest first, as many as File ▸ Recent Files lists.
+    pub fn recent_project_files(&self) -> Vec<PathBuf> {
+        let Some(root) = self.project_root() else { return Vec::new() };
+        self.settings.recent_files.iter().filter(|f| f.starts_with(&root)).take(RECENT_FILES_LIMIT).cloned().collect()
+    }
+
+    /// Take the open project's files off the recent files.
+    pub fn clear_recent_files(&mut self) {
+        if let Some(root) = self.project_root() {
+            self.settings.recent_files.retain(|f| !f.starts_with(&root));
+        }
     }
 
     /// The folder of the app's own files, when it keeps any (never in tests).
@@ -745,7 +763,6 @@ impl Model {
             project_settings_error: None,
             project_under: Default::default(),
             user_file_stamp: store.as_ref().and_then(Store::stamp),
-            recent_files: Vec::new(),
             user_settings_error: None,
             pending_file: None,
             files_alone: false,

@@ -248,7 +248,7 @@ impl WelcomePanel {
                 .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
         });
         let recent: Vec<PathBuf> =
-            self.model.read(cx).recent_files.iter().filter(|f| f.starts_with(root)).take(5).cloned().collect();
+            self.model.read(cx).settings.recent_files.iter().filter(|f| f.starts_with(root)).take(5).cloned().collect();
         let files = recent.into_iter().enumerate().map(|(i, path)| {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let dir = path

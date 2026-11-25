@@ -360,7 +360,7 @@ impl SearchView {
             Mode::RecentFiles => {
                 let root = self.root.clone();
                 let recent: Vec<String> =
-                    self.model.read(cx).recent_files.iter().filter_map(|p| relative_to(p, &root)).collect();
+                    self.model.read(cx).settings.recent_files.iter().filter_map(|p| relative_to(p, &root)).collect();
                 let at = Pattern::new(&query).line();
                 // The latest first among equals.
                 self.items = if Pattern::new(&query).is_empty() {
@@ -406,6 +406,7 @@ impl SearchView {
                 let recent: Vec<String> = self
                     .model
                     .read(cx)
+                    .settings
                     .recent_files
                     .iter()
                     .filter(|p| p.starts_with(&root))

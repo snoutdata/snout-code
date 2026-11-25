@@ -111,10 +111,13 @@ pub struct Settings {
     /// The activity the window showed last, to open on it again (the Project view when
     /// none). The window writes it; a hand edit does not move a running window.
     pub activity: Option<crate::panels::Activity>,
-    /// The projects opened, most recent first, for File ▸ Open Recent and the Welcome
+    /// The projects opened, most recent first, for File ▸ Recent Projects and the Welcome
     /// page. Unset until a project opens or the list is cleared: then the repository list
     /// stands in, newest first.
     pub recent: Option<Vec<PathBuf>>,
+    /// The files opened lately, the latest first, for File ▸ Recent Files, Recent Files (⌘E)
+    /// and the empty editor. The app writes it.
+    pub recent_files: Vec<PathBuf>,
     /// The JDK each Gradle build runs on (build root to JDK home), as chosen or downloaded.
     pub project_jdks: std::collections::BTreeMap<PathBuf, PathBuf>,
     /// The interface's typeface: "Inter" or ".SystemUIFont".
@@ -336,6 +339,7 @@ impl Default for Settings {
             editor_font_size: crate::look::MONO_SIZE,
             activity: None,
             recent: None,
+            recent_files: Vec::new(),
             project_jdks: Default::default(),
             ui_font: crate::look::FONT.into(),
             ui_font_size: crate::look::BODY,

@@ -50,7 +50,7 @@ Processes on the remote machine get the environment of your login shell there: `
 *`shop` on `devbox`: the host in the title bar, and the Java engine running there.*
 
 - File ▸ Open Project… browses the remote machine.
-- File ▸ Open Recent lists remote projects as `shop on devbox`. Pick one to connect and open it in one go. The Welcome page lists them under **Remote**.
+- File ▸ Recent Projects lists remote projects as `shop on devbox`. Pick one to connect and open it in one go. The Welcome page lists them under **Remote**.
 - Opening a project on another host closes the connection to this one. A folder on the same host keeps it.
 - The windows on a host keep their own tabs and recent projects, apart from your Mac's. A host starts with your Mac's appearance and shortcuts.
 - The host's name in the title bar has a dot that shows the connection's state, and a menu with **Close Remote Connection** (and **Reconnect** once the connection is lost).

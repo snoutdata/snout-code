@@ -591,23 +591,25 @@ fn file_menu_open_recent_lists_projects_newest_first_and_opens_one(cx: &mut Test
     act(&model, cx, Action::OpenRepo(b.clone()));
     let recent = cx.update(|_, cx| model.read(cx).recent_projects());
     assert_eq!(recent, [b.clone(), a.clone()], "most recent first");
-    // The menu bar's File ▸ Open Recent, and the palette, list the same.
-    let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects(), &[]));
+    // The menu bar's File ▸ Recent Projects, and the palette, list the same.
+    let bar =
+        cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects(), &[], &[]));
     let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
     let names: Vec<String> = file.items.iter().filter_map(menu_item_name).collect();
-    let first = ["New File…", "New Project…", "Open Project…", "Open Recent", "Close Project"].map(String::from);
+    let first = ["New File…", "New Project…", "Open Project…", "Recent Projects", "Recent Files", "Close Project"]
+        .map(String::from);
     assert!(names.starts_with(&first), "{names:?}");
     let sub = file
         .items
         .iter()
         .find_map(|i| match i {
-            gpui::MenuItem::Submenu(m) if m.name == "Open Recent" => Some(m),
+            gpui::MenuItem::Submenu(m) if m.name == "Recent Projects" => Some(m),
             _ => None,
         })
-        .expect("an Open Recent submenu");
+        .expect("a Recent Projects submenu");
     let sub_names: Vec<String> = sub.items.iter().filter_map(menu_item_name).collect();
     let (na, nb) = (crate::model::Model::dir_name(&a), crate::model::Model::dir_name(&b));
-    assert_eq!(sub_names, [nb.clone(), na.clone(), "Clear Recent".into()]);
+    assert_eq!(sub_names, [nb.clone(), na.clone(), "Clear Recent Projects".into()]);
     let palette: Vec<String> = crate::menus::commands(&recent).into_iter().map(|(n, _)| n.to_string()).collect();
     for name in ["Open Project…", "Close Project", "Clear Recent Projects"] {
         assert!(palette.iter().any(|n| n == name), "the palette has {name}");
@@ -627,6 +629,67 @@ fn file_menu_open_recent_lists_projects_newest_first_and_opens_one(cx: &mut Test
     let _ = ws;
     let _ = std::fs::remove_dir_all(a);
     let _ = std::fs::remove_dir_all(b);
+}
+
+#[gpui::test]
+fn file_menu_recent_files_lists_the_projects_files_latest_first_and_opens_one(cx: &mut TestAppContext) {
+    use crate::menus::{ClearRecentFiles, OpenRecentFile};
+    let repo = demo_repo("recent-files");
+    let other = demo_repo("recent-files-other");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    // A file of another project is kept, but not listed here.
+    cx.update(|_, cx| model.update(cx, |m, _| m.note_recent_file(&other.join("README.md"))));
+    for f in ["README.md", "status.rs", "src/main.rs"] {
+        act(&model, cx, Action::OpenFile(repo.join(f), None));
+    }
+    let files = cx.update(|_, cx| model.read(cx).recent_project_files());
+    assert_eq!(files, [repo.join("src/main.rs"), repo.join("status.rs"), repo.join("README.md")]);
+    let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &[], &[], &files));
+    let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
+    let sub = file
+        .items
+        .iter()
+        .find_map(|i| match i {
+            gpui::MenuItem::Submenu(m) if m.name == "Recent Files" => Some(m),
+            _ => None,
+        })
+        .expect("a Recent Files submenu");
+    let names: Vec<String> = sub.items.iter().filter_map(menu_item_name).collect();
+    assert_eq!(names, ["main.rs", "status.rs", "README.md", "Recent Files…", "Clear Recent Files"]);
+    // The list is a setting, so it is there at the next start.
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.recent_files.len(), 4));
+    // Choosing one brings it to the front, first among the recent files.
+    cx.update(|w, cx| w.dispatch_action(Box::new(OpenRecentFile(repo.join("README.md"))), cx));
+    cx.run_until_parked();
+    let first = cx.update(|_, cx| model.read(cx).recent_project_files().first().cloned());
+    assert_eq!(first, Some(repo.join("README.md")));
+    // Clear Recent Files takes this project's off; the other project's stay.
+    cx.update(|w, cx| w.dispatch_action(Box::new(ClearRecentFiles), cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(model.read(cx).recent_project_files().is_empty());
+        assert_eq!(model.read(cx).settings.recent_files, [other.join("README.md")]);
+    });
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(other);
+}
+
+#[test]
+fn recent_files_sharing_a_name_show_their_folder() {
+    let files = [std::path::PathBuf::from("/p/a/Main.java"), "/p/b/Main.java".into(), "/p/b/App.java".into()];
+    let bar = crate::menus::bar(&Default::default(), &[], &[], &files);
+    let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
+    let sub = file
+        .items
+        .iter()
+        .find_map(|i| match i {
+            gpui::MenuItem::Submenu(m) if m.name == "Recent Files" => Some(m),
+            _ => None,
+        })
+        .expect("a Recent Files submenu");
+    let names: Vec<String> = sub.items.iter().take(3).filter_map(menu_item_name).collect();
+    assert_eq!(names, ["Main.java (a)", "Main.java (b)", "App.java"]);
 }
 
 fn menu_item_name(item: &gpui::MenuItem) -> Option<String> {
@@ -1357,7 +1420,7 @@ fn a_jump_lands_in_the_middle_lit_up_and_back_and_forward_retrace_it(cx: &mut Te
     assert_eq!(front(cx).as_deref(), Some("Other.txt"), "forward again to the other file");
     // The Navigate menu has both, with their keys.
     let names: Vec<String> = cx.update(|_, cx| {
-        crate::menus::bar(&model.read(cx).settings, &[], &[])
+        crate::menus::bar(&model.read(cx).settings, &[], &[], &[])
             .into_iter()
             .flat_map(|m| m.items)
             .filter_map(|i| menu_item_name(&i))

@@ -70,6 +70,7 @@ actions!(
         SplitRight,
         CloseProject,
         ClearRecent,
+        ClearRecentFiles,
         GoToSymbol,
         GoToSymbolInFile,
         ShowProblems,
@@ -175,7 +176,7 @@ pub struct RunMavenGoal {
     pub goals: String,
 }
 
-/// File ▸ Open Recent: open this project of a remote machine.
+/// File ▸ Recent Projects: open this project of a remote machine.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = snout, no_json)]
 pub struct OpenRemoteRecent(pub crate::remote::RemoteProject);
@@ -213,10 +214,15 @@ pub struct OpenInTerminalAt(pub std::path::PathBuf);
 #[action(namespace = snout, no_json)]
 pub struct CloseEditorTab(pub u64);
 
-/// File ▸ Open Recent: open this project.
+/// File ▸ Recent Projects: open this project.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = snout, no_json)]
 pub struct OpenRecent(pub std::path::PathBuf);
+
+/// File ▸ Recent Files: open this file.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = snout, no_json)]
+pub struct OpenRecentFile(pub std::path::PathBuf);
 
 /// Every command, by the name the command palette lists it under; `recent` are the
 /// recent projects, each a command of its own.
@@ -245,6 +251,7 @@ fn fixed_commands() -> Vec<(String, Box<dyn gpui::Action>)> {
         ),
         (t!("cmd-close-remote-connection"), Box::new(CloseRemote)),
         (t!("cmd-clear-recent-projects"), Box::new(ClearRecent)),
+        (t!("cmd-clear-recent-files"), Box::new(ClearRecentFiles)),
         (t!("cmd-search-everywhere"), Box::new(SearchEverywhere)),
         (t!("cmd-settings"), Box::new(OpenSettings)),
         (t!("cmd-open-settings-json"), Box::new(OpenSettingsJson)),
@@ -412,8 +419,8 @@ pub const SOURCE_URL: &str = "https://github.com/snoutdata/snout-code";
 pub const ISSUES_URL: &str = "https://github.com/snoutdata/snout-code/issues";
 pub const WEBSITE_URL: &str = "https://snoutdata.com";
 
-/// File ▸ Open Recent: the recent projects, most recent first, then those of remote
-/// machines, then Clear Recent.
+/// File ▸ Recent Projects: the recent projects, most recent first, then those of remote
+/// machines, then Clear Recent Projects.
 fn recent_items(recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> Vec<MenuItem> {
     let mut items: Vec<MenuItem> = recent
         .iter()
@@ -428,13 +435,44 @@ fn recent_items(recent: &[std::path::PathBuf], remote: &[crate::remote::RemotePr
     if !items.is_empty() {
         items.push(MenuItem::separator());
     }
-    items.push(MenuItem::action(t!("cmd-clear-recent"), ClearRecent));
+    items.push(MenuItem::action(t!("cmd-clear-recent-projects"), ClearRecent));
+    items
+}
+
+/// File ▸ Recent Files: the open project's recent files, the latest first, then the Recent
+/// Files popup and Clear Recent Files. A name two files share gets its folder's name.
+fn recent_file_items(files: &[std::path::PathBuf]) -> Vec<MenuItem> {
+    let name = |p: &std::path::Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut items: Vec<MenuItem> = files
+        .iter()
+        .map(|path| {
+            let shown = name(path);
+            let shared = files.iter().filter(|f| name(f) == shown).count() > 1;
+            let folder = path.parent().map(name).filter(|d| shared && !d.is_empty());
+            let label = match folder {
+                Some(folder) => format!("{shown} ({folder})"),
+                None => shown,
+            };
+            MenuItem::action(label, OpenRecentFile(path.clone()))
+        })
+        .collect();
+    if !items.is_empty() {
+        items.push(MenuItem::separator());
+    }
+    items.push(MenuItem::action(t!("cmd-recent-files"), RecentFiles));
+    items.push(MenuItem::action(t!("cmd-clear-recent-files"), ClearRecentFiles));
     items
 }
 
 /// The whole bar, its check marks taken from `s`; `recent` and `remote` (the remote
-/// machines' projects) fill File ▸ Open Recent.
-pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> Vec<Menu> {
+/// machines' projects) fill File ▸ Recent Projects, and `files` (the open project's recent
+/// files) File ▸ Recent Files.
+pub fn bar(
+    s: &Settings,
+    recent: &[std::path::PathBuf],
+    remote: &[crate::remote::RemoteProject],
+    files: &[std::path::PathBuf],
+) -> Vec<Menu> {
     let check = |item: MenuItem, on: bool| item.checked(on);
     // Without a global menu bar (Linux) there is no app menu: its items go where IntelliJ IDEA
     // has them there, Settings and Quit at the end of File, About at the end of Help.
@@ -496,7 +534,8 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
                 MenuItem::action(t!("cmd-new-file"), NewFile),
                 MenuItem::action(t!("cmd-new-project"), NewProject),
                 MenuItem::action(t!("cmd-open-project"), Open),
-                MenuItem::submenu(Menu::new(t!("menu-open-recent")).items(recent_items(recent, remote))),
+                MenuItem::submenu(Menu::new(t!("menu-recent-projects")).items(recent_items(recent, remote))),
+                MenuItem::submenu(Menu::new(t!("menu-recent-files")).items(recent_file_items(files))),
                 MenuItem::action(t!("cmd-close-project"), CloseProject),
                 MenuItem::separator(),
                 MenuItem::action(t!("cmd-project-structure"), ProjectStructure),
@@ -515,7 +554,6 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
                 MenuItem::separator(),
                 MenuItem::action(t!("cmd-search-everywhere"), SearchEverywhere),
                 MenuItem::action(t!("cmd-go-to-file"), GoToFile),
-                MenuItem::action(t!("cmd-recent-files"), RecentFiles),
                 MenuItem::action(t!("cmd-find-in-files"), FindInFiles),
                 MenuItem::action(t!("cmd-replace-in-files"), ReplaceInFiles),
                 MenuItem::action(t!("cmd-command-palette"), CommandPalette),
@@ -750,8 +788,31 @@ pub fn bar(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote:
 }
 
 /// What the bar shows that can change, to rebuild it only then.
-pub type MenuState = (bool, bool, bool, bool, ThemeChoice, Vec<std::path::PathBuf>, Vec<crate::remote::RemoteProject>);
+pub type MenuState = (
+    bool,
+    bool,
+    bool,
+    bool,
+    ThemeChoice,
+    Vec<std::path::PathBuf>,
+    Vec<crate::remote::RemoteProject>,
+    Vec<std::path::PathBuf>,
+);
 
-pub fn checks(s: &Settings, recent: &[std::path::PathBuf], remote: &[crate::remote::RemoteProject]) -> MenuState {
-    (s.console_open, s.side_by_side, s.compact, s.param_hints, s.theme, recent.to_vec(), remote.to_vec())
+pub fn checks(
+    s: &Settings,
+    recent: &[std::path::PathBuf],
+    remote: &[crate::remote::RemoteProject],
+    files: &[std::path::PathBuf],
+) -> MenuState {
+    (
+        s.console_open,
+        s.side_by_side,
+        s.compact,
+        s.param_hints,
+        s.theme,
+        recent.to_vec(),
+        remote.to_vec(),
+        files.to_vec(),
+    )
 }

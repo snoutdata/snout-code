@@ -87,7 +87,7 @@ fn control_dir() -> Option<PathBuf> {
     None
 }
 
-/// A project on a remote machine, as File ▸ Open Recent lists it.
+/// A project on a remote machine, as File ▸ Recent Projects lists it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteProject {
     pub host: String,

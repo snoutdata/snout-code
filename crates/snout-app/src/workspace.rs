@@ -2191,14 +2191,15 @@ impl Workspace {
         }
     }
 
-    /// The menu bar, made again when what it shows (checks, recent projects) changed.
+    /// The menu bar, made again when what it shows (checks, recent projects and files) changed.
     fn sync_menus(&mut self, cx: &mut Context<Self>) {
         let m = self.model.read(cx);
         let recent = m.recent_projects();
         let remote = crate::remote::recents(cx).projects;
-        let checks = menus::checks(&m.settings, &recent, &remote);
+        let files = m.recent_project_files();
+        let checks = menus::checks(&m.settings, &recent, &remote, &files);
         if self.menu_checks.as_ref() != Some(&checks) {
-            crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote), cx);
+            crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote, &files), cx);
             self.menu_checks = Some(checks);
             if let Some(bar) = &self.menu_bar {
                 bar.update(cx, |bar, cx| bar.reload(cx));
@@ -2564,6 +2565,16 @@ impl Render for Workspace {
                 cx.listener(|this, a: &OpenInTerminalAt, _, cx| this.send(Action::OpenInTerminal(a.0.clone()), cx)),
             )
             .on_action(cx.listener(|this, a: &OpenRecent, _, cx| this.send(Action::OpenRepo(a.0.clone()), cx)))
+            .on_action(
+                cx.listener(|this, a: &OpenRecentFile, _, cx| this.send(Action::OpenFile(a.0.clone(), None), cx)),
+            )
+            .on_action(cx.listener(|this, _: &ClearRecentFiles, _, cx| {
+                this.model.update(cx, |m, _| {
+                    m.clear_recent_files();
+                    m.persist();
+                });
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(Some(1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(Some(-1.), cx)))
             .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(None, cx)))

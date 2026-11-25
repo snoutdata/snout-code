@@ -161,7 +161,7 @@ ssh or port to set up. The first time, SnoutCode installs its small server in `~
 
 So an agent in your Linux profile, such as Amp in `~/.amp/bin`, is found as in your own Linux terminal, and
 **Install** installs it there. Its edits show live and **Draft** works, as on any machine. The title bar and
-the status bar show `WSL: Ubuntu`, and File ▸ Open Recent lists the project as `app on WSL: Ubuntu`.
+the status bar show `WSL: Ubuntu`, and File ▸ Recent Projects lists the project as `app on WSL: Ubuntu`.
 
 ## Where SnoutCode keeps its files
 

@@ -799,6 +799,7 @@ sleep 30
                         host: "devbox".into(),
                         path: "/home/dev/demo".into(),
                     }],
+                    last: None,
                 };
                 // While it comes back, the engine is still on its way there.
                 let tasks = (step == 2)

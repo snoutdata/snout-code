@@ -328,7 +328,7 @@ SnoutCode keeps your settings in `~/Library/Application Support/SnoutCode/settin
 Mac and in `~/.config/SnoutCode/settings.json` on Linux (see [SnoutCode on Linux](linux.md#where-snoutcode-keeps-its-files)), and
 a project's own in `.snout/settings.json` in the project (see
 [Your settings and the project's](#your-settings-and-the-projects)). It
-writes the file as you work: your recent projects, each project's tabs, the window's layout,
+writes the file as you work: your recent projects and files, each project's tabs, the window's layout,
 your choices in the menus and the Settings sheet.
 
 The shortcuts you changed are under `keymap`, by command, with the keys as a list:

@@ -46,8 +46,9 @@ On a remote machine, Open Project… browses that machine's folders instead. See
 
 ## Open a recent project
 
-- File ▸ Open Recent lists up to 12 projects, most recent first, then the projects of remote
-  machines. **Clear Recent** at the bottom empties the list.
+- File ▸ Recent Projects lists up to 12 projects, most recent first, then the projects of remote
+  machines. **Clear Recent Projects** at the bottom empties the list. File ▸ Recent Files, below
+  it, lists the open project's files; see [Recent Files](editor.md#recent-files).
 - The project menu in the title bar lists the 10 most recent.
 - The Welcome page lists them all, with each one's branch and when you last opened it. Type
   in **Search recent projects** to filter by name, path or host. Projects of remote machines

@@ -7,6 +7,7 @@ How to open, edit, find and move around files in SnoutCode.
 - Click a file in the Project view. A single click opens it in a preview tab, whose name is in italics. The next file you click takes the preview tab's place.
 - Double click the preview tab, or edit the file, to keep it open.
 - Press ⌘P (File ▸ Go to File…) and type part of the file's path. See [Go to File](#go-to-file).
+- Pick one of the project's files you opened lately under File ▸ Recent Files, or press ⌘E for all of them with a search box. See [Recent Files](#recent-files).
 
 SnoutCode highlights Java, Kotlin, Groovy (Gradle scripts and `Jenkinsfile`), TypeScript (`.ts`, `.tsx`), JavaScript (`.js`, `.mjs`, `.cjs`), JSON, YAML, XML and `.properties` files. Other files open as plain text.
 
@@ -126,6 +127,10 @@ Files are written where the project is, so a project on a remote machine (see [R
 Press ⌘P (File ▸ Go to File…) and type part of a file's path. The starts of words find the words (`tc` finds `TokenController.java`), a `*` or `?` stands for whatever is there (`token*.ja`), a `/` names folders (`web/app`), and `Order.java:120` opens at line 120. The best matches come first, the files you opened lately first among equals, and the letters that matched are highlighted. See [Searching](search.md) for everything you can type and how results are ranked. ↑ and ↓ pick, ↩ opens, Esc closes.
 
 The files of source folders the build compiles from outside the project folder are listed too. A Gradle build whose `sourceSets` name `../core/src/main/java` shows that folder's files as `../core/src/main/java/...`, once its model is read. Find in Files searches them as well.
+
+## Recent Files
+
+File ▸ Recent Files lists the 15 files of the open project you opened lately, the latest first. A file whose name another one in the list shares shows its folder too, as `Main.java (app)`. **Recent Files…** (⌘E) at the bottom opens the whole list with a search box, and **Clear Recent Files** empties it for this project. The list is kept with your settings, so it is there the next time you start SnoutCode, and each project keeps its own.
 
 ## Go to Line
 
