@@ -431,6 +431,7 @@ fn store_for(host: &str, main: Option<&Store>, base: &Settings) -> Option<Store>
             groups: Vec::new(),
             current: None,
             recent: None,
+            recent_files: Vec::new(),
             opened: Default::default(),
             sessions: Default::default(),
             project_jdks: Default::default(),
@@ -802,5 +803,18 @@ mod tests {
         let old = r#"{ "hosts": ["devbox"], "projects": [{ "host": "devbox", "path": "/home/me/shop" }] }"#;
         let r: Recents = serde_json::from_str(old).unwrap();
         assert_eq!((r.hosts.len(), r.projects.len(), r.last), (1, 1, None));
+    }
+
+    /// A host's first settings take the Mac's look and keys, not its recent files.
+    #[test]
+    fn a_new_hosts_settings_start_without_the_macs_recent_files() {
+        let dir = crate::tests::scratch_dir("remote-seed");
+        let main = Store::at(dir.join("settings.json"));
+        let base = Settings { recent_files: vec!["/home/me/shop/README.md".into()], tab_size: 2, ..Default::default() };
+        let store = store_for("devbox", Some(&main), &base).unwrap();
+        let seeded = store.load();
+        assert!(seeded.recent_files.is_empty(), "{:?}", seeded.recent_files);
+        assert_eq!(seeded.tab_size, 2, "the look and keys are kept");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
