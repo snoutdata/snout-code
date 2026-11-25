@@ -76,6 +76,9 @@ pub struct Workspace {
     pub git: Entity<GitView>,
     pub tabs: Tabs,
     menu_checks: Option<menus::MenuState>,
+    /// A change of the recent files only, put up once the tabs stop changing.
+    menu_pending: Option<menus::MenuState>,
+    _menu_later: Option<Task<()>>,
     /// The menu bar waits until the window has painted (see [`Workspace::hold_menus`]).
     menus_held: bool,
     /// The menus drawn in the title bar, where the system has no menu bar (Linux).
@@ -217,6 +220,9 @@ pub fn docks_fitted(left: f32, right: f32, room: f32) -> (f32, f32) {
 
 /// The layout format this build writes; a saved layout of another version is ignored.
 const LAYOUT_VERSION: usize = 2;
+
+/// How long the tabs stay as they are before the menu bar follows their order.
+const MENUS_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The panels of the window being restored, by name, for the dock's panel registry.
 struct PanelPool(HashMap<&'static str, Arc<dyn BasePanelView>>, Vec<Entity<EditorPanel>>);
@@ -570,6 +576,12 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     crate::platform::clear_attention();
+                    // Another window's menus may be up: this one's go up again.
+                    this.menu_checks = None;
+                    cx.notify();
+                } else {
+                    this.menu_pending = None;
+                    this._menu_later = None;
                 }
                 if window.is_window_active() && this.model.read(cx).job.is_none() {
                     this.model.update(cx, |m, cx| {
@@ -591,6 +603,8 @@ impl Workspace {
             git,
             tabs,
             menu_checks: None,
+            menu_pending: None,
+            _menu_later: None,
             menus_held: false,
             menu_bar: crate::platform::IN_WINDOW_MENUS.then(|| crate::menu_bar::MenuBar::new(cx)),
             focus: cx.focus_handle(),
@@ -2186,24 +2200,51 @@ impl Workspace {
             window.set_window_title(&title);
             self.title = title;
         }
-        if !self.menus_held {
+        // The menu bar is the app's: the window in front puts up its own.
+        if !self.menus_held && window.is_window_active() {
             self.sync_menus(cx);
         }
     }
 
     /// The menu bar, made again when what it shows (checks, recent projects and files) changed.
+    /// Going from tab to tab changes only the order of the recent files: the bar, slow to make
+    /// on a Mac, is made once the switching stops.
     fn sync_menus(&mut self, cx: &mut Context<Self>) {
         let m = self.model.read(cx);
         let recent = m.recent_projects();
         let remote = crate::remote::recents(cx).projects;
         let files = m.recent_project_files(cx);
         let checks = menus::checks(&m.settings, &recent, &remote, &files);
-        if self.menu_checks.as_ref() != Some(&checks) {
-            crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote, &files), cx);
-            self.menu_checks = Some(checks);
-            if let Some(bar) = &self.menu_bar {
-                bar.update(cx, |bar, cx| bar.reload(cx));
+        if self.menu_checks.as_ref() == Some(&checks) {
+            self.menu_pending = None;
+            self._menu_later = None;
+            return;
+        }
+        if self.menu_checks.as_ref().is_some_and(|c| menus::differ_in_files_only(c, &checks)) {
+            if self.menu_pending.as_ref() != Some(&checks) {
+                self.menu_pending = Some(checks);
+                self._menu_later = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(MENUS_SETTLE).await;
+                    let _ = this.update(cx, |this, cx| this.install_menus(cx));
+                }));
             }
+            return;
+        }
+        self.install_menus(cx);
+    }
+
+    /// Put up the menu bar for what the window shows now.
+    fn install_menus(&mut self, cx: &mut Context<Self>) {
+        let m = self.model.read(cx);
+        let recent = m.recent_projects();
+        let remote = crate::remote::recents(cx).projects;
+        let files = m.recent_project_files(cx);
+        crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote, &files), cx);
+        self.menu_checks = Some(menus::checks(&m.settings, &recent, &remote, &files));
+        self.menu_pending = None;
+        self._menu_later = None;
+        if let Some(bar) = &self.menu_bar {
+            bar.update(cx, |bar, cx| bar.reload(cx));
         }
     }
 

@@ -816,3 +816,10 @@ pub fn checks(
         files.to_vec(),
     )
 }
+
+/// Whether `a` and `b` differ in the recent files and nothing else.
+pub fn differ_in_files_only(a: &MenuState, b: &MenuState) -> bool {
+    let (a0, a1, a2, a3, a4, a5, a6, a7) = a;
+    let (b0, b1, b2, b3, b4, b5, b6, b7) = b;
+    (a0, a1, a2, a3, a4, a5, a6) == (b0, b1, b2, b3, b4, b5, b6) && a7 != b7
+}

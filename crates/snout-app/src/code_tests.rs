@@ -682,6 +682,73 @@ fn file_menu_recent_files_lists_the_projects_files_latest_first_and_opens_one(cx
     let _ = std::fs::remove_dir_all(other);
 }
 
+/// The recent files as the menu bar put up shows them.
+fn installed_recent_files(cx: &mut VisualTestContext) -> Vec<String> {
+    let menus = cx.update(|_, cx| cx.get_menus().unwrap_or_default());
+    let file = menus.into_iter().find(|m| m.name == "File").expect("a File menu");
+    let sub = file
+        .items
+        .into_iter()
+        .find_map(|i| match i {
+            gpui::OwnedMenuItem::Submenu(m) if m.name == "Recent Files" => Some(m),
+            _ => None,
+        })
+        .expect("a Recent Files submenu");
+    sub.items
+        .into_iter()
+        .filter_map(|i| match i {
+            gpui::OwnedMenuItem::Action { name, .. } => Some(name),
+            _ => None,
+        })
+        .take_while(|n| n != "Recent Files…")
+        .collect()
+}
+
+/// Going from tab to tab puts the latest file first, but the menu bar is not made again at
+/// each step (that is slow on a Mac): once the switching stops.
+#[gpui::test]
+fn the_menu_bar_follows_the_recent_files_once_tab_switching_stops(cx: &mut TestAppContext) {
+    let repo = demo_repo("menu-settle");
+    let (model, _ws, cx) = open(cx, with_repo(&repo));
+    // The window in front puts up the menu bar.
+    cx.update(|w, _| w.activate_window());
+    for f in ["README.md", "status.rs"] {
+        act(&model, cx, Action::OpenFile(repo.join(f), None));
+    }
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"]);
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    cx.run_until_parked();
+    let first = cx.update(|_, cx| model.read(cx).recent_project_files(cx).first().cloned());
+    assert_eq!(first, Some(repo.join("README.md")), "the list has it first at once");
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "the menu bar waits");
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "and then follows");
+    // Anything else the menus show is put up at once, the order of the files with it.
+    act(&model, cx, Action::OpenFile(repo.join("status.rs"), None));
+    cx.update(|_, cx| {
+        model.update(cx, |m, cx| {
+            m.settings.param_hints = !m.settings.param_hints;
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "no wait for a check");
+    // A window gone to the back leaves the menu bar to the one in front, and puts its own up
+    // again when it comes back.
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    cx.deactivate_window();
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "not from the back");
+    cx.update(|w, _| w.activate_window());
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "at once when back in front");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
 /// A build that compiles a source folder beside the project: its files are the project's
 /// recent files too, listed with them and cleared with them.
 #[gpui::test]
