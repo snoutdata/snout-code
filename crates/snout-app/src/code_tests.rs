@@ -671,6 +671,13 @@ fn file_menu_recent_files_lists_the_projects_files_latest_first_and_opens_one(cx
         assert!(model.read(cx).recent_project_files().is_empty());
         assert_eq!(model.read(cx).settings.recent_files, [other.join("README.md")]);
     });
+    // Recent Files… lists this project's files only, so it is empty now.
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::RecentFiles), cx));
+    cx.run_until_parked();
+    let listed = cx.update(|_, cx| {
+        ws.read(cx).search.as_ref().map(|s| s.read(cx).items.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
+    });
+    assert_eq!(listed, Some(Vec::new()));
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(other);
 }

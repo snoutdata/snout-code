@@ -359,8 +359,16 @@ impl SearchView {
             Mode::GoToLine | Mode::NewFile => cx.notify(),
             Mode::RecentFiles => {
                 let root = self.root.clone();
-                let recent: Vec<String> =
-                    self.model.read(cx).settings.recent_files.iter().filter_map(|p| relative_to(p, &root)).collect();
+                let outside = crate::project_model::outside_roots(&root, cx);
+                let recent: Vec<String> = self
+                    .model
+                    .read(cx)
+                    .settings
+                    .recent_files
+                    .iter()
+                    .filter(|p| p.starts_with(&root) || outside.iter().any(|o| p.starts_with(o)))
+                    .filter_map(|p| relative_to(p, &root))
+                    .collect();
                 let at = Pattern::new(&query).line();
                 // The latest first among equals.
                 self.items = if Pattern::new(&query).is_empty() {
