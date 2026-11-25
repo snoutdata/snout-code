@@ -379,7 +379,8 @@ offers is always what this version of SnoutCode understands:
 *A value of the wrong type, and a key SnoutCode does not know.*
 
 Save the tab (⌘S) and SnoutCode takes the file at once: the window follows, as it does after
-**OK** in the Settings sheet. A file that cannot be read never wipes your settings: SnoutCode
+**OK** in the Settings sheet. The files you opened lately stay as the window has them, not as
+the file lists them. A file that cannot be read never wipes your settings: SnoutCode
 keeps the ones in use, says what is wrong in the status bar and at the top of the Settings
 sheet, and takes the file again once you fix it and save. Meanwhile it does not write your
 `settings.json` over your edit; if you quit with it still broken, it is copied to

@@ -1911,9 +1911,11 @@ impl Model {
     }
 
     /// Put the user's settings `user` in place, the project's values over them. The activity
-    /// stays: it says what the window shows, which a file read again does not change.
+    /// and the recent files stay: they say what the window shows and has opened, which a file
+    /// read again does not change.
     pub fn set_user_settings(&mut self, mut user: Settings) {
         user.activity = self.settings.activity;
+        user.recent_files = std::mem::take(&mut self.settings.recent_files);
         self.settings = user;
         self.project_under = crate::project_settings::put_over(&self.project_settings, &mut self.settings);
     }

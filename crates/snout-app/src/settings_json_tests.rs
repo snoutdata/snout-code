@@ -137,6 +137,15 @@ fn the_users_settings_open_as_json_and_a_saved_edit_is_taken_or_kept_out(cx: &mu
     cx.update(|w, cx| ws.update(cx, |ws, cx| ws.check_user_settings(w, cx)));
     cx.update(|_, cx| ws.update(cx, |ws, cx| ws.save_layout(cx)));
     assert_eq!(Store::at(file.clone()).load().activity, Some(shown));
+    // Nor are the files opened since the last save: a copy with older recent files keeps them.
+    let opened = repo.join("README.md");
+    cx.update(|_, cx| model.update(cx, |m, _| m.note_recent_file(&opened)));
+    let stale = Settings { recent_files: Vec::new(), ..Store::at(file.clone()).load() };
+    Store::at(file.clone()).save(&stale).unwrap();
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.check_user_settings(w, cx)));
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.recent_files.first(), Some(&opened)));
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.save_layout(cx)));
+    assert_eq!(Store::at(file.clone()).load().recent_files.first(), Some(&opened), "and they are saved");
     // Broken: the settings in use stay, the error shows, and the file is not written over.
     let broken = edited.replace("\"tab_size\": 6,", "\"tab_size\": 7");
     save_text(&editor, &broken, cx);
