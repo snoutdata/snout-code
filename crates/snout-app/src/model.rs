@@ -1884,11 +1884,21 @@ impl Model {
                 self.user_settings_error = Some(e);
                 false
             }
-            Some(Ok(read)) => {
+            Some(Ok(mut read)) => {
                 if self.user_settings_error.take().is_some() {
                     self.message = ts!("model-your-settings-are-read-again").into();
                 }
                 self.saved = read.clone();
+                // Another window may have saved files this one did not open: both are kept,
+                // this window's first.
+                let files = &mut self.settings.recent_files;
+                for f in &read.recent_files {
+                    if !files.contains(f) {
+                        files.push(f.clone());
+                    }
+                }
+                files.truncate(RECENT_FILES_KEPT);
+                read.recent_files = files.clone();
                 if read == self.user_settings() {
                     return false;
                 }
