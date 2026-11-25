@@ -58,6 +58,12 @@ const RECENT_FILES_KEPT: usize = 100;
 /// How many of the project's recent files File ▸ Recent Files lists.
 pub const RECENT_FILES_LIMIT: usize = 15;
 
+/// Whether `file` is the project's at `root`: in its folder, or in a source folder its build
+/// compiles from outside it (`outside`).
+pub fn in_project(file: &Path, root: &Path, outside: &[PathBuf]) -> bool {
+    file.starts_with(root) || outside.iter().any(|o| file.starts_with(o))
+}
+
 /// A branch on a remote: `origin` and `feature/x` for `origin/feature/x`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteRef {
@@ -737,15 +743,23 @@ impl Model {
     }
 
     /// The open project's recent files, the latest first, as many as File ▸ Recent Files lists.
-    pub fn recent_project_files(&self) -> Vec<PathBuf> {
+    pub fn recent_project_files(&self, cx: &gpui::App) -> Vec<PathBuf> {
         let Some(root) = self.project_root() else { return Vec::new() };
-        self.settings.recent_files.iter().filter(|f| f.starts_with(&root)).take(RECENT_FILES_LIMIT).cloned().collect()
+        let outside = crate::project_model::outside_roots(&root, cx);
+        self.settings
+            .recent_files
+            .iter()
+            .filter(|f| in_project(f, &root, &outside))
+            .take(RECENT_FILES_LIMIT)
+            .cloned()
+            .collect()
     }
 
     /// Take the open project's files off the recent files.
-    pub fn clear_recent_files(&mut self) {
+    pub fn clear_recent_files(&mut self, cx: &gpui::App) {
         if let Some(root) = self.project_root() {
-            self.settings.recent_files.retain(|f| !f.starts_with(&root));
+            let outside = crate::project_model::outside_roots(&root, cx);
+            self.settings.recent_files.retain(|f| !in_project(f, &root, &outside));
         }
     }
 

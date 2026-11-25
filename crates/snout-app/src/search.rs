@@ -366,7 +366,7 @@ impl SearchView {
                     .settings
                     .recent_files
                     .iter()
-                    .filter(|p| p.starts_with(&root) || outside.iter().any(|o| p.starts_with(o)))
+                    .filter(|p| crate::model::in_project(p, &root, &outside))
                     .filter_map(|p| relative_to(p, &root))
                     .collect();
                 let at = Pattern::new(&query).line();
@@ -411,13 +411,14 @@ impl SearchView {
             }
             Mode::GoToFile => {
                 let root = self.root.clone();
+                let outside = crate::project_model::outside_roots(&root, cx);
                 let recent: Vec<String> = self
                     .model
                     .read(cx)
                     .settings
                     .recent_files
                     .iter()
-                    .filter(|p| p.starts_with(&root))
+                    .filter(|p| crate::model::in_project(p, &root, &outside))
                     .filter_map(|p| relative_to(p, &root))
                     .collect();
                 // `Foo.java:12` opens at the line.

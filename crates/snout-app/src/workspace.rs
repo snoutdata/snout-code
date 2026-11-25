@@ -2196,7 +2196,7 @@ impl Workspace {
         let m = self.model.read(cx);
         let recent = m.recent_projects();
         let remote = crate::remote::recents(cx).projects;
-        let files = m.recent_project_files();
+        let files = m.recent_project_files(cx);
         let checks = menus::checks(&m.settings, &recent, &remote, &files);
         if self.menu_checks.as_ref() != Some(&checks) {
             crate::menu_icons::install(menus::bar(&m.settings, &recent, &remote, &files), cx);
@@ -2569,8 +2569,8 @@ impl Render for Workspace {
                 cx.listener(|this, a: &OpenRecentFile, _, cx| this.send(Action::OpenFile(a.0.clone(), None), cx)),
             )
             .on_action(cx.listener(|this, _: &ClearRecentFiles, _, cx| {
-                this.model.update(cx, |m, _| {
-                    m.clear_recent_files();
+                this.model.update(cx, |m, cx| {
+                    m.clear_recent_files(cx);
                     m.persist();
                 });
                 cx.notify();

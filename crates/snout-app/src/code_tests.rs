@@ -643,7 +643,7 @@ fn file_menu_recent_files_lists_the_projects_files_latest_first_and_opens_one(cx
     for f in ["README.md", "status.rs", "src/main.rs"] {
         act(&model, cx, Action::OpenFile(repo.join(f), None));
     }
-    let files = cx.update(|_, cx| model.read(cx).recent_project_files());
+    let files = cx.update(|_, cx| model.read(cx).recent_project_files(cx));
     assert_eq!(files, [repo.join("src/main.rs"), repo.join("status.rs"), repo.join("README.md")]);
     let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &[], &[], &files));
     let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
@@ -662,13 +662,13 @@ fn file_menu_recent_files_lists_the_projects_files_latest_first_and_opens_one(cx
     // Choosing one brings it to the front, first among the recent files.
     cx.update(|w, cx| w.dispatch_action(Box::new(OpenRecentFile(repo.join("README.md"))), cx));
     cx.run_until_parked();
-    let first = cx.update(|_, cx| model.read(cx).recent_project_files().first().cloned());
+    let first = cx.update(|_, cx| model.read(cx).recent_project_files(cx).first().cloned());
     assert_eq!(first, Some(repo.join("README.md")));
     // Clear Recent Files takes this project's off; the other project's stay.
     cx.update(|w, cx| w.dispatch_action(Box::new(ClearRecentFiles), cx));
     cx.run_until_parked();
     cx.update(|_, cx| {
-        assert!(model.read(cx).recent_project_files().is_empty());
+        assert!(model.read(cx).recent_project_files(cx).is_empty());
         assert_eq!(model.read(cx).settings.recent_files, [other.join("README.md")]);
     });
     // Recent Files… lists this project's files only, so it is empty now.
@@ -680,6 +680,52 @@ fn file_menu_recent_files_lists_the_projects_files_latest_first_and_opens_one(cx
     assert_eq!(listed, Some(Vec::new()));
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(other);
+}
+
+/// A build that compiles a source folder beside the project: its files are the project's
+/// recent files too, listed with them and cleared with them.
+#[gpui::test]
+fn recent_files_of_a_source_folder_outside_the_project_are_the_projects(cx: &mut TestAppContext) {
+    use crate::menus::ClearRecentFiles;
+    use crate::project_model::{Module, ProjectModel, RootKind, SourceRoot};
+    let repo = demo_repo("recent-outside");
+    let core = repo.with_extension("core");
+    std::fs::create_dir_all(&core).unwrap();
+    std::fs::write(core.join("Core.java"), "class Core {}\n").unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let module = Module {
+        id: "shop:app".into(),
+        name: "app".into(),
+        build: "shop".into(),
+        gradle_path: ":app".into(),
+        content_root: repo.clone(),
+        roots: vec![SourceRoot { dir: core.clone(), kind: RootKind::Main, exists: true }],
+        excluded: Vec::new(),
+        uses: Vec::new(),
+        jdk: None,
+        stale: None,
+        maven: false,
+    };
+    let project = ProjectModel { root: repo.clone(), name: "shop".into(), modules: vec![module], ..Default::default() };
+    let store = cx.update(|_, cx| crate::project_model::store(cx)).unwrap();
+    cx.update(|_, cx| store.update(cx, |s, cx| s.set_model(project, cx)));
+    act(&model, cx, Action::OpenFile(core.join("Core.java"), None));
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    let files = cx.update(|_, cx| model.read(cx).recent_project_files(cx));
+    assert_eq!(files, [repo.join("README.md"), core.join("Core.java")], "File ▸ Recent Files lists both");
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::RecentFiles), cx));
+    cx.run_until_parked();
+    let listed = cx.update(|_, cx| {
+        ws.read(cx).search.as_ref().map(|s| s.read(cx).items.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
+    });
+    let beside = format!("../{}/Core.java", core.file_name().unwrap().to_string_lossy());
+    assert_eq!(listed, Some(vec!["README.md".to_owned(), beside]), "and so does Recent Files…");
+    // Clear Recent Files takes both off.
+    cx.update(|w, cx| w.dispatch_action(Box::new(ClearRecentFiles), cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.recent_files, Vec::<std::path::PathBuf>::new()));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(core);
 }
 
 #[test]
