@@ -52,7 +52,7 @@ Processes on the remote machine get the environment of your login shell there: `
 - File ▸ Open Project… browses the remote machine.
 - File ▸ Recent Projects lists remote projects as `shop on devbox`. Pick one to connect and open it in one go. The Welcome page lists them under **Remote**.
 - Opening a project on another host closes the connection to this one. A folder on the same host keeps it.
-- The windows on a host keep their own tabs and recent projects, apart from your Mac's. A host starts with your Mac's appearance and shortcuts.
+- The windows on a host keep their own tabs, recent projects and recent files, apart from your Mac's. A host starts with your Mac's appearance and shortcuts.
 - The host's name in the title bar has a dot that shows the connection's state, and a menu with **Close Remote Connection** (and **Reconnect** once the connection is lost).
 
 ## Claude Code on the remote machine
@@ -126,7 +126,7 @@ rm -rf ~/.snout-code ~/.cache/SnoutCode
 
 ## What SnoutCode keeps on your Mac
 
-- `~/Library/Application Support/SnoutCode/remote/<host>/settings.json`: the settings of the windows on each host (tabs, recent projects, layout).
+- `~/Library/Application Support/SnoutCode/remote/<host>/settings.json`: the settings of the windows on each host (tabs, recent projects, recent files, layout).
 - `~/Library/Application Support/SnoutCode/remote.json`: the recent hosts and remote projects, and the remote project to open again at the next start.
 
 See also [Troubleshooting](troubleshooting.md).
