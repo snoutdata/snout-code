@@ -118,6 +118,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         // File.
         "NewProject" => sf("plus.square", L::SquarePlus),
         "Open" => sf("folder", L::FolderOpen),
+        "OpenFile" => sf("doc", L::FileInput),
         "CloseProject" => sf("xmark.square", L::SquareX),
         "ClearRecent" | "ClearRecentFiles" => sf("xmark.bin", L::Trash),
         "ProjectStructure" => sf("square.stack.3d.up", L::Layers),

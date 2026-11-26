@@ -7,6 +7,7 @@ How to open, edit, find and move around files in SnoutCode.
 - Click a file in the Project view. A single click opens it in a preview tab, whose name is in italics. The next file you click takes the preview tab's place.
 - Double click the preview tab, or edit the file, to keep it open.
 - Press ⌘P (File ▸ Go to File…) and type part of the file's path. See [Go to File](#go-to-file).
+- File ▸ Open File… shows the system's file dialog: pick one or more files, from the project or from anywhere else, and each opens in a tab. The project stays as it is.
 - Pick one of the project's files you opened lately under File ▸ Recent Files, or press ⌘E for all of them with a search box. See [Recent Files](#recent-files).
 
 SnoutCode highlights Java, Kotlin, Groovy (Gradle scripts and `Jenkinsfile`), TypeScript (`.ts`, `.tsx`), JavaScript (`.js`, `.mjs`, `.cjs`), JSON, YAML, XML and `.properties` files. Other files open as plain text.
@@ -24,7 +25,7 @@ Java files of a Gradle build also get the language features described in [Java](
 
 The tab bar also shows what an agent is doing with a file: a badge with the number of changes Claude Code proposes, the agent's dot (pulsing while it writes there), or a dot in its colour while its changes wait for review. See [Coding agents](agents.md).
 
-Every tab closes, the last one too (×, ⌘W, a middle click). With no tab open, the editor shows the ways to a file with their keys (Go to File ⌘P, Recent Files ⌘E, Search Everywhere ⇧⌘A, Find in Files ⇧⌘F, New File ⌘N) and the files you opened lately.
+Every tab closes, the last one too (×, ⌘W, a middle click). With no tab open, the editor shows the ways to a file with their keys (Go to File ⌘P, Recent Files ⌘E, Search Everywhere ⇧⌘A, Find in Files ⇧⌘F, New File ⌘N, Open File) and the files you opened lately.
 
 ### Tabs come back with the project
 

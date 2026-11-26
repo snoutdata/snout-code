@@ -216,6 +216,9 @@ pub enum Action {
     /// status bar), whichever one the Git panel shows.
     OnProject(Box<Action>),
     PickFolder,
+    /// File ▸ Open File…: pick files on this machine to open in tabs, whatever folder they
+    /// are in; the project stays as it is.
+    PickFiles,
     /// Pick a repository to add to the Git panel's list and show there, the project as it is.
     PickRepo,
     OpenPath(PathBuf),
@@ -2371,6 +2374,24 @@ impl Model {
             Action::AgentAnswer(how) => cx.emit(ModelEvent::AgentAnswer(how)),
             Action::AskAgent { root, prompt } => cx.emit(ModelEvent::AskAgent { root, prompt }),
             Action::PickFolder => self.pick_folder(ts!("model-open-project"), Action::OpenPath, cx),
+            Action::PickFiles => {
+                let rx = cx.prompt_for_paths(PathPromptOptions {
+                    files: true,
+                    directories: false,
+                    multiple: true,
+                    prompt: Some(ts!("model-open-file").into()),
+                });
+                cx.spawn(async move |this, cx| {
+                    if let Ok(Ok(Some(paths))) = rx.await {
+                        let _ = this.update(cx, |m, cx| {
+                            for path in paths {
+                                m.handle(Action::OpenFile(path, None), cx);
+                            }
+                        });
+                    }
+                })
+                .detach();
+            }
             Action::PickRepo => self.pick_folder(ts!("model-add-repository"), Action::ShowRepo, cx),
             Action::OpenPath(path) => self.open_path(&path, cx),
             Action::InitRepo(path) => {

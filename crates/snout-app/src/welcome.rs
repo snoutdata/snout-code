@@ -191,7 +191,7 @@ impl WelcomePanel {
         let hover = p.row_hover();
         let keys =
             |a: &dyn gpui::Action| window.bindings_for_action(a).last().map(|b| crate::keymap::binding_label(b, cx));
-        let ways: [(&'static str, IconName, &'static str, Box<dyn gpui::Action>); 5] = [
+        let ways: [(&'static str, IconName, &'static str, Box<dyn gpui::Action>); 6] = [
             ("empty-go-to-file", IconName::FileSearch, ts!("welcome-go-to-file"), Box::new(crate::menus::GoToFile)),
             (
                 "empty-recent-files",
@@ -212,6 +212,7 @@ impl WelcomePanel {
                 Box::new(crate::menus::FindInFiles),
             ),
             ("empty-new-file", IconName::FilePlus, ts!("welcome-new-file"), Box::new(crate::menus::NewFile)),
+            ("empty-open-file", IconName::FileInput, ts!("welcome-open-file"), Box::new(crate::menus::OpenFile)),
         ];
         let rows = ways.into_iter().map(|(id, ico, label, action)| {
             let k = keys(action.as_ref()).unwrap_or_default();

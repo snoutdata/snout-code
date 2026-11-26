@@ -14,6 +14,7 @@ actions!(
     [
         RecentFiles,
         NewFile,
+        OpenFile,
         About,
         Quit,
         Open,
@@ -259,6 +260,7 @@ fn fixed_commands() -> Vec<(String, Box<dyn gpui::Action>)> {
         (t!("cmd-go-to-file"), Box::new(GoToFile)),
         (t!("cmd-recent-files"), Box::new(RecentFiles)),
         (t!("cmd-new-file"), Box::new(NewFile)),
+        (t!("cmd-open-file"), Box::new(OpenFile)),
         (t!("cmd-go-to-class"), Box::new(GoToClass)),
         (t!("cmd-go-to-line"), Box::new(GoToLine)),
         (t!("cmd-navigate-back"), Box::new(NavigateBack)),
@@ -534,6 +536,7 @@ pub fn bar(
                 MenuItem::action(t!("cmd-new-file"), NewFile),
                 MenuItem::action(t!("cmd-new-project"), NewProject),
                 MenuItem::action(t!("cmd-open-project"), Open),
+                MenuItem::action(t!("cmd-open-file"), OpenFile),
                 MenuItem::submenu(Menu::new(t!("menu-recent-projects")).items(recent_items(recent, remote))),
                 MenuItem::submenu(Menu::new(t!("menu-recent-files")).items(recent_file_items(files))),
                 MenuItem::action(t!("cmd-close-project"), CloseProject),

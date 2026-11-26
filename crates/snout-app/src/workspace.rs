@@ -2402,6 +2402,15 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &GoToFile, w, cx| this.open_search(Mode::GoToFile, w, cx)))
+            // Open File…: the system's file dialog; on a remote machine, which it cannot show,
+            // the project's files to pick from.
+            .on_action(cx.listener(|this, _: &menus::OpenFile, w, cx| {
+                if crate::remote::is_remote(cx) {
+                    this.open_search(Mode::GoToFile, w, cx);
+                } else {
+                    this.send(Action::PickFiles, cx);
+                }
+            }))
             .on_action(
                 cx.listener(|this, _: &crate::menus::RecentFiles, w, cx| this.open_search(Mode::RecentFiles, w, cx)),
             )
