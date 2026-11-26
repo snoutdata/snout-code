@@ -947,6 +947,7 @@ git-tags = Etiquetas ({ $count })
 git-branches = Ramas
 git-check-out-o = Cambiar… (⇧⌘O)
 git-double-click-to-check-out = { $b }{ $u }{"\u000A"}{ $target } { $subject }{"\u000A"}{"\u000A"}Doble clic para cambiar
+git-upstream-gone = {" "}→ { $upstream }, eliminada en el remoto{"\u000A"}La rama ahora solo es local
 git-double-click-to-check-out-detached = { $target } { $subject }{"\u000A"}{ $date }{"\u000A"}{"\u000A"}Doble clic para cambiar (HEAD separado)
 git-delete = Eliminar…
 git-delete-from = Eliminar de { $remote }…

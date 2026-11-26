@@ -947,6 +947,7 @@ git-tags = Tags ({ $count })
 git-branches = Branches
 git-check-out-o = Mudar… (⇧⌘O)
 git-double-click-to-check-out = { $b }{ $u }{"\u000A"}{ $target } { $subject }{"\u000A"}{"\u000A"}Clique duas vezes para mudar
+git-upstream-gone = {" "}→ { $upstream }, excluído no remoto{"\u000A"}O branch agora é apenas local
 git-double-click-to-check-out-detached = { $target } { $subject }{"\u000A"}{ $date }{"\u000A"}{"\u000A"}Clique duas vezes para mudar (HEAD desanexado)
 git-delete = Excluir…
 git-delete-from = Excluir de { $remote }…

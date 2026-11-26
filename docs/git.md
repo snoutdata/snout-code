@@ -56,7 +56,7 @@ You can also drag a folder from Finder onto the window to open it.
 Below the Repositories list:
 
 - **Local Branches**, then one section per remote, then **Tags** (with their count). Click a section's title to fold it.
-- The current branch is in bold with a **HEAD** badge. A local branch that tracks a remote branch shows it after its name, beside a cloud: just the remote (`origin`) when the names match, else the whole name (`origin/main`). Branches show how far ahead (↑) and behind (↓) of their upstream they are, and a **gone** badge when the upstream was deleted. When HEAD is detached, a `HEAD (detached at …)` line says so.
+- The current branch is in bold with a **HEAD** badge. A local branch that tracks a remote branch shows it after its name, beside a cloud: just the remote (`origin`) when the names match, else the whole name (`origin/main`). Branches show how far ahead (↑) and behind (↓) of their upstream they are, When the upstream was deleted on the remote (for example after its pull request was merged), the cloud becomes a crossed-out cloud with the remote struck through, and the tooltip says the branch is local only now. When HEAD is detached, a `HEAD (detached at …)` line says so.
 - Hover a branch or tag to see its upstream and its last commit.
 - **Double-click** a branch to check it out, or a tag to check it out detached. A remote branch checks out as a local branch of the same name.
 - **Right-click** a branch for its menu (see below). A tag has **Check out (detached)**, **Create branch from tag…** and **Copy name**.
@@ -218,7 +218,7 @@ Press ↑ or ↓ to move to the previous or next commit. Press Esc, or click **W
 
 The buttons are on the toolbar, in the **Repository** menu and in the title bar's branch menu.
 
-- **Pull** runs `git pull` with your repository's settings.
+- **Pull** runs `git pull --prune` with your repository's settings, so branches deleted on the remote go away and the local branches that tracked them show it.
 - **Fetch** runs `git fetch --all --prune`.
 - **Push** runs `git push`, and sets the upstream on the first push. The button shows how many commits there are to push.
 

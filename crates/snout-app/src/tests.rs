@@ -580,6 +580,19 @@ fn git_panel_branches_track_push_and_rename(cx: &mut TestAppContext) {
     assert_eq!(upstream(cx, "topic-2").as_deref(), Some("origin/main"), "renamed, still tracking");
     act(&model, cx, Action::AskReset(crate::model::StartPoint { label: "topic-2".into(), rev: "topic-2".into() }));
     cx.update(|_, cx| assert!(matches!(model.read(cx).dialog, Some(crate::model::Dialog::Reset(_)))));
+
+    // Deleted on the remote: after a pull the branch shows its upstream as a broken link.
+    act(&model, cx, Action::SetUpstream { name: "topic-2".into(), upstream: "origin/topic".into() });
+    git(&remote, &["branch", "-D", "topic"]);
+    assert!(cx.debug_bounds("branch-upstream-gone").is_none());
+    act(&model, cx, Action::Pull(snout_core::PullMode::Default));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let m = model.read(cx);
+        assert!(!m.branches.iter().any(|b| b.name == "origin/topic"), "pull pruned it");
+        assert!(m.branches.iter().any(|b| b.name == "topic-2" && b.upstream_gone));
+    });
+    assert!(cx.debug_bounds("branch-upstream-gone").is_some(), "topic-2 shows its upstream is gone");
     for dir in [work, remote.parent().unwrap().to_owned()] {
         let _ = std::fs::remove_dir_all(dir);
     }

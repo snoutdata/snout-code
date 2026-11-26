@@ -947,6 +947,7 @@ git-tags = Tags ({ $count })
 git-branches = Branches
 git-check-out-o = Basculer… (⇧⌘O)
 git-double-click-to-check-out = { $b }{ $u }{"\u000A"}{ $target } { $subject }{"\u000A"}{"\u000A"}Double-cliquez pour basculer
+git-upstream-gone = {" "}→ { $upstream }, supprimée sur le dépôt distant{"\u000A"}La branche est désormais locale uniquement
 git-double-click-to-check-out-detached = { $target } { $subject }{"\u000A"}{ $date }{"\u000A"}{"\u000A"}Double-cliquez pour basculer (HEAD détachée)
 git-delete = Supprimer…
 git-delete-from = Supprimer de { $remote }…

@@ -47,11 +47,13 @@ impl Repo {
         self.pull_with(PullMode::Default)
     }
 
+    /// Pull the current branch. The fetch prunes, so a branch deleted on the remote stops
+    /// being listed and the local branches that tracked it show their upstream as gone.
     pub fn pull_with(&self, mode: PullMode) -> Result<String> {
         let args: &[&str] = match mode {
-            PullMode::Default => &["pull"],
-            PullMode::Merge => &["pull", "--no-rebase"],
-            PullMode::Rebase => &["pull", "--rebase"],
+            PullMode::Default => &["pull", "--prune"],
+            PullMode::Merge => &["pull", "--prune", "--no-rebase"],
+            PullMode::Rebase => &["pull", "--prune", "--rebase"],
         };
         Ok(self.git(args)?.text())
     }
@@ -179,6 +181,39 @@ mod tests {
         assert_eq!(b.resolve_commit(&backup).unwrap(), old_tip, "old commits kept");
         assert_eq!(b.resolve_commit("HEAD").unwrap(), b.resolve_commit("origin/main").unwrap());
         assert!(b.root().join("new.txt").exists() && !b.root().join("b.txt").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn pull_prunes_a_branch_deleted_on_the_remote() {
+        let root = scratch("prune");
+        let remote = root.join("remote.git");
+        run(&root, &["init", "-q", "--bare", "-b", "main", &remote.to_string_lossy()]).unwrap();
+        fs::create_dir_all(root.join("a")).unwrap();
+        let a = Repo::init(&snout_host::local(), root.join("a")).unwrap();
+        for args in [
+            ["config", "user.name", "T"],
+            ["config", "user.email", "t@example.com"],
+            ["config", "commit.gpgsign", "false"],
+        ] {
+            run(a.root(), &args).unwrap();
+        }
+        run(a.root(), &["checkout", "-q", "-b", "main"]).unwrap();
+        commit(&a, "base.txt", "base\n");
+        run(a.root(), &["remote", "add", "origin", &remote.to_string_lossy()]).unwrap();
+        a.push(true).unwrap();
+        run(a.root(), &["checkout", "-q", "-b", "topic"]).unwrap();
+        a.push(true).unwrap();
+        run(a.root(), &["checkout", "-q", "main"]).unwrap();
+
+        // The branch is merged and deleted on the remote; a pull on main notices.
+        run(&root, &["--git-dir", &remote.to_string_lossy(), "branch", "-D", "topic"]).unwrap();
+        a.pull().unwrap();
+        let branches = a.branches().unwrap();
+        assert!(!branches.iter().any(|b| b.name == "origin/topic"), "remote branch pruned");
+        let topic = branches.iter().find(|b| b.name == "topic").unwrap();
+        assert!(topic.upstream_gone, "{topic:?}");
+        assert_eq!(topic.upstream.as_deref(), Some("origin/topic"));
         fs::remove_dir_all(&root).unwrap();
     }
 }

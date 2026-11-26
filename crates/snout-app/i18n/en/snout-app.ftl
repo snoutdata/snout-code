@@ -952,6 +952,7 @@ git-tags = Tags ({ $count })
 git-branches = Branches
 git-check-out-o = Check out… (⇧⌘O)
 git-double-click-to-check-out = { $b }{ $u }{"\u000A"}{ $target } { $subject }{"\u000A"}{"\u000A"}Double-click to check out
+git-upstream-gone = {" "}→ { $upstream }, deleted on the remote{"\u000A"}The branch is local only now
 git-double-click-to-check-out-detached = { $target } { $subject }{"\u000A"}{ $date }{"\u000A"}{"\u000A"}Double-click to check out (detached)
 git-delete = Delete…
 git-delete-from = Delete from { $remote }…

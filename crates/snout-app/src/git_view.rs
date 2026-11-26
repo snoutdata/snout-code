@@ -735,10 +735,15 @@ impl GitView {
             BranchKind::Local => b.name.clone(),
             BranchKind::Remote => b.local_name().to_owned(),
         };
+        let upstream_note = match &b.upstream {
+            Some(u) if b.upstream_gone => t!("git-upstream-gone", upstream = u.to_string()),
+            Some(u) => format!(" → {u}"),
+            None => String::new(),
+        };
         let tip: SharedString = t!(
             "git-double-click-to-check-out",
             b = (b.name).to_string(),
-            u = (b.upstream.as_ref().map(|u| format!(" → {u}")).unwrap_or_default()).to_string(),
+            u = upstream_note,
             target = (b.target).to_string(),
             subject = (b.subject).to_string()
         )
@@ -760,14 +765,15 @@ impl GitView {
             if b.kind == BranchKind::Local { ts!("git-delete-branch") } else { ts!("git-delete-from-the-remote") };
         let head_ink = if b.is_head { p.fg } else { mix(p.fg, 0.8, p.fg_dim) };
         let (ahead, behind, gone) = (b.ahead, b.behind, b.upstream_gone);
-        // Where a local branch pushes and pulls: just the remote when the names match.
-        let tracks =
-            b.upstream.as_ref().filter(|_| b.kind == BranchKind::Local && !gone).map(|u| match u.split_once('/') {
-                Some((remote, name)) if name == b.name => remote.to_owned(),
-                _ => u.clone(),
-            });
+        // Where a local branch pushes and pulls: just the remote when the names match. A
+        // deleted upstream stays shown, struck out beside a cloud-off, so the broken link
+        // is plain: the branch is local only now.
+        let tracks = b.upstream.as_ref().filter(|_| b.kind == BranchKind::Local).map(|u| match u.split_once('/') {
+            Some((remote, name)) if name == b.name => remote.to_owned(),
+            _ => u.clone(),
+        });
         let current = self.model.read(cx).status.branch.head.clone().unwrap_or_else(|| "HEAD".into());
-        let can_fast_forward = tracks.is_some() && behind > 0 && ahead == 0;
+        let can_fast_forward = tracks.is_some() && !gone && behind > 0 && ahead == 0;
         crate::components::tree_row(SharedString::from(format!("branch-{key}")), RowState::default(), p)
             .pl(px(20.))
             .on_hover(cx.listener(move |this, on: &bool, _, cx| {
@@ -809,14 +815,21 @@ impl GitView {
                                 .flex()
                                 .items_center()
                                 .gap(px(3.))
-                                .debug_selector(|| "branch-upstream".into())
-                                .child(crate::components::icon(crate::components::IconName::Cloud, 11., p.fg_dim))
-                                .child(crate::components::dim(to, p)),
+                                .debug_selector(|| if gone { "branch-upstream-gone" } else { "branch-upstream" }.into())
+                                .child(crate::components::icon(
+                                    if gone {
+                                        crate::components::IconName::CloudOff
+                                    } else {
+                                        crate::components::IconName::Cloud
+                                    },
+                                    11.,
+                                    if gone { p.warn } else { p.fg_dim },
+                                ))
+                                .child(crate::components::dim(to, p).when(gone, |d| d.line_through())),
                         )
                     })
                     .when(ahead > 0, |d| d.child(crate::components::dim(format!("↑{ahead}"), p)))
                     .when(behind > 0, |d| d.child(crate::components::dim(format!("↓{behind}"), p)))
-                    .when(gone, |d| d.child(crate::components::badge("gone", crate::components::Tone::Warning, p)))
                     .when(b.is_head && room_for_head, |d| {
                         d.child(crate::components::badge("HEAD", crate::components::Tone::Git, p))
                     })
