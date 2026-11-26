@@ -265,7 +265,8 @@ fn mcp_tool() -> Value {
     json!({
         "name": MCP_TOOL,
         "description": "Work the SnoutCode window this session runs in: see the project and what is on screen, open files \
-                        at a line, start runs and read their results, ask the language engines for definitions, \
+                        at a line, run tests (Playwright, Cypress, Vitest, Jest) in its Tests window rather than in a \
+                        shell, start runs and read their results, ask the language engines for definitions, \
                         references, types and callers, run build tasks, use the Git view, and show the user a report. Use \
                         it instead of `code`, `open`, `idea` or any other editor. Call it with tool \"manual\" to list what \
                         it can do, and with tool \"manual\" and arguments {\"domain\": name} for a domain's arguments.",

@@ -26,9 +26,9 @@ For the API's 57 tools, measured on what SnoutCode sends:
 | | Size | When it is in the context |
 |---|---|---|
 | The 57 tools as MCP definitions | about 23,000 characters, roughly 5,800 tokens | every request of the session |
-| The skill's description | about 560 characters, roughly 140 tokens | every request of the session |
-| The one MCP tool, for Codex in place of the skill | about 760 characters, roughly 190 tokens | every request of the session |
-| The skill's instructions, with the `openFile` call | about 2,000 characters, roughly 500 tokens | once, when the agent first uses the window |
+| The skill's description | about 630 characters, roughly 160 tokens | every request of the session |
+| The one MCP tool, for Codex in place of the skill | about 840 characters, roughly 210 tokens | every request of the session |
+| The skill's instructions, with the `openFile` and `runTests` calls | about 2,600 characters, roughly 650 tokens | once, when the agent first uses the window |
 | The short manual, all 57 tools with no arguments | about 9,400 characters, roughly 2,300 tokens | only when the agent needs a tool other than `openFile` |
 | One domain's manual, with its arguments | 800 to 4,400 characters, 200 to 1,100 tokens | only when the agent needs that domain |
 
@@ -134,7 +134,7 @@ the agent does not hear of what you click. **Clear** empties it, and it lasts un
 | `stopRun` | run | Stops a run | `id` |
 | `getRunOutput` | run | What a run printed | `id`, `lastLines` |
 | `getTestResults` | run | How a run's tests went, with each failure | `id` |
-| `runPlaywrightTests` | run | Runs Playwright tests | `file`, `line`, `project` |
+| `runTests` | run | Runs tests in the Tests window: Playwright, Cypress, Vitest or Jest | `file`, `line`, `project` (Playwright) |
 | `getPlaywrightTrace` | run | What a test's trace saw: actions, failed requests, console errors | `test`, `id` |
 | `recordPlaywrightTest` | run | Starts Playwright's recorder at the caret | none |
 | `pickPlaywrightLocator` | run | Lets you pick an element for its locator | none |

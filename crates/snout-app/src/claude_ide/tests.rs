@@ -2169,7 +2169,7 @@ fn an_agent_runs_playwright_and_reads_what_failed(cx: &mut TestAppContext) {
     pump_until(cx, "the tests listed", |cx| cx.update(|_, cx| tests.read(cx).listing.is_some()));
 
     // The run: the id, in the Tests window, its failure with where it is and its trace.
-    let (status, body) = agent_allowed(cx, &model, "runPlaywrightTests", json!({}));
+    let (status, body) = agent_allowed(cx, &model, "runTests", json!({}));
     assert_eq!(status, 200, "{body}");
     let id = serde_json::from_str::<Value>(&body).unwrap()["id"].as_u64().expect("the run's id");
     pump_until(cx, "the run's end", |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| !s.running())));
@@ -2222,13 +2222,53 @@ fn an_agent_runs_playwright_and_reads_what_failed(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(lock_dir);
 }
 
+/// Cypress, as an agent asks for it: the spec runs in the Tests window, not in the agent's shell, and
+/// the agent learns which test failed.
+#[gpui::test]
+fn an_agent_runs_a_cypress_spec_in_the_tests_window(cx: &mut TestAppContext) {
+    if crate::lang::node::discover(&*snout_host::local()).is_empty() {
+        println!("an agent runs Cypress: skipped; needs Node");
+        return;
+    }
+    let repo = demo_repo("harness-cypress");
+    crate::jstest_tests::suite_package(&repo, crate::jstest::Runner::Cypress);
+    let (repo, lock_dir, model, ws, _client, cx) = connected_to(repo, "harness-cypress", cx);
+    hook_command(&ws, cx);
+    let (tests, runs) = cx.update(|_, cx| (ws.read(cx).pw_tests.clone(), ws.read(cx).runs.clone()));
+    pump_until(cx, "the specs found", |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some()));
+
+    let spec = repo.join("cypress/e2e/cart.cy.js");
+    let (status, body) = agent_allowed(cx, &model, "runTests", json!({ "file": spec.to_string_lossy() }));
+    assert_eq!(status, 200, "{body}");
+    let id = serde_json::from_str::<Value>(&body).unwrap()["id"].as_u64().expect("the run's id");
+    pump_until(cx, "the run's end", |cx| cx.update(|_, cx| runs.read(cx).session(id).is_some_and(|s| !s.running())));
+    cx.update(|_, cx| {
+        assert_eq!(tests.read(cx).live, Some(id), "the Tests window follows it");
+        let run = runs.read(cx).session(id).and_then(|s| s.playwright.as_ref()).expect("a test run");
+        assert_eq!(run.runner, Some(crate::jstest::Runner::Cypress));
+    });
+    let (status, body) = agent_calls(cx, "getTestResults", json!({ "id": id }), true);
+    assert_eq!(status, 200, "{body}");
+    let results: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(results["failed"], json!(1), "{body}");
+    let failure = &results["failures"][0];
+    assert!(failure["title"].as_str().unwrap().contains("fails to total"), "{body}");
+    assert!(failure["file"].as_str().unwrap().ends_with("cart.cy.js"), "{body}");
+    drop(ws);
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(lock_dir);
+}
+
 /// A project with no Playwright: each tool says so, and nothing claims to have started.
 #[gpui::test]
 fn an_agent_asking_for_playwright_where_there_is_none_is_told(cx: &mut TestAppContext) {
     let (repo, lock_dir, model, ws, _client, cx) = connected("harness-no-pw", cx);
     hook_command(&ws, cx);
+    let (status, body) = agent_allowed(cx, &model, "runTests", json!({}));
+    assert!(status == 422 && body.contains("no tests"), "{status} {body}");
+    // Its name from when it ran Playwright only still works.
     let (status, body) = agent_allowed(cx, &model, "runPlaywrightTests", json!({}));
-    assert!(status == 422 && body.contains("no Playwright tests"), "{status} {body}");
+    assert!(status == 422 && body.contains("no tests"), "{status} {body}");
     for tool in ["recordPlaywrightTest", "pickPlaywrightLocator"] {
         let (status, body) = agent_allowed(cx, &model, tool, json!({}));
         assert!(status == 422 && body.contains("works in a Playwright project"), "{tool}: {status} {body}");
