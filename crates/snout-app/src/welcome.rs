@@ -247,15 +247,10 @@ impl WelcomePanel {
                 })
                 .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
         });
-        let recent: Vec<PathBuf> =
-            self.model.read(cx).recent_files.iter().filter(|f| f.starts_with(root)).take(5).cloned().collect();
+        let recent: Vec<PathBuf> = self.model.read(cx).recent_project_files(cx).into_iter().take(5).collect();
         let files = recent.into_iter().enumerate().map(|(i, path)| {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let dir = path
-                .parent()
-                .and_then(|d| d.strip_prefix(root).ok())
-                .map(|d| d.to_string_lossy().into_owned())
-                .unwrap_or_default();
+            let dir = path.parent().and_then(|d| crate::search::relative_to(d, root)).unwrap_or_default();
             let model = self.model.clone();
             div()
                 .id(("empty-recent", i))

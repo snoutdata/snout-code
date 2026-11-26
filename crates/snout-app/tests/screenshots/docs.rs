@@ -1979,6 +1979,7 @@ fn remote(projects: &Path) {
         cx.global_mut::<Remote>().recents = Recents {
             hosts: vec!["devbox".into()],
             projects: vec![RemoteProject { host: "devbox".into(), path: "/home/dev/projects/ledger".into() }],
+            last: None,
         }
     });
     // The Connect dialog, devbox typed.

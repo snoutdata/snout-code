@@ -148,7 +148,7 @@ pub fn init_kit(settings: &Settings, cx: &mut App) {
 /// The menu bar. The app puts it up once its window has painted (see [`after_first_paint`]):
 /// its first install is slow (AppKit loads the items' images).
 pub fn install_menus(settings: &Settings, cx: &mut App) {
-    let bar = menus::bar(settings, &model::recent_projects(settings), &remote::recents(cx).projects);
+    let bar = menus::bar(settings, &model::recent_projects(settings), &remote::recents(cx).projects, &[]);
     menu_icons::install(bar, cx);
 }
 

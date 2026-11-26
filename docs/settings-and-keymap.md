@@ -328,7 +328,7 @@ SnoutCode keeps your settings in `~/Library/Application Support/SnoutCode/settin
 Mac and in `~/.config/SnoutCode/settings.json` on Linux (see [SnoutCode on Linux](linux.md#where-snoutcode-keeps-its-files)), and
 a project's own in `.snout/settings.json` in the project (see
 [Your settings and the project's](#your-settings-and-the-projects)). It
-writes the file as you work: your recent projects, each project's tabs, the window's layout,
+writes the file as you work: your recent projects and files, each project's tabs, the window's layout,
 your choices in the menus and the Settings sheet.
 
 The shortcuts you changed are under `keymap`, by command, with the keys as a list:
@@ -379,7 +379,8 @@ offers is always what this version of SnoutCode understands:
 *A value of the wrong type, and a key SnoutCode does not know.*
 
 Save the tab (⌘S) and SnoutCode takes the file at once: the window follows, as it does after
-**OK** in the Settings sheet. A file that cannot be read never wipes your settings: SnoutCode
+**OK** in the Settings sheet. The files you opened lately stay as the window has them, and
+those the file lists that the window does not have come after them. A file that cannot be read never wipes your settings: SnoutCode
 keeps the ones in use, says what is wrong in the status bar and at the top of the Settings
 sheet, and takes the file again once you fix it and save. Meanwhile it does not write your
 `settings.json` over your edit; if you quit with it still broken, it is copied to

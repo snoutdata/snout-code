@@ -32,7 +32,7 @@ Some keys mean different things in different places. Where a shortcut only works
 | ⇧⌘P | Command Palette… | |
 | ⇧⌘A | Search Everywhere… | |
 | ⌘P | Go to File… | |
-| ⌘E | Recent Files… | |
+| ⌘E | Recent Files… (also File ▸ Recent Files) | |
 | ⌘N | New File… | |
 | ⌥⌘O | Go to Class… (⌘O is Open Project) | |
 | ⇧⌘F | Find in Files… | |

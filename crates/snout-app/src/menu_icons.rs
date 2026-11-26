@@ -84,8 +84,10 @@ pub fn for_submenu(title: &str) -> Option<Icon> {
     use IconName as L;
     // The titles are in the language in use, as the bar was made.
     let is = |id: String| title == id;
-    if is(t!("menu-open-recent")) {
+    if is(t!("menu-recent-projects")) {
         sf("clock.arrow.circlepath", L::Clock)
+    } else if is(t!("menu-recent-files")) {
+        sf("doc.badge.clock", L::FileClock)
     } else if is(t!("menu-tool-window-actions")) {
         sf("sidebar.left", L::PanelLeft)
     } else if is(t!("menu-tool-settings")) {
@@ -117,7 +119,7 @@ pub fn for_action(name: &str) -> Option<Icon> {
         "NewProject" => sf("plus.square", L::SquarePlus),
         "Open" => sf("folder", L::FolderOpen),
         "CloseProject" => sf("xmark.square", L::SquareX),
-        "ClearRecent" => sf("xmark.bin", L::Trash),
+        "ClearRecent" | "ClearRecentFiles" => sf("xmark.bin", L::Trash),
         "ProjectStructure" => sf("square.stack.3d.up", L::Layers),
         "ConnectSsh" => sf("network", L::Network),
         "CloseRemote" => sf("network.slash", L::Unplug),
@@ -446,7 +448,7 @@ mod tests {
     #[test]
     fn the_menu_bar_items_have_icons() {
         let s = crate::settings::Settings::default();
-        let bar = crate::menus::bar(&s, &[], &[]);
+        let bar = crate::menus::bar(&s, &[], &[], &[]);
         let plan = plan(&bar);
         assert_eq!(plan.len(), bar.len());
         let mut missing = Vec::new();

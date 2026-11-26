@@ -591,23 +591,25 @@ fn file_menu_open_recent_lists_projects_newest_first_and_opens_one(cx: &mut Test
     act(&model, cx, Action::OpenRepo(b.clone()));
     let recent = cx.update(|_, cx| model.read(cx).recent_projects());
     assert_eq!(recent, [b.clone(), a.clone()], "most recent first");
-    // The menu bar's File ▸ Open Recent, and the palette, list the same.
-    let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects(), &[]));
+    // The menu bar's File ▸ Recent Projects, and the palette, list the same.
+    let bar =
+        cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &model.read(cx).recent_projects(), &[], &[]));
     let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
     let names: Vec<String> = file.items.iter().filter_map(menu_item_name).collect();
-    let first = ["New File…", "New Project…", "Open Project…", "Open Recent", "Close Project"].map(String::from);
+    let first = ["New File…", "New Project…", "Open Project…", "Recent Projects", "Recent Files", "Close Project"]
+        .map(String::from);
     assert!(names.starts_with(&first), "{names:?}");
     let sub = file
         .items
         .iter()
         .find_map(|i| match i {
-            gpui::MenuItem::Submenu(m) if m.name == "Open Recent" => Some(m),
+            gpui::MenuItem::Submenu(m) if m.name == "Recent Projects" => Some(m),
             _ => None,
         })
-        .expect("an Open Recent submenu");
+        .expect("a Recent Projects submenu");
     let sub_names: Vec<String> = sub.items.iter().filter_map(menu_item_name).collect();
     let (na, nb) = (crate::model::Model::dir_name(&a), crate::model::Model::dir_name(&b));
-    assert_eq!(sub_names, [nb.clone(), na.clone(), "Clear Recent".into()]);
+    assert_eq!(sub_names, [nb.clone(), na.clone(), "Clear Recent Projects".into()]);
     let palette: Vec<String> = crate::menus::commands(&recent).into_iter().map(|(n, _)| n.to_string()).collect();
     for name in ["Open Project…", "Close Project", "Clear Recent Projects"] {
         assert!(palette.iter().any(|n| n == name), "the palette has {name}");
@@ -627,6 +629,224 @@ fn file_menu_open_recent_lists_projects_newest_first_and_opens_one(cx: &mut Test
     let _ = ws;
     let _ = std::fs::remove_dir_all(a);
     let _ = std::fs::remove_dir_all(b);
+}
+
+#[gpui::test]
+fn file_menu_recent_files_lists_the_projects_files_latest_first_and_opens_one(cx: &mut TestAppContext) {
+    use crate::menus::{ClearRecentFiles, OpenRecentFile};
+    let repo = demo_repo("recent-files");
+    let other = demo_repo("recent-files-other");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_activity(Activity::Project, w, cx)));
+    // A file of another project is kept, but not listed here.
+    cx.update(|_, cx| model.update(cx, |m, _| m.note_recent_file(&other.join("README.md"))));
+    for f in ["README.md", "status.rs", "src/main.rs"] {
+        act(&model, cx, Action::OpenFile(repo.join(f), None));
+    }
+    let files = cx.update(|_, cx| model.read(cx).recent_project_files(cx));
+    assert_eq!(files, [repo.join("src/main.rs"), repo.join("status.rs"), repo.join("README.md")]);
+    let bar = cx.update(|_, cx| crate::menus::bar(&model.read(cx).settings, &[], &[], &files));
+    let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
+    let sub = file
+        .items
+        .iter()
+        .find_map(|i| match i {
+            gpui::MenuItem::Submenu(m) if m.name == "Recent Files" => Some(m),
+            _ => None,
+        })
+        .expect("a Recent Files submenu");
+    let names: Vec<String> = sub.items.iter().filter_map(menu_item_name).collect();
+    assert_eq!(names, ["main.rs", "status.rs", "README.md", "Recent Files…", "Clear Recent Files"]);
+    // The list is a setting, so it is there at the next start.
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.recent_files.len(), 4));
+    // Choosing one brings it to the front, first among the recent files.
+    cx.update(|w, cx| w.dispatch_action(Box::new(OpenRecentFile(repo.join("README.md"))), cx));
+    cx.run_until_parked();
+    let first = cx.update(|_, cx| model.read(cx).recent_project_files(cx).first().cloned());
+    assert_eq!(first, Some(repo.join("README.md")));
+    // Clear Recent Files takes this project's off; the other project's stay.
+    cx.update(|w, cx| w.dispatch_action(Box::new(ClearRecentFiles), cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(model.read(cx).recent_project_files(cx).is_empty());
+        assert_eq!(model.read(cx).settings.recent_files, [other.join("README.md")]);
+    });
+    // Recent Files… lists this project's files only, so it is empty now.
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::RecentFiles), cx));
+    cx.run_until_parked();
+    let listed = cx.update(|_, cx| {
+        ws.read(cx).search.as_ref().map(|s| s.read(cx).items.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
+    });
+    assert_eq!(listed, Some(Vec::new()));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(other);
+}
+
+/// The recent files as the menu bar put up shows them.
+fn installed_recent_files(cx: &mut VisualTestContext) -> Vec<String> {
+    let menus = cx.update(|_, cx| cx.get_menus().unwrap_or_default());
+    let file = menus.into_iter().find(|m| m.name == "File").expect("a File menu");
+    let sub = file
+        .items
+        .into_iter()
+        .find_map(|i| match i {
+            gpui::OwnedMenuItem::Submenu(m) if m.name == "Recent Files" => Some(m),
+            _ => None,
+        })
+        .expect("a Recent Files submenu");
+    sub.items
+        .into_iter()
+        .filter_map(|i| match i {
+            gpui::OwnedMenuItem::Action { name, .. } => Some(name),
+            _ => None,
+        })
+        .take_while(|n| n != "Recent Files…")
+        .collect()
+}
+
+/// Going from tab to tab puts the latest file first, but the menu bar is not made again at
+/// each step (that is slow on a Mac): once the switching stops.
+#[gpui::test]
+fn the_menu_bar_follows_the_recent_files_once_tab_switching_stops(cx: &mut TestAppContext) {
+    let repo = demo_repo("menu-settle");
+    let (model, _ws, cx) = open(cx, with_repo(&repo));
+    // The window in front puts up the menu bar.
+    cx.update(|w, _| w.activate_window());
+    for f in ["README.md", "status.rs"] {
+        act(&model, cx, Action::OpenFile(repo.join(f), None));
+    }
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"]);
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    cx.run_until_parked();
+    let first = cx.update(|_, cx| model.read(cx).recent_project_files(cx).first().cloned());
+    assert_eq!(first, Some(repo.join("README.md")), "the list has it first at once");
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "the menu bar waits");
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "and then follows");
+    // Anything else the menus show is put up at once, the order of the files with it.
+    act(&model, cx, Action::OpenFile(repo.join("status.rs"), None));
+    cx.update(|_, cx| {
+        model.update(cx, |m, cx| {
+            m.settings.param_hints = !m.settings.param_hints;
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "no wait for a check");
+    // A window gone to the back leaves the menu bar to the one in front; back in front, it
+    // follows its files once they settle.
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    cx.deactivate_window();
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["status.rs", "README.md"], "not from the back");
+    cx.update(|w, _| w.activate_window());
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "back in front");
+    // Its own menus still up, coming back makes nothing again (an empty bar stands for one
+    // nobody put up since, to show that nothing is put up).
+    cx.deactivate_window();
+    cx.update(|_, cx| cx.set_menus(Vec::<gpui::Menu>::new()));
+    cx.update(|w, _| w.activate_window());
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| cx.get_menus().unwrap_or_default().is_empty()), "nothing made again");
+    // Another window's menus up, this one's go up at once.
+    cx.deactivate_window();
+    cx.update(|_, cx| cx.set_global(crate::workspace::MenuOwner(model.entity_id())));
+    cx.update(|w, _| w.activate_window());
+    cx.run_until_parked();
+    assert_eq!(installed_recent_files(cx), ["README.md", "status.rs"], "at once after another window's");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A window that paints behind another leaves the menu bar to the one in front, and puts its
+/// own up once it comes to the front.
+#[gpui::test]
+fn a_window_painted_in_the_back_leaves_the_menu_bar_to_the_one_in_front(cx: &mut TestAppContext) {
+    let repo = demo_repo("menu-back");
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    // Another window's menus are up (an empty bar stands for them), and this one paints
+    // behind it.
+    cx.update(|_, cx| {
+        cx.set_menus(Vec::<gpui::Menu>::new());
+        cx.set_global(crate::workspace::MenuOwner(model.entity_id()));
+    });
+    cx.update(|_, cx| ws.update(cx, |ws, _| ws.hold_menus()));
+    cx.deactivate_window();
+    cx.update(|_, cx| ws.update(cx, |ws, cx| ws.release_menus(cx)));
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| cx.get_menus().unwrap_or_default().is_empty()), "the front window's stay");
+    cx.update(|w, _| w.activate_window());
+    cx.run_until_parked();
+    assert!(!cx.update(|_, cx| cx.get_menus().unwrap_or_default().is_empty()), "its own once in front");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// A build that compiles a source folder beside the project: its files are the project's
+/// recent files too, listed with them and cleared with them.
+#[gpui::test]
+fn recent_files_of_a_source_folder_outside_the_project_are_the_projects(cx: &mut TestAppContext) {
+    use crate::menus::ClearRecentFiles;
+    use crate::project_model::{Module, ProjectModel, RootKind, SourceRoot};
+    let repo = demo_repo("recent-outside");
+    let core = repo.with_extension("core");
+    std::fs::create_dir_all(&core).unwrap();
+    std::fs::write(core.join("Core.java"), "class Core {}\n").unwrap();
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let module = Module {
+        id: "shop:app".into(),
+        name: "app".into(),
+        build: "shop".into(),
+        gradle_path: ":app".into(),
+        content_root: repo.clone(),
+        roots: vec![SourceRoot { dir: core.clone(), kind: RootKind::Main, exists: true }],
+        excluded: Vec::new(),
+        uses: Vec::new(),
+        jdk: None,
+        stale: None,
+        maven: false,
+    };
+    let project = ProjectModel { root: repo.clone(), name: "shop".into(), modules: vec![module], ..Default::default() };
+    let store = cx.update(|_, cx| crate::project_model::store(cx)).unwrap();
+    cx.update(|_, cx| store.update(cx, |s, cx| s.set_model(project, cx)));
+    act(&model, cx, Action::OpenFile(core.join("Core.java"), None));
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    let files = cx.update(|_, cx| model.read(cx).recent_project_files(cx));
+    assert_eq!(files, [repo.join("README.md"), core.join("Core.java")], "File ▸ Recent Files lists both");
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::menus::RecentFiles), cx));
+    cx.run_until_parked();
+    let listed = cx.update(|_, cx| {
+        ws.read(cx).search.as_ref().map(|s| s.read(cx).items.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
+    });
+    let beside = format!("../{}/Core.java", core.file_name().unwrap().to_string_lossy());
+    assert_eq!(listed, Some(vec!["README.md".to_owned(), beside]), "and so does Recent Files…");
+    // Clear Recent Files takes both off.
+    cx.update(|w, cx| w.dispatch_action(Box::new(ClearRecentFiles), cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.recent_files, Vec::<std::path::PathBuf>::new()));
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(core);
+}
+
+#[test]
+fn recent_files_sharing_a_name_show_their_folder() {
+    let files = [std::path::PathBuf::from("/p/a/Main.java"), "/p/b/Main.java".into(), "/p/b/App.java".into()];
+    let bar = crate::menus::bar(&Default::default(), &[], &[], &files);
+    let file = bar.iter().find(|m| m.name == "File").expect("a File menu");
+    let sub = file
+        .items
+        .iter()
+        .find_map(|i| match i {
+            gpui::MenuItem::Submenu(m) if m.name == "Recent Files" => Some(m),
+            _ => None,
+        })
+        .expect("a Recent Files submenu");
+    let names: Vec<String> = sub.items.iter().take(3).filter_map(menu_item_name).collect();
+    assert_eq!(names, ["Main.java (a)", "Main.java (b)", "App.java"]);
 }
 
 fn menu_item_name(item: &gpui::MenuItem) -> Option<String> {
@@ -1357,7 +1577,7 @@ fn a_jump_lands_in_the_middle_lit_up_and_back_and_forward_retrace_it(cx: &mut Te
     assert_eq!(front(cx).as_deref(), Some("Other.txt"), "forward again to the other file");
     // The Navigate menu has both, with their keys.
     let names: Vec<String> = cx.update(|_, cx| {
-        crate::menus::bar(&model.read(cx).settings, &[], &[])
+        crate::menus::bar(&model.read(cx).settings, &[], &[], &[])
             .into_iter()
             .flat_map(|m| m.items)
             .filter_map(|i| menu_item_name(&i))

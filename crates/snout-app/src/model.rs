@@ -49,8 +49,20 @@ pub fn recent_projects(settings: &crate::settings::Settings) -> Vec<PathBuf> {
     }
 }
 
-/// How many projects File ▸ Open Recent lists.
+/// How many projects File ▸ Recent Projects lists.
 pub const RECENT_LIMIT: usize = 12;
+
+/// How many recent files are kept, of all projects together.
+const RECENT_FILES_KEPT: usize = 100;
+
+/// How many of the project's recent files File ▸ Recent Files lists.
+pub const RECENT_FILES_LIMIT: usize = 15;
+
+/// Whether `file` is the project's at `root`: in its folder, or in a source folder its build
+/// compiles from outside it (`outside`).
+pub fn in_project(file: &Path, root: &Path, outside: &[PathBuf]) -> bool {
+    file.starts_with(root) || outside.iter().any(|o| file.starts_with(o))
+}
 
 /// A branch on a remote: `origin` and `feature/x` for `origin/feature/x`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -596,8 +608,6 @@ impl GitSide {
 pub struct Model {
     pub settings: Settings,
     store: Option<Store>,
-    /// The files opened this session, the latest first (the empty editor and Recent Files).
-    pub recent_files: Vec<PathBuf>,
     saved: Settings,
     /// The repository the Git panel shows: the project's, or another one picked in the
     /// panel's list.
@@ -726,9 +736,31 @@ impl Model {
         if path.as_os_str().is_empty() {
             return;
         }
-        self.recent_files.retain(|p| p != path);
-        self.recent_files.insert(0, path.to_owned());
-        self.recent_files.truncate(30);
+        let files = &mut self.settings.recent_files;
+        files.retain(|p| p != path);
+        files.insert(0, path.to_owned());
+        files.truncate(RECENT_FILES_KEPT);
+    }
+
+    /// The open project's recent files, the latest first, as many as File ▸ Recent Files lists.
+    pub fn recent_project_files(&self, cx: &gpui::App) -> Vec<PathBuf> {
+        let Some(root) = self.project_root() else { return Vec::new() };
+        let outside = crate::project_model::outside_roots(&root, cx);
+        self.settings
+            .recent_files
+            .iter()
+            .filter(|f| in_project(f, &root, &outside))
+            .take(RECENT_FILES_LIMIT)
+            .cloned()
+            .collect()
+    }
+
+    /// Take the open project's files off the recent files.
+    pub fn clear_recent_files(&mut self, cx: &gpui::App) {
+        if let Some(root) = self.project_root() {
+            let outside = crate::project_model::outside_roots(&root, cx);
+            self.settings.recent_files.retain(|f| !in_project(f, &root, &outside));
+        }
     }
 
     /// The folder of the app's own files, when it keeps any (never in tests).
@@ -745,7 +777,6 @@ impl Model {
             project_settings_error: None,
             project_under: Default::default(),
             user_file_stamp: store.as_ref().and_then(Store::stamp),
-            recent_files: Vec::new(),
             user_settings_error: None,
             pending_file: None,
             files_alone: false,
@@ -1853,11 +1884,21 @@ impl Model {
                 self.user_settings_error = Some(e);
                 false
             }
-            Some(Ok(read)) => {
+            Some(Ok(mut read)) => {
                 if self.user_settings_error.take().is_some() {
                     self.message = ts!("model-your-settings-are-read-again").into();
                 }
                 self.saved = read.clone();
+                // Another window may have saved files this one did not open: both are kept,
+                // this window's first.
+                let files = &mut self.settings.recent_files;
+                for f in &read.recent_files {
+                    if !files.contains(f) {
+                        files.push(f.clone());
+                    }
+                }
+                files.truncate(RECENT_FILES_KEPT);
+                read.recent_files = files.clone();
                 if read == self.user_settings() {
                     return false;
                 }
@@ -1880,9 +1921,11 @@ impl Model {
     }
 
     /// Put the user's settings `user` in place, the project's values over them. The activity
-    /// stays: it says what the window shows, which a file read again does not change.
+    /// and the recent files stay: they say what the window shows and has opened, which a file
+    /// read again does not change.
     pub fn set_user_settings(&mut self, mut user: Settings) {
         user.activity = self.settings.activity;
+        user.recent_files = std::mem::take(&mut self.settings.recent_files);
         self.settings = user;
         self.project_under = crate::project_settings::put_over(&self.project_settings, &mut self.settings);
     }

@@ -1594,7 +1594,7 @@ fn the_last_tab_closes_and_the_empty_editor_shows(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("empty-editor").is_some(), "the empty editor in its place");
     assert!(cx.debug_bounds("empty-go-to-file").is_some() && cx.debug_bounds("empty-new-file").is_some());
     assert!(cx.debug_bounds("empty-recent-0").is_some(), "the file closed is a recent one");
-    cx.update(|_, cx| assert_eq!(model.read(cx).recent_files.first(), Some(&hello)));
+    cx.update(|_, cx| assert_eq!(model.read(cx).settings.recent_files.first(), Some(&hello)));
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(lock_dir);
 }
