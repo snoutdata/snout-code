@@ -528,7 +528,8 @@ pub fn write_settings(host: &dyn snout_host::Host, dir: &Path, token: &str) -> s
     let skill = super::api::plugin_dir(dir).join("skills").join("snoutcode").join("SKILL.md");
     let told = format!(
         "This session runs in SnoutCode's console. To open files in its editor (instead of `code`, `open`, `idea` or \
-         any other editor), see what is open or on screen, or use its windows, first read {} and follow it.\n",
+         any other editor), run tests or specs in its Tests window (instead of the runner in a shell), see what is \
+         open or on screen, or use its windows, first read {} and follow it.\n",
         skill.display()
     );
     host.write_mode(&opencode_instructions(dir), told.as_bytes(), Some(0o600))?;

@@ -211,6 +211,8 @@ pub fn start(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
                         file.to_string_lossy().into_owned(),
                         "--plugin-dir".into(),
                         plugin.to_string_lossy().into_owned(),
+                        "--append-system-prompt".into(),
+                        super::api::CLAUDE_TOLD.into(),
                     ];
                     if let Some(dir) = file.parent() {
                         let header = dir.join("hook-header");

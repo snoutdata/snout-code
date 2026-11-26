@@ -605,6 +605,8 @@ fn hook_command(ws: &Entity<Workspace>, cx: &mut VisualTestContext) -> (u16, Str
         (port, cx.global::<super::IdeArgs>().0.clone(), cx.global::<IdeEnv>().0.clone())
     });
     assert_eq!(args[0], "--settings", "the console's `claude` gets the hooks as extra settings");
+    let told = args.iter().position(|a| a == "--append-system-prompt").map(|i| args[i + 1].as_str());
+    assert!(told.is_some_and(|t| t.contains("runTests")), "and is told to run tests in the Tests window: {args:?}");
     assert!(env.contains(&(super::hooks::PORT_ENV, port.to_string())));
     let settings: Value = serde_json::from_str(&std::fs::read_to_string(&args[1]).unwrap()).unwrap();
     let cmd = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap().to_owned();
@@ -2476,7 +2478,9 @@ fn the_skill_opens_files_in_the_editor_over_the_api(cx: &mut TestAppContext) {
     let missing = open.replace(&super::api::shell_path(&hello), &super::api::shell_path(&repo.join("nope.txt")));
     let (ok, out) = shell_while_pumping(cx, &missing, &env);
     assert!(!ok && out.contains("File not found"), "{out}");
-    let (ok, manual) = shell_while_pumping(cx, blocks[1], &env);
+    assert!(blocks.iter().any(|b| b.starts_with(&format!("{api} runTests '"))), "the skill shows how to run tests");
+    let manual = blocks.iter().find(|b| b.ends_with(" manual")).expect("the skill's manual command");
+    let (ok, manual) = shell_while_pumping(cx, manual, &env);
     assert!(ok);
     let manual: Value = serde_json::from_str(&manual).unwrap();
     assert!(manual["tools"].as_array().unwrap().iter().any(|t| t["name"] == "openFile"));

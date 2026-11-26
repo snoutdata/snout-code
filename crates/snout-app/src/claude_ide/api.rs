@@ -34,6 +34,12 @@ const PLUGIN: &str = "snout-plugin";
 /// The skill, as the plugin carries it; `{{API}}` stands for the script's path.
 pub const SKILL: &str = include_str!("snoutcode_skill.md");
 
+/// Added to the system prompt of the `claude` the console starts: a skill is only read when
+/// the model thinks of it, and a test run in a shell never shows in the Tests window.
+pub const CLAUDE_TOLD: &str = "This session runs in SnoutCode's console. To run tests or specs (Playwright, Cypress, \
+                               Vitest, Jest), use the snoutcode skill's runTests, not the runner in a shell, so the \
+                               user follows the run in SnoutCode's Tests window.";
+
 /// The script the skill runs: `snout-api <tool> [JSON arguments]`, or `snout-api manual`.
 /// One command with no variables in it, so Claude Code's permission check can match it
 /// (the session's settings allow it); it reads the port and the token's header file from

@@ -26,7 +26,7 @@ For the API's 57 tools, measured on what SnoutCode sends:
 | | Size | When it is in the context |
 |---|---|---|
 | The 57 tools as MCP definitions | about 23,000 characters, roughly 5,800 tokens | every request of the session |
-| The skill's description | about 630 characters, roughly 160 tokens | every request of the session |
+| The skill's description | about 710 characters, roughly 180 tokens | every request of the session |
 | The one MCP tool, for Codex in place of the skill | about 840 characters, roughly 210 tokens | every request of the session |
 | The skill's instructions, with the `openFile` and `runTests` calls | about 2,600 characters, roughly 650 tokens | once, when the agent first uses the window |
 | The short manual, all 57 tools with no arguments | about 9,400 characters, roughly 2,300 tokens | only when the agent needs a tool other than `openFile` |
@@ -54,6 +54,9 @@ with:
   the window closes.
 - `--settings`, the settings it already passes for its hooks, which also let `snout-api` run
   without asking for permission.
+- `--append-system-prompt`, one line telling it to run tests and specs with the skill's `runTests`,
+  not in a shell, so the run shows in the Tests window. A skill is read only when the model thinks
+  of it; this line is in every request (about 220 characters, roughly 55 tokens).
 - Two variables: `SNOUT_HOOK_PORT`, the API's port, and `SNOUT_API_HEADER`, the file that
   holds the token's header line.
 
@@ -193,7 +196,7 @@ settings:
 
 | Agent | How it hears of them |
 |---|---|
-| Claude Code | The skill, through `--plugin-dir` |
+| Claude Code | The skill, through `--plugin-dir`, and one line about running tests through `--append-system-prompt` |
 | opencode | One line in its instructions, through the session's `OPENCODE_CONFIG_CONTENT` variable, that sends it to the skill |
 | Amp | The skill, registered by SnoutCode's Amp plugin, which does nothing outside the console |
 | Codex | One MCP tool, `snoutcode`, through `-c mcp_servers.snoutcode...` arguments |

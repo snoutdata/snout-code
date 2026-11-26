@@ -1,6 +1,6 @@
 ---
 name: snoutcode
-description: Work the SnoutCode window this session runs in. Open files in its editor at a line or with text selected, see the project and what is on screen, open or switch projects, run tests and specs (Playwright, Cypress, Vitest, Jest) in its Tests window, start runs and read their output and test results, ask the language engines for definitions, references, types and callers, run build tasks, use the Git view, and show the user a report in the app. Use it whenever the user asks to open, show or go to a file or line, instead of `code`, `open`, `idea` or any other editor, and whenever they ask about or for anything in SnoutCode.
+description: Work the SnoutCode window this session runs in. Use it whenever the user asks to run tests or a spec (Playwright, Cypress, Vitest, Jest), instead of the runner in a shell, so the run shows in its Tests window. Open files in its editor at a line or with text selected, see the project and what is on screen, open or switch projects, start runs and read their output and test results, ask the language engines for definitions, references, types and callers, run build tasks, use the Git view, and show the user a report in the app. Use it whenever the user asks to open, show or go to a file or line, instead of `code`, `open`, `idea` or any other editor, and whenever they ask about or for anything in SnoutCode.
 ---
 
 # The SnoutCode window
