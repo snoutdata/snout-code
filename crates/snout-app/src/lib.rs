@@ -188,6 +188,17 @@ fn model_for_files(store: Option<Store>, settings: Settings, open: &std::path::P
     model
 }
 
+/// The model of a window opened on the folder `project`: it is the project from the start, so
+/// the tabs of the project last open never show in it. It is remembered once it opens; a
+/// folder that cannot be leaves the one before remembered.
+pub fn model_on(store: Option<Store>, project: std::path::PathBuf, cx: &mut App) -> Entity<Model> {
+    let mut settings = store.as_ref().map(Store::load).unwrap_or_default();
+    let before = settings.current.replace(project);
+    let model = cx.new(|cx| Model::new(settings, store, cx));
+    model.update(cx, |m, _| m.settings.current = before);
+    model
+}
+
 /// The model of a start that does not open the project last open, which stays remembered
 /// for the next start.
 fn model_unopened(store: Option<Store>, mut settings: Settings, cx: &mut App) -> Entity<Model> {

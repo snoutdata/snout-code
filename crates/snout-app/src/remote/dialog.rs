@@ -184,9 +184,10 @@ impl Render for ConnectDialog {
         let can = !busy && !self.host(cx).is_empty();
         let status = match (&self.connecting, &self.error) {
             (Some(h), _) => Some((t!("remote-connecting-to", h = h.to_string()), p.fg_dim)),
-            (None, Some(e)) => Some((e.clone(), p.error)),
             _ => None,
         };
+        // In the body, not the footer: ssh's message is long and the footer keeps one line.
+        let error = self.error.clone();
         let rows = self.rows(cx);
         let empty = rows.is_empty();
         let list = match &self.connecting {
@@ -246,7 +247,8 @@ impl Render for ConnectDialog {
                 .flex_col()
                 .gap(px(6.))
                 .child(field_label(ts!("remote-host"), &p))
-                .child(look::field(&self.input, false, None, &p)),
+                .child(look::field(&self.input, false, None, &p))
+                .when_some(error, |d, e| d.child(crate::components::callout(Tone::Danger, e, &p))),
         )
         .child(list)
         .child(footer(
