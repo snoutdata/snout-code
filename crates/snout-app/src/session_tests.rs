@@ -194,6 +194,37 @@ fn tabs_caret_activity_and_layout_come_back_with_the_app(cx: &mut TestAppContext
     let _ = std::fs::remove_dir_all(repo);
 }
 
+/// A file from outside the project, opened in it, comes back with it: at the next launch
+/// and when the project opens again.
+#[gpui::test]
+fn a_file_from_outside_the_project_comes_back_with_it(cx: &mut TestAppContext) {
+    let repo = demo_repo("session-outside");
+    let elsewhere = scratch_dir("session-outside-files");
+    std::fs::write(elsewhere.join("notes.txt"), "notes\n").unwrap();
+    let (model, ws, vcx) = open(cx, with_repo(&repo));
+    act(&model, vcx, Action::OpenFile(repo.join("README.md"), None));
+    act(&model, vcx, Action::OpenFile(elsewhere.join("notes.txt"), None));
+    assert_eq!(names(&ws, vcx), ["README.md", "notes.txt"]);
+    let saved = vcx.update(|_, cx| {
+        ws.update(cx, |ws, cx| ws.save_layout(cx));
+        model.read(cx).settings.clone()
+    });
+
+    let (model2, ws2, vcx2) = reopen(cx, saved);
+    assert_eq!(names(&ws2, vcx2), ["README.md", "notes.txt"], "back at the next launch");
+    assert_eq!(front(&ws2, vcx2).as_deref(), Some("notes.txt"));
+
+    // Away to another project and back.
+    let other = demo_repo("session-outside-other");
+    act(&model2, vcx2, Action::OpenRepo(other.clone()));
+    assert!(names(&ws2, vcx2).is_empty());
+    act(&model2, vcx2, Action::OpenRepo(repo.clone()));
+    assert_eq!(names(&ws2, vcx2), ["README.md", "notes.txt"], "back with the project");
+    for dir in [repo, other, elsewhere] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 #[gpui::test]
 fn each_project_gets_its_own_tabs_back(cx: &mut TestAppContext) {
     let a = demo_repo("session-a");

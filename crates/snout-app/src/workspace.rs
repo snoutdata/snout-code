@@ -272,8 +272,9 @@ fn default_layout(
 /// Put back the layout `state` (saved last time, or a project's tabs over the layout as it
 /// is), with the panels this window already made; a panel the saved layout lacks (one
 /// added since) goes to its usual place. What this build cannot place is left out first:
-/// a panel it no longer has, a file deleted since, a tab of a project other than
-/// `project` (see [`session::sanitize`]). False when the saved layout cannot be used.
+/// a panel it no longer has, a file deleted since and, unless the tabs are `own` (saved for
+/// `project`), a file outside `project` (see [`session::sanitize`]). False when the saved
+/// layout cannot be used.
 /// Editor tabs open their files again, the caret and the view where they were; they come
 /// back too.
 fn restore_layout(
@@ -281,6 +282,7 @@ fn restore_layout(
     state: serde_json::Value,
     panels: &[(Arc<dyn BasePanelView>, DockPlacement)],
     project: Option<&std::path::Path>,
+    own: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> (bool, Vec<Entity<EditorPanel>>) {
@@ -290,7 +292,7 @@ fn restore_layout(
     let pool: HashMap<&'static str, Arc<dyn BasePanelView>> =
         panels.iter().map(|(view, _)| (view.panel_name(cx), view.clone())).collect();
     let names: std::collections::HashSet<String> = pool.keys().map(|n| n.to_string()).collect();
-    let keep = session::Keep { panels: &names, editor: crate::editor::PANEL_NAME, project, host: None };
+    let keep = session::Keep { panels: &names, editor: crate::editor::PANEL_NAME, project, own, host: None };
     let Ok(state) = serde_json::from_value::<DockAreaState>(session::sanitize(state, &keep)) else {
         return (false, Vec::new());
     };
@@ -478,8 +480,15 @@ impl Workspace {
             saved = saved.map(|state| session::with_center(state, session::empty_tabs()));
         }
         let root = model.read(cx).project_root();
+        // The project's own tabs, as saved for it, in place of the layout's: those may be
+        // another project's, opened last time.
+        let session = root.as_ref().and_then(|r| model.read(cx).settings.sessions.get(r).cloned());
+        let own = session.is_some();
+        if let (Some(center), false) = (session, model.read(cx).files_alone) {
+            saved = saved.map(|state| session::with_center(state, center));
+        }
         let restored = match saved.clone() {
-            Some(state) => restore_layout(&dock, state, &panels, root.as_deref(), window, cx),
+            Some(state) => restore_layout(&dock, state, &panels, root.as_deref(), own, window, cx),
             None => (false, Vec::new()),
         };
         // A layout this build cannot use (an earlier build's) gives way to the usual one;
@@ -490,7 +499,7 @@ impl Workspace {
             if let (Some(saved), Some(root)) = (&saved, &root) {
                 reopen = session::editor_files(saved, crate::editor::PANEL_NAME);
                 // A file gone since closes its tab once it is found so (off the UI thread).
-                reopen.retain(|p| p.starts_with(root));
+                reopen.retain(|p| own || p.starts_with(root));
             }
         }
         let open = model.read(cx).settings.console_open;
@@ -980,7 +989,7 @@ impl Workspace {
             }
         };
         let state = session::with_center(full, center);
-        let (loaded, editors) = restore_layout(&self.dock, state, &self.panels, project.as_deref(), window, cx);
+        let (loaded, editors) = restore_layout(&self.dock, state, &self.panels, project.as_deref(), true, window, cx);
         if !loaded {
             return;
         }
@@ -2148,7 +2157,8 @@ impl Workspace {
     }
 
     /// Save the layout and the activity showing: the next start opens as the window is now,
-    /// whatever the settings file said meanwhile.
+    /// whatever the settings file said meanwhile. The open project's tabs are kept as its
+    /// own too, files from outside it included.
     pub fn save_layout(&mut self, cx: &mut Context<Self>) {
         if self.model.read(cx).files_alone {
             return;
@@ -2157,7 +2167,12 @@ impl Workspace {
         let activity = self.side.read(cx).activity;
         let Ok(value) = serde_json::to_value(state) else { return };
         let size = (f32::from(self.viewport.width), f32::from(self.viewport.height));
+        let root = self.model.read(cx).project_root().filter(|_| self.model.read(cx).project_open());
         self.model.update(cx, |m, _| {
+            if let Some(root) = root {
+                let center = value.get("center").cloned().unwrap_or_else(session::empty_tabs);
+                m.settings.sessions.insert(root, center);
+            }
             m.settings.dock = Some(value);
             m.settings.dock_window = Some(size);
             m.settings.activity = Some(activity);

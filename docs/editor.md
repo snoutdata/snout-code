@@ -28,7 +28,7 @@ Every tab closes, the last one too (×, ⌘W, a middle click). With no tab open,
 
 ### Tabs come back with the project
 
-Each project keeps its editor tabs. When you open the project again, its tabs come back with the caret and scroll position they had. A tab whose file has been deleted since closes by itself. See [Settings and keymap](settings-and-keymap.md).
+Each project keeps its editor tabs. When you open the project again, its tabs come back with the caret and scroll position they had, files from outside the project included. A tab whose file has been deleted since closes by itself. See [Settings and keymap](settings-and-keymap.md).
 
 ### When a file changes on disk
 

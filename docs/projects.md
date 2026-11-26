@@ -82,7 +82,8 @@ Closing the window quits SnoutCode, which stops the Java engine and anything it 
 
 Each project keeps its editor tabs. When you switch to another project or close it, SnoutCode
 remembers its tabs; when the project opens again, they come back with the caret and the view
-where they were. A project without saved tabs shows the Welcome page. SnoutCode keeps the tabs
+where they were. Files from outside the project that you opened in it come back with it too. A
+project without saved tabs shows the Welcome page. SnoutCode keeps the tabs
 of your recent projects only.
 
 When you start SnoutCode, it opens the project you had open last, with its tabs, the tool
