@@ -51,6 +51,9 @@ pub fn scripts(text: &str) -> Vec<Script> {
     out
 }
 
+/// The `test` script `npm init` writes, which only fails: no configuration of its own.
+const NPM_INIT_TEST: &str = r#"echo "Error: no test specified" && exit 1"#;
+
 /// Whether `dir` is a Node project's folder (an app or a package, with Playwright tests or
 /// not), as [`crate::project_kind::Kind`] decides.
 pub fn is_node_project(host: &dyn Host, dir: &Path) -> bool {
@@ -180,14 +183,15 @@ pub fn script_id(dir: &Path, root: &Path, name: &str) -> String {
 }
 
 /// The run configurations of the project at `root`: one for each script of each of its
-/// packages, named as they run (`npm run dev`, `pnpm run build (apps/web)`).
+/// packages but `npm init`'s placeholder, named as they run (`npm run dev`,
+/// `pnpm run build (apps/web)`).
 pub fn configs(host: &dyn Host, root: &Path) -> Vec<RunConfig> {
     let mut out = Vec::new();
     for dir in packages(host, root) {
         let Ok(text) = host.read_to_string(&dir.join("package.json")) else { continue };
         let manager = manager_of(host, &dir, root);
         let folder = rel(&dir, root);
-        for s in scripts(&text) {
+        for s in scripts(&text).into_iter().filter(|s| s.command.trim() != NPM_INIT_TEST) {
             out.push(RunConfig {
                 id: script_id(&dir, root, &s.name),
                 kind: Kind::Npm,

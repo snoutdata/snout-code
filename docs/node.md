@@ -32,7 +32,7 @@ A project can hold several packages: a workspace (npm, pnpm, Yarn or Bun) whose 
 
 *`package.json` with its scripts' run icons; `npm run dev` picked in the title bar and running.*
 
-Each script of `package.json` is a run configuration, under **Scripts** in the title bar's configuration menu, named as it runs: `npm run dev`, `pnpm run build`. The package manager is the one the lockfile names. Until you pick a configuration, the title bar starts on the project's `dev` or `start`, else a package's (see [Several packages](#several-packages)), else the first script.
+Each script of `package.json` is a run configuration, under **Scripts** in the title bar's configuration menu, named as it runs: `npm run dev`, `pnpm run build`. The `test` script `npm init` writes (`echo "Error: no test specified" && exit 1`) is not one, as it only fails; its run icon in `package.json` stays. The package manager is the one the lockfile names. Until you pick a configuration, the title bar starts on the project's `dev` or `start`, else a package's (see [Several packages](#several-packages)), else the first script.
 
 In `package.json` itself, a run icon sits beside each script. Click it for **Run** or **Debug**; ⌃⇧R and ⌃⇧D in the editor run the script the caret is on. The list follows `package.json` each time you save it.
 

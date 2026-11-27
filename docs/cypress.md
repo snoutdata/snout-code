@@ -31,6 +31,7 @@ The header's **Find the Specs Again** looks for specs again after you add or mov
 
 - **The Tests window** follows the run as it goes: each test as its spec starts, passed, failed or skipped, its time, retries (a test that passed on a retry is flaky), and for a failure its message, the lines around the one that failed, and the screenshot Cypress took of the page. **Show in editor** opens the test at its line; **Open in Cypress** opens the Cypress app to step through it.
 - **Run icons.** A spec has an icon at each `describe` and test of its top level. Cypress runs whole specs, so each icon runs its spec.
+- **The title bar's Run.** With **Current File**, Run runs the spec in front. In a project without Java and without a run configuration (`npm init`'s failing `test` script is not one), Run with no spec in front runs all the specs, as the Tests window's **Run all** does.
 - **Scripts.** A `package.json` script that is a plain `cypress run` (such as `"test": "cypress run --browser chrome"`) runs as the script says, and the Tests window follows it all the same: SnoutCode adds its reporter to the run. A script that chains another command after Cypress runs as a script only.
 - **The run's output** shows in the Run window as Cypress prints it, a line per test in place of Cypress's own `spec` reporter.
 

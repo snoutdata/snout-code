@@ -503,7 +503,12 @@ fn workspace(name: &str) -> PathBuf {
         r#"{ "name": "web", "scripts": { "dev": "node server.js" }, "dependencies": { "vue": "^3.5.0" } }"#,
     );
     write(&repo, "apps/web/server.js", "console.log('web in', require('path').basename(process.cwd()));\n");
-    write(&repo, "apps/api/package.json", r#"{ "name": "api", "scripts": { "dev": "node api.js" } }"#);
+    // `npm init`'s `test`, which only fails: not a configuration.
+    write(
+        &repo,
+        "apps/api/package.json",
+        r#"{ "name": "api", "scripts": { "dev": "node api.js", "test": "echo \"Error: no test specified\" && exit 1" } }"#,
+    );
     write(&repo, "apps/api/api.js", "console.log('api');\n");
     // Not packages of the project: installed ones, and build output.
     write(&repo, "node_modules/vue/package.json", r#"{ "name": "vue", "scripts": { "x": "y" } }"#);

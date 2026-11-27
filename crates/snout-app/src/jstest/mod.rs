@@ -314,10 +314,10 @@ pub fn test_launch(
 
 /// The run icons of a test file of `suite`: one at each `test`, `it` and `describe`, each
 /// knowing its `describe`s. Cypress runs whole specs: its spec's have one at each test and
-/// `describe` of the top level, which runs the spec.
+/// `describe` of the top level, which runs the spec, and so does Run on the file.
 pub fn runnables(path: &Path, text: &str, suite: &Suite) -> FileRunnables {
     let whole = suite.runner == Runner::Cypress;
-    let items = crate::playwright::gutter::tests_with_paths(path, text)
+    let items: Vec<Runnable> = crate::playwright::gutter::tests_with_paths(path, text)
         .into_iter()
         .filter(|(_, titles, _)| !whole || titles.len() == 1)
         .map(|(line, path_titles, group)| Runnable {
@@ -331,7 +331,8 @@ pub fn runnables(path: &Path, text: &str, suite: &Suite) -> FileRunnables {
             },
         })
         .collect();
-    FileRunnables { module: None, items, whole: None }
+    let spec = items.first().filter(|_| whole).map(|r| r.target.clone());
+    FileRunnables { module: None, items, whole: spec }
 }
 
 #[cfg(test)]

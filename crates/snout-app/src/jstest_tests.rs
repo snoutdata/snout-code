@@ -542,3 +542,60 @@ fn a_click_on_a_spec_in_the_cypress_window_previews_it_and_a_double_click_runs_i
     assert_eq!(at.as_deref(), Some("cypress/e2e/cart.cy.js"), "{args:?}");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn run_in_the_title_bar_runs_the_spec_in_front_else_all_the_specs(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress title bar run: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-title-run");
+    suite_package(&repo, Runner::Cypress);
+    // As `npm init` leaves it: its only script fails, and is no configuration.
+    let json = r#"{ "name": "shop", "devDependencies": { "cypress": "^13.6.4" }, "scripts": { "test": "echo \"Error: no test specified\" && exit 1" } }"#;
+    write(&repo, "package.json", json);
+    let (model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    let found = pump_until(cx, 10, |cx| {
+        cx.update(|_, cx| {
+            tests.read(cx).cypress_suite(cx).is_some()
+                && crate::project_model::project_java_known(&repo, cx) == Some(false)
+        })
+    });
+    assert!(found, "the specs are found, and the project has no Java");
+    cx.update(|_, cx| assert!(runs.read(cx).selected_config().is_none(), "the title bar shows Current File"));
+    let ended_after = |before: usize, cx: &mut gpui::VisualTestContext| {
+        pump_until(cx, 30, |cx| {
+            cx.update(|_, cx| {
+                let r = runs.read(cx);
+                r.sessions.len() > before && r.sessions.iter().all(|s| s.ended.is_some())
+            })
+        })
+    };
+    let spec_arg = |repo: &Path| {
+        let args = args_of(repo, Runner::Cypress);
+        args.iter().position(|a| a == "--spec").map(|i| args[i + 1].clone())
+    };
+    // Nothing to run in front: all the specs.
+    act(&model, cx, Action::OpenFile(repo.join("README.md"), None));
+    let before = cx.update(|_, cx| runs.read(cx).sessions.len());
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.run_selected(false, w, cx)));
+    assert!(ended_after(before, cx), "Run runs the specs");
+    cx.update(|_, cx| {
+        let s = runs.read(cx).sessions.last().unwrap();
+        assert_eq!(s.playwright.as_ref().unwrap().runner, Some(Runner::Cypress), "{}", s.console_text());
+    });
+    assert_eq!(spec_arg(&repo), None, "all of them");
+    // A spec in front: that spec.
+    let file = repo.join("cypress/e2e/cart.cy.js");
+    act(&model, cx, Action::OpenFile(file.clone(), None));
+    let editor = editor_of(&ws, &file, cx).expect("the spec opens");
+    assert!(pump_until(cx, 10, |cx| cx.update(|_, cx| editor.read(cx).runnables.is_some())));
+    let before = cx.update(|_, cx| runs.read(cx).sessions.len());
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.run_selected(false, w, cx)));
+    assert!(ended_after(before, cx), "Run runs the spec");
+    assert_eq!(spec_arg(&repo).as_deref(), Some("cypress/e2e/cart.cy.js"));
+    let _ = std::fs::remove_dir_all(repo);
+}

@@ -899,6 +899,7 @@ title-yours = Les vôtres
 title-reading-the-configurations = Lecture des configurations…
 title-configurations-appear-once-the-tests-are-listed = Les configurations apparaîtront une fois les tests listés
 title-configurations-appear-once-the-java-engine-is-ready = Les configurations apparaîtront quand le moteur Java sera prêt
+title-no-configurations-yet = Aucune configuration pour l’instant
 title-stop-f2 = Arrêter (⌘F2)
 title-search-everywhere-a = Rechercher partout (⇧⌘A)
 title-settings = Paramètres (⌘,)
