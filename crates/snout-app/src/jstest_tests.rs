@@ -425,6 +425,11 @@ fn a_cypress_run_fills_the_tests_window_and_says_how_to_fix_a_crash(cx: &mut gpu
         let run = s.playwright.as_ref().unwrap();
         assert_eq!(run.cypress.problems, [crate::cypress::Problem::Crashed { signal: "SIGSEGV".into() }]);
         assert_eq!(run.environment.as_deref(), Some("crashy"));
+        // The agent hears the crash as the Tests window tells it, with the package's Cypress.
+        let host = snout_host::local();
+        let answer = crate::claude_ide::capabilities::run::test_run_results(&*host, s, run);
+        let detail = answer["problems"][0]["detail"].as_str().unwrap_or_default().to_owned();
+        assert!(detail.contains("13.6.4") && !detail.contains("the results stand"), "{answer}");
     });
     cx.update(|w, _| w.refresh());
     cx.run_until_parked();
@@ -480,5 +485,181 @@ fn the_npm_script_that_runs_cypress_reports_to_the_tests_window(cx: &mut gpui::T
     });
     let args = args_of(&repo, Runner::Cypress);
     assert!(args.iter().any(|a| a == "--reporter"), "{args:?}");
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn a_cypress_package_without_the_app_it_downloads_needs_it() {
+    use crate::playwright::setup::{Need, cypress_need};
+    let host = snout_host::local();
+    if host.info().var("CYPRESS_RUN_BINARY").is_some_and(|v| !v.is_empty()) {
+        println!("cypress app: skipped; CYPRESS_RUN_BINARY names an app");
+        return;
+    }
+    let repo = scratch_dir("jstest-cypress-app");
+    let cache = scratch_dir("jstest-cypress-cache");
+    // A package in a folder, its packages installed by a package manager that ran no install scripts.
+    suite_package(&repo.join("e2e"), Runner::Cypress);
+    let need = Need::CypressApp { version: "13.6.4".into(), dir: Some(repo.join("e2e")) };
+    assert_eq!(cypress_need(&*host, &repo, &cache), Some(need));
+    // Cypress downloaded its app: nothing more.
+    let app = crate::cypress::app_file(&*host, &cache, "13.6.4");
+    std::fs::create_dir_all(app.parent().unwrap()).unwrap();
+    std::fs::write(&app, "").unwrap();
+    assert_eq!(cypress_need(&*host, &repo, &cache), None);
+    // A relative cache folder is the package's, as Cypress reads it from where it runs.
+    let app = crate::cypress::app_file(&*host, &repo.join("e2e/.cypress-cache"), "13.6.4");
+    std::fs::create_dir_all(app.parent().unwrap()).unwrap();
+    std::fs::write(&app, "").unwrap();
+    assert_eq!(cypress_need(&*host, &repo, Path::new(".cypress-cache")), None);
+    // The project's own package; and before its packages are installed, those come first.
+    let own = scratch_dir("jstest-cypress-app-own");
+    suite_package(&own, Runner::Cypress);
+    assert_eq!(
+        cypress_need(&*host, &own, &cache.join("empty")),
+        Some(Need::CypressApp { version: "13.6.4".into(), dir: None })
+    );
+    std::fs::remove_dir_all(own.join("node_modules")).unwrap();
+    assert_eq!(cypress_need(&*host, &own, &cache.join("empty")), None);
+    // A pre-release build keeps its app under another name: not asked for.
+    suite_package(&own, Runner::Cypress);
+    write(&own, "node_modules/cypress/package.json", r#"{ "version": "13.7.0", "buildInfo": { "stable": false } }"#);
+    assert_eq!(cypress_need(&*host, &own, &cache.join("empty")), None);
+    for d in [repo, cache, own] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+#[gpui::test]
+fn the_bar_offers_the_cypress_app_and_cypress_installs_it(cx: &mut gpui::TestAppContext) {
+    use crate::playwright::setup::Need;
+    let host = snout_host::local();
+    if node::discover(&*host).is_empty() || host.info().var("CYPRESS_RUN_BINARY").is_some_and(|v| !v.is_empty()) {
+        println!("cypress app bar: skipped; needs Node, and no CYPRESS_RUN_BINARY");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-app-bar");
+    suite_package(&repo, Runner::Cypress);
+    // A version no machine has the app of.
+    write(
+        &repo,
+        "node_modules/cypress/package.json",
+        r#"{ "version": "99.0.0", "bin": { "cypress": "bin/cypress" } }"#,
+    );
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let (setup, runs) = cx.update(|_, cx| (ws.read(cx).pw_setup.clone(), ws.read(cx).runs.clone()));
+    let need = |cx: &mut gpui::VisualTestContext| cx.update(|_, cx| setup.read(cx).need.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| setup.read(cx).need.is_some()));
+    assert!(found, "the project is looked at");
+    assert_eq!(need(cx), Some(Need::CypressApp { version: "99.0.0".into(), dir: None }));
+    assert!(cx.debug_bounds("playwright-bar").is_some() && cx.debug_bounds("playwright-install").is_some());
+    // The bar's button runs `cypress install` in the Build window.
+    cx.update(|_, cx| setup.update(cx, |s, cx| s.install(cx)));
+    // The stand-in ends at once: wait for its session, then for the bar to see it end.
+    let ended = pump_until(cx, 30, |cx| {
+        cx.update(|_, cx| {
+            setup.read(cx).installing.is_none() && runs.read(cx).sessions.last().is_some_and(|s| s.ended.is_some())
+        })
+    });
+    assert!(ended, "it runs and ends");
+    let id = cx.update(|_, cx| runs.read(cx).sessions.last().unwrap().id);
+    cx.update(|_, cx| {
+        let s = runs.read(cx).session(id).unwrap();
+        let crate::run::Launch::Process(p) = &s.launch else { panic!("a process") };
+        assert_eq!(p.place, crate::run::Place::Build);
+        assert_eq!(s.ended.as_ref().map(|e| e.outcome), Some(crate::run::Outcome::Success), "{}", s.console_text());
+        assert!(setup.read(cx).error.is_none());
+    });
+    assert_eq!(args_of(&repo, Runner::Cypress), ["install"]);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn a_cypress_run_without_the_app_did_not_start(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress no app: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-no-app");
+    suite_package(&repo, Runner::Cypress);
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    assert!(pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some())));
+    let run_all = |cx: &mut gpui::VisualTestContext| {
+        let before = cx.update(|_, cx| runs.read(cx).sessions.last().map_or(0, |s| s.id));
+        cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx)));
+        pump_until(cx, 30, |cx| {
+            cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.id > before && s.ended.is_some()))
+        })
+    };
+    // A run that ran its tests started, failures or not.
+    assert!(run_all(cx), "the run ends");
+    assert!(!cx.update(|_, cx| tests.read(cx).did_not_start(cx)));
+    // Without the Cypress app, Cypress stops before any spec: no tests, so no "Passed".
+    let env = crate::run::config::Environment {
+        name: "no app".into(),
+        vars: [("FAKE_CYPRESS_NO_APP".to_owned(), "1".to_owned())].into_iter().collect(),
+        ..Default::default()
+    };
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.set_environments(vec![env], Some("no app".into()), cx)));
+    assert!(run_all(cx), "the run without the app ends");
+    cx.update(|_, cx| {
+        let s = runs.read(cx).sessions.last().unwrap();
+        let run = s.playwright.as_ref().unwrap();
+        assert_eq!(run.cypress.problems, [crate::cypress::Problem::NoBinary], "{}", s.console_text());
+        assert_eq!(run.counts().total, 0);
+        assert!(tests.read(cx).did_not_start(cx), "it did not start");
+        // An agent asking getTestResults reads the same, not 0 failed.
+        let host = snout_host::local();
+        let answer = crate::claude_ide::capabilities::run::test_run_results(&*host, s, run);
+        assert_eq!(answer["didNotStart"], true, "{answer}");
+        assert_eq!(answer["problems"][0]["title"], "The Cypress app is not installed", "{answer}");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[gpui::test]
+fn a_cypress_run_stopped_by_hand_says_stopped(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress stopped: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-stopped");
+    suite_package(&repo, Runner::Cypress);
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    assert!(pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some())));
+    // Cypress waits before its first spec; Stop then.
+    let env = crate::run::config::Environment {
+        name: "slow".into(),
+        vars: [("FAKE_CYPRESS_SLOW".to_owned(), "1".to_owned())].into_iter().collect(),
+        ..Default::default()
+    };
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.set_environments(vec![env], Some("slow".into()), cx)));
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx)));
+    let waiting = pump_until(cx, 30, |cx| {
+        cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.console_text().contains("Opening Cypress")))
+    });
+    assert!(waiting, "the run is waiting");
+    assert!(!cx.update(|_, cx| tests.read(cx).stopped(cx)), "not stopped while it runs");
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.stop(cx)));
+    let ended =
+        pump_until(cx, 30, |cx| cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.ended.is_some())));
+    assert!(ended, "the run ends");
+    cx.update(|_, cx| {
+        let t = tests.read(cx);
+        assert_eq!(t.run(cx).unwrap().counts().total, 0);
+        assert!(t.stopped(cx), "a run stopped by hand is stopped, not passed");
+        assert!(!t.did_not_start(cx), "stopping it is not something going wrong");
+        let s = runs.read(cx).sessions.last().unwrap();
+        let host = snout_host::local();
+        let answer = crate::claude_ide::capabilities::run::test_run_results(&*host, s, s.playwright.as_ref().unwrap());
+        assert_eq!((answer["stopped"].clone(), answer["didNotStart"].clone()), (true.into(), false.into()), "{answer}");
+    });
     let _ = std::fs::remove_dir_all(repo);
 }

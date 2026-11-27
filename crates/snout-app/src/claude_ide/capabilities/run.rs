@@ -369,43 +369,65 @@ fn output(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut 
     })));
 }
 
+/// How test run `s` (with its `run`) went, for `getTestResults`: its counts, each failure, and
+/// what went wrong outside the tests. `host` is where its package is.
+pub(crate) fn test_run_results(
+    host: &dyn snout_host::Host,
+    s: &crate::run::Session,
+    run: &crate::playwright::report::Run,
+) -> Value {
+    let c = run.counts();
+    let errors: Vec<String> = run.errors.iter().map(TestError::text).collect();
+    // What went wrong that Cypress printed (its app missing, its browser crashed), as the
+    // Tests window says it: "passed" only when tests ran, the Cypress of the package.
+    let passed = c.failed == 0 && c.passed + c.flaky > 0;
+    let version = run.dir.as_deref().and_then(|d| crate::cypress::version(host, d));
+    let problems: Vec<Value> = crate::cypress::ranked(&run.cypress.problems, passed)
+        .iter()
+        .map(|p| json!({ "title": p.title(passed), "detail": p.detail(version.as_deref(), passed) }))
+        .collect();
+    let failures: Vec<Value> = run
+        .order
+        .iter()
+        .filter_map(|id| run.tests.get(id))
+        .filter(|t| t.state(run.over) == State::Failed)
+        .map(|t| {
+            let last = t.last_try();
+            let (file, line) = run.location(&t.id).unwrap_or_else(|| (t.file.clone(), t.line));
+            json!({
+                "title": t.path.join(" > "),
+                "project": t.project,
+                "file": file,
+                "line": line,
+                "errors": last.map(|l| l.errors.iter().map(TestError::text).collect::<Vec<_>>()),
+                "trace": last.and_then(|l| l.trace()),
+            })
+        })
+        .collect();
+    json!({
+        "id": s.id,
+        "running": s.running(),
+        "passed": c.passed,
+        "failed": c.failed,
+        "flaky": c.flaky,
+        "skipped": c.skipped,
+        "stillRunning": c.running,
+        "status": run.status,
+        "didNotStart": crate::playwright::tests::did_not_start(s),
+        "stopped": crate::playwright::tests::stopped(s),
+        "errors": errors,
+        "problems": problems,
+        "failures": failures,
+    })
+}
+
 fn test_results(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
     let Some(s) = session_of(ws, a, cx) else {
         return reply.error(TOOL_ERROR, "No such run. listRuns has them.", None);
     };
     if let Some(run) = s.playwright.as_ref() {
-        let c = run.counts();
-        let errors: Vec<String> = run.errors.iter().map(TestError::text).collect();
-        let failures: Vec<Value> = run
-            .order
-            .iter()
-            .filter_map(|id| run.tests.get(id))
-            .filter(|t| t.state(run.over) == State::Failed)
-            .map(|t| {
-                let last = t.last_try();
-                let (file, line) = run.location(&t.id).unwrap_or_else(|| (t.file.clone(), t.line));
-                json!({
-                    "title": t.path.join(" > "),
-                    "project": t.project,
-                    "file": file,
-                    "line": line,
-                    "errors": last.map(|l| l.errors.iter().map(TestError::text).collect::<Vec<_>>()),
-                    "trace": last.and_then(|l| l.trace()),
-                })
-            })
-            .collect();
-        return reply.ok(tools::json_text(&json!({
-            "id": s.id,
-            "running": s.running(),
-            "passed": c.passed,
-            "failed": c.failed,
-            "flaky": c.flaky,
-            "skipped": c.skipped,
-            "stillRunning": c.running,
-            "status": run.status,
-            "errors": errors,
-            "failures": failures,
-        })));
+        let host = crate::host::host(cx);
+        return reply.ok(tools::json_text(&test_run_results(&*host, s, run)));
     }
     let Some(tree) = s.tests.as_ref() else {
         return reply.ok(tools::json_text(&json!({ "id": s.id, "running": s.running(), "tests": Value::Null })));

@@ -4,7 +4,10 @@
 // process, with the runner's events and test objects shaped as Cypress makes them (ids,
 // `invocationDetails`, a failure's `codeFrame`). The specs are read by line: `describe('x'`
 // opens a group, `it('y'` is a test, which fails when its title has "fails" in it.
-// FAKE_CYPRESS_CRASH=1 ends the run as an old Cypress does on a new macOS.
+// FAKE_CYPRESS_CRASH=1 ends the run as an old Cypress does on a new macOS, and
+// FAKE_CYPRESS_NO_APP=1 as Cypress does without its app, before any spec. FAKE_CYPRESS_SLOW=1
+// waits a minute before the specs, to be stopped. `cypress install` only says so: the app it
+// would download is not needed here.
 
 'use strict';
 
@@ -14,6 +17,20 @@ const { EventEmitter } = require('events');
 
 const args = process.argv.slice(2);
 fs.writeFileSync(path.join(process.cwd(), 'cypress-args.json'), JSON.stringify(args));
+if (args[0] === 'install') {
+  console.log('Installing Cypress');
+  process.exit(0);
+}
+if (process.env.FAKE_CYPRESS_NO_APP === '1') {
+  console.error('No version of Cypress is installed in: /home/qa/.cache/Cypress/13.6.4/Cypress');
+  console.error('');
+  console.error('Please reinstall Cypress by running: cypress install');
+  process.exit(1);
+}
+if (process.env.FAKE_CYPRESS_SLOW === '1') {
+  console.log('Opening Cypress...');
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);
+}
 const flag = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
