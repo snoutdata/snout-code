@@ -645,6 +645,13 @@ impl Workspace {
             (Need::Browsers { .. }, true) => {
                 (ts!("lang-installing-playwrights-browsers-the-build-window-shows-h").to_owned(), None)
             }
+            (Need::CypressApp { .. }, true) => {
+                (ts!("lang-installing-the-cypress-app-the-build-window-shows").to_owned(), None)
+            }
+            (Need::CypressApp { version, .. }, false) => (
+                t!("lang-cypress-app-not-downloaded", version = version.to_string()),
+                Some(crate::cypress::Fix::InstallBinary.label()),
+            ),
             (Need::Packages { manager, dir }, false) => (
                 match dir {
                     Some(dir) => t!("lang-the-packages-of-are-not-installed-so-it", dir = (folder(dir)).to_string()),

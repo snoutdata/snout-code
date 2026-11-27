@@ -12,6 +12,17 @@ A package tests with Cypress when its `package.json` depends on `cypress` or it 
 
 SnoutCode runs the package's own Cypress, from its `node_modules`, on the package's Node. Its specs are the files the configuration's `specPattern` names, when that is written as text (`specPattern: 'cypress/e2e/**/*.cy.ts'`, or a list of them); otherwise Cypress's own `cypress/e2e/**/*.cy.{js,jsx,ts,tsx}`.
 
+## The Cypress app
+
+The `cypress` package downloads the Cypress app it runs when it is installed, through an install script. Some package managers run no install scripts of their packages unless told to, so the package arrives without its app, and the install often still ends well:
+
+- **npm 12** warns (`npm warn install-scripts … cypress`) and skips it, unless the project's `allowScripts` lets Cypress's script run.
+- **pnpm** skips it unless `allowBuilds` approves Cypress; by default it then ends the install with an error.
+- **Yarn** skips it when `enableScripts` is off, the default in its current documentation.
+- **Bun** runs it: Cypress is one of the packages it trusts by default.
+
+Whatever the cause, when a package's Cypress is installed but its app is not in Cypress's cache (`CYPRESS_CACHE_FOLDER`, else `~/.cache/Cypress`, `~/Library/Caches/Cypress` on macOS, `%LOCALAPPDATA%\Cypress\Cache` on Windows), the bar above the editor says so, straight after the packages' install, and **Install the Cypress App** runs `cypress install` in the Build window. A run without the app ends with the same fix (see [When a run goes wrong](#when-a-run-goes-wrong)). With `CYPRESS_RUN_BINARY` set, the app is the one it names, and the bar does not ask.
+
 ## The Cypress window
 
 Its button is on the right stripe, with the number of failed tests on it. **View ▸ Show the Cypress Window** opens it too.

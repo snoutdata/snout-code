@@ -25,13 +25,16 @@ pub enum Need {
     Packages { manager: PackageManager, dir: Option<PathBuf> },
     /// The browsers this Playwright version runs are not downloaded: their names.
     Browsers { version: String, missing: Vec<String> },
+    /// The `cypress` package is installed but not the app it downloads (`cypress install`
+    /// gets it): its version, and the package's folder when not the project's.
+    CypressApp { version: String, dir: Option<PathBuf> },
 }
 
 impl Need {
     /// The folder the install runs in, when not the project's.
     pub fn dir(&self) -> Option<&Path> {
         match self {
-            Need::Packages { dir, .. } => dir.as_deref(),
+            Need::Packages { dir, .. } | Need::CypressApp { dir, .. } => dir.as_deref(),
             Need::Browsers { .. } => None,
         }
     }
@@ -123,7 +126,8 @@ fn node_line(host: &dyn Host, root: &Path, stop: Option<&Path>) -> String {
 }
 
 /// What the project at `root` (of `kind`) needs, if anything: a Node project's packages
-/// first, then what its Playwright tests need.
+/// first, then the Cypress app its Cypress packages download, then what its Playwright tests
+/// need.
 pub fn check(host: &dyn Host, root: &Path, kind: Kind) -> Option<Need> {
     if kind == Kind::Playwright {
         return playwright_need(host, root);
@@ -137,7 +141,18 @@ pub fn check(host: &dyn Host, root: &Path, kind: Kind) -> Option<Need> {
         (has_dependencies(host, &pkg) && !installed)
             .then(|| Need::Packages { manager: manager_of(host, &at, root), dir: Some(at).filter(|a| a != root) })
     });
-    packages_need.or_else(|| kind.has_playwright().then(|| playwright_need(host, root)).flatten())
+    packages_need
+        .or_else(|| cypress_need(host, root, &crate::cypress::cache_dir(host)))
+        .or_else(|| kind.has_playwright().then(|| playwright_need(host, root)).flatten())
+}
+
+/// The Cypress app a package of the project at `root` that tests with Cypress lacks, looking
+/// in `cache`.
+pub fn cypress_need(host: &dyn Host, root: &Path, cache: &Path) -> Option<Need> {
+    crate::jstest::suites(host, root).into_iter().filter(|s| s.runner == crate::jstest::Runner::Cypress).find_map(|s| {
+        let version = crate::cypress::missing_app(host, &s.dir, cache)?;
+        Some(Need::CypressApp { version, dir: Some(s.dir).filter(|d| d != root) })
+    })
 }
 
 /// What the Playwright tests at `root` need: the test runner installed, then its browsers.
@@ -195,6 +210,9 @@ pub fn install_launch(host: &dyn Host, root: &Path, need: &Need, node: &Node) ->
                 debug_node: None,
                 attach: None,
             })
+        }
+        Need::CypressApp { .. } => {
+            crate::cypress::fix_launch(host, root, root, node, crate::cypress::Fix::InstallBinary)
         }
         Need::Browsers { .. } => {
             let cli = package_dir(host, root, super::TEST_PACKAGE)
@@ -262,10 +280,13 @@ impl Setup {
                 }
             }),
             cx.subscribe(&runs, |this, _, e: &RunsEvent, cx| {
-                if let RunsEvent::Ended(id) = e
-                    && this.installing == Some(*id)
-                {
-                    this.installed(*id, cx);
+                if let RunsEvent::Ended(id) = e {
+                    if this.installing == Some(*id) {
+                        this.installed(*id, cx);
+                    } else if matches!(this.need, Some(Need::CypressApp { .. })) {
+                        // The app may have come another way: a run's fix, a terminal.
+                        this.look(cx);
+                    }
                 }
             }),
         ];

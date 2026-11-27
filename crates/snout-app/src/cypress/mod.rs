@@ -112,6 +112,62 @@ pub fn version(host: &dyn Host, dir: &Path) -> Option<String> {
     manifest.get("version")?.as_str().map(str::to_owned)
 }
 
+/// Where Cypress keeps its apps on `host`, as its CLI finds the folder:
+/// `CYPRESS_CACHE_FOLDER`, else the system's cache folder.
+pub fn cache_dir(host: &dyn Host) -> PathBuf {
+    let info = host.info();
+    let set = info.var("CYPRESS_CACHE_FOLDER").map(|v| v.trim().trim_matches('"')).filter(|v| !v.is_empty());
+    if let Some(v) = set {
+        return match v.strip_prefix("~/").or_else(|| v.strip_prefix("~\\")) {
+            Some(rest) => info.home.join(rest),
+            None => PathBuf::from(v),
+        };
+    }
+    if info.is_mac() {
+        info.home.join("Library/Caches/Cypress")
+    } else if info.is_windows() {
+        info.var("LOCALAPPDATA").map_or_else(|| info.home.join("AppData/Local"), PathBuf::from).join("Cypress/Cache")
+    } else {
+        info.var("XDG_CACHE_HOME").map_or_else(|| info.home.join(".cache"), PathBuf::from).join("Cypress")
+    }
+}
+
+/// The program of the Cypress app `version` in `cache`, as Cypress lays it out on `host`'s
+/// system.
+pub fn app_file(host: &dyn Host, cache: &Path, version: &str) -> PathBuf {
+    let info = host.info();
+    let at = cache.join(version);
+    if info.is_mac() {
+        at.join("Cypress.app/Contents/MacOS/Cypress")
+    } else if info.is_windows() {
+        at.join("Cypress").join("Cypress.exe")
+    } else {
+        at.join("Cypress").join("Cypress")
+    }
+}
+
+/// The version of the Cypress app the package at `dir` lacks, looking in `cache`: its
+/// `cypress` package is installed, but not the app that package downloads on install (a
+/// package manager that runs no install scripts of its own accord skips it). None when
+/// `CYPRESS_RUN_BINARY` names an app of its own, or the package is a build Cypress keeps
+/// under another name.
+pub fn missing_app(host: &dyn Host, dir: &Path, cache: &Path) -> Option<String> {
+    if host.info().var("CYPRESS_RUN_BINARY").is_some_and(|v| !v.is_empty()) {
+        return None;
+    }
+    let pkg = crate::playwright::setup::package_dir(host, dir, "cypress")?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&host.read_to_string(&pkg.join("package.json")).ok()?).ok()?;
+    let version = manifest.get("version")?.as_str()?.to_owned();
+    // A pre-release build lives in a folder named after its branch and commit.
+    if manifest.pointer("/buildInfo/stable").and_then(serde_json::Value::as_bool) == Some(false) {
+        return None;
+    }
+    // Cypress reads a relative cache folder from where it runs: the package.
+    let cache = dir.join(cache);
+    (!host.is_file(&app_file(host, &cache, &version))).then_some(version)
+}
+
 /// The browser Cypress runs the specs in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Browser {
