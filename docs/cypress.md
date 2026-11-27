@@ -22,7 +22,7 @@ Its button is on the right stripe, with the number of failed tests on it. **View
 - **The environment** the tests point at, the same list as Playwright's (see [Environments](playwright.md#environments)). Its application URL reaches Cypress as `baseUrl`, and each of its variables both as it is and as `CYPRESS_<name>`, so `Cypress.env('USER_EMAIL')` reads `USER_EMAIL`.
 - **Watch** runs with the browser showing (`--headed`).
 - **The summary** says how the last run went (`1 of 4 failed`), how long it took, and which Cypress the package has.
-- **The specs**, named from the folder they sit in, each with how it went: passed, failed or flaky, how many of its tests ran, and its time. Before any run in this window, a spec shows how it went in the last run kept. Click a spec to open it; double click it, or click the run icon at the end of its row, to run it alone.
+- **The specs**, named from the folder they sit in, each with how it went: passed, failed or flaky, how many of its tests ran, and its time. Before any run in this window, a spec shows how it went in the last run kept. Click a spec to show it in the preview tab, which the next spec you click replaces; double click it, or click the run icon at the end of its row, to run it alone.
 - **Show the results** brings the Tests window forward.
 
 The header's **Find the Specs Again** looks for specs again after you add or move some.

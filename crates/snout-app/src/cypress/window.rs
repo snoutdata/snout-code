@@ -545,7 +545,7 @@ impl Render for CypressWindow {
                                 start(&tests, scope, cx);
                             } else if let Some(runs) = crate::run::runs(cx) {
                                 let file = open_file.clone();
-                                runs.update(cx, |_, cx| cx.emit(RunsEvent::OpenAt(file, 0)));
+                                runs.update(cx, |_, cx| cx.emit(RunsEvent::PreviewFile(file)));
                             }
                         })
                     })

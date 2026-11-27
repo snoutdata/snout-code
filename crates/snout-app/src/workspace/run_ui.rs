@@ -33,6 +33,7 @@ impl Workspace {
             }
             RunsEvent::OpenLink(link) => self.open_link(link.clone(), window, cx),
             RunsEvent::OpenAt(path, line) => self.open_file(path.clone(), Some((*line, 0)), false, window, cx),
+            RunsEvent::PreviewFile(path) => self.open_file(path.clone(), None, true, window, cx),
             RunsEvent::EditConfigurations => self.open_config_dialog(window, cx),
             RunsEvent::ShowProblems => self.show_problems(window, cx),
             RunsEvent::Ended(id) => self.tool_ended(*id, window, cx),

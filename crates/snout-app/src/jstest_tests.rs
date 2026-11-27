@@ -482,3 +482,63 @@ fn the_npm_script_that_runs_cypress_reports_to_the_tests_window(cx: &mut gpui::T
     assert!(args.iter().any(|a| a == "--reporter"), "{args:?}");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn a_click_on_a_spec_in_the_cypress_window_previews_it_and_a_double_click_runs_it(cx: &mut gpui::TestAppContext) {
+    use gpui::{Modifiers, MouseButton};
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress window: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-window");
+    suite_package(&repo, Runner::Cypress);
+    let (_model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some()));
+    assert!(found, "the package's specs are found");
+    cx.update(|w, cx| ws.update(cx, |ws, cx| ws.show_tool(crate::workspace::Tool::Cypress, w, cx)));
+    let drawn = pump_until(cx, 10, |cx| {
+        cx.update(|w, _| w.refresh());
+        cx.debug_bounds("cypress-spec-0").is_some()
+    });
+    assert!(drawn, "the Cypress window lists the specs");
+    let row = cx.debug_bounds("cypress-spec-0").unwrap().center();
+    let sessions = |cx: &mut gpui::VisualTestContext| cx.update(|_, cx| runs.read(cx).sessions.len());
+    // One click shows the spec in the preview tab, and runs nothing; the next spec takes its tab.
+    let (cart, login) = (repo.join("cypress/e2e/cart.cy.js"), repo.join("cypress/e2e/login.cy.js"));
+    let other = cx.debug_bounds("cypress-spec-1").expect("the second spec is listed").center();
+    cx.simulate_click(other, Modifiers::none());
+    cx.run_until_parked();
+    let shown = editor_of(&ws, &login, cx).expect("one click opens the spec");
+    cx.update(|_, cx| assert!(shown.read(cx).preview, "in the preview tab"));
+    cx.simulate_click(row, Modifiers::none());
+    cx.run_until_parked();
+    assert!(editor_of(&ws, &cart, cx).is_some(), "the next spec opens");
+    assert!(editor_of(&ws, &login, cx).is_none(), "in the first one's tab");
+    assert_eq!(sessions(cx), 0, "one click runs nothing");
+    // The second click of a double click, where the first was: the spec runs alone.
+    let row = cx.debug_bounds("cypress-spec-0").expect("the row is still drawn").center();
+    cx.simulate_event(gpui::MouseDownEvent {
+        position: row,
+        button: MouseButton::Left,
+        modifiers: Modifiers::none(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        position: row,
+        button: MouseButton::Left,
+        modifiers: Modifiers::none(),
+        click_count: 2,
+    });
+    let started = pump_until(cx, 10, |cx| cx.update(|_, cx| !runs.read(cx).sessions.is_empty()));
+    assert!(started, "a double click runs the spec");
+    let ended = pump_until(cx, 30, |cx| cx.update(|_, cx| runs.read(cx).sessions.iter().all(|s| s.ended.is_some())));
+    assert!(ended, "the run ends");
+    let args = args_of(&repo, Runner::Cypress);
+    let at = args.iter().position(|a| a == "--spec").map(|i| args[i + 1].clone());
+    assert_eq!(at.as_deref(), Some("cypress/e2e/cart.cy.js"), "{args:?}");
+    let _ = std::fs::remove_dir_all(repo);
+}
