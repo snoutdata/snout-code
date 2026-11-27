@@ -410,6 +410,7 @@ impl Render for CypressWindow {
             (Some(c), _) if c.failed > 0 => {
                 (t!("cypress-failed-of", failed = (c.failed as u64), total = (c.total as u64)), p.error)
             }
+            (Some(_), _) if t.stopped(cx) => (ts!("run-stopped").to_owned(), p.fg_dim),
             (Some(c), _) if c.total > 0 => {
                 (t!("cypress-passed-of", passed = ((c.passed + c.flaky) as u64), total = (c.total as u64)), p.ok)
             }

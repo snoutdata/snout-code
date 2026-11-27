@@ -274,6 +274,14 @@ impl PwTests {
         !s.running() && run.tests.is_empty() && (!run.errors.is_empty() || !run.cypress.problems.is_empty() || failed)
     }
 
+    /// Whether the run in front was stopped: its runner said so, or it was stopped by hand
+    /// (Cypress's reporter cannot say so, the process just ends).
+    pub fn stopped(&self, cx: &App) -> bool {
+        let Some(s) = self.live.and_then(|id| self.runs.read(cx).session(id)) else { return false };
+        let interrupted = s.playwright.as_ref().is_some_and(|r| r.status.as_deref() == Some("interrupted"));
+        interrupted || s.ended.as_ref().is_some_and(|e| e.outcome == crate::run::Outcome::Cancelled)
+    }
+
     /// How long the run in front has taken.
     pub fn elapsed_ms(&self, cx: &App) -> u64 {
         self.live.and_then(|id| self.runs.read(cx).session(id)).map_or(0, |s| s.elapsed().as_millis() as u64)

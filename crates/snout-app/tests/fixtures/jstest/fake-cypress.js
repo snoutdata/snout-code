@@ -5,8 +5,9 @@
 // `invocationDetails`, a failure's `codeFrame`). The specs are read by line: `describe('x'`
 // opens a group, `it('y'` is a test, which fails when its title has "fails" in it.
 // FAKE_CYPRESS_CRASH=1 ends the run as an old Cypress does on a new macOS, and
-// FAKE_CYPRESS_NO_APP=1 as Cypress does without its app, before any spec. `cypress install`
-// only says so: the app it would download is not needed here.
+// FAKE_CYPRESS_NO_APP=1 as Cypress does without its app, before any spec. FAKE_CYPRESS_SLOW=1
+// waits a minute before the specs, to be stopped. `cypress install` only says so: the app it
+// would download is not needed here.
 
 'use strict';
 
@@ -25,6 +26,10 @@ if (process.env.FAKE_CYPRESS_NO_APP === '1') {
   console.error('');
   console.error('Please reinstall Cypress by running: cypress install');
   process.exit(1);
+}
+if (process.env.FAKE_CYPRESS_SLOW === '1') {
+  console.log('Opening Cypress...');
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);
 }
 const flag = (name) => {
   const i = args.indexOf(name);

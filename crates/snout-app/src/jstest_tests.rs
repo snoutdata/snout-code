@@ -610,3 +610,42 @@ fn a_cypress_run_without_the_app_did_not_start(cx: &mut gpui::TestAppContext) {
     });
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn a_cypress_run_stopped_by_hand_says_stopped(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress stopped: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-stopped");
+    suite_package(&repo, Runner::Cypress);
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    assert!(pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some())));
+    // Cypress waits before its first spec; Stop then.
+    let env = crate::run::config::Environment {
+        name: "slow".into(),
+        vars: [("FAKE_CYPRESS_SLOW".to_owned(), "1".to_owned())].into_iter().collect(),
+        ..Default::default()
+    };
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.set_environments(vec![env], Some("slow".into()), cx)));
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx)));
+    let waiting = pump_until(cx, 30, |cx| {
+        cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.console_text().contains("Opening Cypress")))
+    });
+    assert!(waiting, "the run is waiting");
+    assert!(!cx.update(|_, cx| tests.read(cx).stopped(cx)), "not stopped while it runs");
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.stop(cx)));
+    let ended =
+        pump_until(cx, 30, |cx| cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.ended.is_some())));
+    assert!(ended, "the run ends");
+    cx.update(|_, cx| {
+        let t = tests.read(cx);
+        assert_eq!(t.run(cx).unwrap().counts().total, 0);
+        assert!(t.stopped(cx), "a run stopped by hand is stopped, not passed");
+        assert!(!t.did_not_start(cx), "stopping it is not something going wrong");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}
