@@ -599,3 +599,55 @@ fn run_in_the_title_bar_runs_the_spec_in_front_else_all_the_specs(cx: &mut gpui:
     assert_eq!(spec_arg(&repo).as_deref(), Some("cypress/e2e/cart.cy.js"));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn a_fix_that_installs_the_cypress_app_runs_the_specs_again(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress install fix: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-install-fix");
+    suite_package(&repo, Runner::Cypress);
+    let (_model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some()));
+    assert!(found, "the package's specs are found");
+    // The newest Cypress run: a rerun takes the place of the run it repeats, as a new session.
+    let cypress_run = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| {
+            let r = runs.read(cx);
+            r.sessions
+                .iter()
+                .filter(|s| s.playwright.as_ref().is_some_and(|p| p.runner == Some(Runner::Cypress)))
+                .map(|s| s.id)
+                .max()
+        })
+    };
+    let all_ended =
+        |cx: &mut gpui::VisualTestContext| cx.update(|_, cx| runs.read(cx).sessions.iter().all(|s| s.ended.is_some()));
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx)));
+    assert!(pump_until(cx, 30, |cx| cypress_run(cx).is_some() && all_ended(cx)), "the first run ends");
+    let first = cypress_run(cx).unwrap();
+    // `cypress install` that goes well; anything else runs the specs as before.
+    let fake = fixtures().join("fake-cypress.js");
+    let wrapper = format!(
+        "#!/usr/bin/env node\nif (process.argv[2] === 'install') {{\n  console.log('Cypress installed');\n  process.exit(0);\n}}\nrequire({:?});\n",
+        fake.display().to_string()
+    );
+    write(&repo, "node_modules/cypress/bin/cypress", &wrapper);
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.fix(crate::cypress::Fix::InstallBinary, cx)));
+    let installed = pump_until(cx, 30, |cx| {
+        cx.update(|_, cx| {
+            runs.read(cx).sessions.iter().any(|s| {
+                s.place() == crate::run::Place::Build
+                    && s.ended.as_ref().is_some_and(|e| e.outcome == crate::run::Outcome::Success)
+            })
+        })
+    });
+    assert!(installed, "the install runs and goes well");
+    let again = pump_until(cx, 30, |cx| cypress_run(cx).is_some_and(|id| id > first) && all_ended(cx));
+    assert!(again, "the specs run again once the app is installed");
+    let _ = std::fs::remove_dir_all(repo);
+}
