@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use gpui::Context;
 
 use super::node_run::project_node;
-use super::{Launch, Outcome, Runs};
+use super::{Launch, Outcome, Place, Runs, RunsEvent};
 use crate::cypress::{Browser, Fix, Options};
 use crate::jstest::{Runner, Scope};
 
@@ -72,8 +72,20 @@ impl Runs {
     }
 
     /// Open the Cypress app on the package at `dir`, in the browser picked: to watch a spec
-    /// run step by step, and to debug it in the browser's developer tools.
+    /// run step by step, and to debug it in the browser's developer tools. One already open
+    /// there stays the one: its Run tab comes forward.
     pub fn open_cypress(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
+        let open = self.sessions.iter().rev().find(|s| {
+            s.running()
+                && s.title == ts!("cypress-open-cypress")
+                && matches!(&s.launch, Launch::Process(p) if p.cwd == dir)
+        });
+        if let Some(id) = open.map(|s| s.id) {
+            self.select(Place::Run, id, cx);
+            cx.emit(RunsEvent::Show(Place::Run));
+            self.say(ts!("cypress-the-cypress-app-is-already-open"), cx);
+            return;
+        }
         let Some(project) = self.model.read(cx).project_root() else { return };
         let host = crate::host::host(cx);
         let browser = self.cypress_browser();

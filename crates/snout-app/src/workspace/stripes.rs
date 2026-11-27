@@ -643,6 +643,9 @@ impl Workspace {
                 Tool::Cypress => self.pw_tests.read(cx).cypress_suite(cx).is_some(),
                 Tool::Gradle => self.shows_gradle(cx),
                 Tool::Maven => self.shows_maven(cx),
+                Tool::Spring => {
+                    self.model.read(cx).project_root().is_some_and(|r| crate::project_model::project_is_java(&r, cx))
+                }
                 _ => true,
             };
             if !shown {

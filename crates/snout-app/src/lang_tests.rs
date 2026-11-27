@@ -660,3 +660,33 @@ fn empty_problems_offer_build_project_in_a_gradle_project(cx: &mut TestAppContex
     let files = [("build.gradle", "apply plugin: 'java'\n"), ("settings.gradle", "rootProject.name = 'demo'\n")];
     assert!(empty_problems_offer_build("problems-gradle", &files, cx), "Build Project compiles it");
 }
+
+/// Whether the stripes of a project with `files` offer the Spring window.
+fn stripes_offer_spring(name: &str, files: &[(&str, &str)], cx: &mut TestAppContext) -> bool {
+    let repo = crate::tests::demo_repo(name);
+    for (file, text) in files {
+        std::fs::write(repo.join(file), text).unwrap();
+    }
+    let (_model, _ws, cx) = open(cx, with_repo(&repo));
+    let java = !files.is_empty();
+    let known =
+        pump_until(cx, 10, |cx| cx.update(|_, cx| crate::project_model::project_java_known(&repo, cx) == Some(java)));
+    assert!(known, "the project is known to be Java or not");
+    cx.update(|w, _| w.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("stripe-problems").is_some(), "the stripes are drawn");
+    let spring = cx.debug_bounds("stripe-spring").is_some();
+    let _ = std::fs::remove_dir_all(repo);
+    spring
+}
+
+#[gpui::test]
+fn a_project_without_java_has_no_spring_window(cx: &mut TestAppContext) {
+    assert!(!stripes_offer_spring("spring-node", &[], cx), "no Spring without Java");
+}
+
+#[gpui::test]
+fn a_gradle_project_has_the_spring_window(cx: &mut TestAppContext) {
+    let files = [("build.gradle", "apply plugin: 'java'\n"), ("settings.gradle", "rootProject.name = 'demo'\n")];
+    assert!(stripes_offer_spring("spring-gradle", &files, cx), "its stripe offers Spring");
+}

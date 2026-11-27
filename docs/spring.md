@@ -57,7 +57,7 @@ Press ⌘. on the warning for quick fixes:
 
 ## The Spring tool window
 
-Open it from the leaf on the right stripe, or with **Spring Beans and Endpoints** in the command palette (⇧⌘P). Its header has **Read the Spring Model Again**, **Collapse All** and **Hide**; the first two are also in the command palette, and **Collapse the Spring Window** in View ▸ Tool Window Actions.
+Open it from the leaf on the right stripe (in a Java project), or with **Spring Beans and Endpoints** in the command palette (⇧⌘P). Its header has **Read the Spring Model Again**, **Collapse All** and **Hide**; the first two are also in the command palette, and **Collapse the Spring Window** in View ▸ Tool Window Actions.
 
 Until the engine has imported the project, the window says "No Spring model yet". While it reads, the header says "Reading…".
 

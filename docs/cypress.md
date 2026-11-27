@@ -17,7 +17,7 @@ SnoutCode runs the package's own Cypress, from its `node_modules`, on the packag
 Its button is on the right stripe, with the number of failed tests on it. **View ▸ Show the Cypress Window** opens it too.
 
 - **Run all** runs every spec; **Stop** ends a run. **Rerun failed** runs the specs that failed in the last run.
-- **Open Cypress** opens the Cypress app on the package (`cypress open --e2e`), in the browser picked, to watch a test step by step and debug it in the browser's developer tools.
+- **Open Cypress** opens the Cypress app on the package (`cypress open --e2e`), in the browser picked, to watch a test step by step and debug it in the browser's developer tools. While it is open, Open Cypress again brings its Run tab forward instead of opening a second one; stop it there to open it in another browser.
 - **The browser** the specs run in: Electron (the one Cypress comes with), or Chrome, Edge or Firefox when installed. The choice is kept with the project's settings on this machine.
 - **The environment** the tests point at, the same list as Playwright's (see [Environments](playwright.md#environments)). Its application URL reaches Cypress as `baseUrl`, and each of its variables both as it is and as `CYPRESS_<name>`, so `Cypress.env('USER_EMAIL')` reads `USER_EMAIL`.
 - **Watch** runs with the browser showing (`--headed`).

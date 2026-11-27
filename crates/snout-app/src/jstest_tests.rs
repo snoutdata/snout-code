@@ -651,3 +651,48 @@ fn a_fix_that_installs_the_cypress_app_runs_the_specs_again(cx: &mut gpui::TestA
     assert!(again, "the specs run again once the app is installed");
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn open_cypress_again_brings_the_open_app_forward(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("open cypress again: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-open-again");
+    suite_package(&repo, Runner::Cypress);
+    // `cypress open` stays open, as the app does until it is closed.
+    let fake = fixtures().join("fake-cypress.js");
+    let wrapper = format!(
+        "#!/usr/bin/env node\nif (process.argv[2] === 'open') {{\n  console.log('Cypress opened');\n  setTimeout(() => {{}}, 60000);\n}} else {{\n  require({:?});\n}}\n",
+        fake.display().to_string()
+    );
+    write(&repo, "node_modules/cypress/bin/cypress", &wrapper);
+    let (_model, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    let found = pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some()));
+    assert!(found, "the package's specs are found");
+    let open_apps = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| {
+            runs.read(cx)
+                .sessions
+                .iter()
+                .filter(|s| s.running() && s.title == ts!("cypress-open-cypress"))
+                .map(|s| s.id)
+                .collect::<Vec<_>>()
+        })
+    };
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.open_cypress(cx)));
+    assert!(pump_until(cx, 10, |cx| open_apps(cx).len() == 1), "the app opens");
+    let first = open_apps(cx)[0];
+    cx.update(|_, cx| tests.update(cx, |t, cx| t.open_cypress(cx)));
+    cx.run_until_parked();
+    assert_eq!(open_apps(cx), [first], "the open app stays the only one");
+    cx.update(|_, cx| {
+        assert_eq!(runs.read(cx).selected.get(&crate::run::Place::Run), Some(&first), "its tab is in front");
+    });
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.stop(first, cx)));
+    assert!(pump_until(cx, 10, |cx| open_apps(cx).is_empty()), "it stops");
+    let _ = std::fs::remove_dir_all(repo);
+}

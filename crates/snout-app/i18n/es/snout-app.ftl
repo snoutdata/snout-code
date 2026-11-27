@@ -2444,6 +2444,7 @@ cypress-specs = { $count ->
     }
 cypress-specs-heading = Specs
 cypress-open-cypress = Abrir Cypress
+cypress-the-cypress-app-is-already-open = La aplicación de Cypress ya está abierta
 cypress-open-cypress-tip = Abrir la aplicación de Cypress en estas specs, para seguir una prueba paso a paso y depurarla en las herramientas de desarrollo del navegador
 cypress-open-in-cypress = Abrir en Cypress
 cypress-the-browser-the-specs-run-in = El navegador en el que se ejecutan las specs
