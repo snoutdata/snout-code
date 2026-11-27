@@ -425,6 +425,11 @@ fn a_cypress_run_fills_the_tests_window_and_says_how_to_fix_a_crash(cx: &mut gpu
         let run = s.playwright.as_ref().unwrap();
         assert_eq!(run.cypress.problems, [crate::cypress::Problem::Crashed { signal: "SIGSEGV".into() }]);
         assert_eq!(run.environment.as_deref(), Some("crashy"));
+        // The agent hears the crash as the Tests window tells it, with the package's Cypress.
+        let host = snout_host::local();
+        let answer = crate::claude_ide::capabilities::run::test_run_results(&*host, s, run);
+        let detail = answer["problems"][0]["detail"].as_str().unwrap_or_default().to_owned();
+        assert!(detail.contains("13.6.4") && !detail.contains("the results stand"), "{answer}");
     });
     cx.update(|w, _| w.refresh());
     cx.run_until_parked();
@@ -607,6 +612,11 @@ fn a_cypress_run_without_the_app_did_not_start(cx: &mut gpui::TestAppContext) {
         assert_eq!(run.cypress.problems, [crate::cypress::Problem::NoBinary], "{}", s.console_text());
         assert_eq!(run.counts().total, 0);
         assert!(tests.read(cx).did_not_start(cx), "it did not start");
+        // An agent asking getTestResults reads the same, not 0 failed.
+        let host = snout_host::local();
+        let answer = crate::claude_ide::capabilities::run::test_run_results(&*host, s, run);
+        assert_eq!(answer["didNotStart"], true, "{answer}");
+        assert_eq!(answer["problems"][0]["title"], "The Cypress app is not installed", "{answer}");
     });
     let _ = std::fs::remove_dir_all(repo);
 }
@@ -646,6 +656,10 @@ fn a_cypress_run_stopped_by_hand_says_stopped(cx: &mut gpui::TestAppContext) {
         assert_eq!(t.run(cx).unwrap().counts().total, 0);
         assert!(t.stopped(cx), "a run stopped by hand is stopped, not passed");
         assert!(!t.did_not_start(cx), "stopping it is not something going wrong");
+        let s = runs.read(cx).sessions.last().unwrap();
+        let host = snout_host::local();
+        let answer = crate::claude_ide::capabilities::run::test_run_results(&*host, s, s.playwright.as_ref().unwrap());
+        assert_eq!((answer["stopped"].clone(), answer["didNotStart"].clone()), (true.into(), false.into()), "{answer}");
     });
     let _ = std::fs::remove_dir_all(repo);
 }

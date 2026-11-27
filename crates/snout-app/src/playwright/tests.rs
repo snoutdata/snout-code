@@ -264,22 +264,14 @@ impl PwTests {
         self.live.and_then(|id| self.runs.read(cx).session(id)).is_some_and(|s| s.running())
     }
 
-    /// Whether the run in front ended without running a test, because something went wrong:
-    /// an error outside the tests, a problem Cypress printed, or a failed exit. A run
-    /// stopped by hand is not one.
+    /// Whether the run in front never got to a test (see [`did_not_start`]).
     pub fn did_not_start(&self, cx: &App) -> bool {
-        let Some(s) = self.live.and_then(|id| self.runs.read(cx).session(id)) else { return false };
-        let Some(run) = s.playwright.as_ref() else { return false };
-        let failed = s.ended.as_ref().is_some_and(|e| e.outcome == crate::run::Outcome::Failed);
-        !s.running() && run.tests.is_empty() && (!run.errors.is_empty() || !run.cypress.problems.is_empty() || failed)
+        self.live.and_then(|id| self.runs.read(cx).session(id)).is_some_and(did_not_start)
     }
 
-    /// Whether the run in front was stopped: its runner said so, or it was stopped by hand
-    /// (Cypress's reporter cannot say so, the process just ends).
+    /// Whether the run in front was stopped (see [`stopped`]).
     pub fn stopped(&self, cx: &App) -> bool {
-        let Some(s) = self.live.and_then(|id| self.runs.read(cx).session(id)) else { return false };
-        let interrupted = s.playwright.as_ref().is_some_and(|r| r.status.as_deref() == Some("interrupted"));
-        interrupted || s.ended.as_ref().is_some_and(|e| e.outcome == crate::run::Outcome::Cancelled)
+        self.live.and_then(|id| self.runs.read(cx).session(id)).is_some_and(stopped)
     }
 
     /// How long the run in front has taken.
@@ -569,6 +561,22 @@ impl PwTests {
         }
         cx.notify();
     }
+}
+
+/// Whether test run `s` ended without running a test, because something went wrong: an
+/// error outside the tests, a problem Cypress printed, or a failed exit. A run stopped by
+/// hand is not one.
+pub fn did_not_start(s: &crate::run::Session) -> bool {
+    let Some(run) = s.playwright.as_ref() else { return false };
+    let failed = s.ended.as_ref().is_some_and(|e| e.outcome == crate::run::Outcome::Failed);
+    !s.running() && run.tests.is_empty() && (!run.errors.is_empty() || !run.cypress.problems.is_empty() || failed)
+}
+
+/// Whether test run `s` was stopped: its runner said so, or it was stopped by hand (Cypress's
+/// reporter cannot say so, the process just ends).
+pub fn stopped(s: &crate::run::Session) -> bool {
+    let interrupted = s.playwright.as_ref().is_some_and(|r| r.status.as_deref() == Some("interrupted"));
+    interrupted || s.ended.as_ref().is_some_and(|e| e.outcome == crate::run::Outcome::Cancelled)
 }
 
 /// Whether a run's arguments run every test: no file, project, grep or last-failed filter.
