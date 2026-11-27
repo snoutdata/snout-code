@@ -2147,6 +2147,7 @@ editor-expand-all = Tout déplier
 editor-collapse-all = Tout replier
 editor-no-problems = Aucun problème
 editor-nothing-to-fix-in-the-files-the-java = Rien à corriger dans les fichiers vérifiés par le moteur Java.
+editor-nothing-to-fix-in-the-files-checked = Rien à corriger dans les fichiers vérifiés jusqu’ici.
 editor-no-problems-match = Aucun problème ne correspond
 editor-clear-the-filter-or-turn-on-more-of = Effacez le filtre, ou activez davantage d’erreurs, d’avertissements et d’informations ci-dessus.
 editor-filter-by-name = Filtrer par nom

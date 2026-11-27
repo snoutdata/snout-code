@@ -2147,6 +2147,7 @@ editor-expand-all = Expandir tudo
 editor-collapse-all = Recolher tudo
 editor-no-problems = Nenhum problema
 editor-nothing-to-fix-in-the-files-the-java = Nada para corrigir nos arquivos verificados pelo mecanismo Java.
+editor-nothing-to-fix-in-the-files-checked = Nada para corrigir nos arquivos verificados até agora.
 editor-no-problems-match = Nenhum problema corresponde
 editor-clear-the-filter-or-turn-on-more-of = Limpe o filtro ou ative mais erros, avisos e informações acima.
 editor-filter-by-name = Filtrar por nome
