@@ -406,6 +406,7 @@ impl Render for CypressWindow {
         let total_of = |r: &crate::playwright::history::Record| (r.passed + r.failed + r.flaky + r.skipped) as u64;
         let (headline, ink) = match (counts, last) {
             _ if running => (ts!("console-running").to_owned(), p.accent),
+            (Some(_), _) if t.did_not_start(cx) => (ts!("tests-did-not-start").to_owned(), p.error),
             (Some(c), _) if c.failed > 0 => {
                 (t!("cypress-failed-of", failed = (c.failed as u64), total = (c.total as u64)), p.error)
             }

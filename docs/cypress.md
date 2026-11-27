@@ -51,6 +51,8 @@ Every run is kept with the project's history, as Playwright's are (see [History]
 
 A run that goes wrong in a way SnoutCode knows says so above the results, in the Tests window and the Cypress window, with buttons that fix it. A fix that installs something runs in the Build window, then the same run starts again.
 
+A run that ends before any test ran, with an error, a problem Cypress printed or a failed exit (the Cypress app missing, say), says **Did not start** in red in both windows, not Passed.
+
 A run gets one notice, however many things went wrong. The one that matters most leads, with its explanation and fixes; each lesser one is a line under it with its own fix. The notice is red when the results cannot be trusted, and amber when they stand: a crash after every test passed, or a missing Rosetta, leaves the run green.
 
 | What happened | What fixes it |

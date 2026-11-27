@@ -569,3 +569,44 @@ fn the_bar_offers_the_cypress_app_and_cypress_installs_it(cx: &mut gpui::TestApp
     assert_eq!(args_of(&repo, Runner::Cypress), ["install"]);
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[gpui::test]
+fn a_cypress_run_without_the_app_did_not_start(cx: &mut gpui::TestAppContext) {
+    if node::discover(&*snout_host::local()).is_empty() {
+        println!("cypress no app: skipped; needs Node");
+        return;
+    }
+    cx.executor().allow_parking();
+    let repo = crate::tests::demo_repo("jstest-cypress-no-app");
+    suite_package(&repo, Runner::Cypress);
+    let (_, ws, cx) = open(cx, with_repo(&repo));
+    let runs = cx.update(|_, cx| ws.read(cx).runs.clone());
+    let tests = cx.update(|_, cx| ws.read(cx).pw_tests.clone());
+    assert!(pump_until(cx, 10, |cx| cx.update(|_, cx| tests.read(cx).cypress_suite(cx).is_some())));
+    let run_all = |cx: &mut gpui::VisualTestContext| {
+        let before = cx.update(|_, cx| runs.read(cx).sessions.last().map_or(0, |s| s.id));
+        cx.update(|_, cx| tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx)));
+        pump_until(cx, 30, |cx| {
+            cx.update(|_, cx| runs.read(cx).sessions.last().is_some_and(|s| s.id > before && s.ended.is_some()))
+        })
+    };
+    // A run that ran its tests started, failures or not.
+    assert!(run_all(cx), "the run ends");
+    assert!(!cx.update(|_, cx| tests.read(cx).did_not_start(cx)));
+    // Without the Cypress app, Cypress stops before any spec: no tests, so no "Passed".
+    let env = crate::run::config::Environment {
+        name: "no app".into(),
+        vars: [("FAKE_CYPRESS_NO_APP".to_owned(), "1".to_owned())].into_iter().collect(),
+        ..Default::default()
+    };
+    cx.update(|_, cx| runs.update(cx, |r, cx| r.set_environments(vec![env], Some("no app".into()), cx)));
+    assert!(run_all(cx), "the run without the app ends");
+    cx.update(|_, cx| {
+        let s = runs.read(cx).sessions.last().unwrap();
+        let run = s.playwright.as_ref().unwrap();
+        assert_eq!(run.cypress.problems, [crate::cypress::Problem::NoBinary], "{}", s.console_text());
+        assert_eq!(run.counts().total, 0);
+        assert!(tests.read(cx).did_not_start(cx), "it did not start");
+    });
+    let _ = std::fs::remove_dir_all(repo);
+}

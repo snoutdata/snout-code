@@ -264,6 +264,16 @@ impl PwTests {
         self.live.and_then(|id| self.runs.read(cx).session(id)).is_some_and(|s| s.running())
     }
 
+    /// Whether the run in front ended without running a test, because something went wrong:
+    /// an error outside the tests, a problem Cypress printed, or a failed exit. A run
+    /// stopped by hand is not one.
+    pub fn did_not_start(&self, cx: &App) -> bool {
+        let Some(s) = self.live.and_then(|id| self.runs.read(cx).session(id)) else { return false };
+        let Some(run) = s.playwright.as_ref() else { return false };
+        let failed = s.ended.as_ref().is_some_and(|e| e.outcome == crate::run::Outcome::Failed);
+        !s.running() && run.tests.is_empty() && (!run.errors.is_empty() || !run.cypress.problems.is_empty() || failed)
+    }
+
     /// How long the run in front has taken.
     pub fn elapsed_ms(&self, cx: &App) -> u64 {
         self.live.and_then(|id| self.runs.read(cx).session(id)).map_or(0, |s| s.elapsed().as_millis() as u64)

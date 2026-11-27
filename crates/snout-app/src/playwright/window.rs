@@ -198,7 +198,7 @@ impl TestsWindow {
         let (state_text, ink) = match run {
             None => (ts!("tests-not-run-yet").to_owned(), p.fg_dim),
             Some(_) if running => (ts!("console-running").to_owned(), p.accent),
-            Some(r) if !r.errors.is_empty() && r.tests.is_empty() => (ts!("tests-did-not-start").to_owned(), p.error),
+            Some(_) if t.did_not_start(cx) => (ts!("tests-did-not-start").to_owned(), p.error),
             Some(_) if c.failed > 0 => (ts!("run-failed-3").to_owned(), p.error),
             Some(r) if r.status.as_deref() == Some("interrupted") => (ts!("run-stopped").to_owned(), p.fg_dim),
             Some(_) => (ts!("runwin-passed").to_owned(), p.ok),
