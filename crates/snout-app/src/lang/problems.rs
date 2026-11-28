@@ -701,20 +701,25 @@ impl Render for ProblemsPanel {
             .text_size(px(12.5))
             .when(!none, |d| d.child(self.toolbar(cx)))
             .when(none, |d| {
-                d.child(
-                    crate::components::EmptyState::new(
-                        snout_core::art::spots::no_problems(),
-                        ts!("editor-no-problems"),
-                    )
-                    .hint(ts!("editor-nothing-to-fix-in-the-files-the-java"))
-                    .compact()
-                    .primary_action(
+                let empty = crate::components::EmptyState::new(
+                    snout_core::art::spots::no_problems(),
+                    ts!("editor-no-problems"),
+                )
+                .compact();
+                // Build Project compiles with Gradle or Maven: a project without Java has neither.
+                let java = crate::project_model::store(cx)
+                    .and_then(|s| s.read(cx).root.clone())
+                    .is_some_and(|root| crate::project_model::project_is_java(&root, cx));
+                d.child(if java {
+                    empty.hint(ts!("editor-nothing-to-fix-in-the-files-the-java")).primary_action(
                         "problems-empty-build",
                         crate::components::IconName::Hammer,
                         ts!("cmd-build-project"),
                         crate::menus::BuildProject,
-                    ),
-                )
+                    )
+                } else {
+                    empty.hint(ts!("editor-nothing-to-fix-in-the-files-checked"))
+                })
             })
             .when(!none && empty, |d| {
                 d.child(

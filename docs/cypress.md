@@ -17,12 +17,12 @@ SnoutCode runs the package's own Cypress, from its `node_modules`, on the packag
 Its button is on the right stripe, with the number of failed tests on it. **View ▸ Show the Cypress Window** opens it too.
 
 - **Run all** runs every spec; **Stop** ends a run. **Rerun failed** runs the specs that failed in the last run.
-- **Open Cypress** opens the Cypress app on the package (`cypress open --e2e`), in the browser picked, to watch a test step by step and debug it in the browser's developer tools.
+- **Open Cypress** opens the Cypress app on the package (`cypress open --e2e`), in the browser picked, to watch a test step by step and debug it in the browser's developer tools. While it is open, Open Cypress again brings its Run tab forward instead of opening a second one; stop it there to open it in another browser.
 - **The browser** the specs run in: Electron (the one Cypress comes with), or Chrome, Edge or Firefox when installed. The choice is kept with the project's settings on this machine.
 - **The environment** the tests point at, the same list as Playwright's (see [Environments](playwright.md#environments)). Its application URL reaches Cypress as `baseUrl`, and each of its variables both as it is and as `CYPRESS_<name>`, so `Cypress.env('USER_EMAIL')` reads `USER_EMAIL`.
 - **Watch** runs with the browser showing (`--headed`).
 - **The summary** says how the last run went (`1 of 4 failed`), how long it took, and which Cypress the package has.
-- **The specs**, named from the folder they sit in, each with how it went: passed, failed or flaky, how many of its tests ran, and its time. Before any run in this window, a spec shows how it went in the last run kept. Click a spec to open it; double click it, or click the run icon at the end of its row, to run it alone.
+- **The specs**, named from the folder they sit in, each with how it went: passed, failed or flaky, how many of its tests ran, and its time. Before any run in this window, a spec shows how it went in the last run kept. Click a spec to show it in the preview tab, which the next spec you click replaces; double click it, or click the run icon at the end of its row, to run it alone.
 - **Show the results** brings the Tests window forward.
 
 The header's **Find the Specs Again** looks for specs again after you add or move some.
@@ -31,6 +31,7 @@ The header's **Find the Specs Again** looks for specs again after you add or mov
 
 - **The Tests window** follows the run as it goes: each test as its spec starts, passed, failed or skipped, its time, retries (a test that passed on a retry is flaky), and for a failure its message, the lines around the one that failed, and the screenshot Cypress took of the page. **Show in editor** opens the test at its line; **Open in Cypress** opens the Cypress app to step through it.
 - **Run icons.** A spec has an icon at each `describe` and test of its top level. Cypress runs whole specs, so each icon runs its spec.
+- **The title bar's Run.** With **Current File**, Run runs the spec in front. In a project without Java and without a run configuration (`npm init`'s failing `test` script is not one), Run with no spec in front runs all the specs, as the Tests window's **Run all** does.
 - **Scripts.** A `package.json` script that is a plain `cypress run` (such as `"test": "cypress run --browser chrome"`) runs as the script says, and the Tests window follows it all the same: SnoutCode adds its reporter to the run. A script that chains another command after Cypress runs as a script only.
 - **The run's output** shows in the Run window as Cypress prints it, a line per test in place of Cypress's own `spec` reporter.
 

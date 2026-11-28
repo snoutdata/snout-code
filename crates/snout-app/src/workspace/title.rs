@@ -307,6 +307,7 @@ impl Workspace {
         // the Java engine is up (starting, compiling Scala, stopped by hand) the run waits for
         // it, starts it again, or says in the Run window why it cannot run.
         let ready = self.model.read(cx).project_root().is_some();
+        let java = self.model.read(cx).project_root().is_some_and(|r| crate::project_model::project_is_java(&r, cx));
         let loading = runs.configs_loading;
         let running = runs.any_running();
         // The selected configuration runs: Run becomes Rerun.
@@ -356,8 +357,10 @@ impl Workspace {
                         ts!("title-reading-the-configurations")
                     } else if playwright {
                         ts!("title-configurations-appear-once-the-tests-are-listed")
-                    } else {
+                    } else if java {
                         ts!("title-configurations-appear-once-the-java-engine-is-ready")
+                    } else {
+                        ts!("title-no-configurations-yet")
                     };
                     menu = menu.separator().item(PopupMenuItem::new(note).disabled(true));
                 }

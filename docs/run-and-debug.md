@@ -57,9 +57,9 @@ The right side of the title bar holds:
 - **Debug** (the bug). Debugs the configuration (⌃D).
 - **Stop** (■). Shows while something runs, and stops everything in the Run and Debug windows (⌘F2).
 
-With **Current File**, Run and Debug take the file in front: its test class, else its main class; a TypeScript or JavaScript file runs on Node (see [Script files](node.md#script-files)).
+With **Current File**, Run and Debug take the file in front: its test class, else its main class; a Cypress spec runs as a whole (Debug opens the Cypress app); a TypeScript or JavaScript file runs on Node (see [Script files](node.md#script-files)).
 
-When there is nothing to run in front (no file open, or one with no tests or main class), Run and Debug start the project's own configuration instead, its Spring Boot application, else its first main class, and the title bar shows it from then on. On a project just opened, before the Java engine has found its main classes, the run waits for the engine and starts once it has. A project with nothing to run opens **Edit Configurations** to make a configuration.
+When there is nothing to run in front (no file open, or one with no tests or main class), Run and Debug start the project's own configuration instead, its Spring Boot application, else its first main class, and the title bar shows it from then on. On a project just opened, before the Java engine has found its main classes, the run waits for the engine and starts once it has. A project with nothing to run opens **Edit Configurations** to make a configuration, except one without Java whose tests are Cypress's, Vitest's or Jest's: Run runs them all in the Tests window.
 
 Run and Debug are grey until the Java engine is ready, except for Current File and the configurations that run on Node.
 

@@ -33,6 +33,7 @@ impl Workspace {
             }
             RunsEvent::OpenLink(link) => self.open_link(link.clone(), window, cx),
             RunsEvent::OpenAt(path, line) => self.open_file(path.clone(), Some((*line, 0)), false, window, cx),
+            RunsEvent::PreviewFile(path) => self.open_file(path.clone(), None, true, window, cx),
             RunsEvent::EditConfigurations => self.open_config_dialog(window, cx),
             RunsEvent::ShowProblems => self.show_problems(window, cx),
             RunsEvent::Ended(id) => self.tool_ended(*id, window, cx),
@@ -128,7 +129,8 @@ impl Workspace {
     }
 
     /// The title bar's Run (or Debug): the selected configuration (run again when it runs),
-    /// or what the file in front holds (its test class, else its main class).
+    /// or what the file in front holds (its test class, else its main class, else the whole
+    /// file, a Cypress spec), else the project's own configuration or all its tests.
     pub fn run_selected(&mut self, debug: bool, window: &mut Window, cx: &mut Context<Self>) {
         let runs = self.runs.clone();
         if let Some(config) = runs.read(cx).selected_config() {
@@ -157,8 +159,21 @@ impl Workspace {
         });
         match found {
             Some((target, module)) => runs.update(cx, |r, cx| r.run_target(&target, module.as_deref(), debug, cx)),
+            None if !debug && self.runs_all_tests(cx) => {
+                self.pw_tests.update(cx, |t, cx| t.start(crate::playwright::run::Scope::All, cx));
+                self.show_tool(crate::workspace::Tool::Tests, window, cx);
+            }
             None => runs.update(cx, |r, cx| r.run_project(debug, cx)),
         }
+    }
+
+    /// Whether Run with nothing to run runs the Tests window's tests: a project without Java,
+    /// without a configuration, whose tests are Cypress's, Vitest's or Jest's.
+    fn runs_all_tests(&self, cx: &gpui::App) -> bool {
+        let Some(root) = self.model.read(cx).project_root() else { return false };
+        !crate::project_model::project_is_java(&root, cx)
+            && crate::run::config::default_config(&self.runs.read(cx).configurations()).is_none()
+            && self.pw_tests.read(cx).unit(cx).is_some()
     }
 
     /// ⌃⇧R, ⌃⇧D and the editor's Run and Debug items: what the caret is in (a test method,

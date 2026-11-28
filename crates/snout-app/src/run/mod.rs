@@ -600,6 +600,8 @@ pub enum RunsEvent {
     OpenLink(ansi::Link),
     /// Show this file at this line (from 0), where the debugger stopped.
     OpenAt(PathBuf, u32),
+    /// Show this file in the preview tab, as one click in the Project window does.
+    PreviewFile(PathBuf),
     /// Show the Edit Configurations dialog.
     EditConfigurations,
     /// Show the Problems tool window.
