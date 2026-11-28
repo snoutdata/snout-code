@@ -88,17 +88,18 @@ pub const ALL: &[Capability] = &[
         consent: None,
     },
     Capability {
-        name: "runPlaywrightTests",
+        name: "runTests",
         domain: Domain::Run,
         effect: Effect::Change,
-        description: "Run a Playwright project's tests in the Tests window: all of them, one browser project, a file, or \
-                      the test at a line of it. Answers with the run's id; it does not wait for the run to end. Follow \
-                      it with listRuns and getTestResults.",
-        input: Input::Own(playwright_input),
-        run: Run::Own(run_playwright),
+        description: "Run the project's tests in the Tests window, with its own runner: Playwright, Cypress, Vitest or \
+                      Jest. All of them, a file (a spec), or the test at a line of it; for Playwright, one browser \
+                      project too. Use this, not the runner in a shell, so the user sees the run. Answers with the \
+                      run's id; it does not wait for the run to end. Follow it with listRuns and getTestResults.",
+        input: Input::Own(tests_input),
+        run: Run::Own(run_tests),
         consent: Some(|a| match a["file"].as_str() {
-            Some(file) => format!("run the Playwright tests in {file}"),
-            None => "run the Playwright tests".to_owned(),
+            Some(file) => format!("run the tests in {file}"),
+            None => "run the tests".to_owned(),
         }),
     },
     Capability {
@@ -147,12 +148,12 @@ pub const ALL: &[Capability] = &[
     },
 ];
 
-fn playwright_input() -> Value {
+fn tests_input() -> Value {
     tools::schema(
         json!({
-            "file": { "type": "string", "description": "A spec, absolute. All of them by default" },
+            "file": { "type": "string", "description": "A spec or test file, absolute. All of them by default" },
             "line": { "type": "integer", "description": "The line of a test or describe in it, from 1" },
-            "project": { "type": "string", "description": "A browser project of the configuration" },
+            "project": { "type": "string", "description": "Playwright only: a browser project of the configuration" },
         }),
         &[],
     )
@@ -211,12 +212,12 @@ fn answer_with_new_run(runs: Entity<Runs>, before: u64, title: String, reply: Re
     .detach();
 }
 
-fn run_playwright(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
+fn run_tests(ws: &mut Workspace, a: &Value, reply: Reply, _: &mut Window, cx: &mut Context<Workspace>) {
     use crate::playwright::run::Scope;
     let tests = ws.pw_tests.clone();
     let has_tests = tests.read(cx).playwright || tests.read(cx).unit(cx).is_some();
     if a["file"].is_null() && !has_tests {
-        return reply.error(TOOL_ERROR, "This project has no Playwright tests.", None);
+        return reply.error(TOOL_ERROR, "This project has no tests of Playwright, Cypress, Vitest or Jest.", None);
     }
     let project = a["project"].as_str().map(str::to_owned);
     let scope = match a["file"].as_str() {

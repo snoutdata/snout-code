@@ -257,6 +257,8 @@ const CORE: &[Capability] = &[
 
 /// The capability called `name`.
 pub fn find(name: &str) -> Option<&'static Capability> {
+    // runTests' name from when it ran Playwright only, for agents and scripts that still call it.
+    let name = if name == "runPlaywrightTests" { "runTests" } else { name };
     all().find(|c| c.name == name)
 }
 

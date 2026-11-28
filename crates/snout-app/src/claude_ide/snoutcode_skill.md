@@ -1,6 +1,6 @@
 ---
 name: snoutcode
-description: Work the SnoutCode window this session runs in. Open files in its editor at a line or with text selected, see the project and what is on screen, open or switch projects, start runs and read their output and test results, ask the language engines for definitions, references, types and callers, run build tasks, use the Git view, and show the user a report in the app. Use it whenever the user asks to open, show or go to a file or line, instead of `code`, `open`, `idea` or any other editor, and whenever they ask about or for anything in SnoutCode.
+description: Work the SnoutCode window this session runs in. Use it whenever the user asks to run tests or a spec (Playwright, Cypress, Vitest, Jest), instead of the runner in a shell, so the run shows in its Tests window. Open files in its editor at a line or with text selected, see the project and what is on screen, open or switch projects, start runs and read their output and test results, ask the language engines for definitions, references, types and callers, run build tasks, use the Git view, and show the user a report in the app. Use it whenever the user asks to open, show or go to a file or line, instead of `code`, `open`, `idea` or any other editor, and whenever they ask about or for anything in SnoutCode.
 ---
 
 # The SnoutCode window
@@ -22,6 +22,18 @@ Arguments: `filePath` (required); `startLine` and `endLine` select those lines;
 `startText` (and `endText`) select from the first match of that text (to the end of the
 match of `endText`); `makeFrontmost: false` opens it without switching tabs. The answer
 says what was opened and selected; an error names the problem (a file that is not there).
+
+## Run tests
+
+Run a project's tests here, not with `npx playwright`, `npx cypress`, `vitest` or `jest` in a shell:
+then the run shows in the window's Tests window, where the user follows it.
+
+```sh
+{{API}} runTests '{"file":"/abs/path/cypress/e2e/login.cy.ts"}'
+```
+
+Leave out `file` to run them all; add `line` for the test at that line. It answers with the run's id
+at once. Call `{{API}} getTestResults '{"id":<id>}'` once `listRuns` shows the run has ended.
 
 ## Everything else
 

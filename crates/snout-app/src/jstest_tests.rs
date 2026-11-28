@@ -23,7 +23,7 @@ fn fixtures() -> PathBuf {
 }
 
 /// A package at `dir` that tests with `runner`, the stand-in installed as its program.
-fn suite_package(dir: &Path, runner: Runner) {
+pub(crate) fn suite_package(dir: &Path, runner: Runner) {
     match runner {
         Runner::Vitest => {
             write(dir, "package.json", r#"{ "name": "cart", "devDependencies": { "vitest": "^3.2.0" } }"#);
