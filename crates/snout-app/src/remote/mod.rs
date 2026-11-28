@@ -527,7 +527,10 @@ pub fn disconnect(
 
 /// A new window over a new model from `store` (opening `folder`), then `old` closes.
 fn switch_window(store: Option<Store>, folder: Option<PathBuf>, old: AnyWindowHandle, cx: &mut App) {
-    let model = crate::model(store, folder, cx);
+    let model = match folder {
+        Some(folder) => crate::model_on(store, folder, cx),
+        None => crate::model(store, None, cx),
+    };
     if crate::open_window(model, None, cx).is_some() {
         let _ = old.update(cx, |_, window, _| window.remove_window());
     }

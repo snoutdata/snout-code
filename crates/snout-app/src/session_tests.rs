@@ -273,6 +273,45 @@ fn each_project_gets_its_own_tabs_back(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_window_opened_on_a_folder_shows_none_of_the_last_projects_tabs(cx: &mut TestAppContext) {
+    let a = demo_repo("session-window-a");
+    let b = demo_repo("session-window-b");
+    std::fs::write(a.join("A.java"), "class A {}\n").unwrap();
+    let home = scratch_dir("session-window-home");
+    let store = Store::in_home(&home);
+    store.save(&with_repo(&a)).unwrap();
+    cx.update(|cx| crate::init(&Settings::default(), cx));
+
+    // A is open with a tab, and the layout is saved with it.
+    let model = cx.update(|cx| crate::model(Some(store.clone()), None, cx));
+    let mut ws = None;
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+        ws = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    vcx.run_until_parked();
+    act(&model, vcx, Action::OpenFile(a.join("A.java"), None));
+    ws.unwrap().update(vcx, |w, cx| w.save_layout(cx));
+
+    // A new window on B, as Open Remote Project makes: B from the start, without A's tab.
+    let model = cx.update(|cx| crate::model_on(Some(store.clone()), b.clone(), cx));
+    cx.update(|cx| assert_eq!(model.read(cx).project_root().as_deref(), Some(b.as_path())));
+    let mut ws = None;
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Workspace::new(model.clone(), window, cx));
+        ws = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(names(&ws.unwrap(), vcx).is_empty(), "A's tab stays with A");
+    vcx.update(|_, cx| assert_eq!(model.read(cx).settings.current.as_deref(), Some(b.as_path()), "B, once open"));
+    let _ = std::fs::remove_dir_all(a);
+    let _ = std::fs::remove_dir_all(b);
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[gpui::test]
 fn breakpoints_and_run_configurations_come_back_with_the_project(cx: &mut TestAppContext) {
     use crate::run::config::{Breakpoint, ProjectSettings, RunConfig, project_file};
     let repo = demo_repo("session-runs");
